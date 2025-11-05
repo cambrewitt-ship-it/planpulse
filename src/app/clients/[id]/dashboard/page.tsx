@@ -186,9 +186,11 @@ export default function ClientDashboardPage() {
                   </div>
                 </div>
                 <div className="mt-4">
-                  <Button variant="outline" className="w-full">
-                    View Details
-                  </Button>
+                  <Link href={`/plans/${plan.id}/dashboard`}>
+                    <Button variant="outline" className="w-full">
+                      View Dashboard
+                    </Button>
+                  </Link>
                 </div>
               </CardContent>
             </Card>

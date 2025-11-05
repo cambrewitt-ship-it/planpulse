@@ -124,3 +124,48 @@ export async function getMediaPlans(clientId?: string) {
   if (error) throw error;
   return data;
 }
+
+export async function getPlanById(planId: string) {
+  const { data: plan, error: planError } = await supabase
+    .from('media_plans')
+    .select(`
+      *,
+      clients (id, name)
+    `)
+    .eq('id', planId)
+    .single();
+
+  if (planError) throw planError;
+
+  // Get channels for this plan
+  const { data: channels, error: channelsError } = await supabase
+    .from('channels')
+    .select('*')
+    .eq('plan_id', planId)
+    .order('created_at');
+
+  if (channelsError) throw channelsError;
+
+  // Get weekly plans for each channel
+  const channelsWithWeeklyPlans = await Promise.all(
+    (channels || []).map(async (channel) => {
+      const { data: weeklyPlans, error: weeklyError } = await supabase
+        .from('weekly_plans')
+        .select('*')
+        .eq('channel_id', channel.id)
+        .order('week_commencing');
+
+      if (weeklyError) throw weeklyError;
+
+      return {
+        ...channel,
+        weekly_plans: weeklyPlans || []
+      };
+    })
+  );
+
+  return {
+    ...plan,
+    channels: channelsWithWeeklyPlans
+  };
+}
