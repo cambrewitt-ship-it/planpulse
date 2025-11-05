@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { getPlanById } from '@/lib/db/plans';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -189,30 +189,113 @@ export default function PlanDashboardPage() {
   };
 
   const getChannelChartData = () => {
-    if (!plan) return [];
+    if (!plan) return { data: [], todayIndex: -1 };
     
-    const weekMap = new Map<string, { week: string; weekDate: Date; [key: string]: any }>();
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const planStart = parseISO(plan.start_date);
+    const planEnd = parseISO(plan.end_date);
     
-    plan.channels.forEach((channel) => {
-      const channelLabel = CHANNEL_OPTIONS.find(c => c.value === channel.channel)?.label || channel.channel;
+    // Generate all days from plan start to today only (not beyond today)
+    const endDate = isBefore(today, planEnd) ? today : planEnd;
+    const days: Date[] = [];
+    let currentDate = new Date(planStart);
+    let todayIndex = -1;
+    
+    while (currentDate <= endDate) {
+      const dateKey = new Date(currentDate);
+      dateKey.setHours(0, 0, 0, 0);
+      days.push(dateKey);
       
-      channel.weekly_plans.forEach((wp) => {
-        const weekDate = parseISO(wp.week_commencing);
-        const weekKey = format(weekDate, 'MMM d');
+      // Track today's index
+      if (isSameDay(dateKey, today)) {
+        todayIndex = days.length - 1;
+      }
+      
+      currentDate = addDays(currentDate, 1);
+    }
+    
+    // Create data points for each day (only up to today)
+    const chartData = days.map((day, dayIndex) => {
+      const dayKey = format(day, 'MMM d');
+      const isTodayDay = dayIndex === todayIndex;
+      const dayData: any = { day: dayKey, date: day, isToday: isTodayDay };
+      
+      plan.channels.forEach((channel) => {
+        const channelLabel = CHANNEL_OPTIONS.find(c => c.value === channel.channel)?.label || channel.channel;
         
-        if (!weekMap.has(weekKey)) {
-          weekMap.set(weekKey, { week: weekKey, weekDate });
+        // Only calculate values for days up to and including today
+        if (isBefore(day, today) || isSameDay(day, today)) {
+          if (channel.weekly_plans.length > 0) {
+            const firstWeek = channel.weekly_plans[0];
+            const lastWeek = channel.weekly_plans[channel.weekly_plans.length - 1];
+            const channelStart = parseISO(firstWeek.week_commencing);
+            const lastWeekStart = parseISO(lastWeek.week_commencing);
+            const channelEnd = addWeeks(lastWeekStart, 1);
+            const totalPlanned = channel.weekly_plans.reduce((sum, wp) => sum + (wp.budget_planned || 0), 0);
+            
+            // Calculate expected spend for this day
+            let expectedSpend = 0;
+            if (isBefore(day, channelStart)) {
+              expectedSpend = 0;
+            } else if (isAfter(day, channelEnd) || isSameDay(day, channelEnd)) {
+              expectedSpend = totalPlanned;
+            } else {
+              const totalDays = differenceInDays(channelEnd, channelStart);
+              const daysElapsed = differenceInDays(day, channelStart);
+              const timeProgress = totalDays > 0 ? Math.min(1, Math.max(0, daysElapsed / totalDays)) : 0;
+              expectedSpend = totalPlanned * timeProgress;
+            }
+            
+            // Calculate actual and planned spend up to this day (cumulative)
+            let actualSpend = 0;
+            let plannedSpend = 0;
+            
+            channel.weekly_plans.forEach((wp) => {
+              const weekStart = parseISO(wp.week_commencing);
+              const weekEnd = addWeeks(weekStart, 1);
+              
+              // If this week has already ended, include full amounts
+              if (isBefore(weekEnd, day)) {
+                actualSpend += wp.budget_actual || 0;
+                plannedSpend += wp.budget_planned || 0;
+              } 
+              // If this day is within the week or on the week end, calculate proportional spend
+              else if (isSameDay(day, weekStart) || (isAfter(day, weekStart) && isBefore(day, weekEnd)) || isSameDay(day, weekEnd)) {
+                // Calculate daily spend for this week based on time progress
+                const daysInWeek = differenceInDays(weekEnd, weekStart);
+                const daysIntoWeek = differenceInDays(day, weekStart) + 1; // +1 to include the start day
+                const weekProgress = daysInWeek > 0 ? Math.min(1, Math.max(0, daysIntoWeek / daysInWeek)) : 0;
+                
+                // For planned, use the weekly planned budget proportionally
+                plannedSpend += (wp.budget_planned || 0) * weekProgress;
+                
+                // For actual, use the actual budget if available, otherwise 0
+                actualSpend += (wp.budget_actual || 0) * weekProgress;
+              }
+              // If day is before week starts, no spend yet
+            });
+            
+            dayData[`${channelLabel} (Expected)`] = expectedSpend / 100;
+            dayData[`${channelLabel} (Actual)`] = actualSpend / 100;
+            dayData[`${channelLabel} (Planned)`] = plannedSpend / 100;
+          } else {
+            dayData[`${channelLabel} (Expected)`] = 0;
+            dayData[`${channelLabel} (Actual)`] = 0;
+            dayData[`${channelLabel} (Planned)`] = 0;
+          }
+        } else {
+          // For future dates, set to null so lines don't continue
+          dayData[`${channelLabel} (Expected)`] = null;
+          dayData[`${channelLabel} (Actual)`] = null;
+          dayData[`${channelLabel} (Planned)`] = null;
         }
-        
-        const weekData = weekMap.get(weekKey)!;
-        weekData[`${channelLabel} (Planned)`] = (wp.budget_planned || 0) / 100;
-        weekData[`${channelLabel} (Actual)`] = (wp.budget_actual || 0) / 100;
       });
+      
+      return dayData;
     });
     
-    return Array.from(weekMap.values()).sort((a, b) => 
-      a.weekDate.getTime() - b.weekDate.getTime()
-    );
+    return { data: chartData, todayIndex };
   };
 
   const getDateData = (date: Date) => {
@@ -266,6 +349,67 @@ export default function PlanDashboardPage() {
     return { isStart, isEnd, channels };
   };
 
+  const getChannelStatus = (channel: PlanDashboardData['channels'][0]) => {
+    if (channel.weekly_plans.length === 0) return { status: 'ended', label: 'ENDED', days: 0 };
+    
+    const today = new Date();
+    const firstWeek = channel.weekly_plans[0];
+    const lastWeek = channel.weekly_plans[channel.weekly_plans.length - 1];
+    const startDate = parseISO(firstWeek.week_commencing);
+    const lastWeekStart = parseISO(lastWeek.week_commencing);
+    const endDate = addWeeks(lastWeekStart, 1);
+    
+    if (isBefore(today, startDate)) {
+      const days = differenceInDays(startDate, today);
+      return { status: 'upcoming', label: `STARTS IN ${days} DAY${days !== 1 ? 'S' : ''}`, days };
+    } else if (isAfter(today, endDate) || isSameDay(today, endDate)) {
+      return { status: 'ended', label: 'ENDED', days: 0 };
+    } else {
+      return { status: 'live', label: 'LIVE', days: 0 };
+    }
+  };
+
+  const getChannelProgress = (channel: PlanDashboardData['channels'][0]) => {
+    const totalPlanned = channel.weekly_plans.reduce((sum, wp) => sum + (wp.budget_planned || 0), 0);
+    const totalActual = channel.weekly_plans.reduce((sum, wp) => sum + (wp.budget_actual || 0), 0);
+    
+    // Calculate expected spend based on today's date
+    const today = new Date();
+    let expectedSpend = 0;
+    
+    if (channel.weekly_plans.length > 0) {
+      const firstWeek = channel.weekly_plans[0];
+      const lastWeek = channel.weekly_plans[channel.weekly_plans.length - 1];
+      const startDate = parseISO(firstWeek.week_commencing);
+      const lastWeekStart = parseISO(lastWeek.week_commencing);
+      const endDate = addWeeks(lastWeekStart, 1);
+      
+      // Calculate expected spend based on elapsed time
+      if (isBefore(today, startDate)) {
+        expectedSpend = 0;
+      } else if (isAfter(today, endDate) || isSameDay(today, endDate)) {
+        expectedSpend = totalPlanned;
+      } else {
+        // Calculate percentage of time elapsed
+        const totalDays = differenceInDays(endDate, startDate);
+        const daysElapsed = differenceInDays(today, startDate);
+        const timeProgress = totalDays > 0 ? Math.min(1, Math.max(0, daysElapsed / totalDays)) : 0;
+        expectedSpend = totalPlanned * timeProgress;
+      }
+    }
+    
+    const actualProgress = totalPlanned > 0 ? (totalActual / totalPlanned) * 100 : 0;
+    const expectedProgress = totalPlanned > 0 ? (expectedSpend / totalPlanned) * 100 : 0;
+    
+    return {
+      planned: totalPlanned,
+      actual: totalActual,
+      expected: expectedSpend,
+      actualProgress: Math.min(100, Math.max(0, actualProgress)),
+      expectedProgress: Math.min(100, Math.max(0, expectedProgress))
+    };
+  };
+
   if (loading) {
     return (
       <div className="container mx-auto p-8">
@@ -290,7 +434,9 @@ export default function PlanDashboardPage() {
   }
 
   const progress = calculateProgress();
-  const chartData = getChannelChartData();
+  const chartDataResult = getChannelChartData();
+  const chartData = chartDataResult.data;
+  const todayIndex = chartDataResult.todayIndex;
 
   return (
     <div className="container mx-auto p-8">
@@ -364,6 +510,89 @@ export default function PlanDashboardPage() {
                     {!dateData.isStart && !dateData.isEnd && (
                       <div className="text-xs text-gray-400 text-center">No activity</div>
                     )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Media Channels */}
+      <Card className="mb-8">
+        <CardHeader>
+          <CardTitle>Media Channels</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="divide-y divide-gray-200">
+            {plan.channels.map((channel) => {
+              const channelOption = CHANNEL_OPTIONS.find(c => c.value === channel.channel);
+              const channelLabel = channelOption?.label || channel.channel;
+              const status = getChannelStatus(channel);
+              const progress = getChannelProgress(channel);
+              
+              return (
+                <div key={channel.id} className="p-4 flex items-center justify-between">
+                  <div className="flex items-center gap-4 flex-1">
+                    <div className="flex flex-col">
+                      <div className="font-semibold text-gray-900">{channelLabel}</div>
+                      <div className="text-sm text-gray-500">{channel.detail}</div>
+                    </div>
+                    <Badge 
+                      variant={
+                        status.status === 'live' ? 'default' : 
+                        status.status === 'upcoming' ? 'secondary' : 
+                        'outline'
+                      }
+                      className={
+                        status.status === 'live' ? 'bg-green-600' : 
+                        status.status === 'upcoming' ? 'bg-blue-600' : 
+                        'bg-gray-400'
+                      }
+                    >
+                      {status.label}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center gap-4 flex-1 max-w-md">
+                    <div className="flex-1">
+                      <div className="flex justify-between text-xs mb-1">
+                        <div className="flex gap-3">
+                          <span className="text-gray-600">
+                            Actual: ${(progress.actual / 100).toLocaleString()}
+                          </span>
+                          <span className="text-blue-600">
+                            Expected: ${(progress.expected / 100).toLocaleString()}
+                          </span>
+                        </div>
+                        <span className="text-gray-400">
+                          ${(progress.planned / 100).toLocaleString()}
+                        </span>
+                      </div>
+                      <div className="space-y-2">
+                        <div>
+                          <div className="flex justify-between text-xs mb-0.5">
+                            <span className="text-blue-600 font-medium">Expected</span>
+                          </div>
+                          <div className="relative h-2 bg-gray-200 rounded-full overflow-hidden">
+                            <div 
+                              className="absolute top-0 left-0 h-full bg-blue-400 opacity-60 rounded-full"
+                              style={{ width: `${progress.expectedProgress}%` }}
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <div className="flex justify-between text-xs mb-0.5">
+                            <span className="text-gray-700 font-medium">Actual</span>
+                          </div>
+                          <div className="relative h-2 bg-gray-200 rounded-full overflow-hidden">
+                            <div 
+                              className="absolute top-0 left-0 h-full bg-primary rounded-full"
+                              style={{ width: `${progress.actualProgress}%` }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               );
@@ -477,31 +706,88 @@ export default function PlanDashboardPage() {
               <ResponsiveContainer width="100%" height={300}>
                 <LineChart data={chartData}>
                   <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="week" />
-                  <YAxis />
-                  <Tooltip formatter={(value: number) => `$${value.toLocaleString()}`} />
+                  <XAxis 
+                    dataKey="day" 
+                    angle={-45}
+                    textAnchor="end"
+                    height={80}
+                    interval="preserveStartEnd"
+                  />
+                  <YAxis 
+                    label={{ value: 'Spend ($)', angle: -90, position: 'insideLeft' }}
+                  />
+                  <Tooltip 
+                    formatter={(value: number) => `$${value.toLocaleString()}`}
+                    labelFormatter={(label) => `Date: ${label}`}
+                  />
                   <Legend />
-                  {plan.channels.map((channel) => {
+                  {plan.channels.map((channel, index) => {
                     const channelLabel = CHANNEL_OPTIONS.find(c => c.value === channel.channel)?.label || channel.channel;
+                    const baseColors = ['#8884d8', '#82ca9d', '#ffc658', '#ff7300', '#00ff00', '#ff00ff', '#00ffff'];
+                    const baseColor = baseColors[index % baseColors.length];
+                    
                     return (
-                      <Line 
-                        key={`${channel.id}-planned`}
-                        type="monotone" 
-                        dataKey={`${channelLabel} (Planned)`} 
-                        stroke="#8884d8" 
-                        strokeDasharray="5 5"
-                      />
-                    );
-                  })}
-                  {plan.channels.map((channel) => {
-                    const channelLabel = CHANNEL_OPTIONS.find(c => c.value === channel.channel)?.label || channel.channel;
-                    return (
-                      <Line 
-                        key={`${channel.id}-actual`}
-                        type="monotone" 
-                        dataKey={`${channelLabel} (Actual)`} 
-                        stroke="#82ca9d" 
-                      />
+                      <React.Fragment key={channel.id}>
+                        {/* Expected Spend Line */}
+                        <Line 
+                          type="monotone" 
+                          dataKey={`${channelLabel} (Expected)`} 
+                          stroke={baseColor}
+                          strokeWidth={2}
+                          strokeDasharray="5 5"
+                          dot={false}
+                          name={`${channelLabel} (Expected)`}
+                        />
+                        {/* Planned Spend Line */}
+                        <Line 
+                          type="monotone" 
+                          dataKey={`${channelLabel} (Planned)`} 
+                          stroke={baseColor}
+                          strokeWidth={2}
+                          strokeOpacity={0.6}
+                          dot={(props: any) => {
+                            if (props.payload && props.payload.isToday && todayIndex === props.index) {
+                              return (
+                                <circle 
+                                  cx={props.cx} 
+                                  cy={props.cy} 
+                                  r={5} 
+                                  fill={baseColor} 
+                                  stroke="white" 
+                                  strokeWidth={2}
+                                />
+                              );
+                            }
+                            return null;
+                          }}
+                          activeDot={false}
+                          name={`${channelLabel} (Planned)`}
+                        />
+                        {/* Actual Spend Line */}
+                        <Line 
+                          type="monotone" 
+                          dataKey={`${channelLabel} (Actual)`} 
+                          stroke={baseColor}
+                          strokeWidth={2}
+                          dot={(props: any) => {
+                            if (props.payload && props.payload.isToday && todayIndex === props.index) {
+                              return (
+                                <circle 
+                                  cx={props.cx} 
+                                  cy={props.cy} 
+                                  r={5} 
+                                  fill={baseColor} 
+                                  stroke="white" 
+                                  strokeWidth={2}
+                                />
+                              );
+                            }
+                            return null;
+                          }}
+                          activeDot={false}
+                          name={`${channelLabel} (Actual)`}
+                        />
+                      </React.Fragment>
                     );
                   })}
                 </LineChart>
