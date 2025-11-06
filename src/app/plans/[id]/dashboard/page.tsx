@@ -8,13 +8,14 @@ import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import PlanEditForm from '@/components/plan-entry/PlanEditForm';
 import Link from 'next/link';
-import { ArrowLeft, Calendar, DollarSign, TrendingUp, AlertCircle, CheckCircle2, Clock, Target } from 'lucide-react';
+import { ArrowLeft, Calendar, DollarSign, TrendingUp, AlertCircle, CheckCircle2, Clock, Target, Edit } from 'lucide-react';
 import { format, differenceInDays, isAfter, isBefore, parseISO, startOfWeek, addWeeks, addDays, isToday, isSameDay } from 'date-fns';
 import { CHANNEL_OPTIONS } from '@/types/media-plan';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
-interface PlanDashboardData {
+export interface PlanDashboardData {
   id: string;
   name: string;
   start_date: string;
@@ -61,6 +62,7 @@ export default function PlanDashboardPage() {
   const [plan, setPlan] = useState<PlanDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionPoints, setActionPoints] = useState<ActionPoint[]>([]);
+  const [isEditMode, setIsEditMode] = useState(false);
 
   useEffect(() => {
     if (planId) {
@@ -78,6 +80,19 @@ export default function PlanDashboardPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleEditClick = () => {
+    setIsEditMode(true);
+  };
+
+  const handleEditClose = () => {
+    setIsEditMode(false);
+  };
+
+  const handleEditSave = async () => {
+    await loadPlanData(); // Reload plan data
+    setIsEditMode(false);
   };
 
   const generateActionPoints = (planData: PlanDashboardData) => {
@@ -433,6 +448,16 @@ export default function PlanDashboardPage() {
     );
   }
 
+  if (isEditMode) {
+    return (
+      <PlanEditForm
+        plan={plan}
+        onClose={handleEditClose}
+        onSave={handleEditSave}
+      />
+    );
+  }
+
   const progress = calculateProgress();
   const chartDataResult = getChannelChartData();
   const chartData = chartDataResult.data;
@@ -455,9 +480,15 @@ export default function PlanDashboardPage() {
             <h1 className="text-3xl font-bold mb-2">{plan.name}</h1>
             <p className="text-gray-600">{plan.clients.name}</p>
           </div>
-          <Badge variant={plan.status === 'active' ? 'default' : 'secondary'}>
-            {plan.status}
-          </Badge>
+          <div className="flex items-center gap-3">
+            <Badge variant={plan.status === 'active' ? 'default' : 'secondary'}>
+              {plan.status}
+            </Badge>
+            <Button onClick={handleEditClick} variant="outline" size="sm">
+              <Edit className="h-4 w-4 mr-2" />
+              Edit Plan
+            </Button>
+          </div>
         </div>
       </div>
 

@@ -169,3 +169,170 @@ export async function getPlanById(planId: string) {
     channels: channelsWithWeeklyPlans
   };
 }
+
+export async function updateMediaPlan(
+  planId: string,
+  updates: {
+    name?: string;
+    start_date?: string;
+    end_date?: string;
+    total_budget?: number;
+    status?: string;
+  }
+) {
+  const { data, error } = await supabase
+    .from('media_plans')
+    .update(updates)
+    .eq('id', planId)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+export async function updateMediaPlanWithChannels(
+  planId: string,
+  clientId: string,
+  planUpdates: {
+    name?: string;
+    start_date?: string;
+    end_date?: string;
+    total_budget?: number;
+    status?: string;
+  },
+  channels: MediaChannel[]
+) {
+  // Calculate plan dates and total budget from channels
+  const startDates = channels.map(c => new Date(c.startWeek));
+  const endDates = channels.map(c => new Date(c.endWeek));
+  const planStart = new Date(Math.min(...startDates.map(d => d.getTime())));
+  const planEnd = new Date(Math.max(...endDates.map(d => d.getTime())));
+  const totalBudget = channels.reduce((sum, c) => sum + c.totalBudget, 0);
+
+  // 1. Update the media plan
+  const planUpdateData = {
+    ...planUpdates,
+    start_date: format(planStart, 'yyyy-MM-dd'),
+    end_date: format(planEnd, 'yyyy-MM-dd'),
+    total_budget: totalBudget * 100, // Convert to cents
+  };
+  
+  const { error: planError } = await supabase
+    .from('media_plans')
+    .update(planUpdateData)
+    .eq('id', planId);
+
+  if (planError) throw planError;
+
+  // 2. Get existing channels
+  const { data: existingChannels, error: channelsError } = await supabase
+    .from('channels')
+    .select('id')
+    .eq('plan_id', planId);
+
+  if (channelsError) throw channelsError;
+
+  const existingChannelIds = new Set((existingChannels || []).map(c => c.id));
+  const incomingChannelIds = new Set(
+    channels
+      .filter(c => c.id && c.id.startsWith('db-')) // Only existing channels have db- prefix
+      .map(c => c.id.replace('db-', ''))
+  );
+
+  // 3. Delete channels that are no longer in the list
+  const channelsToDelete = Array.from(existingChannelIds).filter(
+    id => !incomingChannelIds.has(id)
+  );
+
+  if (channelsToDelete.length > 0) {
+    // Delete weekly plans first (foreign key constraint)
+    const { error: weeklyDeleteError } = await supabase
+      .from('weekly_plans')
+      .delete()
+      .in('channel_id', channelsToDelete);
+
+    if (weeklyDeleteError) throw weeklyDeleteError;
+
+    // Delete channels
+    const { error: channelDeleteError } = await supabase
+      .from('channels')
+      .delete()
+      .in('id', channelsToDelete);
+
+    if (channelDeleteError) throw channelDeleteError;
+  }
+
+  // 4. Update or create channels
+  for (const channel of channels) {
+    const isExisting = channel.id && channel.id.startsWith('db-');
+    let channelDbId: string;
+
+    if (isExisting) {
+      // Update existing channel
+      channelDbId = channel.id.replace('db-', '');
+      const { error: channelUpdateError } = await supabase
+        .from('channels')
+        .update({
+          channel: channel.channel,
+          detail: channel.detail,
+          type: channel.isOrganic ? 'organic' : 'paid'
+        })
+        .eq('id', channelDbId);
+
+      if (channelUpdateError) throw channelUpdateError;
+
+      // Delete existing weekly plans for this channel
+      const { error: weeklyDeleteError } = await supabase
+        .from('weekly_plans')
+        .delete()
+        .eq('channel_id', channelDbId);
+
+      if (weeklyDeleteError) throw weeklyDeleteError;
+    } else {
+      // Create new channel
+      const { data: newChannel, error: channelCreateError } = await supabase
+        .from('channels')
+        .insert({
+          client_id: clientId,
+          plan_id: planId,
+          channel: channel.channel,
+          detail: channel.detail,
+          type: channel.isOrganic ? 'organic' : 'paid'
+        })
+        .select()
+        .single();
+
+      if (channelCreateError) throw channelCreateError;
+      channelDbId = newChannel.id;
+    }
+
+    // 5. Create weekly plans for this channel
+    const weeklyPlans = [];
+    let currentWeek = new Date(channel.startWeek);
+    const endWeek = new Date(channel.endWeek);
+    let weekNumber = 1;
+
+    while (currentWeek <= endWeek) {
+      weeklyPlans.push({
+        channel_id: channelDbId,
+        week_commencing: format(currentWeek, 'yyyy-MM-dd'),
+        week_number: weekNumber,
+        budget_planned: Math.round(channel.weeklyBudget * 100), // Convert to cents
+        posts_planned: channel.postsPerWeek || 0
+      });
+      currentWeek = addWeeks(currentWeek, 1);
+      weekNumber++;
+    }
+
+    if (weeklyPlans.length > 0) {
+      const { error: weeklyError } = await supabase
+        .from('weekly_plans')
+        .insert(weeklyPlans);
+
+      if (weeklyError) throw weeklyError;
+    }
+  }
+
+  return { success: true };
+}
