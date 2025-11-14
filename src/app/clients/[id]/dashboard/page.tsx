@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { ArrowLeft, Calendar, DollarSign, Plus, TrendingUp } from 'lucide-react';
 import { format } from 'date-fns';
+import AdPlatformConnector from '@/components/AdPlatformConnector';
 
 interface Client {
   id: string;
@@ -197,6 +198,11 @@ export default function ClientDashboardPage() {
           ))}
         </div>
       )}
+
+      {/* Ad Platform Connections */}
+      <div className="mt-12">
+        <AdPlatformConnector clientId={clientId} />
+      </div>
     </div>
   );
 }
