@@ -64,6 +64,34 @@ export interface Database {
             created_at: string;
           };
         };
+        meta_ads_accounts: {
+          Row: {
+            id: string;
+            user_id: string;
+            account_id: string;
+            account_name: string | null;
+            is_active: boolean;
+            created_at: string;
+            updated_at: string;
+          };
+          Insert: {
+            id?: string;
+            user_id: string;
+            account_id: string;
+            account_name?: string | null;
+            is_active?: boolean;
+            created_at?: string;
+            updated_at?: string;
+          };
+          Update: {
+            id?: string;
+            user_id?: string;
+            account_id?: string;
+            account_name?: string | null;
+            is_active?: boolean;
+            updated_at?: string;
+          };
+        };
       };
     };
   }

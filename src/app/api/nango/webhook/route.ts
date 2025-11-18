@@ -109,22 +109,31 @@ async function handleDeletion(payload: NangoWebhookPayload) {
 }
 
 export async function POST(request: Request) {
+  console.log('=== WEBHOOK RECEIVED ===');
+  console.log('Request headers:', Object.fromEntries(request.headers.entries()));
+  
   let payload: NangoWebhookPayload | null = null;
 
   try {
-    payload = await request.json();
+    const text = await request.text();
+    console.log('Raw webhook body:', text);
+    payload = JSON.parse(text);
   } catch (error) {
     console.error('Failed to parse Nango webhook payload', error);
   }
 
   if (!payload) {
+    console.log('No payload, returning 200');
     return new Response(null, { status: 200 });
   }
 
-  console.info('Received Nango webhook', {
+  console.info('=== Received Nango webhook ===', {
     type: payload.type,
     operation: payload.operation,
     success: payload.success,
+    connectionId: payload.connectionId,
+    providerConfigKey: payload.providerConfigKey,
+    endUserId: payload.endUser?.endUserId,
   });
 
   try {

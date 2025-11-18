@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { Nango } from "@nangohq/node";
+import { toNangoPlatform } from "@/lib/platform-mapping";
 
 import type { Database } from "@/types/database";
 
@@ -28,9 +29,9 @@ export async function POST(request: Request) {
     );
   }
 
-  const { clientId, platform } = body;
+  const { clientId, platform: rawPlatform } = body;
 
-  console.log("Session token request:", { clientId, platform });
+  console.log("Session token request:", { clientId, platform: rawPlatform });
 
   if (!clientId) {
     return NextResponse.json(
@@ -38,6 +39,10 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
+
+  // Use platform mapping to get Nango provider name
+  const nangoPlatform = rawPlatform ? toNangoPlatform(rawPlatform) : rawPlatform;
+  console.log("Platform mapping:", { raw: rawPlatform, nango: nangoPlatform });
 
   const cookieStore = await cookies();
   
@@ -88,7 +93,7 @@ export async function POST(request: Request) {
             ? user.user_metadata.full_name
             : user.email,
       },
-      allowed_integrations: [platform], // Only allow the specific platform being connected
+      allowed_integrations: nangoPlatform ? [nangoPlatform] : undefined, // Use Nango platform name
     };
     
     console.log("Request body:", JSON.stringify(requestBody, null, 2));
