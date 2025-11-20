@@ -10,10 +10,19 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import PlanEditForm from '@/components/plan-entry/PlanEditForm';
 import Link from 'next/link';
-import { ArrowLeft, Calendar, DollarSign, TrendingUp, AlertCircle, CheckCircle2, Clock, Target, Edit } from 'lucide-react';
+import { ArrowLeft, Calendar, DollarSign, TrendingUp, AlertCircle, CheckCircle2, Clock, Target, Edit, Plus, ChevronDown, ChevronRight } from 'lucide-react';
 import { format, differenceInDays, isAfter, isBefore, parseISO, startOfWeek, addWeeks, addDays, isToday, isSameDay } from 'date-fns';
 import { CHANNEL_OPTIONS } from '@/types/media-plan';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { MediaPlanSummaryCards } from '@/components/ui/media-plan-summary-cards';
+import { MediaChannelRow } from '@/components/ui/media-channel-row';
+import { MediaChannelSpendChart } from '@/components/ui/media-channel-spend-chart';
+import { MediaChannelHealthChecklist } from '@/components/ui/media-channel-health-checklist';
+import { ActionCalendar } from '@/components/ui/action-calendar';
+import { MediaPlanTimeSeriesChart } from '@/components/ui/media-plan-time-series-chart';
+import { MediaChannel, TimeFrame, ViewMode, ChecklistItem as HealthChecklistItem } from '@/lib/types/media-plan';
+import { fetchChannelSpendData, formatDateForApi } from '@/lib/api/spend-data-integration';
+import { calculatePacingScore, getPacingStatus, calculateSpendRate } from '@/lib/utils/pacing-calculations';
 
 export interface PlanDashboardData {
   id: string;
@@ -63,6 +72,10 @@ export default function PlanDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [actionPoints, setActionPoints] = useState<ActionPoint[]>([]);
   const [isEditMode, setIsEditMode] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>('month');
+  const [mediaChannels, setMediaChannels] = useState<MediaChannel[]>([]);
+  const [loadingSpendData, setLoadingSpendData] = useState(false);
+  const [expandedChannels, setExpandedChannels] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (planId) {
@@ -75,6 +88,13 @@ export default function PlanDashboardPage() {
       const planData = await getPlanById(planId);
       setPlan(planData as PlanDashboardData);
       generateActionPoints(planData as PlanDashboardData);
+      
+      // Transform plan data to MediaChannel format
+      const channels = transformToMediaChannels(planData as PlanDashboardData);
+      setMediaChannels(channels);
+      
+      // Fetch real spend data from ad platforms
+      await syncSpendData(channels, planData as PlanDashboardData);
     } catch (error) {
       console.error('Error loading plan:', error);
     } finally {
@@ -93,6 +113,142 @@ export default function PlanDashboardPage() {
   const handleEditSave = async () => {
     await loadPlanData(); // Reload plan data
     setIsEditMode(false);
+  };
+
+  const transformToMediaChannels = (planData: PlanDashboardData): MediaChannel[] => {
+    const channelColors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4'];
+    
+    return planData.channels.map((channel, index) => {
+      const channelOption = CHANNEL_OPTIONS.find(c => c.value === channel.channel);
+      const channelLabel = channelOption?.label || channel.channel;
+      
+      // Group weekly plans into monthly timeframes
+      const timeFrames: TimeFrame[] = [];
+      const monthlyData = new Map<string, { planned: number; actual: number; weeks: any[] }>();
+      
+      channel.weekly_plans.forEach((wp) => {
+        const weekStart = parseISO(wp.week_commencing);
+        const monthKey = format(weekStart, 'MMM yyyy');
+        
+        if (!monthlyData.has(monthKey)) {
+          monthlyData.set(monthKey, {
+            planned: 0,
+            actual: 0,
+            weeks: []
+          });
+        }
+        
+        const monthData = monthlyData.get(monthKey)!;
+        monthData.planned += wp.budget_planned || 0;
+        monthData.actual += wp.budget_actual || 0;
+        monthData.weeks.push(wp);
+      });
+      
+      // Convert monthly data to TimeFrame array
+      monthlyData.forEach((data, monthKey) => {
+        const weeks = data.weeks.sort((a, b) => 
+          parseISO(a.week_commencing).getTime() - parseISO(b.week_commencing).getTime()
+        );
+        const startDate = weeks[0].week_commencing;
+        const lastWeek = weeks[weeks.length - 1];
+        const endDate = format(addWeeks(parseISO(lastWeek.week_commencing), 1), 'yyyy-MM-dd');
+        
+        timeFrames.push({
+          period: monthKey,
+          planned: data.planned / 100, // Convert cents to dollars
+          actual: data.actual / 100,
+          startDate,
+          endDate
+        });
+      });
+      
+      // Determine platform type
+      let platformType: MediaChannel['platformType'] = 'other';
+      if (channel.type === 'paid' || channel.type === 'both') {
+        // Check channel name for platform hints
+        if (channelLabel.toLowerCase().includes('facebook') || channelLabel.toLowerCase().includes('instagram') || channelLabel.toLowerCase().includes('meta')) {
+          platformType = 'meta-ads';
+        } else if (channelLabel.toLowerCase().includes('google')) {
+          platformType = 'google-ads';
+        }
+      } else {
+        platformType = 'organic';
+      }
+      
+      // Create sample checklist items
+      const checklist: HealthChecklistItem[] = [
+        { id: `${channel.id}-1`, text: 'Campaign objectives defined', completed: true },
+        { id: `${channel.id}-2`, text: 'Target audience configured', completed: true },
+        { id: `${channel.id}-3`, text: 'Ad creatives approved', completed: false, priority: 'critical' },
+        { id: `${channel.id}-4`, text: 'Tracking pixels installed', completed: channel.type === 'paid', priority: 'critical' },
+        { id: `${channel.id}-5`, text: 'Budget alerts configured', completed: false },
+      ];
+      
+      return {
+        id: channel.id,
+        name: channelLabel,
+        detail: channel.detail,
+        schedule: channel.weekly_plans.length > 0 
+          ? `${format(parseISO(channel.weekly_plans[0].week_commencing), 'MMM d')} - ${format(addWeeks(parseISO(channel.weekly_plans[channel.weekly_plans.length - 1].week_commencing), 1), 'MMM d')}`
+          : 'No schedule',
+        costPerMonth: timeFrames.reduce((sum, tf) => sum + tf.planned, 0) / (timeFrames.length || 1),
+        color: channelColors[index % channelColors.length],
+        status: getChannelStatus(channel).status === 'live' ? 'active' : 
+                getChannelStatus(channel).status === 'upcoming' ? 'draft' : 'paused',
+        timeFrames,
+        checklist,
+        platformType,
+        adAccountId: undefined, // Would be set from user configuration
+      };
+    });
+  };
+
+  const syncSpendData = async (channels: MediaChannel[], planData: PlanDashboardData) => {
+    setLoadingSpendData(true);
+    
+    try {
+      const updatedChannels = await Promise.all(
+        channels.map(async (channel) => {
+          // Only fetch for channels with ad platform integration
+          if (channel.platformType === 'organic' || channel.platformType === 'other' || !channel.adAccountId) {
+            return channel;
+          }
+          
+          const result = await fetchChannelSpendData(
+            channel,
+            planData.start_date,
+            planData.end_date
+          );
+          
+          if (result.success && result.updatedTimeFrames) {
+            return {
+              ...channel,
+              timeFrames: result.updatedTimeFrames
+            };
+          }
+          
+          return channel;
+        })
+      );
+      
+      setMediaChannels(updatedChannels);
+    } catch (error) {
+      console.error('Error syncing spend data:', error);
+    } finally {
+      setLoadingSpendData(false);
+    }
+  };
+
+  const toggleChannelExpanded = (channelId: string) => {
+    setExpandedChannels((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(channelId)) {
+        newSet.delete(channelId);
+      } else {
+        newSet.add(channelId);
+      }
+      return newSet;
+    });
   };
 
   const generateActionPoints = (planData: PlanDashboardData) => {
@@ -492,139 +648,190 @@ export default function PlanDashboardPage() {
         </div>
       </div>
 
-      {/* Date Row - Today + Next 9 Days */}
-      <Card className="mb-8">
-        <CardContent className="p-0">
-          <div className="grid grid-cols-10">
-            {Array.from({ length: 10 }, (_, i) => {
-              const date = addDays(new Date(), i);
-              const isCurrentDay = isToday(date);
-              const dayName = format(date, 'EEE');
-              const dayNumber = format(date, 'd');
-              const dateData = getDateData(date);
-              
-              return (
-                <div
-                  key={i}
-                  className={`flex flex-col border-r last:border-r-0 border-gray-200 ${
-                    isCurrentDay ? 'shadow-lg' : ''
-                  }`}
-                >
-                  <div className="flex items-center justify-center p-3 bg-gray-600">
-                    <span className="text-base font-bold text-white">
-                      {dayName} {dayNumber}
-                    </span>
-                  </div>
-                  <div className={`border-t border-gray-200 border-l border-r border-b border-black aspect-square p-2 overflow-y-auto flex flex-col items-center justify-center ${
-                    dateData.isStart || dateData.isEnd ? 'bg-blue-50' : 'bg-white'
-                  }`}>
-                    {dateData.isStart && (
-                      <div className="flex flex-col items-center">
-                        <div className="text-xs font-bold text-blue-700">START</div>
-                        {dateData.channels.map((ch, idx) => (
-                          <div key={idx} className="text-xs text-blue-600 mt-1">
-                            {ch.channel}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {dateData.isEnd && (
-                      <div className="flex flex-col items-center">
-                        <div className="text-xs font-bold text-red-700">END</div>
-                        {dateData.channels.map((ch, idx) => (
-                          <div key={idx} className="text-xs text-red-600 mt-1">
-                            {ch.channel}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {!dateData.isStart && !dateData.isEnd && (
-                      <div className="text-xs text-gray-400 text-center">No activity</div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </CardContent>
-      </Card>
+      {/* Time Series Chart - Overview of all channels */}
+      <div className="mb-8">
+        <Card>
+          <CardHeader>
+            <CardTitle>Spend Overview</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="h-96">
+              <MediaPlanTimeSeriesChart
+                channels={mediaChannels}
+                startDate={plan.start_date}
+                endDate={plan.end_date}
+              />
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
-      {/* Media Channels */}
+      {/* Action Calendar - Timeline view of tasks */}
+      <div className="mb-8">
+        <ActionCalendar
+          channels={mediaChannels}
+          onChannelClick={(channelId) => {
+            // Expand the channel when action is clicked
+            setExpandedChannels((prev) => {
+              const newSet = new Set(prev);
+              newSet.add(channelId);
+              return newSet;
+            });
+            // Scroll to the channel
+            const element = document.getElementById(`channel-${channelId}`);
+            if (element) {
+              element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          }}
+        />
+      </div>
+
+      {/* Media Plan Summary Cards */}
+      <div className="mb-8">
+        {loadingSpendData && (
+          <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-center gap-2">
+            <div className="animate-spin h-4 w-4 border-2 border-blue-600 border-t-transparent rounded-full" />
+            <span className="text-sm text-blue-800">Syncing spend data from ad platforms...</span>
+          </div>
+        )}
+        
+        <MediaPlanSummaryCards
+          totalBudget={mediaChannels.reduce((sum, ch) => sum + ch.timeFrames.reduce((s, tf) => s + tf.planned, 0), 0)}
+          actualSpend={mediaChannels.reduce((sum, ch) => sum + ch.timeFrames.reduce((s, tf) => s + tf.actual, 0), 0)}
+          spendRate={calculateSpendRate(
+            mediaChannels.reduce((sum, ch) => sum + ch.timeFrames.reduce((s, tf) => s + tf.actual, 0), 0),
+            mediaChannels.reduce((sum, ch) => sum + ch.timeFrames.reduce((s, tf) => s + tf.planned, 0), 0)
+          )}
+          onTrackCount={mediaChannels.filter(ch => getPacingStatus(calculatePacingScore(ch, new Date())) === 'on-track').length}
+          totalChannels={mediaChannels.length}
+        />
+      </div>
+
+      {/* View Mode Toggle */}
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="text-2xl font-bold">Media Channels</h2>
+        <div className="flex items-center gap-3">
+          <div className="flex border rounded-lg overflow-hidden">
+            <button
+              onClick={() => setViewMode('month')}
+              className={`px-4 py-2 text-sm font-medium ${
+                viewMode === 'month'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-white text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              Month
+            </button>
+            <button
+              onClick={() => setViewMode('week')}
+              className={`px-4 py-2 text-sm font-medium border-l ${
+                viewMode === 'week'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-white text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              Week
+            </button>
+          </div>
+          <Button>
+            <Plus className="h-4 w-4 mr-2" />
+            Add Channel
+          </Button>
+        </div>
+      </div>
+
+      {/* Media Channels Section */}
       <Card className="mb-8">
-        <CardHeader>
-          <CardTitle>Media Channels</CardTitle>
-        </CardHeader>
         <CardContent className="p-0">
-          <div className="divide-y divide-gray-200">
-            {plan.channels.map((channel) => {
-              const channelOption = CHANNEL_OPTIONS.find(c => c.value === channel.channel);
-              const channelLabel = channelOption?.label || channel.channel;
-              const status = getChannelStatus(channel);
-              const progress = getChannelProgress(channel);
+          <div className="divide-y">
+            {mediaChannels.map((channel) => {
+              const pacingScore = calculatePacingScore(channel, new Date());
+              const pacingStatus = getPacingStatus(pacingScore);
+              const isExpanded = expandedChannels.has(channel.id);
+              
+              // Prepare monthly data for the channel row
+              const monthlyData = channel.timeFrames.map(tf => ({
+                month: tf.period,
+                planned: tf.planned,
+                actual: tf.actual
+              }));
+              
+              // Prepare chart data
+              const chartData = channel.timeFrames.flatMap(tf => {
+                const daysInPeriod = differenceInDays(parseISO(tf.endDate), parseISO(tf.startDate));
+                const dailyPlanned = tf.planned / Math.max(daysInPeriod, 1);
+                const dailyActual = tf.actual / Math.max(daysInPeriod, 1);
+                
+                return Array.from({ length: Math.min(daysInPeriod, 30) }, (_, i) => {
+                  const date = format(addDays(parseISO(tf.startDate), i), 'yyyy-MM-dd');
+                  return {
+                    date,
+                    planned: dailyPlanned * (i + 1),
+                    actual: dailyActual * (i + 1),
+                    projected: dailyActual * daysInPeriod // Simple projection
+                  };
+                });
+              });
               
               return (
-                <div key={channel.id} className="p-4 flex items-center justify-between">
-                  <div className="flex items-center gap-4 flex-1">
-                    <div className="flex flex-col">
-                      <div className="font-semibold text-gray-900">{channelLabel}</div>
-                      <div className="text-sm text-gray-500">{channel.detail}</div>
-                    </div>
-                    <Badge 
-                      variant={
-                        status.status === 'live' ? 'default' : 
-                        status.status === 'upcoming' ? 'secondary' : 
-                        'outline'
-                      }
-                      className={
-                        status.status === 'live' ? 'bg-green-600' : 
-                        status.status === 'upcoming' ? 'bg-blue-600' : 
-                        'bg-gray-400'
-                      }
-                    >
-                      {status.label}
-                    </Badge>
-                  </div>
-                  <div className="flex items-center gap-4 flex-1 max-w-md">
-                    <div className="flex-1">
-                      <div className="flex justify-between text-xs mb-1">
-                        <div className="flex gap-3">
-                          <span className="text-gray-600">
-                            Actual: ${(progress.actual / 100).toLocaleString()}
-                          </span>
-                          <span className="text-blue-600">
-                            Expected: ${(progress.expected / 100).toLocaleString()}
-                          </span>
-                        </div>
-                        <span className="text-gray-400">
-                          ${(progress.planned / 100).toLocaleString()}
-                        </span>
-                      </div>
-                      <div className="space-y-2">
-                        <div>
-                          <div className="flex justify-between text-xs mb-0.5">
-                            <span className="text-blue-600 font-medium">Expected</span>
-                          </div>
-                          <div className="relative h-2 bg-gray-200 rounded-full overflow-hidden">
-                            <div 
-                              className="absolute top-0 left-0 h-full bg-blue-400 opacity-60 rounded-full"
-                              style={{ width: `${progress.expectedProgress}%` }}
-                            />
-                          </div>
-                        </div>
-                        <div>
-                          <div className="flex justify-between text-xs mb-0.5">
-                            <span className="text-gray-700 font-medium">Actual</span>
-                          </div>
-                          <div className="relative h-2 bg-gray-200 rounded-full overflow-hidden">
-                            <div 
-                              className="absolute top-0 left-0 h-full bg-primary rounded-full"
-                              style={{ width: `${progress.actualProgress}%` }}
-                            />
-                          </div>
+                <div key={channel.id} id={`channel-${channel.id}`}>
+                  <MediaChannelRow
+                    channelName={channel.name}
+                    channelDetails={channel.detail}
+                    scheduleDescription={channel.schedule}
+                    colorDot={channel.color}
+                    monthlyData={monthlyData}
+                    pacingScore={pacingStatus}
+                    onViewDetails={() => toggleChannelExpanded(channel.id)}
+                  />
+                  
+                  {/* Expanded Details */}
+                  {isExpanded && (
+                    <div className="bg-gray-50 p-6 space-y-6">
+                      {/* Spend Chart */}
+                      <div>
+                        <h3 className="font-semibold mb-4 flex items-center gap-2">
+                          <TrendingUp className="h-4 w-4" />
+                          Spend Trend
+                        </h3>
+                        <div className="h-64 bg-white rounded-lg p-4 border">
+                          <MediaChannelSpendChart
+                            data={chartData}
+                            channelColor={channel.color}
+                            channelName={channel.name}
+                          />
                         </div>
                       </div>
+                      
+                      {/* Health Checklist */}
+                      <MediaChannelHealthChecklist
+                        title="Campaign Health Checklist"
+                        items={channel.checklist.map(item => ({
+                          id: item.id,
+                          label: item.text,
+                          checked: item.completed,
+                          isCritical: item.priority === 'critical'
+                        }))}
+                        onItemToggle={(itemId) => {
+                          // Toggle checklist item
+                          setMediaChannels(prev => prev.map(ch => {
+                            if (ch.id === channel.id) {
+                              return {
+                                ...ch,
+                                checklist: ch.checklist.map(item => 
+                                  item.id === itemId 
+                                    ? { ...item, completed: !item.completed }
+                                    : item
+                                )
+                              };
+                            }
+                            return ch;
+                          }));
+                        }}
+                        defaultExpanded={true}
+                      />
                     </div>
-                  </div>
+                  )}
                 </div>
               );
             })}
@@ -676,49 +883,6 @@ export default function PlanDashboardPage() {
         </Card>
       </div>
 
-      {/* Action Points */}
-      {actionPoints.length > 0 && (
-        <Card className="mb-8">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <AlertCircle className="h-5 w-5" />
-              Action Points
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {actionPoints.slice(0, 10).map((action) => (
-                <div
-                  key={action.id}
-                  className={`flex items-start gap-3 p-3 rounded-lg border ${
-                    action.type === 'overdue' 
-                      ? 'border-red-200 bg-red-50' 
-                      : action.type === 'current'
-                      ? 'border-yellow-200 bg-yellow-50'
-                      : 'border-blue-200 bg-blue-50'
-                  }`}
-                >
-                  <div className="mt-1">
-                    {action.type === 'overdue' && <AlertCircle className="h-4 w-4 text-red-600" />}
-                    {action.type === 'current' && <Clock className="h-4 w-4 text-yellow-600" />}
-                    {action.type === 'upcoming' && <CheckCircle2 className="h-4 w-4 text-blue-600" />}
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <Badge variant={action.priority === 'high' ? 'destructive' : 'secondary'}>
-                        {action.priority}
-                      </Badge>
-                      <span className="font-semibold text-sm">{action.channel} - {action.channelDetail}</span>
-                      <span className="text-xs text-gray-500">Week {action.weekNumber} ({action.week})</span>
-                    </div>
-                    <p className="text-sm text-gray-700">{action.message}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
 
       {/* Tabs for Channel Details */}
       <Tabs defaultValue="overview" className="mb-8">
