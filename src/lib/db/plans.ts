@@ -336,3 +336,45 @@ export async function updateMediaPlanWithChannels(
 
   return { success: true };
 }
+
+export async function deleteMediaPlan(planId: string) {
+  // 1. Get all channels for this plan
+  const { data: channels, error: channelsError } = await supabase
+    .from('channels')
+    .select('id')
+    .eq('plan_id', planId);
+
+  if (channelsError) throw channelsError;
+
+  const channelIds = (channels || []).map(c => c.id);
+
+  // 2. Delete weekly plans first (foreign key constraint)
+  if (channelIds.length > 0) {
+    const { error: weeklyDeleteError } = await supabase
+      .from('weekly_plans')
+      .delete()
+      .in('channel_id', channelIds);
+
+    if (weeklyDeleteError) throw weeklyDeleteError;
+  }
+
+  // 3. Delete channels
+  if (channelIds.length > 0) {
+    const { error: channelDeleteError } = await supabase
+      .from('channels')
+      .delete()
+      .in('id', channelIds);
+
+    if (channelDeleteError) throw channelDeleteError;
+  }
+
+  // 4. Delete the media plan
+  const { error: planDeleteError } = await supabase
+    .from('media_plans')
+    .delete()
+    .eq('id', planId);
+
+  if (planDeleteError) throw planDeleteError;
+
+  return { success: true };
+}

@@ -3,14 +3,15 @@
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { User, Plus, TrendingUp } from 'lucide-react';
+import { User, Plus, TrendingUp, Pencil } from 'lucide-react';
 import RollingCalendar from '@/components/RollingCalendar';
 import MediaChannels from '@/components/MediaChannels';
 import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { getClients, getMediaPlans } from '@/lib/db/plans';
+import { getClients, getMediaPlans, getPlanById } from '@/lib/db/plans';
 import Link from 'next/link';
 import { format } from 'date-fns';
+import PlanEditForm from '@/components/plan-entry/PlanEditForm';
 
 interface Client {
   id: string;
@@ -34,6 +35,8 @@ export default function NewClientDashboard() {
   const [client, setClient] = useState<Client | null>(null);
   const [plans, setPlans] = useState<MediaPlan[]>([]);
   const [loading, setLoading] = useState(true);
+  const [editingPlan, setEditingPlan] = useState<any>(null);
+  const [loadingPlan, setLoadingPlan] = useState(false);
 
   useEffect(() => {
     if (clientId) {
@@ -58,7 +61,28 @@ export default function NewClientDashboard() {
     }
   };
 
-  const activePlans = plans.filter(p => p.status === 'active');
+  const handleEditPlan = async (planId: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setLoadingPlan(true);
+    try {
+      const planData = await getPlanById(planId);
+      setEditingPlan(planData);
+    } catch (error) {
+      console.error('Error loading plan:', error);
+      alert('Error loading plan. Please try again.');
+    } finally {
+      setLoadingPlan(false);
+    }
+  };
+
+  const handleClosePlanEdit = () => {
+    setEditingPlan(null);
+  };
+
+  const handlePlanSaved = () => {
+    loadData(); // Reload plans after save
+  };
 
   if (loading) {
     return (
@@ -67,6 +91,19 @@ export default function NewClientDashboard() {
       </div>
     );
   }
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'active':
+        return 'bg-[#22c55e] hover:bg-[#16a34a]';
+      case 'draft':
+        return 'bg-[#64748b] hover:bg-[#475569]';
+      case 'completed':
+        return 'bg-[#2563eb] hover:bg-[#1d4ed8]';
+      default:
+        return 'bg-[#64748b] hover:bg-[#475569]';
+    }
+  };
 
   return (
     <div className="w-full min-h-screen bg-[#f8fafc] font-sans">
@@ -105,36 +142,47 @@ export default function NewClientDashboard() {
                     <h2 className="text-lg font-semibold text-[#0f172a]">Live Media Plans</h2>
                   </div>
                   
-                  {activePlans.length > 0 ? (
+                  {plans.length > 0 ? (
                     <div className="space-y-2">
-                      {activePlans.slice(0, 3).map((plan) => (
-                        <Link key={plan.id} href={`/plans/${plan.id}/dashboard`}>
-                          <div className="p-3 rounded-lg bg-[#f8fafc] hover:bg-[#e2e8f0] transition-colors duration-200 border border-[#e2e8f0] hover:border-[#cbd5e1] cursor-pointer">
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium text-[#0f172a] truncate">
-                                  {plan.name}
-                                </p>
-                                <p className="text-xs text-[#64748b] mt-1">
-                                  {format(new Date(plan.start_date), 'MMM d')} - {format(new Date(plan.end_date), 'MMM d, yyyy')}
-                                </p>
+                      {plans.slice(0, 3).map((plan) => (
+                        <div key={plan.id} className="relative group">
+                          <Link href={`/plans/${plan.id}/dashboard`}>
+                            <div className="p-3 rounded-lg bg-[#f8fafc] hover:bg-[#e2e8f0] transition-colors duration-200 border border-[#e2e8f0] hover:border-[#cbd5e1] cursor-pointer">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium text-[#0f172a] truncate">
+                                    {plan.name}
+                                  </p>
+                                  <p className="text-xs text-[#64748b] mt-1">
+                                    {format(new Date(plan.start_date), 'MMM d')} - {format(new Date(plan.end_date), 'MMM d, yyyy')}
+                                  </p>
+                                </div>
+                                <Badge className={`${getStatusColor(plan.status)} text-white text-xs capitalize`}>
+                                  {plan.status}
+                                </Badge>
                               </div>
-                              <Badge className="bg-[#22c55e] hover:bg-[#16a34a] text-white text-xs">
-                                Active
-                              </Badge>
                             </div>
-                          </div>
-                        </Link>
+                          </Link>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="absolute top-2 right-2 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity bg-white hover:bg-[#e2e8f0] shadow-sm"
+                            onClick={(e) => handleEditPlan(plan.id, e)}
+                            disabled={loadingPlan}
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </Button>
+                        </div>
                       ))}
-                      {activePlans.length > 3 && (
+                      {plans.length > 3 && (
                         <p className="text-xs text-[#64748b] text-center pt-2">
-                          +{activePlans.length - 3} more
+                          +{plans.length - 3} more
                         </p>
                       )}
                     </div>
                   ) : (
                     <div className="text-center py-4">
-                      <p className="text-sm text-[#64748b] mb-3">No active media plans</p>
+                      <p className="text-sm text-[#64748b] mb-3">No media plans</p>
                       <Link href={`/plan-entry?client=${clientId}`}>
                         <Button size="sm" className="bg-[#2563eb] hover:bg-[#1d4ed8]">
                           <Plus className="h-4 w-4 mr-2" />
@@ -159,6 +207,16 @@ export default function NewClientDashboard() {
           <MediaChannels />
         </section>
       </div>
+
+      {/* Edit Plan Modal */}
+      {editingPlan && (
+        <PlanEditForm
+          plan={editingPlan}
+          onClose={handleClosePlanEdit}
+          onSave={handlePlanSaved}
+          onDelete={handlePlanSaved}
+        />
+      )}
     </div>
   );
 }

@@ -11,7 +11,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { MediaChannel, CHANNEL_OPTIONS, getWeekCommencing, formatWeekCommencing } from '@/types/media-plan';
 import { format, addWeeks, differenceInWeeks } from 'date-fns';
-import { updateMediaPlanWithChannels, getClients, createClient } from '@/lib/db/plans';
+import { updateMediaPlanWithChannels, getClients, createClient, deleteMediaPlan } from '@/lib/db/plans';
 
 interface PlanDashboardData {
   id: string;
@@ -50,14 +50,17 @@ interface PlanEditFormProps {
   plan: PlanDashboardData;
   onClose: () => void;
   onSave: () => void;
+  onDelete?: () => void;
 }
 
-export default function PlanEditForm({ plan, onClose, onSave }: PlanEditFormProps) {
+export default function PlanEditForm({ plan, onClose, onSave, onDelete }: PlanEditFormProps) {
   const [clients, setClients] = useState<Client[]>([]);
   const [selectedClient, setSelectedClient] = useState<string>(plan.clients.id);
   const [planName, setPlanName] = useState(plan.name);
   const [planStatus, setPlanStatus] = useState(plan.status);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [createClientDialogOpen, setCreateClientDialogOpen] = useState(false);
   const [newClientName, setNewClientName] = useState('');
   const [creatingClient, setCreatingClient] = useState(false);
@@ -212,6 +215,23 @@ export default function PlanEditForm({ plan, onClose, onSave }: PlanEditFormProp
       alert('Error saving plan. Please try again.');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    try {
+      await deleteMediaPlan(plan.id);
+      if (onDelete) {
+        onDelete();
+      }
+      onClose();
+    } catch (error) {
+      console.error('Error deleting plan:', error);
+      alert('Error deleting plan. Please try again.');
+    } finally {
+      setDeleting(false);
+      setDeleteConfirmOpen(false);
     }
   };
 
@@ -409,10 +429,19 @@ export default function PlanEditForm({ plan, onClose, onSave }: PlanEditFormProp
                 Add Channel
               </Button>
               <div className="flex gap-2">
-                <Button variant="outline" onClick={onClose} disabled={saving}>
+                <Button 
+                  variant="outline" 
+                  onClick={() => setDeleteConfirmOpen(true)}
+                  disabled={saving || deleting}
+                  className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete Plan
+                </Button>
+                <Button variant="outline" onClick={onClose} disabled={saving || deleting}>
                   Cancel
                 </Button>
-                <Button onClick={handleSave} disabled={saving}>
+                <Button onClick={handleSave} disabled={saving || deleting}>
                   {saving ? (
                     <>
                       <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -430,6 +459,48 @@ export default function PlanEditForm({ plan, onClose, onSave }: PlanEditFormProp
           </div>
         </CardContent>
       </Card>
+
+      {/* Delete Confirmation Dialog */}
+      {deleteConfirmOpen && (
+        <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center">
+          <Card className="w-full max-w-md">
+            <CardHeader>
+              <CardTitle>Delete Media Plan</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-gray-700 mb-4">
+                Are you sure you want to delete "{planName}"? This action cannot be undone and will delete all associated channels and weekly plans.
+              </p>
+            </CardContent>
+            <div className="flex justify-end gap-2 p-6 border-t">
+              <Button
+                variant="outline"
+                onClick={() => setDeleteConfirmOpen(false)}
+                disabled={deleting}
+              >
+                Cancel
+              </Button>
+              <Button 
+                onClick={handleDelete} 
+                disabled={deleting}
+                className="bg-red-600 hover:bg-red-700 text-white"
+              >
+                {deleting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Delete Plan
+                  </>
+                )}
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
 
       {/* Create Client Dialog */}
       {createClientDialogOpen && (

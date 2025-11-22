@@ -218,7 +218,7 @@ export default function RollingCalendar() {
                       !direction ? 'slide-in' : ''
                     } ${
                       isToday 
-                        ? 'bg-gradient-to-br from-[#2563eb] to-[#1d4ed8] text-white shadow-lg' 
+                        ? 'bg-white border-2 border-[#2563eb] shadow-lg' 
                         : 'bg-[#f8fafc] border border-[#e2e8f0]'
                     }`}
                     style={{ animationDelay: `${index * 0.05}s` }}
@@ -227,20 +227,15 @@ export default function RollingCalendar() {
                   >
                   {/* Day Header */}
                   <div className="text-center mb-4">
-                    <div className={`text-sm font-semibold mb-1 ${isToday ? 'text-blue-100' : 'text-[#64748b]'}`}>
+                    <div className={`text-sm font-semibold mb-1 ${isToday ? 'text-[#2563eb]' : 'text-[#64748b]'}`}>
                       {dayName}
                     </div>
-                    <div className={`text-4xl font-bold mb-1 ${isToday ? 'text-white' : 'text-[#0f172a]'}`}>
+                    <div className={`text-4xl font-bold mb-1 ${isToday ? 'text-[#2563eb]' : 'text-[#0f172a]'}`}>
                       {dayNumber}
                     </div>
-                    <div className={`text-xs ${isToday ? 'text-blue-100' : 'text-[#64748b]'}`}>
+                    <div className={`text-xs ${isToday ? 'text-[#64748b]' : 'text-[#64748b]'}`}>
                       {fullDate}
                     </div>
-                    {isToday && (
-                      <Badge className="mt-2 bg-white text-[#2563eb] hover:bg-white font-semibold">
-                        Today
-                      </Badge>
-                    )}
                   </div>
 
                   {/* Tasks List */}
@@ -251,7 +246,7 @@ export default function RollingCalendar() {
                         <div
                           key={task.id}
                           className={`flex items-start gap-2 p-2 rounded ${
-                            isToday ? 'bg-white/10' : 'bg-white'
+                            isToday ? 'bg-[#f8fafc]' : 'bg-white'
                           }`}
                           role="group"
                           aria-label={`Task: ${task.text}`}
@@ -277,9 +272,7 @@ export default function RollingCalendar() {
                             <p
                               className={`text-sm ${
                                 isCompleted
-                                  ? `line-through ${isToday ? 'text-white/50' : 'text-[#94a3b8]'}`
-                                  : isToday
-                                  ? 'text-white'
+                                  ? 'line-through text-[#94a3b8]'
                                   : 'text-[#0f172a]'
                               }`}
                             >
@@ -291,7 +284,6 @@ export default function RollingCalendar() {
                           <Checkbox
                             checked={isCompleted}
                             onCheckedChange={() => toggleTask(task.id)}
-                            className={isToday ? 'border-white data-[state=checked]:bg-white data-[state=checked]:text-blue-600' : ''}
                             aria-label={`Mark task ${isCompleted ? 'incomplete' : 'complete'}`}
                           />
                         </div>
