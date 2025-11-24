@@ -14,6 +14,7 @@ import { MediaChannel, CHANNEL_OPTIONS, getWeekCommencing, formatWeekCommencing 
 import { format, addWeeks, differenceInWeeks } from 'date-fns';
 import { createMediaPlan, getClients, createClient } from '@/lib/db/plans';
 import { useRouter } from 'next/navigation';
+import WeekCommencingCalendar from './WeekCommencingCalendar';
 
 interface Client {
   id: string;
@@ -33,6 +34,7 @@ export default function PlanEntryForm({ initialClientId }: PlanEntryFormProps = 
   const [createClientDialogOpen, setCreateClientDialogOpen] = useState(false);
   const [newClientName, setNewClientName] = useState('');
   const [creatingClient, setCreatingClient] = useState(false);
+  const [selectedChannelIndex, setSelectedChannelIndex] = useState<number | null>(null);
   
   // Get next Monday
   const getNextMonday = () => {
@@ -269,23 +271,29 @@ export default function PlanEntryForm({ initialClientId }: PlanEntryFormProps = 
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="space-y-4">
-          {/* Header */}
-          <div className="grid grid-cols-12 gap-2 text-sm font-semibold border-b pb-2">
-            <div className="col-span-2">Channel</div>
-            <div className="col-span-2">Service Details</div>
-            <div className="col-span-2">Start W/C</div>
-            <div className="col-span-2">End W/C</div>
-            <div className="col-span-1">$/Total</div>
-            <div className="col-span-1">Organic</div>
-            <div className="col-span-1">Posts/Wk</div>
-            <div className="col-span-1">Actions</div>
-          </div>
+        <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-6">
+          {/* Left Column - Form */}
+          <div className="space-y-4">
+            {/* Header */}
+            <div className="grid grid-cols-12 gap-2 text-sm font-semibold border-b pb-2">
+              <div className="col-span-3">Channel</div>
+              <div className="col-span-3">Service Details</div>
+              <div className="col-span-2">$/Total</div>
+              <div className="col-span-1">Organic</div>
+              <div className="col-span-2">Posts/Wk</div>
+              <div className="col-span-1">Actions</div>
+            </div>
 
-          {/* Rows */}
-          {channels.map((channel, index) => (
-            <div key={channel.id} className="grid grid-cols-12 gap-2 items-center">
-              <div className="col-span-2">
+            {/* Rows */}
+            {channels.map((channel, index) => (
+              <div 
+                key={channel.id} 
+                className={`grid grid-cols-12 gap-2 items-center p-2 rounded transition-colors ${
+                  selectedChannelIndex === index ? 'bg-blue-50 border border-blue-200' : ''
+                }`}
+                onClick={() => setSelectedChannelIndex(index)}
+              >
+              <div className="col-span-3">
                 <Select
                   value={channel.channel}
                   onValueChange={(value) => updateChannel(index, 'channel', value)}
@@ -303,7 +311,7 @@ export default function PlanEntryForm({ initialClientId }: PlanEntryFormProps = 
                 </Select>
               </div>
               
-              <div className="col-span-2">
+              <div className="col-span-3">
                 <Input
                   value={channel.detail}
                   onChange={(e) => updateChannel(index, 'detail', e.target.value)}
@@ -312,38 +320,6 @@ export default function PlanEntryForm({ initialClientId }: PlanEntryFormProps = 
               </div>
               
               <div className="col-span-2">
-                <Input
-                  type="date"
-                  value={channel.startWeek}
-                  onChange={(e) => {
-                    const date = new Date(e.target.value);
-                    const monday = getWeekCommencing(date);
-                    updateChannel(index, 'startWeek', format(monday, 'yyyy-MM-dd'));
-                  }}
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  {channel.startWeek && formatWeekCommencing(new Date(channel.startWeek))}
-                </p>
-              </div>
-              
-              <div className="col-span-2">
-                <Input
-                  type="date"
-                  value={channel.endWeek}
-                  min={channel.startWeek}
-                  onChange={(e) => {
-                    const date = new Date(e.target.value);
-                    const monday = getWeekCommencing(date);
-                    updateChannel(index, 'endWeek', format(monday, 'yyyy-MM-dd'));
-                  }}
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  {channel.endWeek && formatWeekCommencing(new Date(channel.endWeek))}
-                  {channel.numberOfWeeks && ` (${channel.numberOfWeeks} wks)`}
-                </p>
-              </div>
-              
-              <div className="col-span-1">
                 <Input
                   type="number"
                   value={channel.totalBudget || ''}
@@ -362,7 +338,7 @@ export default function PlanEntryForm({ initialClientId }: PlanEntryFormProps = 
                 />
               </div>
               
-              <div className="col-span-1">
+              <div className="col-span-2">
                 <Input
                   type="number"
                   value={channel.postsPerWeek || ''}
@@ -384,25 +360,38 @@ export default function PlanEntryForm({ initialClientId }: PlanEntryFormProps = 
             </div>
           ))}
 
-          {/* Action Buttons */}
-          <div className="flex justify-between pt-4 border-t">
-            <Button onClick={addChannel} variant="outline">
-              <Plus className="h-4 w-4 mr-2" />
-              Add Channel
-            </Button>
-            <Button onClick={handleSave} disabled={saving}>
-              {saving ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Saving...
-                </>
-              ) : (
-                <>
-                  <Save className="h-4 w-4 mr-2" />
-                  Save Plan
-                </>
-              )}
-            </Button>
+            {/* Action Buttons */}
+            <div className="flex justify-between pt-4 border-t">
+              <Button onClick={addChannel} variant="outline">
+                <Plus className="h-4 w-4 mr-2" />
+                Add Channel
+              </Button>
+              <Button onClick={handleSave} disabled={saving}>
+                {saving ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Save className="h-4 w-4 mr-2" />
+                    Save Plan
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+
+          {/* Right Column - Calendar */}
+          <div>
+            <WeekCommencingCalendar
+              channels={channels}
+              selectedChannelIndex={selectedChannelIndex}
+              onDateRangeChange={(channelIndex, start, end) => {
+                updateChannel(channelIndex, 'startWeek', start);
+                updateChannel(channelIndex, 'endWeek', end);
+              }}
+            />
           </div>
         </div>
       </CardContent>

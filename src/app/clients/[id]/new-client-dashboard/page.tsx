@@ -34,6 +34,7 @@ export default function NewClientDashboard() {
   
   const [client, setClient] = useState<Client | null>(null);
   const [plans, setPlans] = useState<MediaPlan[]>([]);
+  const [activePlan, setActivePlan] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [editingPlan, setEditingPlan] = useState<any>(null);
   const [loadingPlan, setLoadingPlan] = useState(false);
@@ -54,6 +55,15 @@ export default function NewClientDashboard() {
       // Load plans for this client
       const clientPlans = await getMediaPlans(clientId);
       setPlans(clientPlans || []);
+
+      // Find active plan and load its full data
+      const activePlanData = clientPlans?.find((p: MediaPlan) => p.status?.toLowerCase() === 'active');
+      if (activePlanData) {
+        const fullPlanData = await getPlanById(activePlanData.id);
+        setActivePlan(fullPlanData);
+      } else {
+        setActivePlan(null);
+      }
     } catch (error) {
       console.error('Error loading data:', error);
     } finally {
@@ -204,7 +214,7 @@ export default function NewClientDashboard() {
 
         {/* Media Channels Section */}
         <section className="mt-8" aria-label="Media channels budget pacing">
-          <MediaChannels />
+          <MediaChannels activePlan={activePlan} />
         </section>
       </div>
 

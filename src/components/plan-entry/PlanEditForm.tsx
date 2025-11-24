@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { MediaChannel, CHANNEL_OPTIONS, getWeekCommencing, formatWeekCommencing } from '@/types/media-plan';
 import { format, addWeeks, differenceInWeeks } from 'date-fns';
 import { updateMediaPlanWithChannels, getClients, createClient, deleteMediaPlan } from '@/lib/db/plans';
+import WeekCommencingCalendar from './WeekCommencingCalendar';
 
 interface PlanDashboardData {
   id: string;
@@ -64,6 +65,7 @@ export default function PlanEditForm({ plan, onClose, onSave, onDelete }: PlanEd
   const [createClientDialogOpen, setCreateClientDialogOpen] = useState(false);
   const [newClientName, setNewClientName] = useState('');
   const [creatingClient, setCreatingClient] = useState(false);
+  const [selectedChannelIndex, setSelectedChannelIndex] = useState<number | null>(null);
   
   // Convert plan channels to MediaChannel format
   const convertChannelsToMediaChannels = (): MediaChannel[] => {
@@ -307,23 +309,29 @@ export default function PlanEditForm({ plan, onClose, onSave, onDelete }: PlanEd
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="space-y-4">
-            {/* Header */}
-            <div className="grid grid-cols-12 gap-2 text-sm font-semibold border-b pb-2">
-              <div className="col-span-2">Channel</div>
-              <div className="col-span-2">Service Details</div>
-              <div className="col-span-2">Start W/C</div>
-              <div className="col-span-2">End W/C</div>
-              <div className="col-span-1">$/Total</div>
-              <div className="col-span-1">Organic</div>
-              <div className="col-span-1">Posts/Wk</div>
-              <div className="col-span-1">Actions</div>
-            </div>
+          <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-6">
+            {/* Left Column - Form */}
+            <div className="space-y-4">
+              {/* Header */}
+              <div className="grid grid-cols-12 gap-2 text-sm font-semibold border-b pb-2">
+                <div className="col-span-3">Channel</div>
+                <div className="col-span-3">Service Details</div>
+                <div className="col-span-2">$/Total</div>
+                <div className="col-span-1">Organic</div>
+                <div className="col-span-2">Posts/Wk</div>
+                <div className="col-span-1">Actions</div>
+              </div>
 
-            {/* Rows */}
-            {channels.map((channel, index) => (
-              <div key={channel.id} className="grid grid-cols-12 gap-2 items-center">
-                <div className="col-span-2">
+              {/* Rows */}
+              {channels.map((channel, index) => (
+                <div 
+                  key={channel.id} 
+                  className={`grid grid-cols-12 gap-2 items-center p-2 rounded transition-colors ${
+                    selectedChannelIndex === index ? 'bg-blue-50 border border-blue-200' : ''
+                  }`}
+                  onClick={() => setSelectedChannelIndex(index)}
+                >
+                <div className="col-span-3">
                   <Select
                     value={channel.channel}
                     onValueChange={(value) => updateChannel(index, 'channel', value)}
@@ -341,7 +349,7 @@ export default function PlanEditForm({ plan, onClose, onSave, onDelete }: PlanEd
                   </Select>
                 </div>
                 
-                <div className="col-span-2">
+                <div className="col-span-3">
                   <Input
                     value={channel.detail}
                     onChange={(e) => updateChannel(index, 'detail', e.target.value)}
@@ -350,38 +358,6 @@ export default function PlanEditForm({ plan, onClose, onSave, onDelete }: PlanEd
                 </div>
                 
                 <div className="col-span-2">
-                  <Input
-                    type="date"
-                    value={channel.startWeek}
-                    onChange={(e) => {
-                      const date = new Date(e.target.value);
-                      const monday = getWeekCommencing(date);
-                      updateChannel(index, 'startWeek', format(monday, 'yyyy-MM-dd'));
-                    }}
-                  />
-                  <p className="text-xs text-gray-500 mt-1">
-                    {channel.startWeek && formatWeekCommencing(new Date(channel.startWeek))}
-                  </p>
-                </div>
-                
-                <div className="col-span-2">
-                  <Input
-                    type="date"
-                    value={channel.endWeek}
-                    min={channel.startWeek}
-                    onChange={(e) => {
-                      const date = new Date(e.target.value);
-                      const monday = getWeekCommencing(date);
-                      updateChannel(index, 'endWeek', format(monday, 'yyyy-MM-dd'));
-                    }}
-                  />
-                  <p className="text-xs text-gray-500 mt-1">
-                    {channel.endWeek && formatWeekCommencing(new Date(channel.endWeek))}
-                    {channel.numberOfWeeks && ` (${channel.numberOfWeeks} wks)`}
-                  </p>
-                </div>
-                
-                <div className="col-span-1">
                   <Input
                     type="number"
                     value={channel.totalBudget || ''}
@@ -400,7 +376,7 @@ export default function PlanEditForm({ plan, onClose, onSave, onDelete }: PlanEd
                   />
                 </div>
                 
-                <div className="col-span-1">
+                <div className="col-span-2">
                   <Input
                     type="number"
                     value={channel.postsPerWeek || ''}
@@ -422,39 +398,52 @@ export default function PlanEditForm({ plan, onClose, onSave, onDelete }: PlanEd
               </div>
             ))}
 
-            {/* Action Buttons */}
-            <div className="flex justify-between pt-4 border-t">
-              <Button onClick={addChannel} variant="outline">
-                <Plus className="h-4 w-4 mr-2" />
-                Add Channel
-              </Button>
-              <div className="flex gap-2">
-                <Button 
-                  variant="outline" 
-                  onClick={() => setDeleteConfirmOpen(true)}
-                  disabled={saving || deleting}
-                  className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                >
-                  <Trash2 className="h-4 w-4 mr-2" />
-                  Delete Plan
+              {/* Action Buttons */}
+              <div className="flex justify-between pt-4 border-t">
+                <Button onClick={addChannel} variant="outline">
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Channel
                 </Button>
-                <Button variant="outline" onClick={onClose} disabled={saving || deleting}>
-                  Cancel
-                </Button>
-                <Button onClick={handleSave} disabled={saving || deleting}>
-                  {saving ? (
-                    <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      Saving...
-                    </>
-                  ) : (
-                    <>
-                      <Save className="h-4 w-4 mr-2" />
-                      Save Plan
-                    </>
-                  )}
-                </Button>
+                <div className="flex gap-2">
+                  <Button 
+                    variant="outline" 
+                    onClick={() => setDeleteConfirmOpen(true)}
+                    disabled={saving || deleting}
+                    className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Delete Plan
+                  </Button>
+                  <Button variant="outline" onClick={onClose} disabled={saving || deleting}>
+                    Cancel
+                  </Button>
+                  <Button onClick={handleSave} disabled={saving || deleting}>
+                    {saving ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Saving...
+                      </>
+                    ) : (
+                      <>
+                        <Save className="h-4 w-4 mr-2" />
+                        Save Plan
+                      </>
+                    )}
+                  </Button>
+                </div>
               </div>
+            </div>
+
+            {/* Right Column - Calendar */}
+            <div>
+              <WeekCommencingCalendar
+                channels={channels}
+                selectedChannelIndex={selectedChannelIndex}
+                onDateRangeChange={(channelIndex, start, end) => {
+                  updateChannel(channelIndex, 'startWeek', start);
+                  updateChannel(channelIndex, 'endWeek', end);
+                }}
+              />
             </div>
           </div>
         </CardContent>

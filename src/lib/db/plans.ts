@@ -210,7 +210,19 @@ export async function updateMediaPlanWithChannels(
   const planEnd = new Date(Math.max(...endDates.map(d => d.getTime())));
   const totalBudget = channels.reduce((sum, c) => sum + c.totalBudget, 0);
 
-  // 1. Update the media plan
+  // 1. If setting status to 'active', deactivate all other active plans for this client
+  if (planUpdates.status === 'active') {
+    const { error: deactivateError } = await supabase
+      .from('media_plans')
+      .update({ status: 'draft' })
+      .eq('client_id', clientId)
+      .eq('status', 'active')
+      .neq('id', planId);
+
+    if (deactivateError) throw deactivateError;
+  }
+
+  // 2. Update the media plan
   const planUpdateData = {
     ...planUpdates,
     start_date: format(planStart, 'yyyy-MM-dd'),
@@ -225,7 +237,7 @@ export async function updateMediaPlanWithChannels(
 
   if (planError) throw planError;
 
-  // 2. Get existing channels
+  // 3. Get existing channels
   const { data: existingChannels, error: channelsError } = await supabase
     .from('channels')
     .select('id')
@@ -240,7 +252,7 @@ export async function updateMediaPlanWithChannels(
       .map(c => c.id.replace('db-', ''))
   );
 
-  // 3. Delete channels that are no longer in the list
+  // 4. Delete channels that are no longer in the list
   const channelsToDelete = Array.from(existingChannelIds).filter(
     id => !incomingChannelIds.has(id)
   );
@@ -263,7 +275,7 @@ export async function updateMediaPlanWithChannels(
     if (channelDeleteError) throw channelDeleteError;
   }
 
-  // 4. Update or create channels
+  // 5. Update or create channels
   for (const channel of channels) {
     const isExisting = channel.id && channel.id.startsWith('db-');
     let channelDbId: string;
@@ -307,7 +319,7 @@ export async function updateMediaPlanWithChannels(
       channelDbId = newChannel.id;
     }
 
-    // 5. Create weekly plans for this channel
+    // 6. Create weekly plans for this channel
     const weeklyPlans = [];
     let currentWeek = new Date(channel.startWeek);
     const endWeek = new Date(channel.endWeek);

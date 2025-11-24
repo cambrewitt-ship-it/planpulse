@@ -92,6 +92,37 @@ export interface Database {
             updated_at?: string;
           };
         };
+        action_points: {
+          Row: {
+            id: string;
+            channel_type: string;
+            text: string;
+            completed: boolean;
+            category: 'SET UP' | 'ONGOING';
+            reset_frequency: 'weekly' | 'fortnightly' | 'monthly' | null;
+            created_at: string;
+            updated_at: string;
+          };
+          Insert: {
+            id?: string;
+            channel_type: string;
+            text: string;
+            completed?: boolean;
+            category: 'SET UP' | 'ONGOING';
+            reset_frequency?: 'weekly' | 'fortnightly' | 'monthly' | null;
+            created_at?: string;
+            updated_at?: string;
+          };
+          Update: {
+            id?: string;
+            channel_type?: string;
+            text?: string;
+            completed?: boolean;
+            category?: 'SET UP' | 'ONGOING';
+            reset_frequency?: 'weekly' | 'fortnightly' | 'monthly' | null;
+            updated_at?: string;
+          };
+        };
       };
     };
   }
