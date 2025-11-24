@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { User, Plus, TrendingUp, Pencil } from 'lucide-react';
 import RollingCalendar from '@/components/RollingCalendar';
 import MediaChannels from '@/components/MediaChannels';
+import { MediaPlanGrid } from '@/components/media-plan-builder/media-plan-grid';
 import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { getClients, getMediaPlans, getPlanById } from '@/lib/db/plans';
@@ -210,6 +211,16 @@ export default function NewClientDashboard() {
         {/* Rolling Calendar Section */}
         <section className="mt-8" aria-label="Rolling calendar with daily tasks">
           <RollingCalendar />
+        </section>
+
+        {/* Media Plan Builder Section */}
+        <section className="mt-8" aria-label="Media plan builder">
+          <Card className="bg-white shadow-md">
+            <CardContent className="p-6">
+              <h2 className="text-xl font-semibold text-[#0f172a] mb-4">Media Plan Builder</h2>
+              <MediaPlanGrid />
+            </CardContent>
+          </Card>
         </section>
 
         {/* Media Channels Section */}
