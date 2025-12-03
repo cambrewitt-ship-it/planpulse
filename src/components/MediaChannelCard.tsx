@@ -6,10 +6,10 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Line, ComposedChart, Dot } from 'recharts';
-import { format, startOfMonth, endOfMonth, eachDayOfInterval, parseISO } from 'date-fns';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Line, ComposedChart, Dot, LineChart } from 'recharts';
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, parseISO, addMonths, subMonths, addDays } from 'date-fns';
 import { useState } from 'react';
-import { RefreshCw, Plus, X, Edit2, Check, Trash2 } from 'lucide-react';
+import { RefreshCw, Plus, X, Edit2, Check, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface ActionPoint {
   id: string;
@@ -22,8 +22,18 @@ interface ActionPoint {
 interface SpendData {
   date: string;
   actualSpend: number | null;
-  targetSpend: number;
+  plannedSpend: number | null;
+  projectedSpend: number | null;
   projected?: boolean;
+}
+
+interface LiveSpendItem {
+  accountId?: string;
+  accountName?: string;
+  dateStart?: string;
+  dateStop?: string;
+  spend?: number;
+  currency?: string;
 }
 
 interface MediaChannelCardProps {
@@ -41,6 +51,9 @@ interface MediaChannelCardProps {
     spendError?: string;
     onActionPointsChange?: () => void;
     channelType: string;
+    connectedAccount?: string | null;
+    liveSpendData?: LiveSpendItem[];
+    connectedAccountId?: string | null;
   };
   onToggleAction?: (channelId: string, actionId: string) => void;
 }
@@ -49,6 +62,15 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
   const [completedActions, setCompletedActions] = useState<Set<string>>(
     new Set(channel.actionPoints.filter(a => a.completed).map(a => a.id))
   );
+  // Initialize selectedMonth from channel data (which comes from parent state)
+  // The parent manages the selected month per channel
+  const [selectedMonth, setSelectedMonth] = useState<Date>(() => {
+    // Try to infer from spendData - get the first date's month
+    if (channel.spendData && channel.spendData.length > 0) {
+      return startOfMonth(parseISO(channel.spendData[0].date));
+    }
+    return new Date();
+  });
   const [newActionText, setNewActionText] = useState('');
   const [newActionCategory, setNewActionCategory] = useState<'SET UP' | 'ONGOING'>('SET UP');
   const [newActionResetFrequency, setNewActionResetFrequency] = useState<'weekly' | 'fortnightly' | 'monthly'>('weekly');
@@ -235,8 +257,15 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
 
   // Calculate projection using linear regression on last N days
   const calculateProjection = (data: SpendData[]): SpendData[] => {
-    const actualData = data.filter(d => d.actualSpend !== null && !d.projected);
-    if (actualData.length < 2) return data;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayKey = format(today, 'yyyy-MM-dd');
+    
+    const actualData = data.filter(d => d.actualSpend !== null && !d.projected && d.date <= todayKey);
+    if (actualData.length < 2) {
+      // If not enough data, return data with projectedSpend as null
+      return data.map(d => ({ ...d, projectedSpend: null }));
+    }
 
     // Use last 7 days for trend
     const recentData = actualData.slice(-7);
@@ -252,27 +281,156 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
     });
     
     const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
-    const intercept = (sumY - slope * sumX) / n;
     
-    // Project from last actual data point
-    const lastActualIndex = data.findIndex(d => d.date === actualData[actualData.length - 1].date);
-    const lastActualSpend = actualData[actualData.length - 1].actualSpend || 0;
+    // Find today's index in the data
+    const todayIndex = data.findIndex(d => d.date === todayKey);
+    const todayActualSpend = todayIndex >= 0 && data[todayIndex]?.actualSpend !== null 
+      ? data[todayIndex].actualSpend || 0
+      : actualData[actualData.length - 1].actualSpend || 0;
     
     return data.map((d, i) => {
-      if (i <= lastActualIndex) return d;
+      // For dates up to today, no projection (show actual or planned)
+      if (d.date <= todayKey) {
+        return { ...d, projectedSpend: null };
+      }
       
-      const daysFromLast = i - lastActualIndex;
-      const projectedSpend = lastActualSpend + (slope * daysFromLast);
+      // For future dates, calculate projection from today
+      const daysFromToday = i - todayIndex;
+      const projectedSpend = todayActualSpend + (slope * daysFromToday);
       
       return {
         ...d,
-        actualSpend: projectedSpend,
-        projected: true
+        projectedSpend: projectedSpend >= 0 ? projectedSpend : null
       };
     });
   };
 
-  const chartData = calculateProjection(channel.spendData);
+  // Filter data to show only the current month
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayKey = format(today, 'yyyy-MM-dd');
+  const currentMonthStart = startOfMonth(today);
+  const currentMonthEnd = endOfMonth(today);
+  const currentMonthStartKey = format(currentMonthStart, 'yyyy-MM-dd');
+  const currentMonthEndKey = format(currentMonthEnd, 'yyyy-MM-dd');
+  
+  // Filter to show only dates within the current month
+  const filteredData = channel.spendData.filter(d => d.date >= currentMonthStartKey && d.date <= currentMonthEndKey);
+  
+  // Sort by date to ensure proper order
+  const sortedData = [...filteredData].sort((a, b) => a.date.localeCompare(b.date));
+  
+  const chartData = calculateProjection(sortedData);
+  
+  // Calculate Y-axis scale based on planned monthly spend
+  // Scale to the closest 50 above the planned monthly spend
+  const plannedMonthlySpend = channel.monthBudget;
+  const yAxisMax = Math.ceil(plannedMonthlySpend / 50) * 50;
+  
+  // Set tick count based on the scale (1 tick per unit)
+  const tickCount = yAxisMax;
+  
+  // Notify parent when month changes to fetch new data
+  const handleMonthChange = (newMonth: Date) => {
+    setSelectedMonth(newMonth);
+    channel.onMonthChange?.(newMonth);
+  };
+
+  // Calculate stats (reuse today and todayKey from above)
+  
+  // Check if account is connected
+  const hasConnectedAccount = !!channel.connectedAccountId && !!channel.connectedAccount;
+  
+  // Calculate Current Daily Spend from live API data (connected account only)
+  // Meta Ads API with time_increment=1 returns daily spend (not cumulative) for each day
+  let currentDailySpend: number | null = null;
+  
+  if (hasConnectedAccount && channel.liveSpendData && channel.liveSpendData.length > 0) {
+    // Filter by connected account ID (handle both string and number comparison)
+    const filteredLiveData = channel.liveSpendData.filter(item => {
+      if (!item.accountId || !channel.connectedAccountId) return false;
+      // Convert both to strings for comparison to handle type mismatches
+      const itemAccountId = String(item.accountId);
+      const connectedId = String(channel.connectedAccountId);
+      return itemAccountId === connectedId;
+    });
+    
+    if (filteredLiveData.length > 0) {
+      // Sort by date (most recent first) - use dateStart as primary, dateStop as fallback
+      const sortedData = [...filteredLiveData].sort((a, b) => {
+        const dateA = a.dateStart || a.dateStop || '';
+        const dateB = b.dateStart || b.dateStop || '';
+        return dateB.localeCompare(dateA);
+      });
+      
+      // Try to find today's spend first
+      let todaySpendItem = sortedData.find(item => {
+        const itemDate = item.dateStart || item.dateStop;
+        if (!itemDate) return false;
+        // Meta API with time_increment=1 returns dateStart and dateStop as the same date for daily data
+        return itemDate === todayKey;
+      });
+      
+      // If not found, try yesterday (since today's data might not be available yet)
+      if (!todaySpendItem) {
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        const yesterdayKey = format(yesterday, 'yyyy-MM-dd');
+        todaySpendItem = sortedData.find(item => {
+          const itemDate = item.dateStart || item.dateStop;
+          return itemDate === yesterdayKey;
+        });
+      }
+      
+      // Use today's or yesterday's spend, or fall back to most recent
+      const spendItem = todaySpendItem || sortedData[0];
+      if (spendItem && spendItem.spend !== undefined && spendItem.spend !== null) {
+        currentDailySpend = spendItem.spend;
+      } else {
+        // No spend data found - set to 0 (not null, so we show $0.00)
+        currentDailySpend = 0;
+      }
+    } else {
+      // Account connected but no data for this account - show 0
+      currentDailySpend = 0;
+    }
+  }
+  
+  // Planned Monthly Spend = monthBudget (already defined above for Y-axis scaling)
+  // Reuse plannedMonthlySpend from line 326
+  
+  // Projected Monthly Spend = current daily rate * days in month
+  const monthStart = startOfMonth(today);
+  const monthEnd = endOfMonth(today);
+  const daysInMonth = eachDayOfInterval({ start: monthStart, end: monthEnd }).length;
+  
+  let projectedMonthlySpend: number | null = null;
+  
+  if (hasConnectedAccount && channel.liveSpendData && channel.liveSpendData.length > 0) {
+    // Calculate average daily spend from live API data (connected account only)
+    const filteredLiveData = channel.liveSpendData.filter(item => {
+      if (!item.accountId || !channel.connectedAccountId) return false;
+      const itemAccountId = String(item.accountId);
+      const connectedId = String(channel.connectedAccountId);
+      return itemAccountId === connectedId;
+    });
+    
+    if (filteredLiveData.length > 0) {
+      // Get actual daily spend values (not cumulative)
+      const dailySpends = filteredLiveData
+        .map(item => item.spend || 0)
+        .filter(spend => spend > 0);
+      
+      if (dailySpends.length > 0) {
+        const averageDailySpend = dailySpends.reduce((sum, spend) => sum + spend, 0) / dailySpends.length;
+        projectedMonthlySpend = averageDailySpend * daysInMonth;
+      } else {
+        projectedMonthlySpend = 0;
+      }
+    } else {
+      projectedMonthlySpend = 0;
+    }
+  }
 
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
@@ -282,15 +440,21 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
           <p className="text-sm font-semibold text-[#0f172a] mb-2">
             {format(parseISO(label), 'MMM d, yyyy')}
           </p>
+          {data.plannedSpend !== null && (
+            <p className="text-sm text-[#94a3b8]">
+              Planned: ${data.plannedSpend.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </p>
+          )}
           {data.actualSpend !== null && (
             <p className="text-sm text-[#2563eb] font-medium">
               Actual: ${data.actualSpend.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              {data.projected && ' (projected)'}
             </p>
           )}
-          <p className="text-sm text-[#64748b]">
-            Target: ${data.targetSpend.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          </p>
+          {data.projectedSpend !== null && (
+            <p className="text-sm text-[#93c5fd] font-medium">
+              Projected: ${data.projectedSpend.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </p>
+          )}
         </div>
       );
     }
@@ -298,11 +462,19 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
   };
 
   const formatCurrency = (value: number) => {
-    return `$${(value / 1000).toFixed(0)}k`;
+    if (value === 0) {
+      return '$0';
+    } else if (value < 1000) {
+      return `$${Math.round(value)}`;
+    } else if (value < 10000) {
+      return `$${(value / 1000).toFixed(1)}k`;
+    } else {
+      return `$${Math.round(value / 1000)}k`;
+    }
   };
 
   const formatDate = (dateStr: string) => {
-    return format(parseISO(dateStr), 'MMM d');
+    return format(parseISO(dateStr), 'd');
   };
 
   return (
@@ -320,9 +492,14 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
                 <h3 className="text-lg font-semibold text-[#0f172a] mb-1">
                   {channel.name}
                 </h3>
-                <Badge className={`${getStatusColor(channel.status)} text-white font-medium`}>
-                  {channel.status}
-                </Badge>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Badge className={`${getStatusColor(channel.status)} text-white font-medium`}>
+                    {channel.status}
+                  </Badge>
+                  <span className="text-xs text-[#64748b]">
+                    {channel.connectedAccount || 'No Account Connected'}
+                  </span>
+                </div>
               </div>
             </div>
 
@@ -547,7 +724,32 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
           {/* Right Section - Chart (60%) */}
           <div className="lg:col-span-3">
             <div className="flex items-center justify-between mb-3">
-              <h4 className="text-sm font-semibold text-[#0f172a]">Budget Pacing</h4>
+              <div className="flex items-center gap-3">
+                <h4 className="text-sm font-semibold text-[#0f172a]">Budget Pacing</h4>
+                {/* Month Navigation */}
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleMonthChange(subMonths(selectedMonth, 1))}
+                    className="h-7 w-7 p-0"
+                  >
+                    <ChevronLeft className="h-3 w-3" />
+                  </Button>
+                  <span className="text-xs font-medium text-[#0f172a] min-w-[80px] text-center">
+                    {format(selectedMonth, 'MMM yyyy')}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleMonthChange(addMonths(selectedMonth, 1))}
+                    disabled={format(addMonths(selectedMonth, 1), 'yyyy-MM') > format(new Date(), 'yyyy-MM')}
+                    className="h-7 w-7 p-0"
+                  >
+                    <ChevronRight className="h-3 w-3" />
+                  </Button>
+                </div>
+              </div>
               {channel.isMetaAds && channel.onRefreshSpend && (
                 <Button
                   size="sm"
@@ -566,49 +768,98 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
                 {channel.spendError}
               </div>
             )}
-            <div className="h-[300px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart
-                  data={chartData}
-                  margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
-                >
-                  <defs>
-                    <linearGradient id={`colorTarget-${channel.id}`} x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#94a3b8" stopOpacity={0.5} />
-                      <stop offset="95%" stopColor="#94a3b8" stopOpacity={0.1} />
-                    </linearGradient>
-                    <linearGradient id={`colorActual-${channel.id}`} x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#2563eb" stopOpacity={0.9} />
-                      <stop offset="95%" stopColor="#2563eb" stopOpacity={0.3} />
-                    </linearGradient>
-                  </defs>
-                  
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  
-                  <XAxis
-                    dataKey="date"
-                    tickFormatter={formatDate}
-                    stroke="#64748b"
-                    style={{ fontSize: '12px' }}
-                    interval="preserveStartEnd"
-                  />
+            
+            {/* Stats Section */}
+            <div className="grid grid-cols-3 gap-3 mb-4">
+              <div className="bg-[#f8fafc] rounded-lg p-3 border border-[#e2e8f0]">
+                <p className="text-xs text-[#64748b] mb-1">Current Daily Spend</p>
+                <p className="text-lg font-semibold text-[#0f172a]">
+                  {hasConnectedAccount && currentDailySpend !== null
+                    ? `$${currentDailySpend.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                    : '—'}
+                </p>
+              </div>
+              <div className="bg-[#f8fafc] rounded-lg p-3 border border-[#e2e8f0]">
+                <p className="text-xs text-[#64748b] mb-1">Planned Monthly Spend</p>
+                <p className="text-lg font-semibold text-[#0f172a]">
+                  ${plannedMonthlySpend.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+              </div>
+              <div className="bg-[#f8fafc] rounded-lg p-3 border border-[#e2e8f0]">
+                <p className="text-xs text-[#64748b] mb-1">Projected Monthly Spend</p>
+                <p className="text-lg font-semibold text-[#0f172a]">
+                  {hasConnectedAccount && projectedMonthlySpend !== null
+                    ? `$${projectedMonthlySpend.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                    : '—'}
+                </p>
+              </div>
+            </div>
+            
+            <div className="relative">
+              <div className="h-[300px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart
+                    data={chartData}
+                    margin={{ top: 10, right: 10, left: 0, bottom: 25 }}
+                  >
+                    <defs>
+                      <linearGradient id={`colorPlanned-${channel.id}`} x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#94a3b8" stopOpacity={0.5} />
+                        <stop offset="95%" stopColor="#94a3b8" stopOpacity={0.5} />
+                      </linearGradient>
+                      <linearGradient id={`colorActual-${channel.id}`} x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#2563eb" stopOpacity={0.9} />
+                        <stop offset="95%" stopColor="#2563eb" stopOpacity={0.3} />
+                      </linearGradient>
+                      <linearGradient id={`colorProjected-${channel.id}`} x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#93c5fd" stopOpacity={0.6} />
+                        <stop offset="95%" stopColor="#93c5fd" stopOpacity={0.1} />
+                      </linearGradient>
+                    </defs>
+                    
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    
+                    <XAxis
+                      dataKey="date"
+                      tickFormatter={formatDate}
+                      stroke="#64748b"
+                      style={{ fontSize: '12px' }}
+                      interval={0}
+                      domain={['dataMin', 'dataMax']}
+                    />
                   
                   <YAxis
                     tickFormatter={formatCurrency}
                     stroke="#64748b"
                     style={{ fontSize: '12px' }}
+                    domain={[0, yAxisMax]}
+                    tickCount={tickCount}
                   />
                   
                   <Tooltip content={<CustomTooltip />} />
                   
-                  {/* Target Budget Area */}
+                  {/* Planned Spend Area (underneath) */}
                   <Area
-                    type="linear"
-                    dataKey="targetSpend"
+                    type="monotone"
+                    dataKey="plannedSpend"
                     stroke="#94a3b8"
                     strokeWidth={2}
                     strokeDasharray="5 5"
-                    fill={`url(#colorTarget-${channel.id})`}
+                    fill={`url(#colorPlanned-${channel.id})`}
+                    connectNulls={false}
+                    animationDuration={1500}
+                    animationEasing="ease-in-out"
+                  />
+                  
+                  {/* Projected Spend Line (extends from actual) */}
+                  <Line
+                    type="linear"
+                    dataKey="projectedSpend"
+                    stroke="#93c5fd"
+                    strokeWidth={2}
+                    strokeDasharray="3 3"
+                    dot={false}
+                    connectNulls={false}
                     animationDuration={1500}
                     animationEasing="ease-in-out"
                   />
@@ -623,17 +874,8 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
                     animationDuration={1500}
                     animationEasing="ease-in-out"
                     dot={(props: any) => {
-                      if (props.payload.projected) {
-                        return (
-                          <Dot
-                            {...props}
-                            r={3}
-                            fill="#93c5fd"
-                            stroke="#2563eb"
-                            strokeWidth={1}
-                            opacity={0.6}
-                          />
-                        );
+                      if (props.payload.projectedSpend !== null) {
+                        return null; // Don't show dots on projected section
                       }
                       return (
                         <Dot
@@ -645,14 +887,16 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
                         />
                       );
                     }}
-                    strokeDasharray={(props: any) => {
-                      // Use dashed line for projected data
-                      return props?.payload?.projected ? "5 5" : "0";
-                    }}
                     connectNulls={false}
                   />
                 </ComposedChart>
               </ResponsiveContainer>
+              </div>
+              <div className="absolute left-0 right-[10px] bottom-[-20px] text-center">
+                <p className="text-base font-semibold text-[#64748b] tracking-wide">
+                  {format(today, 'MMMM').toUpperCase()}
+                </p>
+              </div>
             </div>
           </div>
         </div>

@@ -2,7 +2,7 @@
 
 import MediaChannelCard from './MediaChannelCard';
 import { Facebook, Search, Linkedin, Music, Instagram } from 'lucide-react';
-import { format, eachDayOfInterval, startOfMonth, endOfMonth, parseISO, isWithinInterval } from 'date-fns';
+import { format, eachDayOfInterval, startOfMonth, endOfMonth, parseISO, isWithinInterval, addDays } from 'date-fns';
 import { useState, useEffect } from 'react';
 
 interface ActivePlan {
@@ -29,13 +29,17 @@ interface ActivePlan {
 
 interface MediaChannelsProps {
   activePlan: ActivePlan | null;
+  clientId?: string;
 }
 
-export default function MediaChannels({ activePlan }: MediaChannelsProps) {
+export default function MediaChannels({ activePlan, clientId }: MediaChannelsProps) {
   const [liveSpendData, setLiveSpendData] = useState<Record<string, any[]>>({});
   const [fetchingSpend, setFetchingSpend] = useState<Record<string, boolean>>({});
   const [spendErrors, setSpendErrors] = useState<Record<string, string>>({});
   const [actionPoints, setActionPoints] = useState<Record<string, any[]>>({});
+  const [connectedAccounts, setConnectedAccounts] = useState<Record<string, string | null>>({});
+  const [connectedAccountIds, setConnectedAccountIds] = useState<Record<string, string | null>>({});
+  const [selectedMonths, setSelectedMonths] = useState<Record<string, Date>>({});
 
   // Map channel names to icons
   const getChannelIcon = (channelName: string) => {
@@ -86,7 +90,7 @@ export default function MediaChannels({ activePlan }: MediaChannelsProps) {
   };
 
   // Fetch live spend data for Meta Ads
-  const fetchLiveSpendData = async (channelId: string, channelName: string) => {
+  const fetchLiveSpendData = async (channelId: string, channelName: string, month?: Date) => {
     if (!isMetaAdsChannel(channelName)) {
       return;
     }
@@ -95,9 +99,9 @@ export default function MediaChannels({ activePlan }: MediaChannelsProps) {
     setSpendErrors(prev => ({ ...prev, [channelId]: '' }));
 
     try {
-      const today = new Date();
-      const monthStart = startOfMonth(today);
-      const monthEnd = endOfMonth(today);
+      const targetMonth = month || new Date();
+      const monthStart = startOfMonth(targetMonth);
+      const monthEnd = endOfMonth(targetMonth);
 
       const startDate = format(monthStart, 'yyyy-MM-dd');
       const endDate = format(monthEnd, 'yyyy-MM-dd');
@@ -111,6 +115,7 @@ export default function MediaChannels({ activePlan }: MediaChannelsProps) {
           platform: 'meta-ads',
           startDate,
           endDate,
+          clientId: clientId || undefined,
         }),
       });
 
@@ -150,6 +155,26 @@ export default function MediaChannels({ activePlan }: MediaChannelsProps) {
     }
   };
 
+  // Fetch connected account for a channel
+  const fetchConnectedAccount = async (channelType: string) => {
+    if (!clientId) return;
+    
+    try {
+      const response = await fetch(
+        `/api/connections/channel-account?clientId=${encodeURIComponent(clientId)}&channelType=${encodeURIComponent(channelType)}`
+      );
+      if (!response.ok) {
+        console.error(`Failed to fetch connected account for channel type ${channelType}`);
+        return;
+      }
+      const { accountName, accountId, hasConnection } = await response.json();
+      setConnectedAccounts(prev => ({ ...prev, [channelType]: hasConnection ? (accountName || null) : null }));
+      setConnectedAccountIds(prev => ({ ...prev, [channelType]: hasConnection ? (accountId || null) : null }));
+    } catch (error) {
+      console.error(`Error fetching connected account for channel type ${channelType}:`, error);
+    }
+  };
+
   // Auto-fetch spend data and action points for channels on mount
   useEffect(() => {
     if (!activePlan || !activePlan.channels) return;
@@ -160,21 +185,36 @@ export default function MediaChannels({ activePlan }: MediaChannelsProps) {
       }
       const channelType = getChannelDisplayName(channel.channel, channel.detail);
       fetchActionPoints(channelType);
+      if (clientId) {
+        fetchConnectedAccount(channelType);
+      }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activePlan?.id]); // Only refetch when plan changes
+  }, [activePlan?.id, clientId]); // Only refetch when plan or client changes
 
   // Generate month data from weekly plans and live spend data
   const generateMonthDataFromWeeklyPlans = (
     weeklyPlans: any[], 
     monthBudget: number, 
     channelId: string,
-    liveData?: any[]
+    liveData?: any[],
+    accountId?: string | null,
+    hasConnectedAccount?: boolean,
+    selectedMonth?: Date
   ) => {
+    const month = selectedMonth || new Date();
+    const monthStart = startOfMonth(month);
+    const monthEnd = endOfMonth(month);
     const today = new Date();
-    const monthStart = startOfMonth(today);
-    const monthEnd = endOfMonth(today);
-    const allDays = eachDayOfInterval({ start: monthStart, end: monthEnd });
+    today.setHours(0, 0, 0, 0); // Reset time to start of day
+    
+    // Generate data for the month, but ensure we include at least 30 days from today
+    // This ensures we have enough data for the chart which shows today + 30 days ahead
+    const thirtyDaysAhead = new Date(today);
+    thirtyDaysAhead.setDate(thirtyDaysAhead.getDate() + 30);
+    const effectiveEndDate = thirtyDaysAhead > monthEnd ? thirtyDaysAhead : monthEnd;
+    
+    const allDays = eachDayOfInterval({ start: monthStart, end: effectiveEndDate });
     
     // Calculate daily target
     const dailyTarget = monthBudget / allDays.length;
@@ -185,6 +225,16 @@ export default function MediaChannels({ activePlan }: MediaChannelsProps) {
     // Process live spend data if available
     if (liveData && liveData.length > 0) {
       liveData.forEach((item) => {
+        // Filter by account ID if provided (to show only data for the connected account)
+        // Convert both to strings for comparison to handle type mismatches
+        if (accountId && item.accountId) {
+          const itemAccountId = String(item.accountId);
+          const connectedId = String(accountId);
+          if (itemAccountId !== connectedId) {
+            return;
+          }
+        }
+        
         if (item.dateStart && item.spend !== undefined) {
           // Meta API returns date ranges, use dateStart for daily aggregation
           // If dateStart and dateStop are different, we'll use dateStart
@@ -200,57 +250,62 @@ export default function MediaChannels({ activePlan }: MediaChannelsProps) {
     const plannedSpendByDate = new Map<string, number>();
     
     // Process weekly plans to distribute spend across days
+    // For the planned line, always use budget_planned from the media plan
     weeklyPlans.forEach((wp) => {
       const weekStart = parseISO(wp.week_commencing);
       const weekEnd = new Date(weekStart);
       weekEnd.setDate(weekEnd.getDate() + 6);
       
-      // Use actual spend if available, otherwise use planned
-      const weekSpend = wp.budget_actual || wp.budget_planned || 0;
-      const dailySpend = weekSpend / 7;
+      // Always use planned budget from the media plan for the planned line
+      const weekPlannedSpend = wp.budget_planned || 0;
+      const dailyPlannedSpend = weekPlannedSpend / 7;
       
       // Distribute across days in the week
       for (let i = 0; i < 7; i++) {
         const day = new Date(weekStart);
         day.setDate(day.getDate() + i);
         
-        if (isWithinInterval(day, { start: monthStart, end: monthEnd })) {
+        if (isWithinInterval(day, { start: monthStart, end: effectiveEndDate })) {
           const dateKey = format(day, 'yyyy-MM-dd');
-          plannedSpendByDate.set(dateKey, (plannedSpendByDate.get(dateKey) || 0) + dailySpend);
+          plannedSpendByDate.set(dateKey, (plannedSpendByDate.get(dateKey) || 0) + dailyPlannedSpend);
         }
       }
     });
     
-    // Merge live data with planned data (live data takes precedence)
-    const spendByDate = new Map<string, number>();
+    // Keep planned and actual spend separate
+    // Actual spend comes from live API data only
+    // Planned spend comes from weekly plans only
     
-    // First, add planned spend
-    plannedSpendByDate.forEach((spend, date) => {
-      spendByDate.set(date, spend);
-    });
-    
-    // Then, override with live data where available
-    liveSpendByDate.forEach((spend, date) => {
-      spendByDate.set(date, spend * 100); // Convert dollars to cents to match planned data format
-    });
-    
-    // Check if we have any spend data at all
-    const hasAnySpend = Array.from(spendByDate.values()).some(spend => spend > 0);
+    // Check if we have any live spend data
+    const hasLiveSpendData = hasConnectedAccount && liveData && liveData.length > 0 && accountId;
     
     // Build cumulative data
+    // Meta API returns daily spend (not cumulative), so we accumulate day by day
     let cumulativeActual = 0;
-    let cumulativeTarget = 0;
+    let cumulativePlanned = 0;
     
     return allDays.map((date, index) => {
       const dateKey = format(date, 'yyyy-MM-dd');
-      const daySpend = spendByDate.get(dateKey) || 0;
-      cumulativeActual += daySpend;
-      cumulativeTarget += dailyTarget;
+      
+      // Get planned spend for this day (from weekly plans only)
+      const plannedDaySpend = plannedSpendByDate.get(dateKey) || 0;
+      cumulativePlanned += plannedDaySpend;
+      
+      // Get actual spend for this day (from live API data only)
+      // Live data is in dollars, convert to cents for consistency
+      const actualDaySpend = liveSpendByDate.get(dateKey) || 0;
+      const actualDaySpendInCents = actualDaySpend * 100; // Convert dollars to cents
+      cumulativeActual += actualDaySpendInCents;
+      
+      // Convert from cents to dollars for display
+      // Show actual spend only if we have live data from connected account
+      const shouldShowActual = hasLiveSpendData;
       
       return {
         date: dateKey,
-        actualSpend: hasAnySpend ? cumulativeActual / 100 : null, // Convert from cents, show cumulative if we have any spend
-        targetSpend: cumulativeTarget / 100, // Convert from cents
+        actualSpend: shouldShowActual ? cumulativeActual / 100 : null, // Convert from cents to dollars
+        plannedSpend: cumulativePlanned / 100, // Convert from cents to dollars
+        projectedSpend: null, // Will be calculated in MediaChannelCard
         projected: false
       };
     });
@@ -266,49 +321,60 @@ export default function MediaChannels({ activePlan }: MediaChannelsProps) {
       // Ensure weekly_plans exists
       const weeklyPlans = channel.weekly_plans || [];
       
-      // Calculate month budget from weekly plans
-      const currentMonth = new Date();
-      const monthStart = startOfMonth(currentMonth);
-      const monthEnd = endOfMonth(currentMonth);
+      const channelType = getChannelDisplayName(channel.channel, channel.detail);
+      const accountId = connectedAccountIds[channelType] ?? null;
+      const hasConnectedAccount = !!accountId && !!connectedAccounts[channelType];
       
-      // Get weekly plans for current month
-      const monthWeeklyPlans = weeklyPlans.filter((wp) => {
+      // Get selected month for this channel (default to current month)
+      const selectedMonth = selectedMonths[channel.id] || new Date();
+      
+      // Calculate month budget for selected month
+      const selectedMonthStart = startOfMonth(selectedMonth);
+      const selectedMonthEnd = endOfMonth(selectedMonth);
+      const selectedMonthWeeklyPlans = weeklyPlans.filter((wp) => {
         if (!wp.week_commencing) return false;
         const weekStart = parseISO(wp.week_commencing);
-        return isWithinInterval(weekStart, { start: monthStart, end: monthEnd });
+        return isWithinInterval(weekStart, { start: selectedMonthStart, end: selectedMonthEnd });
       });
-      
-      // Calculate month budget (sum of planned budgets for weeks in this month)
-      const monthBudget = monthWeeklyPlans.reduce((sum, wp) => sum + (wp.budget_planned || 0), 0);
-      
-      // If no weekly plans for this month, use average weekly budget
+      const selectedMonthBudget = selectedMonthWeeklyPlans.reduce((sum, wp) => sum + (wp.budget_planned || 0), 0);
       const avgWeeklyBudget = weeklyPlans.length > 0
         ? weeklyPlans.reduce((sum, wp) => sum + (wp.budget_planned || 0), 0) / weeklyPlans.length
         : 0;
-      const estimatedMonthBudget = avgWeeklyBudget * 4.33; // Average weeks per month
+      const estimatedSelectedMonthBudget = avgWeeklyBudget * 4.33;
+      const finalSelectedMonthBudget = selectedMonthBudget > 0 ? selectedMonthBudget : estimatedSelectedMonthBudget;
       
-      const finalMonthBudget = monthBudget > 0 ? monthBudget : estimatedMonthBudget;
-      
-      const channelType = getChannelDisplayName(channel.channel, channel.detail);
       return {
         id: channel.id,
         name: channelType,
         icon: getChannelIcon(channel.channel),
         status: 'Active' as const,
         actionPoints: actionPoints[channelType] || [],
-        monthBudget: finalMonthBudget / 100, // Convert from cents
+        monthBudget: finalSelectedMonthBudget / 100, // Convert from cents
         spendData: generateMonthDataFromWeeklyPlans(
           weeklyPlans, 
-          finalMonthBudget, 
+          finalSelectedMonthBudget, 
           channel.id,
-          liveSpendData[channel.id]
+          liveSpendData[channel.id],
+          accountId,
+          hasConnectedAccount,
+          selectedMonth
         ),
         isMetaAds: isMetaAdsChannel(channel.channel),
-        onRefreshSpend: () => fetchLiveSpendData(channel.id, channel.channel),
+        onRefreshSpend: () => fetchLiveSpendData(channel.id, channel.channel, selectedMonth),
+        onMonthChange: (month: Date) => {
+          // Update selected month and fetch data for the new month
+          setSelectedMonths(prev => ({ ...prev, [channel.id]: month }));
+          if (isMetaAdsChannel(channel.channel)) {
+            fetchLiveSpendData(channel.id, channel.channel, month);
+          }
+        },
         isFetchingSpend: fetchingSpend[channel.id] || false,
         spendError: spendErrors[channel.id],
         onActionPointsChange: () => fetchActionPoints(channelType),
-        channelType: channelType
+        channelType: channelType,
+        connectedAccount: connectedAccounts[channelType] ?? undefined,
+        liveSpendData: liveSpendData[channel.id] || [],
+        connectedAccountId: accountId
       };
     });
   };

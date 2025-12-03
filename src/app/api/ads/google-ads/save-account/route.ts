@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
 
     // Parse request body
     const body = await request.json();
-    const { customerId, accountName } = body;
+    const { customerId, accountName, currency } = body;
 
     if (!customerId) {
       return NextResponse.json(
@@ -40,21 +40,25 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get user's Google Ads connection
-    const { data: connection, error: connectionError } = await supabase
+    // Get user's Google Ads connection (get most recent active connection)
+    const { data: connections, error: connectionError } = await supabase
       .from('ad_platform_connections')
       .select('connection_id')
       .eq('user_id', user.id)
       .eq('platform', 'google-ads')
-      .single();
+      .eq('connection_status', 'active')
+      .order('created_at', { ascending: false })
+      .limit(1);
 
-    if (connectionError || !connection) {
+    if (connectionError || !connections || connections.length === 0) {
       console.error('Connection lookup error:', connectionError);
       return NextResponse.json(
         { error: 'No active Google Ads connection found. Please connect your Google Ads account first.' },
         { status: 404 }
       );
     }
+
+    const connection = connections[0];
 
     // Upsert the Google Ads account
     const { data: savedAccount, error: insertError } = await supabase
@@ -88,6 +92,7 @@ export async function POST(request: NextRequest) {
       userId: user.id,
       customerId: cleanedCustomerId,
       accountName: accountName || 'N/A',
+      currency: currency || 'N/A',
     });
 
     return NextResponse.json({

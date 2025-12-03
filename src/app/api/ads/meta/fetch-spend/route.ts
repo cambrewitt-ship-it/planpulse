@@ -13,7 +13,7 @@ export async function POST(request: NextRequest) {
     // Parse request body
     const body = await request.json();
     console.log('Request body:', body);
-    const { startDate, endDate } = body;
+    const { startDate, endDate, clientId } = body;
 
     // Validate required parameters
     if (!startDate || !endDate) {
@@ -62,12 +62,19 @@ export async function POST(request: NextRequest) {
     }
 
     // Look up user's connection for Meta Ads
-    const { data: connection, error: dbError } = await supabase
+    // If clientId is provided, filter by it; otherwise find any active connection
+    let query = supabase
       .from('ad_platform_connections')
       .select('connection_id, platform, connection_status')
       .eq('user_id', user.id)
       .eq('platform', 'meta-ads')
-      .single();
+      .eq('connection_status', 'active');
+    
+    if (clientId) {
+      query = query.eq('client_id', clientId);
+    }
+    
+    const { data: connection, error: dbError } = await query.single();
 
     if (dbError || !connection) {
       return Response.json(
@@ -76,13 +83,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check if connection is active
-    if (connection.connection_status !== 'active') {
-      return Response.json(
-        { error: `Connection status is "${connection.connection_status}". Please reconnect your account.` },
-        { status: 403 }
-      );
-    }
 
     // Initialize Nango with correct secret key
     const nangoSecretKey = process.env.NANGO_SECRET_KEY_DEV_PLAN_CHECK;
@@ -145,6 +145,7 @@ export async function POST(request: NextRequest) {
               since: startDate,
               until: endDate
             }),
+            time_increment: '1', // Get daily breakdown
             level: 'account',
             access_token: accessToken
           });

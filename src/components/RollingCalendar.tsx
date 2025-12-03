@@ -4,16 +4,27 @@ import { Card } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { format, addDays, subDays, isSameDay } from 'date-fns';
-import { useState } from 'react';
+import { format, addDays, subDays, isSameDay, startOfDay } from 'date-fns';
+import { useState, useEffect } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
+
+interface ActionPoint {
+  id: string;
+  text: string;
+  completed: boolean;
+  category: 'SET UP' | 'ONGOING';
+  channel_type: string;
+  reset_frequency?: 'weekly' | 'fortnightly' | 'monthly' | null;
+}
 
 interface Task {
   id: string;
   text: string;
   priority: 'high' | 'medium' | 'low';
-  channel: 'Meta' | 'Google' | 'LinkedIn' | 'TikTok';
+  channel: string;
   completed: boolean;
+  actionPointId: string;
+  scheduledDate: Date;
 }
 
 interface DayData {
@@ -21,51 +32,155 @@ interface DayData {
   tasks: Task[];
 }
 
-export default function RollingCalendar() {
-  const today = new Date();
+interface RollingCalendarProps {
+  channelTypes?: string[];
+  activePlan?: {
+    channels?: Array<{
+      channel: string;
+      detail: string;
+    }>;
+  } | null;
+}
+
+export default function RollingCalendar({ channelTypes, activePlan }: RollingCalendarProps = {}) {
+  const today = startOfDay(new Date());
   const [startDayOffset, setStartDayOffset] = useState(-1); // Start from yesterday
   const [direction, setDirection] = useState<'left' | 'right' | null>(null);
+  const [actionPoints, setActionPoints] = useState<ActionPoint[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [completedTasks, setCompletedTasks] = useState<Set<string>>(new Set());
   
-  // Generate day data for a wider range (7 days before to 7 days after today)
+  // Get channel types from active plan if not provided
+  const getChannelTypes = (): string[] => {
+    if (channelTypes && channelTypes.length > 0) {
+      return channelTypes;
+    }
+    
+    if (activePlan?.channels) {
+      return activePlan.channels.map(ch => {
+        const lowerName = ch.channel.toLowerCase();
+        if (lowerName.includes('facebook') && lowerName.includes('instagram')) {
+          return 'Meta Ads';
+        }
+        if (lowerName.includes('facebook') || lowerName.includes('meta')) {
+          return 'Meta Ads';
+        }
+        if (lowerName.includes('google')) {
+          return 'Google Ads';
+        }
+        if (lowerName.includes('linkedin')) {
+          return 'LinkedIn Ads';
+        }
+        if (lowerName.includes('tiktok')) {
+          return 'TikTok Ads';
+        }
+        return ch.channel;
+      });
+    }
+    
+    return [];
+  };
+
+  // Fetch action points for all channel types
+  useEffect(() => {
+    const fetchAllActionPoints = async () => {
+      setLoading(true);
+      const types = getChannelTypes();
+      
+      if (types.length === 0) {
+        setActionPoints([]);
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const allActionPoints: ActionPoint[] = [];
+        
+        // Fetch action points for each channel type
+        await Promise.all(
+          types.map(async (channelType) => {
+            try {
+              const response = await fetch(`/api/action-points?channel_type=${encodeURIComponent(channelType)}`);
+              if (response.ok) {
+                const { data } = await response.json();
+                if (data && Array.isArray(data)) {
+                  allActionPoints.push(...data);
+                }
+              }
+            } catch (error) {
+              console.error(`Error fetching action points for ${channelType}:`, error);
+            }
+          })
+        );
+        
+        setActionPoints(allActionPoints);
+        
+        // Initialize completed tasks from action points
+        const completed = new Set(
+          allActionPoints.filter(ap => ap.completed).map(ap => ap.id)
+        );
+        setCompletedTasks(completed);
+      } catch (error) {
+        console.error('Error fetching action points:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchAllActionPoints();
+  }, [channelTypes, activePlan?.channels]);
+
+  // Generate day data from action points
   const generateAllDays = (): DayData[] => {
     const allDays: DayData[] = [];
+    const taskMap = new Map<string, Task[]>();
     
-    // Sample tasks for different days
-    const taskTemplates = [
-      { text: 'Review ad performance', priority: 'high' as const, channel: 'Meta' as const },
-      { text: 'Update campaign budgets', priority: 'medium' as const, channel: 'Google' as const },
-      { text: 'Analyze audience insights', priority: 'low' as const, channel: 'LinkedIn' as const },
-      { text: 'Launch new campaign', priority: 'high' as const, channel: 'Meta' as const },
-      { text: 'Client status meeting', priority: 'high' as const, channel: 'Google' as const },
-      { text: 'Review creative assets', priority: 'medium' as const, channel: 'TikTok' as const },
-      { text: 'Optimize targeting', priority: 'medium' as const, channel: 'Google' as const },
-      { text: 'A/B test results review', priority: 'high' as const, channel: 'Meta' as const },
-      { text: 'Content calendar update', priority: 'low' as const, channel: 'LinkedIn' as const },
-      { text: 'Monthly report prep', priority: 'medium' as const, channel: 'Google' as const },
-      { text: 'Strategy adjustment', priority: 'high' as const, channel: 'Meta' as const },
-      { text: 'Competitor analysis', priority: 'low' as const, channel: 'TikTok' as const },
-      { text: 'Budget reallocation review', priority: 'medium' as const, channel: 'Meta' as const },
-      { text: 'Performance dashboard check', priority: 'low' as const, channel: 'Google' as const },
-      { text: 'Team sync meeting', priority: 'medium' as const, channel: 'LinkedIn' as const },
-    ];
-    
+    // Initialize days from -7 to 7
     for (let i = -7; i <= 7; i++) {
       const date = addDays(today, i);
-      const dayTasks = taskTemplates
-        .slice((i + 7) % taskTemplates.length, ((i + 7) % taskTemplates.length) + 3)
-        .map((template, idx) => ({
-          id: `task-${i}-${idx}`,
-          ...template,
-          completed: i < 0 && Math.random() > 0.5, // Past tasks may be completed
-        }));
+      const dateKey = format(date, 'yyyy-MM-dd');
+      taskMap.set(dateKey, []);
+    }
+    
+    // Process only incomplete action points
+    const incompleteActionPoints = actionPoints.filter(ap => !ap.completed);
+    
+    // Track which action points have been scheduled to avoid duplicates
+    const scheduledActionPointIds = new Set<string>();
+    
+    incompleteActionPoints.forEach((actionPoint) => {
+      // Skip if already scheduled
+      if (scheduledActionPointIds.has(actionPoint.id)) {
+        return;
+      }
       
+      const priority: 'high' | 'medium' | 'low' = actionPoint.category === 'SET UP' ? 'high' : 'medium';
+      const todayKey = format(today, 'yyyy-MM-dd');
+      const tasks = taskMap.get(todayKey) || [];
+      
+      // Check if task already exists (avoid duplicates)
+      if (!tasks.find(t => t.actionPointId === actionPoint.id)) {
+        tasks.push({
+          id: `${actionPoint.id}-${todayKey}`, // Make key unique by combining actionPointId with date
+          text: actionPoint.text,
+          priority,
+          channel: actionPoint.channel_type,
+          completed: false,
+          actionPointId: actionPoint.id,
+          scheduledDate: today,
+        });
+        taskMap.set(todayKey, tasks);
+        scheduledActionPointIds.add(actionPoint.id);
+      }
+    });
+    
+    // Convert map to DayData array
+    for (let i = -7; i <= 7; i++) {
+      const date = addDays(today, i);
+      const dateKey = format(date, 'yyyy-MM-dd');
       allDays.push({
         date,
-        tasks: dayTasks.length ? dayTasks : taskTemplates.slice(0, 3).map((template, idx) => ({
-          id: `task-${i}-${idx}`,
-          ...template,
-          completed: false,
-        })),
+        tasks: taskMap.get(dateKey) || [],
       });
     }
     
@@ -81,21 +196,81 @@ export default function RollingCalendar() {
   };
   
   const visibleDays = getVisibleDays();
-  
-  const [completedTasks, setCompletedTasks] = useState<Set<string>>(
-    new Set(allDays.flatMap(d => d.tasks.filter(t => t.completed).map(t => t.id)))
-  );
 
-  const toggleTask = (taskId: string) => {
+  const toggleTask = async (taskId: string) => {
+    const task = allDays.flatMap(d => d.tasks).find(t => t.id === taskId);
+    if (!task) return;
+    
+    // Track completion by actionPointId, not taskId
+    const actionPointId = task.actionPointId;
+    const newCompleted = !completedTasks.has(actionPointId);
+    
+    // Optimistically update UI
     setCompletedTasks(prev => {
       const newSet = new Set(prev);
-      if (newSet.has(taskId)) {
-        newSet.delete(taskId);
+      if (newCompleted) {
+        newSet.add(actionPointId);
       } else {
-        newSet.add(taskId);
+        newSet.delete(actionPointId);
       }
       return newSet;
     });
+    
+    // Update in database
+    try {
+      const response = await fetch('/api/action-points', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: actionPointId,
+          completed: newCompleted
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to update action point');
+      }
+      
+      // Refresh action points to get latest state
+      const types = getChannelTypes();
+      const allActionPoints: ActionPoint[] = [];
+      
+      await Promise.all(
+        types.map(async (channelType) => {
+          try {
+            const resp = await fetch(`/api/action-points?channel_type=${encodeURIComponent(channelType)}`);
+            if (resp.ok) {
+              const { data } = await resp.json();
+              if (data && Array.isArray(data)) {
+                allActionPoints.push(...data);
+              }
+            }
+          } catch (error) {
+            console.error(`Error refreshing action points for ${channelType}:`, error);
+          }
+        })
+      );
+      
+      setActionPoints(allActionPoints);
+      
+      // Update completed tasks set from refreshed action points
+      const completed = new Set(
+        allActionPoints.filter(ap => ap.completed).map(ap => ap.id)
+      );
+      setCompletedTasks(completed);
+    } catch (error) {
+      console.error('Error updating action point:', error);
+      // Revert on error
+      setCompletedTasks(prev => {
+        const newSet = new Set(prev);
+        if (newCompleted) {
+          newSet.delete(actionPointId);
+        } else {
+          newSet.add(actionPointId);
+        }
+        return newSet;
+      });
+    }
   };
   
   const handlePrevious = () => {
@@ -127,13 +302,20 @@ export default function RollingCalendar() {
   };
 
   const getChannelColor = (channel: string) => {
-    switch (channel) {
-      case 'Meta': return 'bg-blue-600';
-      case 'Google': return 'bg-red-600';
-      case 'LinkedIn': return 'bg-blue-700';
-      case 'TikTok': return 'bg-black';
-      default: return 'bg-gray-600';
+    const lowerChannel = channel.toLowerCase();
+    if (lowerChannel.includes('meta') || lowerChannel.includes('facebook')) {
+      return 'bg-blue-600';
     }
+    if (lowerChannel.includes('google')) {
+      return 'bg-red-600';
+    }
+    if (lowerChannel.includes('linkedin')) {
+      return 'bg-blue-700';
+    }
+    if (lowerChannel.includes('tiktok')) {
+      return 'bg-black';
+    }
+    return 'bg-gray-600';
   };
 
   return (
@@ -241,7 +423,7 @@ export default function RollingCalendar() {
                   {/* Tasks List */}
                   <div className="space-y-3">
                     {day.tasks.map((task) => {
-                      const isCompleted = completedTasks.has(task.id);
+                      const isCompleted = completedTasks.has(task.actionPointId);
                       return (
                         <div
                           key={task.id}

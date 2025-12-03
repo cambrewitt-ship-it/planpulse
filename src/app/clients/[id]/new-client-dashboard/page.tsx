@@ -210,7 +210,7 @@ export default function NewClientDashboard() {
 
         {/* Rolling Calendar Section */}
         <section className="mt-8" aria-label="Rolling calendar with daily tasks">
-          <RollingCalendar />
+          <RollingCalendar activePlan={activePlan} />
         </section>
 
         {/* Media Plan Builder Section */}
@@ -225,7 +225,7 @@ export default function NewClientDashboard() {
 
         {/* Media Channels Section */}
         <section className="mt-8" aria-label="Media channels budget pacing">
-          <MediaChannels activePlan={activePlan} />
+          <MediaChannels activePlan={activePlan} clientId={clientId} />
         </section>
       </div>
 
