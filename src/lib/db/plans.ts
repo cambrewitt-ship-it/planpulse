@@ -37,12 +37,16 @@ export async function createMediaPlan(
   clientId: string,
   channels: MediaChannel[]
 ) {
+  console.log('createMediaPlan called with:', { clientId, channelsCount: channels.length, channels });
+  
   // Calculate plan dates and total budget
   const startDates = channels.map(c => new Date(c.startWeek));
   const endDates = channels.map(c => new Date(c.endWeek));
   const planStart = new Date(Math.min(...startDates.map(d => d.getTime())));
   const planEnd = new Date(Math.max(...endDates.map(d => d.getTime())));
   const totalBudget = channels.reduce((sum, c) => sum + c.totalBudget, 0);
+
+  console.log('Plan details:', { planStart, planEnd, totalBudget });
 
   // 1. Create the media plan
   const { data: plan, error: planError } = await supabase
@@ -58,50 +62,91 @@ export async function createMediaPlan(
     .select()
     .single();
 
-  if (planError) throw planError;
+  if (planError) {
+    console.error('Error creating media plan:', planError);
+    throw planError;
+  }
+
+  console.log('Media plan created:', plan);
 
   // 2. Create channels
-  for (const channel of channels) {
-    const { data: dbChannel, error: channelError } = await supabase
-      .from('channels')
-      .insert({
-        client_id: clientId,
-        plan_id: plan.id,
-        channel: channel.channel,
-        detail: channel.detail,
-        type: channel.isOrganic ? 'organic' : 'paid'
-      })
-      .select()
-      .single();
+  for (let i = 0; i < channels.length; i++) {
+    const channel = channels[i];
+    console.log(`Creating channel ${i + 1}/${channels.length}:`, { 
+      channel: channel.channel, 
+      detail: channel.detail, 
+      type: channel.isOrganic ? 'organic' : 'paid',
+      startWeek: channel.startWeek,
+      endWeek: channel.endWeek,
+      weeklyBudget: channel.weeklyBudget,
+      totalBudget: channel.totalBudget
+    });
+    
+    try {
+      const { data: dbChannel, error: channelError } = await supabase
+        .from('channels')
+        .insert({
+          client_id: clientId,
+          plan_id: plan.id,
+          channel: channel.channel,
+          detail: channel.detail,
+          type: channel.isOrganic ? 'organic' : 'paid'
+        })
+        .select()
+        .single();
 
-    if (channelError) throw channelError;
+      if (channelError) {
+        console.error(`Error creating channel ${i + 1}:`, channelError, 'Channel data:', channel);
+        throw new Error(`Failed to create channel "${channel.channel} - ${channel.detail}": ${channelError.message}`);
+      }
 
-    // 3. Create weekly plans for each channel
-    const weeklyPlans = [];
-    let currentWeek = new Date(channel.startWeek);
-    const endWeek = new Date(channel.endWeek);
-    let weekNumber = 1;
+      console.log(`Channel ${i + 1} created successfully:`, dbChannel);
 
-    while (currentWeek <= endWeek) {
-      weeklyPlans.push({
-        channel_id: dbChannel.id,
-        week_commencing: format(currentWeek, 'yyyy-MM-dd'),
-        week_number: weekNumber,
-        budget_planned: Math.round(channel.weeklyBudget * 100), // Convert to cents
-        posts_planned: channel.postsPerWeek || 0
-      });
-      currentWeek = addWeeks(currentWeek, 1);
-      weekNumber++;
-    }
+      // 3. Create weekly plans for each channel
+      const weeklyPlans = [];
+      let currentWeek = new Date(channel.startWeek);
+      const endWeek = new Date(channel.endWeek);
+      let weekNumber = 1;
 
-    if (weeklyPlans.length > 0) {
-      const { error: weeklyError } = await supabase
-        .from('weekly_plans')
-        .insert(weeklyPlans);
+      // Validate dates
+      if (isNaN(currentWeek.getTime()) || isNaN(endWeek.getTime())) {
+        throw new Error(`Invalid date range for channel "${channel.channel} - ${channel.detail}": startWeek=${channel.startWeek}, endWeek=${channel.endWeek}`);
+      }
 
-      if (weeklyError) throw weeklyError;
+      while (currentWeek <= endWeek) {
+        weeklyPlans.push({
+          channel_id: dbChannel.id,
+          week_commencing: format(currentWeek, 'yyyy-MM-dd'),
+          week_number: weekNumber,
+          budget_planned: Math.round(channel.weeklyBudget * 100), // Convert to cents
+          posts_planned: channel.postsPerWeek || 0
+        });
+        currentWeek = addWeeks(currentWeek, 1);
+        weekNumber++;
+      }
+
+      if (weeklyPlans.length > 0) {
+        console.log(`Creating ${weeklyPlans.length} weekly plans for channel ${i + 1}`);
+        const { error: weeklyError } = await supabase
+          .from('weekly_plans')
+          .insert(weeklyPlans);
+
+        if (weeklyError) {
+          console.error(`Error creating weekly plans for channel ${i + 1}:`, weeklyError);
+          throw new Error(`Failed to create weekly plans for channel "${channel.channel} - ${channel.detail}": ${weeklyError.message}`);
+        }
+        console.log(`Weekly plans created successfully for channel ${i + 1}`);
+      } else {
+        console.warn(`No weekly plans to create for channel ${i + 1} (startWeek: ${channel.startWeek}, endWeek: ${channel.endWeek})`);
+      }
+    } catch (error) {
+      console.error(`Failed to save channel ${i + 1} (${channel.channel} - ${channel.detail}):`, error);
+      // Re-throw with more context
+      throw error;
     }
   }
+  
+  console.log(`Successfully created all ${channels.length} channels`);
 
   return plan;
 }

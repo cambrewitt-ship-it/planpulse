@@ -120,9 +120,18 @@ export default function PlanEntryForm({ initialClientId }: PlanEntryFormProps = 
     }]);
   };
 
-  const removeChannel = (index: number) => {
+  const removeChannel = (index: number, e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation(); // Prevent event from bubbling to parent div
+    }
     if (channels.length > 1) {
       setChannels(channels.filter((_, i) => i !== index));
+      // Reset selectedChannelIndex if it's the deleted channel or adjust if it's after
+      if (selectedChannelIndex === index) {
+        setSelectedChannelIndex(null);
+      } else if (selectedChannelIndex !== null && selectedChannelIndex > index) {
+        setSelectedChannelIndex(selectedChannelIndex - 1);
+      }
     }
   };
 
@@ -161,20 +170,61 @@ export default function PlanEntryForm({ initialClientId }: PlanEntryFormProps = 
       return;
     }
 
+    // Log all channels for debugging
+    console.log('All channels before filtering:', channels.map((ch, idx) => ({
+      index: idx,
+      channel: ch.channel,
+      detail: ch.detail,
+      hasChannel: !!ch.channel,
+      hasDetail: !!ch.detail,
+      totalBudget: ch.totalBudget,
+      startWeek: ch.startWeek,
+      endWeek: ch.endWeek,
+      weeklyBudget: ch.weeklyBudget
+    })));
+
     const validChannels = channels.filter(ch => ch.channel && ch.detail);
+    const invalidChannels = channels.filter(ch => !ch.channel || !ch.detail);
+    
+    if (invalidChannels.length > 0) {
+      console.warn('Invalid channels (will be skipped):', invalidChannels.map((ch, idx) => ({
+        index: channels.indexOf(ch),
+        channel: ch.channel || '(empty)',
+        detail: ch.detail || '(empty)',
+        missing: !ch.channel ? 'channel' : 'detail'
+      })));
+    }
+
     if (validChannels.length === 0) {
-      alert('Please add at least one complete channel');
+      alert('Please add at least one complete channel. Each channel needs both a channel type and service details.');
       return;
     }
+
+    // Log what we're trying to save for debugging
+    console.log(`Saving plan with ${validChannels.length} valid channel(s):`, validChannels.map((ch, idx) => ({
+      index: idx + 1,
+      channel: ch.channel,
+      detail: ch.detail,
+      totalBudget: ch.totalBudget,
+      weeklyBudget: ch.weeklyBudget,
+      startWeek: ch.startWeek,
+      endWeek: ch.endWeek,
+      numberOfWeeks: ch.numberOfWeeks,
+      isOrganic: ch.isOrganic
+    })));
 
     setSaving(true);
     try {
       const plan = await createMediaPlan(selectedClient, validChannels);
-      alert('Plan saved successfully!');
+      console.log('Plan saved successfully:', plan);
+      alert(`Plan saved successfully with ${validChannels.length} channel(s)!`);
       router.push('/plans');
     } catch (error) {
       console.error('Error saving plan:', error);
-      alert('Error saving plan. Please try again.');
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      console.error('Error details:', errorMessage);
+      console.error('Full error object:', error);
+      alert(`Error saving plan: ${errorMessage}\n\nPlease check the browser console for more details.`);
     } finally {
       setSaving(false);
     }
@@ -351,7 +401,7 @@ export default function PlanEntryForm({ initialClientId }: PlanEntryFormProps = 
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={() => removeChannel(index)}
+                  onClick={(e) => removeChannel(index, e)}
                   disabled={channels.length === 1}
                 >
                   <Trash2 className="h-4 w-4" />

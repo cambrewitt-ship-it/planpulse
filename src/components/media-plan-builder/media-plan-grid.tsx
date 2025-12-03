@@ -3,13 +3,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -149,11 +142,15 @@ export function MediaPlanGrid({ channels: externalChannels, onChannelsChange }: 
     isDragging: false,
   });
   
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragStart, setDragStart] = useState<{ rowIndex: number; weekIndex: number } | null>(null);
-  const [dragEnd, setDragEnd] = useState<{ rowIndex: number; weekIndex: number } | null>(null);
-
-  // Flight editing modal state
+  // Inline budget input state
+  const [activeSelection, setActiveSelection] = useState<{
+    channelId: string;
+    startWeekIdx: number;
+    endWeekIdx: number;
+    budget: string;
+  } | null>(null);
+  
+  // Keep editingFlight for editing existing flights (clicking on flight blocks)
   const [editingFlight, setEditingFlight] = useState<{
     channelId: string;
     flight: MediaFlight | null;
@@ -161,12 +158,19 @@ export function MediaPlanGrid({ channels: externalChannels, onChannelsChange }: 
     endWeekIdx: number;
   } | null>(null);
   
-  const [flightFormData, setFlightFormData] = useState<{
-    monthlySpend: { [monthKey: string]: number };
-    color: string;
-  }>({ monthlySpend: {}, color: "#3b82f6" });
-  
   const isDraggingRef = useRef(false);
+  const budgetInputRef = useRef<HTMLInputElement>(null);
+  const hasFocusedInputRef = useRef(false);
+  
+  // Focus budget input when activeSelection changes (only once per selection)
+  useEffect(() => {
+    if (activeSelection && budgetInputRef.current && !hasFocusedInputRef.current) {
+      budgetInputRef.current.focus();
+      hasFocusedInputRef.current = true;
+    } else if (!activeSelection) {
+      hasFocusedInputRef.current = false;
+    }
+  }, [activeSelection]);
   // Hardcoded date range: Dec 1 2024 - Feb 28 2025
   const startDate = new Date(2024, 11, 1); // December 1, 2024 (month is 0-indexed)
   const endDate = new Date(2025, 1, 28); // February 28, 2025
@@ -199,66 +203,33 @@ export function MediaPlanGrid({ channels: externalChannels, onChannelsChange }: 
     return `${day}/${month}`;
   };
 
-  const getSelectedCells = () => {
-    if (!dragStart || !dragEnd) return [];
-    const minWeek = Math.min(dragStart.weekIndex, dragEnd.weekIndex);
-    const maxWeek = Math.max(dragStart.weekIndex, dragEnd.weekIndex);
-    return Array.from({ length: maxWeek - minWeek + 1 }, (_, i) => minWeek + i);
+  // Helper to check if a week is in the current drag selection
+  const isWeekInDragSelection = (weekIdx: number, channelId: string): boolean => {
+    if (!dragState.isDragging || dragState.channelId !== channelId) return false;
+    if (dragState.startWeekIdx === null || dragState.currentWeekIdx === null) return false;
+    const minWeek = Math.min(dragState.startWeekIdx, dragState.currentWeekIdx);
+    const maxWeek = Math.max(dragState.startWeekIdx, dragState.currentWeekIdx);
+    return weekIdx >= minWeek && weekIdx <= maxWeek;
   };
 
 const calculateMonthlyTotal = (monthKey: string) => {
   let total = 0;
   channels.forEach((channel) => {
     channel.flights?.forEach((flight) => {
-      const weeklyBudget = flight.weeklyBudget || 0;
-      if (weeklyBudget === 0) {
-        return;
-      }
-      const weeksInMonthAndFlight = weeks.filter((week) => {
-        const weekMonthKey = `${week.weekStart.getFullYear()}-${week.weekStart.getMonth() + 1}`;
-        const isInMonth = weekMonthKey === monthKey;
-        const weekStartDate = week.weekStart;
-        const flightStart = new Date(flight.startWeek);
-        const flightEnd = new Date(flight.endWeek);
-        const isInFlight = weekStartDate >= flightStart && weekStartDate <= flightEnd;
-        return isInMonth && isInFlight;
-      });
-      total += weeklyBudget * weeksInMonthAndFlight.length;
+      // Sum monthly spend for the specific month
+      total += flight.monthlySpend[monthKey] || 0;
     });
   });
   return total;
 };
 
-const handleCreateFlight = (channelIndex: number) => {
-  if (!dragStart || !dragEnd) return;
-
-  const channel = channels[channelIndex];
-  if (!channel || !channel.totalBudget || channel.totalBudget === 0) {
-    alert("Please enter a total budget first");
-    return;
-  }
-
-  const selectedWeeks = getSelectedCells();
-  if (selectedWeeks.length === 0) return;
-
-  const weeklyBudget = channel.totalBudget / selectedWeeks.length;
-
-  const newFlight: MediaFlight = {
-    id: Date.now().toString(),
-    startWeek: weeks[selectedWeeks[0]].weekStart,
-    endWeek: weeks[selectedWeeks[selectedWeeks.length - 1]].weekEnd,
-    monthlySpend: {},
-    color: "#60A5FA",
-    weeklyBudget,
-  };
-
-  const updatedChannels = [...channels];
-  const channelFlights = updatedChannels[channelIndex].flights || [];
-  updatedChannels[channelIndex] = {
-    ...updatedChannels[channelIndex],
-    flights: [...channelFlights, newFlight],
-  };
-  setChannels(updatedChannels);
+// Calculate total budget from all flights in a channel
+const calculateTotalBudgetFromFlights = (flights: MediaFlight[]): number => {
+  return flights.reduce((total, flight) => {
+    // Sum all monthly spend values
+    const flightTotal = Object.values(flight.monthlySpend).reduce((sum, amount) => sum + amount, 0);
+    return total + flightTotal;
+  }, 0);
 };
 
   // Helper to get month key for a date (format: "YYYY-MM")
@@ -310,11 +281,11 @@ const getMonthKey = (date: Date): string => {
     );
   };
 
+// Total budget is now auto-calculated, so we don't need handleBudgetChange
+// But we'll keep it for backward compatibility if needed elsewhere
 const handleBudgetChange = (channelIndex: number, value: number) => {
-  const updatedChannels = channels.map((channel, idx) =>
-    idx === channelIndex ? { ...channel, totalBudget: value } : channel
-  );
-  setChannels(updatedChannels);
+  // Total budget is now auto-calculated from flights
+  // This function is kept for compatibility but won't be used
 };
 
   // Delete a channel
@@ -378,31 +349,41 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
         const startIdx = Math.min(dragState.startWeekIdx, dragState.currentWeekIdx);
         const endIdx = Math.max(dragState.startWeekIdx, dragState.currentWeekIdx);
         
-        // Get all months in the flight range
-        const monthsInRange = new Set<string>();
-        for (let i = startIdx; i <= endIdx; i++) {
-          monthsInRange.add(getMonthKey(weeks[i].weekStart));
+        const channel = channels.find(c => c.id === dragState.channelId);
+        if (channel) {
+          // Check if selected range overlaps with any existing flights
+          const selectedWeeks = weeks.slice(startIdx, endIdx + 1);
+          const overlappingFlights = channel.flights.filter(flight => {
+            // Check if flight overlaps with selected range
+            const flightStart = new Date(flight.startWeek);
+            const flightEnd = new Date(flight.endWeek);
+            const selectionStart = selectedWeeks[0].weekStart;
+            const selectionEnd = selectedWeeks[selectedWeeks.length - 1].weekEnd;
+            
+            // Flight overlaps if it starts before selection ends and ends after selection starts
+            return flightStart <= selectionEnd && flightEnd >= selectionStart;
+          });
+          
+          if (overlappingFlights.length > 0) {
+            // Delete overlapping flights
+            const flightIdsToDelete = overlappingFlights.map(f => f.id);
+            const updatedFlights = channel.flights.filter(f => !flightIdsToDelete.includes(f.id));
+            const newTotalBudget = calculateTotalBudgetFromFlights(updatedFlights);
+            
+            handleUpdateChannel(dragState.channelId!, {
+              flights: updatedFlights,
+              totalBudget: newTotalBudget,
+            });
+          } else {
+            // No existing flights, show budget input
+            setActiveSelection({
+              channelId: dragState.channelId!,
+              startWeekIdx: startIdx,
+              endWeekIdx: endIdx,
+              budget: "",
+            });
+          }
         }
-        const monthKeys = Array.from(monthsInRange).sort();
-        
-        // Initialize monthly spend
-        const initialSpend: { [monthKey: string]: number } = {};
-        monthKeys.forEach((key) => {
-          initialSpend[key] = 0;
-        });
-        
-        setFlightFormData({
-          monthlySpend: initialSpend,
-          color: "#3b82f6",
-        });
-        
-        // Open modal to create flight
-        setEditingFlight({
-          channelId: dragState.channelId!,
-          flight: null,
-          startWeekIdx: startIdx,
-          endWeekIdx: endIdx,
-        });
       }
       
       isDraggingRef.current = false;
@@ -423,54 +404,76 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
         document.removeEventListener('mouseup', handleMouseUp);
       };
     }
-  }, [dragState]);
+  }, [dragState, channels, weeks]);
 
-  // Handle flight block click (edit)
+  // Handle flight block click (delete)
   const handleFlightBlockClick = (channelId: string, flight: MediaFlight, e: React.MouseEvent) => {
     e.stopPropagation();
     
-    // Find flight range
-    let startIdx = -1;
-    let endIdx = -1;
-    
-    weeks.forEach((week, idx) => {
-      if (weekOverlapsFlight(week, flight)) {
-        if (startIdx === -1) startIdx = idx;
-        endIdx = idx;
-      }
-    });
-    
-    if (startIdx !== -1) {
-      // Get all months in the flight range
-      const monthsInRange = new Set<string>();
-      for (let i = startIdx; i <= endIdx; i++) {
-        monthsInRange.add(getMonthKey(weeks[i].weekStart));
-      }
-      const monthKeys = Array.from(monthsInRange).sort();
-      
-      // Initialize monthly spend
-      const initialSpend: { [monthKey: string]: number } = {};
-      monthKeys.forEach((key) => {
-        initialSpend[key] = flight.monthlySpend[key] || 0;
-      });
-      
-      setFlightFormData({
-        monthlySpend: initialSpend,
-        color: flight.color,
-      });
-      
-      setEditingFlight({
-        channelId,
-        flight,
-        startWeekIdx: startIdx,
-        endWeekIdx: endIdx,
-      });
-    }
+    // Delete the flight when clicked
+    handleDeleteFlight(channelId, flight.id);
   };
 
-  // Save flight (create or update)
+  // Save flight from inline input
+  const handleSaveBudgetFromInput = (budget: number) => {
+    if (!activeSelection) return;
+    
+    const channel = channels.find((c) => c.id === activeSelection.channelId);
+    if (!channel) return;
+    
+    const startWeek = weeks[activeSelection.startWeekIdx];
+    const endWeek = weeks[activeSelection.endWeekIdx];
+    
+    // Calculate which months are in the flight range
+    const selectedWeeks = weeks.slice(
+      activeSelection.startWeekIdx,
+      activeSelection.endWeekIdx + 1
+    );
+    
+    // Group weeks by month - weeks should be combined until a month break occurs
+    const monthlySpend: { [monthKey: string]: number } = {};
+    const weeksByMonth: { [monthKey: string]: WeekRange[] } = {};
+    
+    selectedWeeks.forEach(week => {
+      const monthKey = getMonthKey(week.weekStart);
+      if (!weeksByMonth[monthKey]) {
+        weeksByMonth[monthKey] = [];
+      }
+      weeksByMonth[monthKey].push(week);
+    });
+    
+    // Distribute budget proportionally by number of weeks in each month
+    const totalWeeks = selectedWeeks.length;
+    Object.entries(weeksByMonth).forEach(([monthKey, monthWeeks]) => {
+      monthlySpend[monthKey] = (budget * monthWeeks.length) / totalWeeks;
+    });
+    
+    // Create new flight
+    const newFlight: MediaFlight = {
+      id: generateFlightId(),
+      startWeek: startWeek.weekStart,
+      endWeek: endWeek.weekEnd,
+      monthlySpend: monthlySpend,
+      color: "#3b82f6",
+    };
+    
+    const updatedFlights = [...channel.flights, newFlight];
+    
+    // Auto-calculate total budget from all flights
+    const newTotalBudget = calculateTotalBudgetFromFlights(updatedFlights);
+    
+    // Update channel with new flights and total budget
+    handleUpdateChannel(activeSelection.channelId, {
+      flights: updatedFlights,
+      totalBudget: newTotalBudget,
+    });
+    
+    setActiveSelection(null);
+  };
+
+  // Save flight (create or update) - for editing existing flights
   const handleSaveFlight = (flightData: {
-    monthlySpend: { [monthKey: string]: number };
+    budget: number;
     color: string;
     startWeekIdx?: number;
     endWeekIdx?: number;
@@ -483,33 +486,65 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
     const startWeek = weeks[flightData.startWeekIdx ?? editingFlight.startWeekIdx];
     const endWeek = weeks[flightData.endWeekIdx ?? editingFlight.endWeekIdx];
     
+    // Calculate which months are in the flight range
+    const selectedWeeks = weeks.slice(
+      flightData.startWeekIdx ?? editingFlight.startWeekIdx,
+      (flightData.endWeekIdx ?? editingFlight.endWeekIdx) + 1
+    );
+    
+    // Group weeks by month and calculate monthly spend
+    const monthlySpend: { [monthKey: string]: number } = {};
+    const weeksByMonth: { [monthKey: string]: WeekRange[] } = {};
+    
+    selectedWeeks.forEach(week => {
+      const monthKey = getMonthKey(week.weekStart);
+      if (!weeksByMonth[monthKey]) {
+        weeksByMonth[monthKey] = [];
+      }
+      weeksByMonth[monthKey].push(week);
+    });
+    
+    // Distribute budget proportionally by number of weeks in each month
+    const totalWeeks = selectedWeeks.length;
+    Object.entries(weeksByMonth).forEach(([monthKey, monthWeeks]) => {
+      monthlySpend[monthKey] = (flightData.budget * monthWeeks.length) / totalWeeks;
+    });
+    
+    let updatedFlights: MediaFlight[];
+    
     if (editingFlight.flight) {
       // Update existing flight
-      const updatedFlights = channel.flights.map((f) =>
+      updatedFlights = channel.flights.map((f) =>
         f.id === editingFlight.flight!.id
           ? {
               ...f,
               startWeek: startWeek.weekStart,
               endWeek: endWeek.weekEnd,
-              monthlySpend: flightData.monthlySpend,
+              monthlySpend: monthlySpend,
               color: flightData.color,
             }
           : f
       );
-      handleUpdateChannel(editingFlight.channelId, { flights: updatedFlights });
     } else {
       // Create new flight
       const newFlight: MediaFlight = {
         id: generateFlightId(),
         startWeek: startWeek.weekStart,
         endWeek: endWeek.weekEnd,
-        monthlySpend: flightData.monthlySpend,
+        monthlySpend: monthlySpend,
         color: flightData.color,
       };
-      handleUpdateChannel(editingFlight.channelId, {
-        flights: [...channel.flights, newFlight],
-      });
+      updatedFlights = [...channel.flights, newFlight];
     }
+    
+    // Auto-calculate total budget from all flights
+    const newTotalBudget = calculateTotalBudgetFromFlights(updatedFlights);
+    
+    // Update channel with new flights and total budget
+    handleUpdateChannel(editingFlight.channelId, {
+      flights: updatedFlights,
+      totalBudget: newTotalBudget,
+    });
     
     setEditingFlight(null);
   };
@@ -519,30 +554,19 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
     const channel = channels.find((c) => c.id === channelId);
     if (!channel) return;
     
+    const updatedFlights = channel.flights.filter((f) => f.id !== flightId);
+    const newTotalBudget = calculateTotalBudgetFromFlights(updatedFlights);
+    
     handleUpdateChannel(channelId, {
-      flights: channel.flights.filter((f) => f.id !== flightId),
+      flights: updatedFlights,
+      totalBudget: newTotalBudget,
     });
     setEditingFlight(null);
   };
 
   return (
-    <div className="w-full overflow-hidden border border-gray-300 rounded-lg">
-      <div
-        className="overflow-x-auto w-full"
-        onMouseUp={() => {
-          if (isDragging && dragStart) {
-            handleCreateFlight(dragStart.rowIndex);
-          }
-          setIsDragging(false);
-          setDragStart(null);
-          setDragEnd(null);
-        }}
-        onMouseLeave={() => {
-          setIsDragging(false);
-          setDragStart(null);
-          setDragEnd(null);
-        }}
-      >
+    <div className="w-full overflow-hidden border border-gray-300 rounded-lg relative">
+      <div className="overflow-x-auto w-full">
         <table className="border-collapse w-full">
           <thead className="bg-gray-100 sticky top-0 z-10">
             {/* Month header row */}
@@ -583,11 +607,14 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
               {weeks.map((week, weekIdx) => (
                 <th
                   key={weekIdx}
-                  className={`border border-gray-300 bg-gray-100 text-center px-2 py-2 font-semibold relative z-0 w-[100px] min-w-[100px] max-w-[100px] text-sm ${
+                  className={`border border-gray-300 bg-gray-100 text-center px-2 py-2 font-semibold relative z-0 w-[40px] min-w-[40px] max-w-[40px] text-sm ${
                     weekIdx === 0 ? 'border-l-2 border-l-gray-400' : ''
                   }`}
+                  style={{ height: '80px' }}
                 >
-                  {formatWeekDate(week.weekStart)}
+                  <div className="transform -rotate-90 origin-center whitespace-nowrap">
+                    {formatWeekDate(week.weekStart)}
+                  </div>
                 </th>
               ))}
             </tr>
@@ -648,18 +675,9 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                     />
                   </td>
                   <td className="border-l-2 border-l-gray-400 border border-gray-300 px-3 py-2 text-center font-mono sticky left-[350px] mr-[-1px] z-30 bg-gray-50 bg-opacity-100 w-[120px] min-w-[120px] border-r-2 border-gray-400 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)]">
-                    <input
-                      type="number"
-                      value={channel.totalBudget ?? 0}
-                      onChange={(e) =>
-                        handleBudgetChange(
-                          channelIndex,
-                          parseFloat(e.target.value) || 0
-                        )
-                      }
-                      className="w-full px-2 py-1 border-0 bg-transparent text-center focus:bg-white focus:border focus:border-blue-500 rounded"
-                      placeholder="0"
-                    />
+                    <div className="w-full px-2 py-1 text-center">
+                      {formatCurrency(calculateTotalBudgetFromFlights(channel.flights || []))}
+                    </div>
                   </td>
                   <td className="border border-gray-300 px-2 py-2 text-center" style={{ width: '64px' }}>
                     <Button
@@ -697,11 +715,20 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                       return `rgba(${r}, ${g}, ${b}, ${opacity})`;
                     };
                     
-                    const cellWidth = 100;
+                    const cellWidth = 40;
                     
                     // Track which weeks are covered by colspan
                     const coveredByColspan = new Set<number>();
                     const weekToStartFlights = new Map<number, typeof flightRanges>();
+                    
+                    // Check if there's an active selection for this channel
+                    const hasActiveSelection = activeSelection && activeSelection.channelId === channel.id;
+                    if (hasActiveSelection) {
+                      // Mark weeks covered by the active selection colspan
+                      for (let i = activeSelection.startWeekIdx + 1; i <= activeSelection.endWeekIdx; i++) {
+                        coveredByColspan.add(i);
+                      }
+                    }
                     
                     // Group flights by their start week
                     flightRanges.forEach((range) => {
@@ -710,19 +737,27 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                       }
                       weekToStartFlights.get(range.startIdx)!.push(range);
                       
-                      // Mark weeks covered by colspan
+                      // Mark weeks covered by colspan (only if not already covered by active selection)
                       for (let i = range.startIdx + 1; i <= range.endIdx; i++) {
-                        coveredByColspan.add(i);
+                        if (!hasActiveSelection || i < activeSelection.startWeekIdx || i > activeSelection.endWeekIdx) {
+                          coveredByColspan.add(i);
+                        }
                       }
                     });
                     
                     const cells: React.ReactNode[] = [];
                     
                     weeks.forEach((week, weekIdx) => {
-                      const isCellSelected =
-                        isDragging &&
-                        dragStart?.rowIndex === channelIndex &&
-                        getSelectedCells().includes(weekIdx);
+                      const isCellSelected = isWeekInDragSelection(weekIdx, channel.id);
+                      const isFirstSelectedCell = activeSelection && 
+                        activeSelection.channelId === channel.id &&
+                        activeSelection.startWeekIdx === weekIdx;
+                      
+                      // Check if this is part of an active selection that spans multiple cells
+                      const isInActiveSelection = activeSelection && 
+                        activeSelection.channelId === channel.id &&
+                        weekIdx >= activeSelection.startWeekIdx &&
+                        weekIdx <= activeSelection.endWeekIdx;
                       
                       if (weekToStartFlights.has(weekIdx)) {
                         // This week starts one or more flights - use colspan for the longest
@@ -731,28 +766,67 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                           ...flightsStartingHere.map((f) => f.endIdx - f.startIdx + 1)
                         );
                         
+                        // If this is the first cell of an active selection, calculate the span
+                        const selectionSpan = isInActiveSelection && isFirstSelectedCell
+                          ? activeSelection.endWeekIdx - activeSelection.startWeekIdx + 1
+                          : maxSpan;
+                        
                         cells.push(
                           <td
                             key={`week-${weekIdx}`}
                             data-week-cell
                             data-week-index={weekIdx}
                             data-channel-id={channel.id}
-                            colSpan={maxSpan}
-                            className={`border-l-2 border-l-gray-400 border border-gray-300 px-2 py-2 relative h-12 cursor-crosshair z-0 w-[100px] min-w-[100px] max-w-[100px] ${
-                              isCellSelected ? 'bg-blue-200 border-2 border-blue-500' : channelColors.bg
+                            colSpan={isInActiveSelection && isFirstSelectedCell ? selectionSpan : maxSpan}
+                            className={`border-l-2 border-l-gray-400 border border-gray-300 px-2 py-2 relative h-12 cursor-crosshair z-0 w-[40px] min-w-[40px] max-w-[40px] ${
+                              isCellSelected || isInActiveSelection ? 'bg-blue-200 border-2 border-blue-500' : channelColors.bg
                             }`}
                             onMouseDown={(e) => {
                               handleWeekCellMouseDown(channel.id, weekIdx, e);
-                              setIsDragging(true);
-                              setDragStart({ rowIndex: channelIndex, weekIndex: weekIdx });
-                              setDragEnd({ rowIndex: channelIndex, weekIndex: weekIdx });
-                            }}
-                            onMouseEnter={() => {
-                              if (isDragging && dragStart?.rowIndex === channelIndex) {
-                                setDragEnd({ rowIndex: channelIndex, weekIndex: weekIdx });
-                              }
                             }}
                           >
+                            {/* Inline budget input spanning across selected cells */}
+                            {isFirstSelectedCell && activeSelection && (
+                              <div className="absolute inset-0 z-50 flex items-center justify-center bg-blue-200 rounded">
+                                <div className="bg-white border-2 border-blue-500 rounded shadow-lg p-2 w-full max-w-[90%]">
+                                  <Input
+                                    ref={budgetInputRef}
+                                    type="number"
+                                    value={activeSelection.budget}
+                                    onChange={(e) => {
+                                      const value = e.target.value;
+                                      setActiveSelection({
+                                        ...activeSelection,
+                                        budget: value,
+                                      });
+                                    }}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        const budget = parseFloat(activeSelection.budget);
+                                        if (budget > 0) {
+                                          handleSaveBudgetFromInput(budget);
+                                        } else {
+                                          setActiveSelection(null);
+                                        }
+                                      } else if (e.key === 'Escape') {
+                                        setActiveSelection(null);
+                                      }
+                                    }}
+                                    onBlur={() => {
+                                      const budget = parseFloat(activeSelection.budget);
+                                      if (budget > 0) {
+                                        handleSaveBudgetFromInput(budget);
+                                      } else {
+                                        setActiveSelection(null);
+                                      }
+                                    }}
+                                    placeholder="Enter budget"
+                                    className="w-full [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                    autoFocus
+                                  />
+                                </div>
+                              </div>
+                            )}
                             {channel.flights?.map((flight) => {
                               const flightStartIndex = weeks.findIndex(
                                 (w) => w.weekStart.getTime() === new Date(flight.startWeek).getTime()
@@ -769,10 +843,13 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                                     className="absolute inset-1 flex items-center justify-center rounded text-white font-semibold text-sm"
                                     style={{
                                       backgroundColor: flight.color,
-                                      width: `calc(${spanWeeks * 100}% + ${(spanWeeks - 1) * 100}px)`,
+                                      width: `calc(${spanWeeks * 100}% + ${(spanWeeks - 1) * 50}px)`,
                                     }}
                                   >
-                                    ${Math.round((flight.weeklyBudget || 0) * spanWeeks).toLocaleString()}
+                                    {(() => {
+                                      const totalBudget = Object.values(flight.monthlySpend).reduce((sum, amount) => sum + amount, 0);
+                                      return formatCurrency(totalBudget);
+                                    })()}
                                   </div>
                                 );
                               }
@@ -847,27 +924,74 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                           ({ startIdx, endIdx }) => weekIdx >= startIdx && weekIdx <= endIdx && startIdx !== weekIdx
                         );
                         
+                        // Check if this is part of an active selection
+                        const isInActiveSelection = activeSelection && 
+                          activeSelection.channelId === channel.id &&
+                          weekIdx >= activeSelection.startWeekIdx &&
+                          weekIdx <= activeSelection.endWeekIdx;
+                        
+                        // If this is the first cell of an active selection, calculate the span
+                        const shouldShowInput = isFirstSelectedCell && activeSelection;
+                        const selectionSpan = shouldShowInput
+                          ? activeSelection.endWeekIdx - activeSelection.startWeekIdx + 1
+                          : 1;
+                        
                         cells.push(
                           <td
                             key={`week-${weekIdx}`}
                             data-week-cell
                             data-week-index={weekIdx}
                             data-channel-id={channel.id}
-                            className={`border-l-2 border-l-gray-400 border border-gray-300 px-2 py-2 relative h-12 cursor-crosshair z-0 w-[100px] min-w-[100px] max-w-[100px] ${
-                              isCellSelected ? 'bg-blue-200 border-2 border-blue-500' : channelColors.bg
+                            colSpan={shouldShowInput ? selectionSpan : 1}
+                            className={`border-l-2 border-l-gray-400 border border-gray-300 px-2 py-2 relative h-12 cursor-crosshair z-0 w-[40px] min-w-[40px] max-w-[40px] ${
+                              isCellSelected || isInActiveSelection ? 'bg-blue-200 border-2 border-blue-500' : channelColors.bg
                             }`}
                             onMouseDown={(e) => {
                               handleWeekCellMouseDown(channel.id, weekIdx, e);
-                              setIsDragging(true);
-                              setDragStart({ rowIndex: channelIndex, weekIndex: weekIdx });
-                              setDragEnd({ rowIndex: channelIndex, weekIndex: weekIdx });
-                            }}
-                            onMouseEnter={() => {
-                              if (isDragging && dragStart?.rowIndex === channelIndex) {
-                                setDragEnd({ rowIndex: channelIndex, weekIndex: weekIdx });
-                              }
                             }}
                           >
+                            {/* Inline budget input spanning across selected cells */}
+                            {shouldShowInput && (
+                              <div className="absolute inset-0 z-50 flex items-center justify-center bg-blue-200 rounded">
+                                <div className="bg-white border-2 border-blue-500 rounded shadow-lg p-2 w-full max-w-[90%]">
+                                  <Input
+                                    ref={budgetInputRef}
+                                    type="number"
+                                    value={activeSelection.budget}
+                                    onChange={(e) => {
+                                      const value = e.target.value;
+                                      setActiveSelection({
+                                        ...activeSelection,
+                                        budget: value,
+                                      });
+                                    }}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        const budget = parseFloat(activeSelection.budget);
+                                        if (budget > 0) {
+                                          handleSaveBudgetFromInput(budget);
+                                        } else {
+                                          setActiveSelection(null);
+                                        }
+                                      } else if (e.key === 'Escape') {
+                                        setActiveSelection(null);
+                                      }
+                                    }}
+                                    onBlur={() => {
+                                      const budget = parseFloat(activeSelection.budget);
+                                      if (budget > 0) {
+                                        handleSaveBudgetFromInput(budget);
+                                      } else {
+                                        setActiveSelection(null);
+                                      }
+                                    }}
+                                    placeholder="Enter budget"
+                                    className="w-full [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                    autoFocus
+                                  />
+                                </div>
+                              </div>
+                            )}
                             {/* Render overlapping flights */}
                             {overlappingFlights.map(({ flight, startIdx, endIdx }, flightLayerIdx) => {
                               const flightSpan = endIdx - startIdx + 1;
@@ -905,8 +1029,9 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
             
             {/* Totals Row */}
             {channels.length > 0 && (() => {
-              // Calculate total budget across all channels
-              const totalBudget = channels.reduce((sum, channel) => sum + (channel.totalBudget || 0), 0);
+              // Calculate total budget across all channels (auto-calculated from flights)
+              const totalBudget = channels.reduce((sum, channel) => 
+                sum + calculateTotalBudgetFromFlights(channel.flights || []), 0);
 
               return (
                 <tr className="bg-gray-50 font-semibold">
@@ -989,6 +1114,7 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
           Add Channel
         </Button>
       </div>
+      
       
     </div>
   );

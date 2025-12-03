@@ -30,8 +30,10 @@ interface SpendData {
 interface LiveSpendItem {
   accountId?: string;
   accountName?: string;
-  dateStart?: string;
-  dateStop?: string;
+  customerId?: string; // Google Ads format
+  dateStart?: string; // Meta Ads format
+  dateStop?: string; // Meta Ads format
+  date?: string; // Google Ads format
   spend?: number;
   currency?: string;
 }
@@ -343,31 +345,43 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
   
   // Calculate Current Daily Spend from live API data (connected account only)
   // Meta Ads API with time_increment=1 returns daily spend (not cumulative) for each day
+  // Google Ads API also returns daily spend
   let currentDailySpend: number | null = null;
   
   if (hasConnectedAccount && channel.liveSpendData && channel.liveSpendData.length > 0) {
-    // Filter by connected account ID (handle both string and number comparison)
+    // Filter by connected account ID (handle both Meta Ads accountId and Google Ads customerId)
     const filteredLiveData = channel.liveSpendData.filter(item => {
-      if (!item.accountId || !channel.connectedAccountId) return false;
-      // Convert both to strings for comparison to handle type mismatches
-      const itemAccountId = String(item.accountId);
-      const connectedId = String(channel.connectedAccountId);
-      return itemAccountId === connectedId;
+      if (!channel.connectedAccountId) return false;
+      
+      // Check Meta Ads format (accountId)
+      if (item.accountId) {
+        const itemAccountId = String(item.accountId);
+        const connectedId = String(channel.connectedAccountId);
+        return itemAccountId === connectedId;
+      }
+      
+      // Check Google Ads format (customerId)
+      if (item.customerId) {
+        const itemCustomerId = String(item.customerId).replace(/-/g, '');
+        const connectedId = String(channel.connectedAccountId).replace(/-/g, '');
+        return itemCustomerId === connectedId;
+      }
+      
+      return false;
     });
     
     if (filteredLiveData.length > 0) {
-      // Sort by date (most recent first) - use dateStart as primary, dateStop as fallback
+      // Sort by date (most recent first) - handle both Meta Ads (dateStart/dateStop) and Google Ads (date)
       const sortedData = [...filteredLiveData].sort((a, b) => {
-        const dateA = a.dateStart || a.dateStop || '';
-        const dateB = b.dateStart || b.dateStop || '';
+        const dateA = a.date || a.dateStart || a.dateStop || '';
+        const dateB = b.date || b.dateStart || b.dateStop || '';
         return dateB.localeCompare(dateA);
       });
       
       // Try to find today's spend first
       let todaySpendItem = sortedData.find(item => {
-        const itemDate = item.dateStart || item.dateStop;
+        const itemDate = item.date || item.dateStart || item.dateStop;
         if (!itemDate) return false;
-        // Meta API with time_increment=1 returns dateStart and dateStop as the same date for daily data
         return itemDate === todayKey;
       });
       
@@ -377,7 +391,7 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
         yesterday.setDate(yesterday.getDate() - 1);
         const yesterdayKey = format(yesterday, 'yyyy-MM-dd');
         todaySpendItem = sortedData.find(item => {
-          const itemDate = item.dateStart || item.dateStop;
+          const itemDate = item.date || item.dateStart || item.dateStop;
           return itemDate === yesterdayKey;
         });
       }
@@ -408,11 +422,25 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
   
   if (hasConnectedAccount && channel.liveSpendData && channel.liveSpendData.length > 0) {
     // Calculate average daily spend from live API data (connected account only)
+    // Handle both Meta Ads (accountId) and Google Ads (customerId)
     const filteredLiveData = channel.liveSpendData.filter(item => {
-      if (!item.accountId || !channel.connectedAccountId) return false;
-      const itemAccountId = String(item.accountId);
-      const connectedId = String(channel.connectedAccountId);
-      return itemAccountId === connectedId;
+      if (!channel.connectedAccountId) return false;
+      
+      // Check Meta Ads format (accountId)
+      if (item.accountId) {
+        const itemAccountId = String(item.accountId);
+        const connectedId = String(channel.connectedAccountId);
+        return itemAccountId === connectedId;
+      }
+      
+      // Check Google Ads format (customerId)
+      if (item.customerId) {
+        const itemCustomerId = String(item.customerId).replace(/-/g, '');
+        const connectedId = String(channel.connectedAccountId).replace(/-/g, '');
+        return itemCustomerId === connectedId;
+      }
+      
+      return false;
     });
     
     if (filteredLiveData.length > 0) {
@@ -750,7 +778,7 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
                   </Button>
                 </div>
               </div>
-              {channel.isMetaAds && channel.onRefreshSpend && (
+              {channel.onRefreshSpend && (
                 <Button
                   size="sm"
                   variant="outline"

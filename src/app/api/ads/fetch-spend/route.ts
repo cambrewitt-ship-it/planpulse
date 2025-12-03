@@ -69,27 +69,32 @@ export async function POST(request: NextRequest) {
     }
 
     // Look up user's connection for the platform
-    const { data: connection, error: dbError } = await supabase
+    // Get the most recent active connection (user may have multiple connections for different clients)
+    const { data: connections, error: dbError } = await supabase
       .from('ad_platform_connections')
       .select('connection_id, platform, connection_status')
       .eq('user_id', user.id)
       .eq('platform', platform)
-      .single();
+      .eq('connection_status', 'active')
+      .order('created_at', { ascending: false })
+      .limit(1);
 
-    if (dbError || !connection) {
+    if (dbError) {
+      console.error('Error querying connections:', dbError);
       return Response.json(
         { error: 'Platform not connected. Please connect your account first.' },
         { status: 404 }
       );
     }
 
-    // Check if connection is active
-    if (connection.connection_status !== 'active') {
+    if (!connections || connections.length === 0) {
       return Response.json(
-        { error: `Connection status is "${connection.connection_status}". Please reconnect your account.` },
-        { status: 403 }
+        { error: 'Platform not connected. Please connect your account first.' },
+        { status: 404 }
       );
     }
+
+    const connection = connections[0];
 
     // Initialize Nango with correct secret key
     const nangoSecretKey = process.env.NANGO_SECRET_KEY_DEV_PLAN_CHECK;

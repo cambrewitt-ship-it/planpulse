@@ -25,11 +25,22 @@ export default function WeekCommencingCalendar({
   const [activeChannelIndex, setActiveChannelIndex] = useState<number | null>(selectedChannelIndex);
   // Track selected weeks for each channel (set of week strings)
   const [selectedWeeksByChannel, setSelectedWeeksByChannel] = useState<Map<number, Set<string>>>(new Map());
+  // Ref to store pending date range changes to avoid calling callback during render
+  const pendingDateRangeChangeRef = useRef<{ channelIndex: number; startWeek: string; endWeek: string } | null>(null);
   
   // Update active channel when selectedChannelIndex changes
   useEffect(() => {
     setActiveChannelIndex(selectedChannelIndex);
   }, [selectedChannelIndex]);
+
+  // Call onDateRangeChange when pending date range change is set (outside of render phase)
+  useEffect(() => {
+    if (pendingDateRangeChangeRef.current) {
+      const { channelIndex, startWeek, endWeek } = pendingDateRangeChangeRef.current;
+      pendingDateRangeChangeRef.current = null; // Clear the ref
+      onDateRangeChange(channelIndex, startWeek, endWeek);
+    }
+  }, [selectedWeeksByChannel, onDateRangeChange]);
 
   // Initialize selected weeks from channel data on mount and when new channels are added
   useEffect(() => {
@@ -192,7 +203,7 @@ export default function WeekCommencingCalendar({
     const weekStart = getWeekCommencing(weekDate);
     const weekString = format(weekStart, 'yyyy-MM-dd');
     
-    // Update the selected weeks map
+    // Calculate the new selected weeks and date range
     setSelectedWeeksByChannel(prev => {
       // Get current selected weeks for this channel (ensure it exists)
       const currentSelected = prev.get(channelIndex) || new Set<string>();
@@ -207,13 +218,9 @@ export default function WeekCommencingCalendar({
         newSelected.add(weekString);
       }
       
-      // Update the map
-      const updated = new Map(prev);
-      updated.set(channelIndex, newSelected);
-      
       // Calculate min and max weeks for startWeek and endWeek
-      let finalStartWeek = '';
-      let finalEndWeek = '';
+      let calculatedStartWeek = '';
+      let calculatedEndWeek = '';
       
       if (newSelected.size > 0) {
         const weekDates = Array.from(newSelected)
@@ -222,12 +229,20 @@ export default function WeekCommencingCalendar({
         const minWeek = weekDates[0];
         const maxWeek = weekDates[weekDates.length - 1];
         
-        finalStartWeek = format(getWeekCommencing(minWeek), 'yyyy-MM-dd');
-        finalEndWeek = format(getWeekCommencing(maxWeek), 'yyyy-MM-dd');
+        calculatedStartWeek = format(getWeekCommencing(minWeek), 'yyyy-MM-dd');
+        calculatedEndWeek = format(getWeekCommencing(maxWeek), 'yyyy-MM-dd');
       }
       
-      // Call onDateRangeChange with the new values
-      onDateRangeChange(channelIndex, finalStartWeek, finalEndWeek);
+      // Store the callback parameters in a ref (will be called in useEffect)
+      pendingDateRangeChangeRef.current = {
+        channelIndex,
+        startWeek: calculatedStartWeek,
+        endWeek: calculatedEndWeek
+      };
+      
+      // Update the map
+      const updated = new Map(prev);
+      updated.set(channelIndex, newSelected);
       
       return updated;
     });
@@ -263,7 +278,7 @@ export default function WeekCommencingCalendar({
         <div>
           <h3 className="text-sm font-semibold">Date Range Calendar</h3>
           <p className="text-xs text-gray-500 mt-1">
-            {activeChannelIndex !== null 
+            {activeChannelIndex !== null && channels[activeChannelIndex]
               ? `Click W/C boxes to set dates for: ${getChannelLabel(channels[activeChannelIndex], activeChannelIndex)}`
               : 'Select a channel row to set dates'}
           </p>

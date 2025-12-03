@@ -89,9 +89,18 @@ export default function MediaChannels({ activePlan, clientId }: MediaChannelsPro
     return lowerName.includes('facebook') || lowerName.includes('meta');
   };
 
-  // Fetch live spend data for Meta Ads
+  // Check if channel is Google Ads
+  const isGoogleAdsChannel = (channelName: string) => {
+    const lowerName = channelName.toLowerCase();
+    return lowerName.includes('google');
+  };
+
+  // Fetch live spend data for Meta Ads or Google Ads
   const fetchLiveSpendData = async (channelId: string, channelName: string, month?: Date) => {
-    if (!isMetaAdsChannel(channelName)) {
+    const isMeta = isMetaAdsChannel(channelName);
+    const isGoogle = isGoogleAdsChannel(channelName);
+    
+    if (!isMeta && !isGoogle) {
       return;
     }
 
@@ -106,18 +115,35 @@ export default function MediaChannels({ activePlan, clientId }: MediaChannelsPro
       const startDate = format(monthStart, 'yyyy-MM-dd');
       const endDate = format(monthEnd, 'yyyy-MM-dd');
 
-      const response = await fetch('/api/ads/meta/fetch-spend', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          platform: 'meta-ads',
-          startDate,
-          endDate,
-          clientId: clientId || undefined,
-        }),
-      });
+      let response;
+      if (isMeta) {
+        response = await fetch('/api/ads/meta/fetch-spend', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            platform: 'meta-ads',
+            startDate,
+            endDate,
+            clientId: clientId || undefined,
+          }),
+        });
+      } else if (isGoogle) {
+        response = await fetch('/api/ads/fetch-spend', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            platform: 'google-ads',
+            startDate,
+            endDate,
+          }),
+        });
+      } else {
+        return;
+      }
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
@@ -180,7 +206,7 @@ export default function MediaChannels({ activePlan, clientId }: MediaChannelsPro
     if (!activePlan || !activePlan.channels) return;
 
     activePlan.channels.forEach((channel) => {
-      if (isMetaAdsChannel(channel.channel)) {
+      if (isMetaAdsChannel(channel.channel) || isGoogleAdsChannel(channel.channel)) {
         fetchLiveSpendData(channel.id, channel.channel);
       }
       const channelType = getChannelDisplayName(channel.channel, channel.detail);
@@ -226,21 +252,40 @@ export default function MediaChannels({ activePlan, clientId }: MediaChannelsPro
     if (liveData && liveData.length > 0) {
       liveData.forEach((item) => {
         // Filter by account ID if provided (to show only data for the connected account)
-        // Convert both to strings for comparison to handle type mismatches
-        if (accountId && item.accountId) {
-          const itemAccountId = String(item.accountId);
-          const connectedId = String(accountId);
-          if (itemAccountId !== connectedId) {
-            return;
+        // For Google Ads, use customerId; for Meta Ads, use accountId
+        if (accountId) {
+          if (item.accountId) {
+            // Meta Ads format
+            const itemAccountId = String(item.accountId);
+            const connectedId = String(accountId);
+            if (itemAccountId !== connectedId) {
+              return;
+            }
+          } else if (item.customerId) {
+            // Google Ads format - customerId is formatted like "123-456-7890"
+            const itemCustomerId = String(item.customerId);
+            const connectedId = String(accountId);
+            // Compare both with and without dashes
+            const itemClean = itemCustomerId.replace(/-/g, '');
+            const connectedClean = connectedId.replace(/-/g, '');
+            if (itemClean !== connectedClean && itemCustomerId !== connectedId) {
+              return;
+            }
           }
         }
         
-        if (item.dateStart && item.spend !== undefined) {
+        // Handle both Meta Ads (dateStart) and Google Ads (date) formats
+        let dateKey: string | null = null;
+        if (item.dateStart) {
           // Meta API returns date ranges, use dateStart for daily aggregation
-          // If dateStart and dateStop are different, we'll use dateStart
-          // (for daily data, they should be the same)
-          const dateKey = item.dateStart; // API returns YYYY-MM-DD format
-          // Sum spend for the same date (in case of multiple accounts or date ranges)
+          dateKey = item.dateStart; // API returns YYYY-MM-DD format
+        } else if (item.date) {
+          // Google Ads API returns single date field
+          dateKey = item.date; // API returns YYYY-MM-DD format
+        }
+        
+        if (dateKey && item.spend !== undefined) {
+          // Sum spend for the same date (in case of multiple accounts or campaigns)
           liveSpendByDate.set(dateKey, (liveSpendByDate.get(dateKey) || 0) + (item.spend || 0));
         }
       });
@@ -364,7 +409,7 @@ export default function MediaChannels({ activePlan, clientId }: MediaChannelsPro
         onMonthChange: (month: Date) => {
           // Update selected month and fetch data for the new month
           setSelectedMonths(prev => ({ ...prev, [channel.id]: month }));
-          if (isMetaAdsChannel(channel.channel)) {
+          if (isMetaAdsChannel(channel.channel) || isGoogleAdsChannel(channel.channel)) {
             fetchLiveSpendData(channel.id, channel.channel, month);
           }
         },
