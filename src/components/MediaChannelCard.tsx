@@ -324,6 +324,21 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
   
   const chartData = calculateProjection(sortedData);
   
+  // Prepare data for actual spend: area only up to today, line continues after today
+  const chartDataWithActualSpendSplit = chartData.map((d) => {
+    const isAfterToday = d.date > todayKey;
+    const isToday = d.date === todayKey;
+    return {
+      ...d,
+      // For area fill: only show actualSpend up to today
+      actualSpendForArea: isAfterToday ? null : d.actualSpend,
+      // For line up to today: show actualSpend up to and including today
+      actualSpendLineUpToToday: isAfterToday ? null : d.actualSpend,
+      // For line after today: show actualSpend from today onwards (to ensure connection)
+      actualSpendLineAfterToday: isToday || isAfterToday ? d.actualSpend : null,
+    };
+  });
+  
   // Calculate Y-axis scale based on planned monthly spend
   // Scale to the closest 50 above the planned monthly spend
   const plannedMonthlySpend = channel.monthBudget;
@@ -827,7 +842,7 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
               <div className="h-[300px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <ComposedChart
-                    data={chartData}
+                    data={chartDataWithActualSpendSplit}
                     margin={{ top: 10, right: 10, left: 0, bottom: 25 }}
                   >
                     <defs>
@@ -892,18 +907,26 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
                     animationEasing="ease-in-out"
                   />
                   
-                  {/* Actual Spend Area */}
+                  {/* Actual Spend Area - only up to today (no stroke, line drawn separately) */}
                   <Area
                     type="monotone"
-                    dataKey="actualSpend"
-                    stroke="#2563eb"
-                    strokeWidth={2.5}
+                    dataKey="actualSpendForArea"
+                    stroke="none"
                     fill={`url(#colorActual-${channel.id})`}
                     animationDuration={1500}
                     animationEasing="ease-in-out"
+                    connectNulls={false}
+                  />
+                  
+                  {/* Actual Spend Line - solid up to today */}
+                  <Line
+                    type="monotone"
+                    dataKey="actualSpendLineUpToToday"
+                    stroke="#2563eb"
+                    strokeWidth={2.5}
                     dot={(props: any) => {
-                      if (props.payload.projectedSpend !== null) {
-                        return null; // Don't show dots on projected section
+                      if (props.payload.projectedSpend !== null || props.payload.date > todayKey) {
+                        return null; // Don't show dots on projected section or after today
                       }
                       return (
                         <Dot
@@ -916,6 +939,21 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
                       );
                     }}
                     connectNulls={false}
+                    animationDuration={1500}
+                    animationEasing="ease-in-out"
+                  />
+                  
+                  {/* Actual Spend Line - dotted after today */}
+                  <Line
+                    type="monotone"
+                    dataKey="actualSpendLineAfterToday"
+                    stroke="#2563eb"
+                    strokeWidth={2.5}
+                    strokeDasharray="5 5"
+                    dot={false}
+                    connectNulls={false}
+                    animationDuration={1500}
+                    animationEasing="ease-in-out"
                   />
                 </ComposedChart>
               </ResponsiveContainer>

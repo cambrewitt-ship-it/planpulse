@@ -75,6 +75,24 @@ const getChannelColorClasses = (channelName: string): { bg: string; text: string
     : { bg: "bg-white", text: "text-gray-900" };
 };
 
+// Get channel solid color for budget boxes (Excel-style filled cells)
+const getChannelBudgetColor = (channelName: string): string => {
+  if (!channelName) {
+    return "bg-gray-500";
+  }
+  const channelMap: { [key: string]: string } = {
+    "meta ads": "bg-blue-500",
+    "google ads": "bg-red-500",
+    "linkedin ads": "bg-indigo-500",
+    "tiktok ads": "bg-gray-500",
+    "instagram ads": "bg-pink-500",
+    "twitter ads": "bg-sky-500",
+    "youtube ads": "bg-red-600",
+    "snapchat ads": "bg-yellow-500",
+  };
+  return channelMap[channelName.toLowerCase()] || "bg-gray-500";
+};
+
 /**
  * Generates weekly date ranges between start and end dates.
  * Each week runs Monday-Sunday.
@@ -430,6 +448,48 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
       activeSelection.endWeekIdx + 1
     );
     
+    // Get months in the selection
+    const selectionMonths = new Set<string>();
+    selectedWeeks.forEach(week => {
+      selectionMonths.add(getMonthKey(week.weekStart));
+    });
+    
+    // Find existing flights in the same month(s) that can be combined
+    // Flights can be combined if they're in the same month(s) and overlap or are adjacent
+    const combinableFlights: MediaFlight[] = [];
+    const otherFlights: MediaFlight[] = [];
+    
+    channel.flights.forEach(flight => {
+      // Get months in this flight
+      const flightMonths = new Set<string>();
+      Object.keys(flight.monthlySpend).forEach(monthKey => {
+        if (flight.monthlySpend[monthKey] > 0) {
+          flightMonths.add(monthKey);
+        }
+      });
+      
+      // Check if flight shares any months with selection
+      const sharesMonths = Array.from(selectionMonths).some(month => flightMonths.has(month));
+      
+      // Check if flight overlaps or is adjacent to selection
+      const flightStart = new Date(flight.startWeek);
+      const flightEnd = new Date(flight.endWeek);
+      const selectionStart = startWeek.weekStart;
+      const selectionEnd = endWeek.weekEnd;
+      
+      // Overlaps if flight starts before selection ends and ends after selection starts
+      // Adjacent if they're next to each other (within 1 week)
+      const overlaps = flightStart <= selectionEnd && flightEnd >= selectionStart;
+      const isAdjacent = Math.abs(flightEnd.getTime() - selectionStart.getTime()) <= 7 * 24 * 60 * 60 * 1000 ||
+                         Math.abs(flightStart.getTime() - selectionEnd.getTime()) <= 7 * 24 * 60 * 60 * 1000;
+      
+      if (sharesMonths && (overlaps || isAdjacent)) {
+        combinableFlights.push(flight);
+      } else {
+        otherFlights.push(flight);
+      }
+    });
+    
     // Group weeks by month - weeks should be combined until a month break occurs
     const monthlySpend: { [monthKey: string]: number } = {};
     const weeksByMonth: { [monthKey: string]: WeekRange[] } = {};
@@ -442,31 +502,76 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
       weeksByMonth[monthKey].push(week);
     });
     
-    // Distribute budget proportionally by number of weeks in each month
+    // Distribute new budget proportionally by number of weeks in each month
     const totalWeeks = selectedWeeks.length;
     Object.entries(weeksByMonth).forEach(([monthKey, monthWeeks]) => {
       monthlySpend[monthKey] = (budget * monthWeeks.length) / totalWeeks;
     });
     
-    // Create new flight
-    const newFlight: MediaFlight = {
-      id: generateFlightId(),
-      startWeek: startWeek.weekStart,
-      endWeek: endWeek.weekEnd,
-      monthlySpend: monthlySpend,
-      color: "#3b82f6",
-    };
-    
-    const updatedFlights = [...channel.flights, newFlight];
-    
-    // Auto-calculate total budget from all flights
-    const newTotalBudget = calculateTotalBudgetFromFlights(updatedFlights);
-    
-    // Update channel with new flights and total budget
-    handleUpdateChannel(activeSelection.channelId, {
-      flights: updatedFlights,
-      totalBudget: newTotalBudget,
-    });
+    // Combine with existing flights if any
+    if (combinableFlights.length > 0) {
+      // Merge date ranges
+      let combinedStart = startWeek.weekStart;
+      let combinedEnd = endWeek.weekEnd;
+      
+      combinableFlights.forEach(flight => {
+        const flightStart = new Date(flight.startWeek);
+        const flightEnd = new Date(flight.endWeek);
+        if (flightStart < combinedStart) combinedStart = flightStart;
+        if (flightEnd > combinedEnd) combinedEnd = flightEnd;
+      });
+      
+      // Add budgets together for each month
+      combinableFlights.forEach(flight => {
+        Object.entries(flight.monthlySpend).forEach(([monthKey, amount]) => {
+          if (monthlySpend[monthKey] !== undefined) {
+            monthlySpend[monthKey] += amount;
+          } else {
+            monthlySpend[monthKey] = amount;
+          }
+        });
+      });
+      
+      // Create combined flight
+      const combinedFlight: MediaFlight = {
+        id: generateFlightId(),
+        startWeek: combinedStart,
+        endWeek: combinedEnd,
+        monthlySpend: monthlySpend,
+        color: "#3b82f6",
+      };
+      
+      const updatedFlights = [...otherFlights, combinedFlight];
+      
+      // Auto-calculate total budget from all flights
+      const newTotalBudget = calculateTotalBudgetFromFlights(updatedFlights);
+      
+      // Update channel with new flights and total budget
+      handleUpdateChannel(activeSelection.channelId, {
+        flights: updatedFlights,
+        totalBudget: newTotalBudget,
+      });
+    } else {
+      // No combinable flights, create new flight
+      const newFlight: MediaFlight = {
+        id: generateFlightId(),
+        startWeek: startWeek.weekStart,
+        endWeek: endWeek.weekEnd,
+        monthlySpend: monthlySpend,
+        color: "#3b82f6",
+      };
+      
+      const updatedFlights = [...channel.flights, newFlight];
+      
+      // Auto-calculate total budget from all flights
+      const newTotalBudget = calculateTotalBudgetFromFlights(updatedFlights);
+      
+      // Update channel with new flights and total budget
+      handleUpdateChannel(activeSelection.channelId, {
+        flights: updatedFlights,
+        totalBudget: newTotalBudget,
+      });
+    }
     
     setActiveSelection(null);
   };
@@ -778,17 +883,18 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                             data-week-index={weekIdx}
                             data-channel-id={channel.id}
                             colSpan={isInActiveSelection && isFirstSelectedCell ? selectionSpan : maxSpan}
-                            className={`border-l-2 border-l-gray-400 border border-gray-300 px-2 py-2 relative h-12 cursor-crosshair z-0 w-[40px] min-w-[40px] max-w-[40px] ${
-                              isCellSelected || isInActiveSelection ? 'bg-blue-200 border-2 border-blue-500' : channelColors.bg
+                            className={`border-l-2 border-l-gray-400 border border-gray-300 px-0 py-0 relative h-12 cursor-crosshair z-0 w-[40px] min-w-[40px] max-w-[40px] overflow-hidden ${
+                              isCellSelected || isInActiveSelection ? 'bg-blue-200 border-2 border-blue-500 rounded-none' : channelColors.bg
                             }`}
                             onMouseDown={(e) => {
                               handleWeekCellMouseDown(channel.id, weekIdx, e);
                             }}
                           >
                             {/* Inline budget input spanning across selected cells */}
-                            {isFirstSelectedCell && activeSelection && (
-                              <div className="absolute inset-0 z-50 flex items-center justify-center bg-blue-200 rounded">
-                                <div className="bg-white border-2 border-blue-500 rounded shadow-lg p-2 w-full max-w-[90%]">
+                            {isFirstSelectedCell && activeSelection && (() => {
+                              const channelBudgetColor = getChannelBudgetColor(channel.channelName);
+                              return (
+                                <div className={`absolute inset-0 z-50 flex items-center justify-center ${channelBudgetColor}`} style={{ overflow: 'hidden' }}>
                                   <Input
                                     ref={budgetInputRef}
                                     type="number"
@@ -820,13 +926,21 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                                         setActiveSelection(null);
                                       }
                                     }}
-                                    placeholder="Enter budget"
-                                    className="w-full [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                    placeholder=""
+                                    className="w-full h-full text-center text-xs font-semibold border-0 px-2 py-1 focus:ring-0 focus-visible:ring-0 shadow-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none text-white bg-transparent placeholder:text-white/70"
+                                    style={{ 
+                                      textShadow: 'none !important', 
+                                      boxShadow: 'none !important',
+                                      filter: 'none !important',
+                                      WebkitTextStroke: '0',
+                                      WebkitTextFillColor: 'white',
+                                      boxSizing: 'border-box'
+                                    }}
                                     autoFocus
                                   />
                                 </div>
-                              </div>
-                            )}
+                              );
+                            })()}
                             {channel.flights?.map((flight) => {
                               const flightStartIndex = weeks.findIndex(
                                 (w) => w.weekStart.getTime() === new Date(flight.startWeek).getTime()
@@ -836,15 +950,11 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                               );
 
                               if (weekIdx === flightStartIndex) {
-                                const spanWeeks = flightEndIndex - flightStartIndex + 1;
+                                const channelBudgetColor = getChannelBudgetColor(channel.channelName);
                                 return (
                                   <div
                                     key={flight.id}
-                                    className="absolute inset-1 flex items-center justify-center rounded text-white font-semibold text-sm"
-                                    style={{
-                                      backgroundColor: flight.color,
-                                      width: `calc(${spanWeeks * 100}% + ${(spanWeeks - 1) * 50}px)`,
-                                    }}
+                                    className={`absolute inset-0 z-50 flex items-center justify-center text-white font-semibold text-sm ${channelBudgetColor}`}
                                   >
                                     {(() => {
                                       const totalBudget = Object.values(flight.monthlySpend).reduce((sum, amount) => sum + amount, 0);
@@ -875,20 +985,16 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                                 const blockWidth = flightSpan * cellWidth;
                                 const leftOffset = (weekIdx - startIdx) * cellWidth;
                                 
-                                // Stack overlapping flights
-                                const stackOffset = flightLayerIdx * 2;
+                                const channelBudgetColor = getChannelBudgetColor(channel.channelName);
                                 
                                 return (
                                   <div
                                     key={`flight-${flight.id}-${weekIdx}`}
                                     data-flight-block
-                                    className="absolute flex items-center justify-center text-white text-xs font-semibold px-1 rounded cursor-pointer hover:opacity-90 transition-opacity group"
+                                    className={`absolute top-0 bottom-0 z-50 flex items-center justify-center text-white text-xs font-semibold cursor-pointer hover:opacity-90 transition-opacity group ${channelBudgetColor}`}
                                     style={{
-                                      top: `${stackOffset + 2}px`,
-                                      bottom: `${stackOffset + 2}px`,
-                                      left: `${leftOffset + 2}px`,
-                                      width: `${blockWidth - 4}px`,
-                                      backgroundColor: hexToRgba(flight.color, 0.8),
+                                      left: `${leftOffset}px`,
+                                      width: `${blockWidth}px`,
                                       zIndex: 10 + flightLayerIdx,
                                     }}
                                     onClick={(e) => handleFlightBlockClick(channel.id, flight, e)}
@@ -943,17 +1049,18 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                             data-week-index={weekIdx}
                             data-channel-id={channel.id}
                             colSpan={shouldShowInput ? selectionSpan : 1}
-                            className={`border-l-2 border-l-gray-400 border border-gray-300 px-2 py-2 relative h-12 cursor-crosshair z-0 w-[40px] min-w-[40px] max-w-[40px] ${
-                              isCellSelected || isInActiveSelection ? 'bg-blue-200 border-2 border-blue-500' : channelColors.bg
+                            className={`border-l-2 border-l-gray-400 border border-gray-300 px-0 py-0 relative h-12 cursor-crosshair z-0 w-[40px] min-w-[40px] max-w-[40px] overflow-hidden ${
+                              isCellSelected || isInActiveSelection ? 'bg-blue-200 border-2 border-blue-500 rounded-none' : channelColors.bg
                             }`}
                             onMouseDown={(e) => {
                               handleWeekCellMouseDown(channel.id, weekIdx, e);
                             }}
                           >
                             {/* Inline budget input spanning across selected cells */}
-                            {shouldShowInput && (
-                              <div className="absolute inset-0 z-50 flex items-center justify-center bg-blue-200 rounded">
-                                <div className="bg-white border-2 border-blue-500 rounded shadow-lg p-2 w-full max-w-[90%]">
+                            {shouldShowInput && (() => {
+                              const channelBudgetColor = getChannelBudgetColor(channel.channelName);
+                              return (
+                                <div className={`absolute inset-0 z-50 flex items-center justify-center ${channelBudgetColor}`} style={{ overflow: 'hidden' }}>
                                   <Input
                                     ref={budgetInputRef}
                                     type="number"
@@ -985,30 +1092,35 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                                         setActiveSelection(null);
                                       }
                                     }}
-                                    placeholder="Enter budget"
-                                    className="w-full [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                    placeholder=""
+                                    className="w-full h-full text-center text-xs font-semibold border-0 px-2 py-1 focus:ring-0 focus-visible:ring-0 shadow-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none text-white bg-transparent placeholder:text-white/70"
+                                    style={{ 
+                                      textShadow: 'none !important', 
+                                      boxShadow: 'none !important',
+                                      filter: 'none !important',
+                                      WebkitTextStroke: '0',
+                                      WebkitTextFillColor: 'white',
+                                      boxSizing: 'border-box'
+                                    }}
                                     autoFocus
                                   />
                                 </div>
-                              </div>
-                            )}
+                              );
+                            })()}
                             {/* Render overlapping flights */}
                             {overlappingFlights.map(({ flight, startIdx, endIdx }, flightLayerIdx) => {
                               const flightSpan = endIdx - startIdx + 1;
                               const blockWidth = flightSpan * cellWidth;
                               const leftOffset = (weekIdx - startIdx) * cellWidth;
-                              const stackOffset = flightLayerIdx * 2;
+                              const channelBudgetColor = getChannelBudgetColor(channel.channelName);
                               
                               return (
                                 <div
                                   key={`flight-overlap-${flight.id}-${weekIdx}`}
-                                  className="absolute flex items-center justify-center text-white text-xs font-semibold px-1 rounded"
+                                  className={`absolute top-0 bottom-0 z-50 flex items-center justify-center text-white text-xs font-semibold ${channelBudgetColor}`}
                                   style={{
-                                    top: `${stackOffset + 2}px`,
-                                    bottom: `${stackOffset + 2}px`,
-                                    left: `${leftOffset + 2}px`,
-                                    width: `${blockWidth - 4}px`,
-                                    backgroundColor: hexToRgba(flight.color, 0.8),
+                                    left: `${leftOffset}px`,
+                                    width: `${blockWidth}px`,
                                     zIndex: 10 + flightLayerIdx,
                                   }}
                                 />
