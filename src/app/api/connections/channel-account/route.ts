@@ -24,6 +24,8 @@ export async function GET(request: NextRequest) {
     const clientId = searchParams.get('clientId');
     const channelType = searchParams.get('channelType');
 
+    console.log('[channel-account] Request:', { clientId, channelType, userId: user.id });
+
     if (!clientId || !channelType) {
       return NextResponse.json(
         { error: 'clientId and channelType are required' },
@@ -43,7 +45,10 @@ export async function GET(request: NextRequest) {
       platform = 'linkedin-ads';
     }
 
+    console.log('[channel-account] Platform mapped:', { channelType, lowerChannelType, platform });
+
     if (!platform) {
+      console.log('[channel-account] No platform matched');
       return NextResponse.json({
         accountName: null,
         accountId: null,
@@ -60,6 +65,8 @@ export async function GET(request: NextRequest) {
       .eq('platform', platform)
       .eq('connection_status', 'active')
       .maybeSingle();
+
+    console.log('[channel-account] Client-specific connection:', { connection, connectionError });
 
     if (connectionError) {
       console.error('Error querying ad_platform_connections:', connectionError);
@@ -116,8 +123,64 @@ export async function GET(request: NextRequest) {
       });
     }
 
+    // For Google Ads, if no client-specific connection exists, check if user has any connection
+    // and if accounts exist - Google Ads accounts are user-level, not client-level
+    if (!connection && platform === 'google-ads') {
+      console.log('[channel-account] No client-specific connection, checking for any Google Ads connection');
+      // Check if user has any Google Ads connection (any client)
+      const { data: anyConnection } = await supabase
+        .from('ad_platform_connections')
+        .select('connection_id, connection_status')
+        .eq('user_id', user.id)
+        .eq('platform', platform)
+        .eq('connection_status', 'active')
+        .limit(1)
+        .maybeSingle();
+      
+      console.log('[channel-account] Any Google Ads connection:', anyConnection);
+      
+      // If user has a connection (even for a different client), check for accounts
+      if (anyConnection) {
+        // Try to find any active Google Ads account for this user
+        const { data: account, error: accountError } = await supabase
+          .from('google_ads_accounts')
+          .select('account_name, customer_id')
+          .eq('user_id', user.id)
+          .eq('is_active', true)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        console.log('[channel-account] Google Ads account found:', { account, accountError });
+
+        if (accountError) {
+          console.error('Error fetching Google Ads account:', accountError);
+        }
+
+        // Return account if found, even though connection is for a different client
+        if (account) {
+          console.log('[channel-account] Returning account:', account.account_name);
+          return NextResponse.json({
+            accountName: account.account_name || null,
+            accountId: account.customer_id || null,
+            hasConnection: true,
+          });
+        } else {
+          console.log('[channel-account] Connection exists but no account found');
+        }
+      }
+      
+      // No connection found at all
+      console.log('[channel-account] No Google Ads connection found');
+      return NextResponse.json({
+        accountName: null,
+        accountId: null,
+        hasConnection: false,
+      });
+    }
+
     if (!connection) {
-      // No active connection found for this client (non-Meta platforms)
+      // No active connection found for this client (other platforms)
       return NextResponse.json({
         accountName: null,
         accountId: null,
@@ -127,7 +190,9 @@ export async function GET(request: NextRequest) {
 
     // Get account name and ID based on platform
     if (platform === 'google-ads') {
-      const { data: account, error: accountError } = await supabase
+      // First try to find account with matching connection_id
+      let account = null;
+      const { data: accountWithConnection, error: accountError } = await supabase
         .from('google_ads_accounts')
         .select('account_name, customer_id')
         .eq('user_id', user.id)
@@ -137,7 +202,26 @@ export async function GET(request: NextRequest) {
         .limit(1)
         .maybeSingle();
 
-      if (accountError) {
+      if (!accountError && accountWithConnection) {
+        account = accountWithConnection;
+      } else {
+        // If no account found with matching connection_id, try to find any active account for this user
+        // (Google Ads accounts are user-level, not client-level)
+        const { data: anyAccount, error: anyAccountError } = await supabase
+          .from('google_ads_accounts')
+          .select('account_name, customer_id')
+          .eq('user_id', user.id)
+          .eq('is_active', true)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (!anyAccountError && anyAccount) {
+          account = anyAccount;
+        }
+      }
+
+      if (accountError && !account) {
         console.error('Error fetching Google Ads account:', accountError);
         return NextResponse.json({
           accountName: null,
@@ -146,6 +230,7 @@ export async function GET(request: NextRequest) {
         });
       }
 
+      console.log('[channel-account] Returning Google Ads account:', account?.account_name || 'null');
       return NextResponse.json({
         accountName: account?.account_name || null,
         accountId: account?.customer_id || null,

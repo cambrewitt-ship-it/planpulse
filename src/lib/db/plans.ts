@@ -33,6 +33,32 @@ export async function createClient(name: string) {
   return data;
 }
 
+export async function updateClient(clientId: string, name: string, notes?: string | null) {
+  const updateData: { name: string; notes?: string | null } = { name };
+  if (notes !== undefined) {
+    updateData.notes = notes;
+  }
+  
+  const { data, error } = await supabase
+    .from('clients')
+    .update(updateData)
+    .eq('id', clientId)
+    .select()
+    .single();
+  
+  if (error) {
+    const errorMessage = error.message || 'Failed to update client';
+    const errorDetails = {
+      message: errorMessage,
+      code: error.code,
+      details: error.details,
+      hint: error.hint
+    };
+    throw new Error(JSON.stringify(errorDetails));
+  }
+  return data;
+}
+
 export async function createMediaPlan(
   clientId: string,
   channels: MediaChannel[]

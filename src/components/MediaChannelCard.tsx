@@ -6,6 +6,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Progress } from '@/components/ui/progress';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Line, ComposedChart, Dot, LineChart } from 'recharts';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, parseISO, addMonths, subMonths, addDays } from 'date-fns';
 import { useState, useEffect } from 'react';
@@ -532,6 +533,61 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
     return format(parseISO(dateStr), 'd');
   };
 
+  // Calculate pacing status
+  const calculatePacingStatus = () => {
+    if (!hasConnectedAccount || projectedMonthlySpend === null || plannedMonthlySpend === 0) {
+      return null;
+    }
+
+    // Calculate percentage difference: (projected - planned) / planned * 100
+    const percentageDiff = ((projectedMonthlySpend - plannedMonthlySpend) / plannedMonthlySpend) * 100;
+    
+    // Determine status based on percentage difference
+    // Green: within ±10% (on track)
+    // Orange: ±10% to ±20% (warning)
+    // Red: beyond ±20% (off track)
+    const isOver = percentageDiff > 0;
+    const absPercentage = Math.abs(percentageDiff);
+    const statusText = isOver ? 'OVER SPENDING' : 'UNDER SPENDING';
+    
+    if (absPercentage <= 10) {
+      return { color: 'green', percentage: absPercentage, isOver, statusText: 'ON TRACK' };
+    } else if (absPercentage <= 20) {
+      return { color: 'orange', percentage: absPercentage, isOver, statusText };
+    } else {
+      return { color: 'red', percentage: absPercentage, isOver, statusText };
+    }
+  };
+
+  const pacingStatus = calculatePacingStatus();
+
+  // Calculate month progress (percentage through the selected month)
+  const daysInSelectedMonth = eachDayOfInterval({ start: selectedMonthStart, end: selectedMonthEnd }).length;
+  const currentDate = new Date();
+  currentDate.setHours(0, 0, 0, 0);
+  
+  let monthProgress = 0;
+  if (selectedMonthStart <= currentDate && currentDate <= selectedMonthEnd) {
+    // We're in the selected month
+    const daysElapsed = Math.floor((currentDate.getTime() - selectedMonthStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    monthProgress = (daysElapsed / daysInSelectedMonth) * 100;
+  } else if (currentDate > selectedMonthEnd) {
+    // Selected month is in the past
+    monthProgress = 100;
+  } else {
+    // Selected month is in the future
+    monthProgress = 0;
+  }
+  
+  // Calculate spend progress (actual spend / planned spend * 100)
+  const totalActualSpend = sortedData
+    .filter(d => d.actualSpend !== null && d.date <= todayKey)
+    .reduce((sum, d) => sum + (d.actualSpend || 0), 0);
+  
+  const spendProgress = plannedMonthlySpend > 0 
+    ? (totalActualSpend / plannedMonthlySpend) * 100 
+    : 0;
+
   return (
     <Card className="bg-white shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 ease-in-out">
       <CardContent className="p-6">
@@ -544,9 +600,25 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
                 {channel.icon}
               </div>
               <div className="flex-1">
-                <h3 className="text-lg font-semibold text-[#0f172a] mb-1">
-                  {channel.name}
-                </h3>
+                <div className="flex items-center gap-2 mb-1">
+                  <h3 className="text-lg font-semibold text-[#0f172a]">
+                    {channel.name}
+                  </h3>
+                  {pacingStatus && (
+                    <Badge
+                      className={`text-white font-medium text-xs ${
+                        pacingStatus.color === 'green'
+                          ? 'bg-green-500 hover:bg-green-600'
+                          : pacingStatus.color === 'orange'
+                          ? 'bg-orange-500 hover:bg-orange-600'
+                          : 'bg-red-500 hover:bg-red-600'
+                      }`}
+                    >
+                      {pacingStatus.statusText} {pacingStatus.isOver ? '+' : '-'}
+                      {pacingStatus.percentage.toFixed(1)}%
+                    </Badge>
+                  )}
+                </div>
                 <div className="flex items-center gap-2 flex-wrap">
                   <Badge className={`${getStatusColor(channel.status)} text-white font-medium`}>
                     {channel.status}
@@ -846,6 +918,35 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
                     ? `$${projectedMonthlySpend.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                     : '—'}
                 </p>
+              </div>
+            </div>
+
+            {/* Progress Bars Section */}
+            <div className="space-y-3 mb-4">
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-[#64748b]">Month Progress</span>
+                  <span className="text-xs font-semibold text-[#0f172a]">{monthProgress.toFixed(1)}%</span>
+                </div>
+                <Progress value={monthProgress} className="h-2" />
+              </div>
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-[#64748b]">Spend Progress</span>
+                  <span className="text-xs font-semibold text-[#0f172a]">
+                    {hasConnectedAccount ? `${spendProgress.toFixed(1)}%` : '—'}
+                  </span>
+                </div>
+                <Progress 
+                  value={spendProgress} 
+                  className={`h-2 ${
+                    spendProgress > 100 
+                      ? '[&>div]:bg-red-500' 
+                      : spendProgress > 80 
+                      ? '[&>div]:bg-orange-500' 
+                      : '[&>div]:bg-green-500'
+                  }`}
+                />
               </div>
             </div>
             

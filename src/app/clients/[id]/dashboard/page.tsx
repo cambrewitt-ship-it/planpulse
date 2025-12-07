@@ -71,7 +71,7 @@ export default function ClientDashboardPage() {
         <Card>
           <CardContent className="text-center py-12">
             <p className="text-gray-500 mb-4">Client not found</p>
-            <Link href="/clients">
+            <Link href="/dashboard">
               <Button>Back to Clients</Button>
             </Link>
           </CardContent>
@@ -86,7 +86,7 @@ export default function ClientDashboardPage() {
   return (
     <div className="container mx-auto p-8">
       <div className="mb-6">
-        <Link href="/clients">
+        <Link href="/dashboard">
           <Button variant="outline" size="sm">
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back to Clients
@@ -130,12 +130,9 @@ export default function ClientDashboardPage() {
             <CardTitle className="text-sm font-medium">Quick Actions</CardTitle>
           </CardHeader>
           <CardContent>
-            <Link href={`/plan-entry?client=${clientId}`}>
-              <Button size="sm" className="w-full">
-                <Plus className="h-4 w-4 mr-2" />
-                Create Plan
-              </Button>
-            </Link>
+            <p className="text-xs text-muted-foreground">
+              Plans can be created from the client dashboard
+            </p>
           </CardContent>
         </Card>
       </div>
@@ -143,21 +140,13 @@ export default function ClientDashboardPage() {
       {/* Plans List */}
       <div className="mb-4 flex justify-between items-center">
         <h2 className="text-2xl font-semibold">Media Plans</h2>
-        <Link href={`/plan-entry?client=${clientId}`}>
-          <Button>
-            <Plus className="h-4 w-4 mr-2" />
-            Create New Plan
-          </Button>
-        </Link>
       </div>
 
       {plans.length === 0 ? (
         <Card>
           <CardContent className="text-center py-12">
             <p className="text-gray-500 mb-4">No media plans for this client</p>
-            <Link href={`/plan-entry?client=${clientId}`}>
-              <Button>Create Your First Plan</Button>
-            </Link>
+            <p className="text-sm text-gray-400">Plans can be created from the client dashboard</p>
           </CardContent>
         </Card>
       ) : (

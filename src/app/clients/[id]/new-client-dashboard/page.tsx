@@ -2,22 +2,22 @@
 
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { User, Plus, TrendingUp, Pencil } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { User, Pencil, Check, X } from 'lucide-react';
 import RollingCalendar from '@/components/RollingCalendar';
 import MediaChannels from '@/components/MediaChannels';
 import { MediaPlanGrid, MediaPlanChannel } from '@/components/media-plan-builder/media-plan-grid';
 import { useParams } from 'next/navigation';
 import { useEffect, useState, useRef } from 'react';
-import { getClients, getMediaPlans, getPlanById } from '@/lib/db/plans';
-import Link from 'next/link';
-import { format } from 'date-fns';
+import { getClients, getMediaPlans, getPlanById, updateClient } from '@/lib/db/plans';
 import PlanEditForm from '@/components/plan-entry/PlanEditForm';
 import AdPlatformConnector from '@/components/AdPlatformConnector';
 
 interface Client {
   id: string;
   name: string;
+  notes?: string | null;
 }
 
 interface MediaPlan {
@@ -45,6 +45,12 @@ export default function NewClientDashboard() {
   const [isLoadingMediaPlanBuilder, setIsLoadingMediaPlanBuilder] = useState(true);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isInitialLoadRef = useRef(true);
+  const [isEditingClientName, setIsEditingClientName] = useState(false);
+  const [editingClientName, setEditingClientName] = useState('');
+  const [isSavingClientName, setIsSavingClientName] = useState(false);
+  const [isEditingClientNotes, setIsEditingClientNotes] = useState(false);
+  const [editingClientNotes, setEditingClientNotes] = useState('');
+  const [isSavingClientNotes, setIsSavingClientNotes] = useState(false);
 
   useEffect(() => {
     if (clientId) {
@@ -100,6 +106,66 @@ export default function NewClientDashboard() {
 
   const handlePlanSaved = () => {
     loadData(); // Reload plans after save
+  };
+
+  const handleStartEditClientName = () => {
+    if (client) {
+      setEditingClientName(client.name);
+      setIsEditingClientName(true);
+    }
+  };
+
+  const handleSaveClientName = async () => {
+    if (!client || !editingClientName.trim()) {
+      return;
+    }
+
+    try {
+      setIsSavingClientName(true);
+      await updateClient(client.id, editingClientName.trim(), client.notes || null);
+      setClient({ ...client, name: editingClientName.trim() });
+      setIsEditingClientName(false);
+    } catch (error) {
+      console.error('Error updating client name:', error);
+      alert('Failed to update client name. Please try again.');
+    } finally {
+      setIsSavingClientName(false);
+    }
+  };
+
+  const handleCancelEditClientName = () => {
+    setIsEditingClientName(false);
+    setEditingClientName('');
+  };
+
+  const handleStartEditClientNotes = () => {
+    if (client) {
+      setEditingClientNotes(client.notes || '');
+      setIsEditingClientNotes(true);
+    }
+  };
+
+  const handleSaveClientNotes = async () => {
+    if (!client) {
+      return;
+    }
+
+    try {
+      setIsSavingClientNotes(true);
+      await updateClient(client.id, client.name, editingClientNotes.trim() || null);
+      setClient({ ...client, notes: editingClientNotes.trim() || null });
+      setIsEditingClientNotes(false);
+    } catch (error) {
+      console.error('Error updating client notes:', error);
+      alert('Failed to update client notes. Please try again.');
+    } finally {
+      setIsSavingClientNotes(false);
+    }
+  };
+
+  const handleCancelEditClientNotes = () => {
+    setIsEditingClientNotes(false);
+    setEditingClientNotes('');
   };
 
   // Load media plan builder data from the API
@@ -252,19 +318,6 @@ export default function NewClientDashboard() {
     );
   }
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'active':
-        return 'bg-[#22c55e] hover:bg-[#16a34a]';
-      case 'draft':
-        return 'bg-[#64748b] hover:bg-[#475569]';
-      case 'completed':
-        return 'bg-[#2563eb] hover:bg-[#1d4ed8]';
-      default:
-        return 'bg-[#64748b] hover:bg-[#475569]';
-    }
-  };
-
   return (
     <div className="w-full min-h-screen bg-[#f8fafc] font-sans">
       <div className="container mx-auto max-w-7xl px-4 py-8">
@@ -272,9 +325,7 @@ export default function NewClientDashboard() {
         <header role="banner" aria-label="Client dashboard header">
           <Card className="bg-white shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 ease-in-out">
             <CardContent className="py-6">
-              <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-                {/* Left Section - Client Info (60%) */}
-                <div className="lg:col-span-3 flex items-start gap-4">
+              <div className="flex items-start gap-4">
                   {/* Circular Avatar */}
                   <div 
                     className="flex-shrink-0 w-14 h-14 rounded-full bg-[#e2e8f0] flex items-center justify-center"
@@ -286,73 +337,115 @@ export default function NewClientDashboard() {
                   
                   {/* Client Info */}
                   <div className="flex-1">
-                    <h1 className="text-3xl font-bold text-[#0f172a] mb-1">
-                      {client?.name || 'Client Name'}
-                    </h1>
-                    <p className="text-[#64748b] text-sm md:text-base">
-                      Your trusted partner for strategic growth
-                    </p>
-                  </div>
-                </div>
-
-                {/* Right Section - Live Media Plans (40%) */}
-                <div className="lg:col-span-2 border-l border-[#e2e8f0] pl-6">
-                  <div className="flex items-center gap-2 mb-3">
-                    <TrendingUp className="h-5 w-5 text-[#2563eb]" />
-                    <h2 className="text-lg font-semibold text-[#0f172a]">Live Media Plans</h2>
-                  </div>
-                  
-                  {plans.length > 0 ? (
-                    <div className="space-y-2">
-                      {plans.slice(0, 3).map((plan) => (
-                        <div key={plan.id} className="relative group">
-                          <Link href={`/plans/${plan.id}/dashboard`}>
-                            <div className="p-3 rounded-lg bg-[#f8fafc] hover:bg-[#e2e8f0] transition-colors duration-200 border border-[#e2e8f0] hover:border-[#cbd5e1] cursor-pointer">
-                              <div className="flex items-start justify-between gap-2">
-                                <div className="flex-1 min-w-0">
-                                  <p className="text-sm font-medium text-[#0f172a] truncate">
-                                    {plan.name}
-                                  </p>
-                                  <p className="text-xs text-[#64748b] mt-1">
-                                    {format(new Date(plan.start_date), 'MMM d')} - {format(new Date(plan.end_date), 'MMM d, yyyy')}
-                                  </p>
-                                </div>
-                                <Badge className={`${getStatusColor(plan.status)} text-white text-xs capitalize`}>
-                                  {plan.status}
-                                </Badge>
-                              </div>
-                            </div>
-                          </Link>
+                    {isEditingClientName ? (
+                      <div className="flex items-center gap-2 mb-1">
+                        <Input
+                          value={editingClientName}
+                          onChange={(e) => setEditingClientName(e.target.value)}
+                          className="text-3xl font-bold h-auto py-1 px-2"
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              handleSaveClientName();
+                            } else if (e.key === 'Escape') {
+                              handleCancelEditClientName();
+                            }
+                          }}
+                          disabled={isSavingClientName}
+                        />
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={handleSaveClientName}
+                          disabled={isSavingClientName || !editingClientName.trim()}
+                          className="h-8 w-8"
+                        >
+                          <Check className="h-4 w-4 text-green-600" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={handleCancelEditClientName}
+                          disabled={isSavingClientName}
+                          className="h-8 w-8"
+                        >
+                          <X className="h-4 w-4 text-red-600" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 group">
+                        <h1 className="text-3xl font-bold text-[#0f172a] mb-1">
+                          {client?.name || 'Client Name'}
+                        </h1>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={handleStartEditClientName}
+                          className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+                          title="Edit client name"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    )}
+                    {isEditingClientNotes ? (
+                      <div className="mt-2 space-y-2">
+                        <Textarea
+                          value={editingClientNotes}
+                          onChange={(e) => setEditingClientNotes(e.target.value)}
+                          placeholder="Add notes about this client..."
+                          className="text-sm md:text-base min-h-[80px]"
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === 'Escape') {
+                              handleCancelEditClientNotes();
+                            }
+                          }}
+                          disabled={isSavingClientNotes}
+                        />
+                        <div className="flex items-center gap-2">
                           <Button
-                            size="icon"
+                            size="sm"
                             variant="ghost"
-                            className="absolute top-2 right-2 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity bg-white hover:bg-[#e2e8f0] shadow-sm"
-                            onClick={(e) => handleEditPlan(plan.id, e)}
-                            disabled={loadingPlan}
+                            onClick={handleSaveClientNotes}
+                            disabled={isSavingClientNotes}
+                            className="h-7 text-xs"
                           >
-                            <Pencil className="h-3 w-3" />
+                            <Check className="h-3 w-3 mr-1 text-green-600" />
+                            Save
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={handleCancelEditClientNotes}
+                            disabled={isSavingClientNotes}
+                            className="h-7 text-xs"
+                          >
+                            <X className="h-3 w-3 mr-1 text-red-600" />
+                            Cancel
                           </Button>
                         </div>
-                      ))}
-                      {plans.length > 3 && (
-                        <p className="text-xs text-[#64748b] text-center pt-2">
-                          +{plans.length - 3} more
-                        </p>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="text-center py-4">
-                      <p className="text-sm text-[#64748b] mb-3">No media plans</p>
-                      <Link href={`/plan-entry?client=${clientId}`}>
-                        <Button size="sm" className="bg-[#2563eb] hover:bg-[#1d4ed8]">
-                          <Plus className="h-4 w-4 mr-2" />
-                          Create Plan
+                      </div>
+                    ) : (
+                      <div className="mt-2 group/notes">
+                        {client?.notes && (
+                          <p className="text-[#64748b] text-sm md:text-base whitespace-pre-wrap">
+                            {client.notes}
+                          </p>
+                        )}
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={handleStartEditClientNotes}
+                          className="h-6 w-6 mt-1 opacity-0 group-hover/notes:opacity-100 transition-opacity"
+                          title="Edit notes"
+                        >
+                          <Pencil className="h-3 w-3" />
                         </Button>
-                      </Link>
-                    </div>
-                  )}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
             </CardContent>
           </Card>
         </header>

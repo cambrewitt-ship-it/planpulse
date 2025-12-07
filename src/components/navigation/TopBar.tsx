@@ -86,10 +86,10 @@ export default function TopBar() {
                   Plans
                 </Button>
               </Link>
-              <Link href="/clients">
-                <Button variant={pathname === '/clients' ? 'default' : 'ghost'} size="sm">
-                  <Users className="h-4 w-4 mr-2" />
-                  Clients
+              <Link href="/dashboard">
+                <Button variant={pathname === '/dashboard' ? 'default' : 'ghost'} size="sm">
+                  <LayoutDashboard className="h-4 w-4 mr-2" />
+                  Dashboard
                 </Button>
               </Link>
             </div>

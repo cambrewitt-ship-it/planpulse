@@ -24,7 +24,7 @@ export default function CreateClientPage() {
     setCreating(true);
     try {
       await createClient(clientName.trim());
-      router.push('/clients');
+      router.push('/dashboard');
     } catch (error) {
       console.error('Error creating client:', error);
       let errorMessage = 'Error creating client. Please try again.';
@@ -47,7 +47,7 @@ export default function CreateClientPage() {
   return (
     <div className="container mx-auto p-8">
       <div className="mb-4">
-        <Link href="/clients">
+        <Link href="/dashboard">
           <Button variant="outline" size="sm">
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back to Clients
@@ -89,7 +89,7 @@ export default function CreateClientPage() {
                   'Create Client'
                 )}
               </Button>
-              <Link href="/clients">
+              <Link href="/dashboard">
                 <Button variant="outline">Cancel</Button>
               </Link>
             </div>

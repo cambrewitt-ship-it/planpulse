@@ -344,7 +344,7 @@ export default function TestDataPage() {
           <div className="mt-4 pt-4 border-t border-yellow-300">
             <p className="font-semibold text-yellow-900 mb-2">How to connect a platform:</p>
             <ol className="list-decimal list-inside space-y-1 text-sm text-yellow-800">
-              <li>Navigate to <code className="bg-yellow-100 px-1 rounded">/clients</code></li>
+              <li>Navigate to <code className="bg-yellow-100 px-1 rounded">/dashboard</code></li>
               <li>Click on a client or create a new client</li>
               <li>Go to the client's dashboard</li>
               <li>Look for the "Ad Platform Connections" section</li>
@@ -358,7 +358,7 @@ export default function TestDataPage() {
         {/* Quick Link */}
         <div className="mt-4 text-center">
           <a 
-            href="/clients" 
+            href="/dashboard" 
             className="inline-block px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors"
           >
             Go to Clients Page to Connect Platforms

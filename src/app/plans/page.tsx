@@ -36,21 +36,13 @@ export default function PlansPage() {
     <div className="container mx-auto p-8">
       <div className="flex justify-between items-center mb-8">
         <h1 className="text-3xl font-bold">Media Plans</h1>
-        <Link href="/plan-entry">
-          <Button>
-            <Plus className="h-4 w-4 mr-2" />
-            Create New Plan
-          </Button>
-        </Link>
       </div>
 
       {plans.length === 0 ? (
         <Card>
           <CardContent className="text-center py-12">
             <p className="text-gray-500 mb-4">No media plans yet</p>
-            <Link href="/plan-entry">
-              <Button>Create Your First Plan</Button>
-            </Link>
+            <p className="text-sm text-gray-400">Plans can be created from the client dashboard</p>
           </CardContent>
         </Card>
       ) : (
