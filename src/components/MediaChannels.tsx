@@ -2,8 +2,9 @@
 
 import MediaChannelCard from './MediaChannelCard';
 import { Facebook, Search, Linkedin, Music, Instagram } from 'lucide-react';
-import { format, eachDayOfInterval, startOfMonth, endOfMonth, parseISO, isWithinInterval, addDays } from 'date-fns';
+import { format, eachDayOfInterval, startOfMonth, endOfMonth, parseISO, isWithinInterval, addDays, startOfWeek, addWeeks, differenceInWeeks } from 'date-fns';
 import { useState, useEffect } from 'react';
+import { MediaPlanChannel, MediaFlight } from '@/components/media-plan-builder/media-plan-grid';
 
 interface ActivePlan {
   id: string;
@@ -30,9 +31,11 @@ interface ActivePlan {
 interface MediaChannelsProps {
   activePlan: ActivePlan | null;
   clientId?: string;
+  mediaPlanBuilderChannels?: MediaPlanChannel[];
+  commission?: number;
 }
 
-export default function MediaChannels({ activePlan, clientId }: MediaChannelsProps) {
+export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderChannels = [], commission = 0 }: MediaChannelsProps) {
   const [liveSpendData, setLiveSpendData] = useState<Record<string, any[]>>({});
   const [fetchingSpend, setFetchingSpend] = useState<Record<string, boolean>>({});
   const [spendErrors, setSpendErrors] = useState<Record<string, string>>({});
@@ -40,6 +43,135 @@ export default function MediaChannels({ activePlan, clientId }: MediaChannelsPro
   const [connectedAccounts, setConnectedAccounts] = useState<Record<string, string | null>>({});
   const [connectedAccountIds, setConnectedAccountIds] = useState<Record<string, string | null>>({});
   const [selectedMonths, setSelectedMonths] = useState<Record<string, Date>>({});
+
+  // Helper function to find the earliest month with budget > 0 for a channel
+  const findEarliestMonthWithBudget = (channelId: string): Date | null => {
+    // First, check mediaPlanBuilderChannels (most reliable source)
+    if (mediaPlanBuilderChannels && mediaPlanBuilderChannels.length > 0) {
+      const channel = mediaPlanBuilderChannels.find(c => c.id === channelId);
+      if (channel && channel.flights) {
+        const monthsWithBudget: Array<{ year: number; month: number; key: string }> = [];
+        
+        // Collect all months with budget > 0 from all flights
+        channel.flights.forEach((flight) => {
+          if (flight.monthlySpend) {
+            Object.entries(flight.monthlySpend).forEach(([monthKey, amount]) => {
+              if (amount && amount > 0) {
+                // Parse month key (format: "2024-12" or "2024-1")
+                const parts = monthKey.split('-');
+                if (parts.length === 2) {
+                  const year = parseInt(parts[0], 10);
+                  const month = parseInt(parts[1], 10);
+                  if (!isNaN(year) && !isNaN(month) && month >= 1 && month <= 12) {
+                    monthsWithBudget.push({ year, month, key: monthKey });
+                  }
+                }
+              }
+            });
+          }
+        });
+        
+        // Find the earliest month
+        if (monthsWithBudget.length > 0) {
+          monthsWithBudget.sort((a, b) => {
+            if (a.year !== b.year) return a.year - b.year;
+            return a.month - b.month;
+          });
+          
+          const earliest = monthsWithBudget[0];
+          return new Date(earliest.year, earliest.month - 1, 1); // month is 0-indexed in Date
+        }
+      }
+    }
+    
+    // Fallback: check activePlan channels (from weekly plans)
+    if (activePlan && activePlan.channels) {
+      const channel = activePlan.channels.find(c => c.id === channelId);
+      if (channel && channel.weekly_plans) {
+        const monthsWithBudget: Array<{ year: number; month: number }> = [];
+        
+        channel.weekly_plans.forEach((wp) => {
+          if (wp.budget_planned && wp.budget_planned > 0 && wp.week_commencing) {
+            const weekStart = parseISO(wp.week_commencing);
+            const year = weekStart.getFullYear();
+            const month = weekStart.getMonth() + 1;
+            
+            // Check if this month is already in the list
+            const exists = monthsWithBudget.some(m => m.year === year && m.month === month);
+            if (!exists) {
+              monthsWithBudget.push({ year, month });
+            }
+          }
+        });
+        
+        if (monthsWithBudget.length > 0) {
+          monthsWithBudget.sort((a, b) => {
+            if (a.year !== b.year) return a.year - b.year;
+            return a.month - b.month;
+          });
+          
+          const earliest = monthsWithBudget[0];
+          return new Date(earliest.year, earliest.month - 1, 1);
+        }
+      }
+    }
+    
+    return null;
+  };
+
+  // Initialize selectedMonths with earliest month with budget for each channel
+  useEffect(() => {
+    if (!mediaPlanBuilderChannels && !activePlan) return;
+    
+    const initialSelectedMonths: Record<string, Date> = {};
+    
+    // Get all channel IDs
+    const channelIds: string[] = [];
+    if (mediaPlanBuilderChannels && mediaPlanBuilderChannels.length > 0) {
+      mediaPlanBuilderChannels.forEach(ch => {
+        if (ch.id) channelIds.push(ch.id);
+      });
+    } else if (activePlan && activePlan.channels) {
+      activePlan.channels.forEach(ch => {
+        if (ch.id) channelIds.push(ch.id);
+      });
+    }
+    
+    // Find earliest month with budget for each channel
+    channelIds.forEach(channelId => {
+      const earliestMonth = findEarliestMonthWithBudget(channelId);
+      if (earliestMonth) {
+        initialSelectedMonths[channelId] = earliestMonth;
+      }
+    });
+    
+    // Update state if we found any months, preserving existing selections
+    if (Object.keys(initialSelectedMonths).length > 0) {
+      setSelectedMonths(prev => {
+        const updated = { ...prev };
+        // Only set if not already set (preserve user selection)
+        Object.entries(initialSelectedMonths).forEach(([channelId, month]) => {
+          if (!updated[channelId]) {
+            updated[channelId] = month;
+          }
+        });
+        return updated;
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mediaPlanBuilderChannels, activePlan?.id]); // Only run when channels change
+
+  // Helper function to apply commission to a budget amount
+  // Commission is a percentage (e.g., 20 means 20%)
+  // Returns the amount after commission is deducted
+  const applyCommission = (amount: number): number => {
+    if (!amount || isNaN(amount) || amount <= 0) return 0;
+    if (commission <= 0) return amount;
+    // If commission is 20%, we show 80% of the original (100% - 20%)
+    const commissionMultiplier = (100 - commission) / 100;
+    const result = amount * commissionMultiplier;
+    return isNaN(result) ? 0 : result;
+  };
 
   // Map channel names to icons
   const getChannelIcon = (channelName: string) => {
@@ -183,17 +315,22 @@ export default function MediaChannels({ activePlan, clientId }: MediaChannelsPro
 
   // Fetch connected account for a channel
   const fetchConnectedAccount = async (channelType: string) => {
-    if (!clientId) return;
+    if (!clientId) {
+      console.log('fetchConnectedAccount: No clientId provided for channelType:', channelType);
+      return;
+    }
     
     try {
+      console.log('fetchConnectedAccount: Fetching for channelType:', channelType, 'clientId:', clientId);
       const response = await fetch(
         `/api/connections/channel-account?clientId=${encodeURIComponent(clientId)}&channelType=${encodeURIComponent(channelType)}`
       );
       if (!response.ok) {
-        console.error(`Failed to fetch connected account for channel type ${channelType}`);
+        console.error(`Failed to fetch connected account for channel type ${channelType}:`, response.status, response.statusText);
         return;
       }
       const { accountName, accountId, hasConnection } = await response.json();
+      console.log('fetchConnectedAccount: Response for', channelType, ':', { accountName, accountId, hasConnection });
       setConnectedAccounts(prev => ({ ...prev, [channelType]: hasConnection ? (accountName || null) : null }));
       setConnectedAccountIds(prev => ({ ...prev, [channelType]: hasConnection ? (accountId || null) : null }));
     } catch (error) {
@@ -203,20 +340,46 @@ export default function MediaChannels({ activePlan, clientId }: MediaChannelsPro
 
   // Auto-fetch spend data and action points for channels on mount
   useEffect(() => {
-    if (!activePlan || !activePlan.channels) return;
-
-    activePlan.channels.forEach((channel) => {
-      if (isMetaAdsChannel(channel.channel) || isGoogleAdsChannel(channel.channel)) {
-        fetchLiveSpendData(channel.id, channel.channel);
-      }
-      const channelType = getChannelDisplayName(channel.channel, channel.detail);
-      fetchActionPoints(channelType);
-      if (clientId) {
-        fetchConnectedAccount(channelType);
-      }
+    console.log('MediaChannels useEffect: Running with', {
+      hasMediaPlanBuilderChannels: !!mediaPlanBuilderChannels && mediaPlanBuilderChannels.length > 0,
+      mediaPlanBuilderChannelsLength: mediaPlanBuilderChannels?.length || 0,
+      hasActivePlan: !!activePlan && !!activePlan.channels,
+      activePlanChannelsLength: activePlan?.channels?.length || 0,
+      clientId
     });
+    
+    // Prioritize mediaPlanBuilderChannels over activePlan.channels
+    if (mediaPlanBuilderChannels && mediaPlanBuilderChannels.length > 0) {
+      console.log('MediaChannels: Processing mediaPlanBuilderChannels');
+      mediaPlanBuilderChannels.forEach((channel) => {
+        console.log('MediaChannels: Processing channel:', channel.channelName, channel.id);
+        if (isMetaAdsChannel(channel.channelName) || isGoogleAdsChannel(channel.channelName)) {
+          fetchLiveSpendData(channel.id, channel.channelName);
+        }
+        const channelType = getChannelDisplayName(channel.channelName, channel.format || '');
+        console.log('MediaChannels: Calculated channelType:', channelType, 'from channelName:', channel.channelName, 'format:', channel.format);
+        fetchActionPoints(channelType);
+        if (clientId) {
+          fetchConnectedAccount(channelType);
+        } else {
+          console.log('MediaChannels: Skipping fetchConnectedAccount - no clientId');
+        }
+      });
+    } else if (activePlan && activePlan.channels) {
+      console.log('MediaChannels: Processing activePlan.channels');
+      activePlan.channels.forEach((channel) => {
+        if (isMetaAdsChannel(channel.channel) || isGoogleAdsChannel(channel.channel)) {
+          fetchLiveSpendData(channel.id, channel.channel);
+        }
+        const channelType = getChannelDisplayName(channel.channel, channel.detail);
+        fetchActionPoints(channelType);
+        if (clientId) {
+          fetchConnectedAccount(channelType);
+        }
+      });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activePlan?.id, clientId]); // Only refetch when plan or client changes
+  }, [activePlan?.id, clientId, mediaPlanBuilderChannels ? mediaPlanBuilderChannels.map(c => c.id).join(',') : '']); // Refetch when plan, client, or mediaPlanBuilderChannels changes
 
   // Generate month data from weekly plans and live spend data
   const generateMonthDataFromWeeklyPlans = (
@@ -302,6 +465,7 @@ export default function MediaChannels({ activePlan, clientId }: MediaChannelsPro
       weekEnd.setDate(weekEnd.getDate() + 6);
       
       // Always use planned budget from the media plan for the planned line
+      // Commission is already applied in transformMediaPlanBuilderChannels or transformActivePlanChannels
       const weekPlannedSpend = wp.budget_planned || 0;
       const dailyPlannedSpend = weekPlannedSpend / 7;
       
@@ -356,37 +520,310 @@ export default function MediaChannels({ activePlan, clientId }: MediaChannelsPro
     });
   };
 
+  // Transform MediaPlanBuilder channels to ActivePlan channels format
+  const transformMediaPlanBuilderChannels = (channels: MediaPlanChannel[]): ActivePlan['channels'] => {
+    return channels
+      .filter(ch => ch.channelName && ch.channelName.trim() !== '')
+      .map((channel) => {
+        // Generate weekly plans from flights
+        const weeklyPlans: ActivePlan['channels'][0]['weekly_plans'] = [];
+        // Track monthly spend totals from flights (before commission)
+        const monthlySpendTotals: { [monthKey: string]: number } = {};
+        
+        channel.flights.forEach((flight) => {
+          // Accumulate monthly spend totals from all flights
+          // Note: flight.monthlySpend uses getMonthKey format (e.g., "2024-12" or "2024-1")
+          // We need to normalize to "yyyy-MM" format for consistency
+          Object.entries(flight.monthlySpend).forEach(([monthKey, amount]) => {
+            // Normalize month key to "yyyy-MM" format (pad month if needed)
+            const normalizedMonthKey = monthKey.includes('-') 
+              ? monthKey.split('-').map((part, idx) => idx === 1 ? part.padStart(2, '0') : part).join('-')
+              : monthKey;
+            monthlySpendTotals[normalizedMonthKey] = (monthlySpendTotals[normalizedMonthKey] || 0) + amount;
+          });
+          const startDate = new Date(flight.startWeek);
+          const endDate = new Date(flight.endWeek);
+          
+          // Get Monday of the start week
+          const startMonday = startOfWeek(startDate, { weekStartsOn: 1 });
+          const endMonday = startOfWeek(endDate, { weekStartsOn: 1 });
+          
+          // Calculate number of weeks
+          const numWeeks = differenceInWeeks(endMonday, startMonday) + 1;
+          
+          // Group weeks by month to properly distribute monthly spend
+          const weeksByMonth: { [monthKey: string]: Date[] } = {};
+          
+          for (let i = 0; i < numWeeks; i++) {
+            const weekStart = addWeeks(startMonday, i);
+            const monthKey = format(weekStart, 'yyyy-MM');
+            
+            if (!weeksByMonth[monthKey]) {
+              weeksByMonth[monthKey] = [];
+            }
+            weeksByMonth[monthKey].push(weekStart);
+          }
+          
+          // Generate weekly plans with proper monthly distribution
+          let weekNumber = 1;
+          for (let i = 0; i < numWeeks; i++) {
+            const weekStart = addWeeks(startMonday, i);
+            const weekKey = format(weekStart, 'yyyy-MM-dd');
+            const monthKey = format(weekStart, 'yyyy-MM');
+            
+            // Get monthly spend for this month
+            // flight.monthlySpend uses getMonthKey format (e.g., "2024-12" or "2024-1")
+            // monthKey is in "yyyy-MM" format, so we need to try both formats
+            const unpaddedMonthKey = monthKey.replace(/-0+(\d)$/, '-$1'); // Convert "2024-01" to "2024-1"
+            const monthlySpend = flight.monthlySpend[monthKey] || flight.monthlySpend[unpaddedMonthKey] || 0;
+            // Count weeks in this month
+            const weeksInMonth = weeksByMonth[monthKey]?.length || 1;
+            // Distribute monthly spend across weeks in this month
+            const weeklyBudgetBeforeCommission = weeksInMonth > 0 ? monthlySpend / weeksInMonth : 0;
+            // Apply commission to reduce the budget
+            const weeklyBudget = applyCommission(weeklyBudgetBeforeCommission);
+            
+            weeklyPlans.push({
+              id: `week-${channel.id}-${flight.id}-${i}`,
+              week_commencing: weekKey,
+              week_number: weekNumber++,
+              budget_planned: Math.round(weeklyBudget * 100), // Convert to cents
+              budget_actual: 0,
+              posts_planned: 0,
+              posts_actual: 0,
+            });
+          }
+        });
+        
+        return {
+          id: channel.id,
+          channel: channel.channelName,
+          detail: channel.format || '',
+          type: channel.channelName.toLowerCase(),
+          weekly_plans: weeklyPlans,
+          // Store monthly spend totals for accurate monthly budget calculation
+          _monthlySpendTotals: monthlySpendTotals,
+        };
+      });
+  };
+
   // Transform active plan channels to MediaChannelCard format
   const transformChannels = () => {
+    // Prioritize mediaPlanBuilderChannels over activePlan.channels
+    if (mediaPlanBuilderChannels && mediaPlanBuilderChannels.length > 0) {
+      const transformedChannels = transformMediaPlanBuilderChannels(mediaPlanBuilderChannels);
+      // Pass the original MediaPlanBuilder channels so we can recalculate monthly spend if needed
+      return transformActivePlanChannels(transformedChannels, mediaPlanBuilderChannels);
+    }
+    
     if (!activePlan || !activePlan.channels || activePlan.channels.length === 0) {
       return [];
     }
+    
+    return transformActivePlanChannels(activePlan.channels);
+  };
 
-    return activePlan.channels.map((channel) => {
-      // Ensure weekly_plans exists
-      const weeklyPlans = channel.weekly_plans || [];
-      
+  // Transform ActivePlan channels to MediaChannelCard format
+  const transformActivePlanChannels = (channels: ActivePlan['channels'], originalMediaPlanChannels?: MediaPlanChannel[]) => {
+    if (!channels || channels.length === 0) {
+      return [];
+    }
+
+    return channels.map((channel) => {
       const channelType = getChannelDisplayName(channel.channel, channel.detail);
+      console.log('transformActivePlanChannels: channelType:', channelType, 'from channel:', channel.channel, 'detail:', channel.detail);
+      console.log('transformActivePlanChannels: connectedAccounts:', connectedAccounts);
+      console.log('transformActivePlanChannels: connectedAccountIds:', connectedAccountIds);
       const accountId = connectedAccountIds[channelType] ?? null;
       const hasConnectedAccount = !!accountId && !!connectedAccounts[channelType];
+      console.log('transformActivePlanChannels: accountId:', accountId, 'hasConnectedAccount:', hasConnectedAccount, 'for channelType:', channelType);
       
-      // Get selected month for this channel (default to current month)
-      const selectedMonth = selectedMonths[channel.id] || new Date();
+      // Get selected month for this channel (default to earliest month with budget, or current month)
+      const selectedMonth = selectedMonths[channel.id] || findEarliestMonthWithBudget(channel.id) || new Date();
+      const selectedMonthKey = format(selectedMonth, 'yyyy-MM');
       
-      // Calculate month budget for selected month
-      const selectedMonthStart = startOfMonth(selectedMonth);
-      const selectedMonthEnd = endOfMonth(selectedMonth);
-      const selectedMonthWeeklyPlans = weeklyPlans.filter((wp) => {
-        if (!wp.week_commencing) return false;
-        const weekStart = parseISO(wp.week_commencing);
-        return isWithinInterval(weekStart, { start: selectedMonthStart, end: selectedMonthEnd });
-      });
-      const selectedMonthBudget = selectedMonthWeeklyPlans.reduce((sum, wp) => sum + (wp.budget_planned || 0), 0);
-      const avgWeeklyBudget = weeklyPlans.length > 0
-        ? weeklyPlans.reduce((sum, wp) => sum + (wp.budget_planned || 0), 0) / weeklyPlans.length
-        : 0;
-      const estimatedSelectedMonthBudget = avgWeeklyBudget * 4.33;
-      const finalSelectedMonthBudget = selectedMonthBudget > 0 ? selectedMonthBudget : estimatedSelectedMonthBudget;
+      // Check if this is a MediaPlanBuilder channel (has _monthlySpendTotals or we have original channels)
+      const isMediaPlanBuilderChannel = !!(channel as any)._monthlySpendTotals || (originalMediaPlanChannels && originalMediaPlanChannels.some(c => c.id === channel.id));
+      
+      // For MediaPlanBuilder channels, weekly plans already have commission applied
+      // For plan-entry channels, apply commission to weekly plans
+      const weeklyPlans = isMediaPlanBuilderChannel
+        ? (channel.weekly_plans || []) // MediaPlanBuilder: commission already applied
+        : (channel.weekly_plans || []).map((wp) => ({
+            ...wp,
+            budget_planned: Math.round(applyCommission(wp.budget_planned || 0)),
+          })); // Plan-entry: apply commission
+      
+      // For MediaPlanBuilder channels, use monthlySpend directly from flights (more accurate)
+      // For plan-entry channels, calculate from weekly plans
+      let finalSelectedMonthBudget: number;
+      
+      if (isMediaPlanBuilderChannel) {
+        // MediaPlanBuilder channel - calculate monthly spend directly from original channels
+        let monthlySpendTotal: number | undefined = undefined;
+        let foundInOriginalChannels = false;
+        
+        // First, try to get directly from original MediaPlanBuilder channels (most reliable)
+        if (originalMediaPlanChannels && originalMediaPlanChannels.length > 0) {
+          const originalChannel = originalMediaPlanChannels.find(c => c.id === channel.id);
+          
+          // Debug: check if channel was found
+          if (!originalChannel) {
+            console.log('Channel not found in originalMediaPlanChannels:', {
+              channelId: channel.id,
+              availableIds: originalMediaPlanChannels.map(c => c.id),
+              channelName: channel.channel
+            });
+          }
+          if (originalChannel && originalChannel.flights) {
+            // Get month key in getMonthKey format (unpadded) for lookup
+            const year = selectedMonth.getFullYear();
+            const month = selectedMonth.getMonth() + 1;
+            const getMonthKeyFormat = `${year}-${month}`; // e.g., "2024-12" or "2024-1"
+            
+            // Also try padded format
+            const paddedMonthKey = `${year}-${String(month).padStart(2, '0')}`; // e.g., "2024-12" or "2024-01"
+            
+            // Debug logging
+            console.log('Looking up monthly spend for:', {
+              channelId: channel.id,
+              selectedMonth: selectedMonthKey,
+              getMonthKeyFormat,
+              paddedMonthKey,
+              flightsCount: originalChannel.flights.length,
+              flightMonthKeys: originalChannel.flights.map(f => f.monthlySpend ? Object.keys(f.monthlySpend) : [])
+            });
+            
+            // Sum monthly spend from all flights for this month
+            monthlySpendTotal = 0;
+            originalChannel.flights.forEach((flight) => {
+              if (flight.monthlySpend) {
+                // Try all possible formats - check each one explicitly
+                let spend = 0;
+                if (flight.monthlySpend[getMonthKeyFormat] !== undefined) {
+                  spend = flight.monthlySpend[getMonthKeyFormat];
+                  foundInOriginalChannels = true;
+                } else if (flight.monthlySpend[paddedMonthKey] !== undefined) {
+                  spend = flight.monthlySpend[paddedMonthKey];
+                  foundInOriginalChannels = true;
+                } else if (flight.monthlySpend[selectedMonthKey] !== undefined) {
+                  spend = flight.monthlySpend[selectedMonthKey];
+                  foundInOriginalChannels = true;
+                } else {
+                  // Last resort: check all keys and try to match by normalizing
+                  Object.entries(flight.monthlySpend).forEach(([key, value]) => {
+                    // Normalize the key from flight to compare with our formats
+                    const normalizedKey = key.includes('-') 
+                      ? key.split('-').map((part, idx) => idx === 1 ? part.padStart(2, '0') : part).join('-')
+                      : key;
+                    const unpaddedKey = normalizedKey.replace(/-0+(\d)$/, '-$1');
+                    
+                    // Check if this key matches our selected month
+                    if (normalizedKey === selectedMonthKey || 
+                        normalizedKey === paddedMonthKey ||
+                        unpaddedKey === getMonthKeyFormat ||
+                        key === getMonthKeyFormat ||
+                        key === paddedMonthKey ||
+                        key === selectedMonthKey) {
+                      spend = value as number;
+                      foundInOriginalChannels = true;
+                    }
+                  });
+                }
+                
+                if (spend && !isNaN(spend)) {
+                  monthlySpendTotal! += spend;
+                }
+              }
+            });
+          }
+        }
+        
+        // If not found from original channels, try stored totals
+        if (!foundInOriginalChannels && (monthlySpendTotal === undefined || monthlySpendTotal === 0)) {
+          const monthlySpendTotals = (channel as any)._monthlySpendTotals || {};
+          monthlySpendTotal = monthlySpendTotals[selectedMonthKey];
+          
+          // If not found, try unpadded format
+          if (monthlySpendTotal === undefined || isNaN(monthlySpendTotal)) {
+            const unpaddedKey = selectedMonthKey.replace(/-0+(\d)$/, '-$1');
+            monthlySpendTotal = monthlySpendTotals[unpaddedKey];
+          }
+          
+          // If we found something in stored totals, mark as found
+          if (monthlySpendTotal !== undefined && !isNaN(monthlySpendTotal) && monthlySpendTotal > 0) {
+            foundInOriginalChannels = true;
+          }
+        }
+        
+        // If still not found, fall back to calculating from weekly plans
+        if (!foundInOriginalChannels && (monthlySpendTotal === undefined || isNaN(monthlySpendTotal) || monthlySpendTotal === 0)) {
+          const selectedMonthStart = startOfMonth(selectedMonth);
+          const selectedMonthEnd = endOfMonth(selectedMonth);
+          const selectedMonthWeeklyPlans = weeklyPlans.filter((wp) => {
+            if (!wp.week_commencing) return false;
+            const weekStart = parseISO(wp.week_commencing);
+            return isWithinInterval(weekStart, { start: selectedMonthStart, end: selectedMonthEnd });
+          });
+          // Sum weekly plans and convert back to dollars (they're in cents)
+          // Note: weekly plans already have commission applied, so we need to reverse it to get the original total
+          const weeklyPlansTotal = selectedMonthWeeklyPlans.reduce((sum, wp) => {
+            const budget = wp.budget_planned || 0;
+            return sum + (isNaN(budget) ? 0 : budget);
+          }, 0);
+          const monthlySpendWithCommission = weeklyPlansTotal / 100; // Convert from cents to dollars
+          
+          // Reverse commission to get the original amount before commission
+          // If commission is 20%, and we have $800 (after commission), original is $800 / 0.8 = $1000
+          if (commission > 0 && commission < 100) {
+            const commissionMultiplier = (100 - commission) / 100;
+            monthlySpendTotal = monthlySpendWithCommission / commissionMultiplier;
+          } else {
+            monthlySpendTotal = monthlySpendWithCommission;
+          }
+        }
+        
+        // Ensure we have a valid number
+        if (isNaN(monthlySpendTotal) || monthlySpendTotal === undefined) {
+          monthlySpendTotal = 0;
+        }
+        
+        // Planned Monthly Spend = total month spend from media plan builder (with commission applied)
+        // Apply commission to match what's shown in the media plan builder for that month
+        // Weekly plans already have commission applied, so monthly budget should too
+        const monthlySpendAfterCommission = applyCommission(monthlySpendTotal);
+        finalSelectedMonthBudget = Math.round(monthlySpendAfterCommission * 100); // Convert to cents
+        
+        // Debug logging
+        console.log('Final monthly spend calculation:', {
+          channelId: channel.id,
+          channelName: channel.channel,
+          selectedMonth: selectedMonthKey,
+          monthlySpendTotal,
+          finalSelectedMonthBudget,
+          foundInOriginalChannels
+        });
+        
+        // Final safety check
+        if (isNaN(finalSelectedMonthBudget)) {
+          finalSelectedMonthBudget = 0;
+        }
+      } else {
+        // Plan-entry channel - calculate from weekly plans
+        const selectedMonthStart = startOfMonth(selectedMonth);
+        const selectedMonthEnd = endOfMonth(selectedMonth);
+        const selectedMonthWeeklyPlans = weeklyPlans.filter((wp) => {
+          if (!wp.week_commencing) return false;
+          const weekStart = parseISO(wp.week_commencing);
+          return isWithinInterval(weekStart, { start: selectedMonthStart, end: selectedMonthEnd });
+        });
+        const selectedMonthBudget = selectedMonthWeeklyPlans.reduce((sum, wp) => sum + (wp.budget_planned || 0), 0);
+        const avgWeeklyBudget = weeklyPlans.length > 0
+          ? weeklyPlans.reduce((sum, wp) => sum + (wp.budget_planned || 0), 0) / weeklyPlans.length
+          : 0;
+        const estimatedSelectedMonthBudget = avgWeeklyBudget * 4.33;
+        finalSelectedMonthBudget = selectedMonthBudget > 0 ? selectedMonthBudget : estimatedSelectedMonthBudget;
+      }
       
       return {
         id: channel.id,
@@ -419,15 +856,19 @@ export default function MediaChannels({ activePlan, clientId }: MediaChannelsPro
         channelType: channelType,
         connectedAccount: connectedAccounts[channelType] ?? undefined,
         liveSpendData: liveSpendData[channel.id] || [],
-        connectedAccountId: accountId
+        connectedAccountId: accountId,
+        selectedMonth: selectedMonth
       };
     });
   };
 
   const channels = transformChannels();
 
-  // If no active plan, show empty state
-  if (!activePlan) {
+  // If no channels from either source, show empty state
+  const hasChannels = (mediaPlanBuilderChannels && mediaPlanBuilderChannels.length > 0) || 
+                      (activePlan && activePlan.channels && activePlan.channels.length > 0);
+  
+  if (!hasChannels) {
     return (
       <div className="space-y-6">
         <div className="flex items-center justify-between mb-4">
@@ -442,17 +883,23 @@ export default function MediaChannels({ activePlan, clientId }: MediaChannelsPro
     );
   }
 
-  // If active plan exists but no channels, show different message
-  if (channels.length === 0) {
+  // If channels exist but transformation resulted in empty array, show different message
+  if (channels.length === 0 && hasChannels) {
     return (
       <div className="space-y-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-2xl font-bold text-[#0f172a]">Media Channels</h2>
-          <p className="text-sm text-[#64748b]">No channels in active plan</p>
+          <p className="text-sm text-[#64748b]">No valid channels found</p>
         </div>
         <div className="text-center py-12 bg-white rounded-lg border border-[#e2e8f0]">
-          <p className="text-[#64748b] mb-4">The active media plan "{activePlan.name}" has no channels.</p>
-          <p className="text-sm text-[#94a3b8]">Add channels to the plan to see pacing data here.</p>
+          <p className="text-[#64748b] mb-4">
+            {mediaPlanBuilderChannels && mediaPlanBuilderChannels.length > 0
+              ? "Media plan builder has channels but they need channel names."
+              : activePlan 
+                ? `The active media plan "${activePlan.name}" has no channels.`
+                : "No channels found."}
+          </p>
+          <p className="text-sm text-[#94a3b8]">Add channels to see pacing data here.</p>
         </div>
       </div>
     );

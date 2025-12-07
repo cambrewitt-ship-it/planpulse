@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Line, ComposedChart, Dot, LineChart } from 'recharts';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, parseISO, addMonths, subMonths, addDays } from 'date-fns';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { RefreshCw, Plus, X, Edit2, Check, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface ActionPoint {
@@ -56,6 +56,7 @@ interface MediaChannelCardProps {
     connectedAccount?: string | null;
     liveSpendData?: LiveSpendItem[];
     connectedAccountId?: string | null;
+    selectedMonth?: Date;
   };
   onToggleAction?: (channelId: string, actionId: string) => void;
 }
@@ -64,15 +65,26 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
   const [completedActions, setCompletedActions] = useState<Set<string>>(
     new Set(channel.actionPoints.filter(a => a.completed).map(a => a.id))
   );
-  // Initialize selectedMonth from channel data (which comes from parent state)
+  // Initialize selectedMonth from channel prop (which comes from parent state)
   // The parent manages the selected month per channel
   const [selectedMonth, setSelectedMonth] = useState<Date>(() => {
+    // Use selectedMonth from channel prop if available, otherwise infer from spendData
+    if (channel.selectedMonth) {
+      return channel.selectedMonth;
+    }
     // Try to infer from spendData - get the first date's month
     if (channel.spendData && channel.spendData.length > 0) {
       return startOfMonth(parseISO(channel.spendData[0].date));
     }
     return new Date();
   });
+  
+  // Sync local state with prop when it changes
+  useEffect(() => {
+    if (channel.selectedMonth) {
+      setSelectedMonth(channel.selectedMonth);
+    }
+  }, [channel.selectedMonth]);
   const [newActionText, setNewActionText] = useState('');
   const [newActionCategory, setNewActionCategory] = useState<'SET UP' | 'ONGOING'>('SET UP');
   const [newActionResetFrequency, setNewActionResetFrequency] = useState<'weekly' | 'fortnightly' | 'monthly'>('weekly');
@@ -307,17 +319,17 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
     });
   };
 
-  // Filter data to show only the current month
+  // Filter data to show only the selected month
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const todayKey = format(today, 'yyyy-MM-dd');
-  const currentMonthStart = startOfMonth(today);
-  const currentMonthEnd = endOfMonth(today);
-  const currentMonthStartKey = format(currentMonthStart, 'yyyy-MM-dd');
-  const currentMonthEndKey = format(currentMonthEnd, 'yyyy-MM-dd');
+  const selectedMonthStart = startOfMonth(selectedMonth);
+  const selectedMonthEnd = endOfMonth(selectedMonth);
+  const selectedMonthStartKey = format(selectedMonthStart, 'yyyy-MM-dd');
+  const selectedMonthEndKey = format(selectedMonthEnd, 'yyyy-MM-dd');
   
-  // Filter to show only dates within the current month
-  const filteredData = channel.spendData.filter(d => d.date >= currentMonthStartKey && d.date <= currentMonthEndKey);
+  // Filter to show only dates within the selected month
+  const filteredData = channel.spendData.filter(d => d.date >= selectedMonthStartKey && d.date <= selectedMonthEndKey);
   
   // Sort by date to ensure proper order
   const sortedData = [...filteredData].sort((a, b) => a.date.localeCompare(b.date));
@@ -786,7 +798,6 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
                     size="sm"
                     variant="outline"
                     onClick={() => handleMonthChange(addMonths(selectedMonth, 1))}
-                    disabled={format(addMonths(selectedMonth, 1), 'yyyy-MM') > format(new Date(), 'yyyy-MM')}
                     className="h-7 w-7 p-0"
                   >
                     <ChevronRight className="h-3 w-3" />
@@ -960,7 +971,7 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
               </div>
               <div className="absolute left-0 right-[10px] bottom-[-20px] text-center">
                 <p className="text-base font-semibold text-[#64748b] tracking-wide">
-                  {format(today, 'MMMM').toUpperCase()}
+                  {format(selectedMonth, 'MMMM').toUpperCase()}
                 </p>
               </div>
             </div>

@@ -6,13 +6,14 @@ import { Badge } from '@/components/ui/badge';
 import { User, Plus, TrendingUp, Pencil } from 'lucide-react';
 import RollingCalendar from '@/components/RollingCalendar';
 import MediaChannels from '@/components/MediaChannels';
-import { MediaPlanGrid } from '@/components/media-plan-builder/media-plan-grid';
+import { MediaPlanGrid, MediaPlanChannel } from '@/components/media-plan-builder/media-plan-grid';
 import { useParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { getClients, getMediaPlans, getPlanById } from '@/lib/db/plans';
 import Link from 'next/link';
 import { format } from 'date-fns';
 import PlanEditForm from '@/components/plan-entry/PlanEditForm';
+import AdPlatformConnector from '@/components/AdPlatformConnector';
 
 interface Client {
   id: string;
@@ -39,10 +40,16 @@ export default function NewClientDashboard() {
   const [loading, setLoading] = useState(true);
   const [editingPlan, setEditingPlan] = useState<any>(null);
   const [loadingPlan, setLoadingPlan] = useState(false);
+  const [mediaPlanBuilderChannels, setMediaPlanBuilderChannels] = useState<MediaPlanChannel[]>([]);
+  const [commission, setCommission] = useState<number>(0);
+  const [isLoadingMediaPlanBuilder, setIsLoadingMediaPlanBuilder] = useState(true);
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isInitialLoadRef = useRef(true);
 
   useEffect(() => {
     if (clientId) {
       loadData();
+      loadMediaPlanBuilderData();
     }
   }, [clientId]);
 
@@ -93,6 +100,148 @@ export default function NewClientDashboard() {
 
   const handlePlanSaved = () => {
     loadData(); // Reload plans after save
+  };
+
+  // Load media plan builder data from the API
+  const loadMediaPlanBuilderData = async () => {
+    if (!clientId) return;
+    
+    setIsLoadingMediaPlanBuilder(true);
+    try {
+      const response = await fetch(`/api/clients/${clientId}/media-plan-builder`);
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.error('Failed to load media plan builder data:', {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorData
+        });
+        // If there's an error, just start with empty state
+        return;
+      }
+      const result = await response.json();
+      
+      if (result.data) {
+        console.log('Loaded media plan builder data:', {
+          channelsCount: result.data.channels?.length || 0,
+          commission: result.data.commission,
+          channels: result.data.channels
+        });
+        
+        // Ensure flights have proper Date objects
+        const processedChannels = (result.data.channels || []).map((channel: any) => ({
+          ...channel,
+          flights: (channel.flights || []).map((flight: any) => ({
+            ...flight,
+            startWeek: flight.startWeek ? new Date(flight.startWeek) : new Date(),
+            endWeek: flight.endWeek ? new Date(flight.endWeek) : new Date(),
+          })),
+        }));
+        
+        setMediaPlanBuilderChannels(processedChannels);
+        setCommission(result.data.commission || 0);
+      }
+    } catch (error) {
+      console.error('Error loading media plan builder data:', error);
+      // If there's an error, just start with empty state
+    } finally {
+      setIsLoadingMediaPlanBuilder(false);
+      isInitialLoadRef.current = false;
+    }
+  };
+
+  // Save media plan builder data to the API
+  const saveMediaPlanBuilderData = async (channels: MediaPlanChannel[], commission: number) => {
+    if (!clientId || isInitialLoadRef.current) return;
+    
+    try {
+      // Serialize dates to ISO strings before sending
+      const serializedChannels = channels.map(channel => ({
+        ...channel,
+        flights: (channel.flights || []).map((flight: any) => ({
+          ...flight,
+          startWeek: flight.startWeek instanceof Date 
+            ? flight.startWeek.toISOString() 
+            : (typeof flight.startWeek === 'string' ? flight.startWeek : new Date().toISOString()),
+          endWeek: flight.endWeek instanceof Date 
+            ? flight.endWeek.toISOString() 
+            : (typeof flight.endWeek === 'string' ? flight.endWeek : new Date().toISOString()),
+        })),
+      }));
+
+      const response = await fetch(`/api/clients/${clientId}/media-plan-builder`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          channels: serializedChannels,
+          commission,
+        }),
+      });
+      
+      if (!response.ok) {
+        let errorData: any = {};
+        let responseText = '';
+        try {
+          responseText = await response.clone().text();
+          if (responseText) {
+            errorData = JSON.parse(responseText);
+          }
+        } catch (e) {
+          // Response is not JSON
+          errorData = { rawResponse: responseText || 'Empty response' };
+        }
+        
+        console.error('Failed to save media plan builder data:', {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorData,
+          responseText: responseText.substring(0, 500), // First 500 chars
+          url: `/api/clients/${clientId}/media-plan-builder`,
+          headers: Object.fromEntries(response.headers.entries())
+        });
+        // Don't throw - just log the error so auto-save doesn't break the UI
+        return;
+      }
+      
+      console.log('Media plan builder data saved successfully');
+    } catch (error) {
+      console.error('Error saving media plan builder data:', error);
+    }
+  };
+
+  // Auto-save media plan builder data with debouncing
+  useEffect(() => {
+    // Skip auto-save on initial load
+    if (isInitialLoadRef.current || isLoadingMediaPlanBuilder) return;
+
+    // Clear existing timeout
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+
+    // Set new timeout to save after 1 second of no changes
+    saveTimeoutRef.current = setTimeout(() => {
+      saveMediaPlanBuilderData(mediaPlanBuilderChannels, commission);
+    }, 1000);
+
+    // Cleanup timeout on unmount
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [mediaPlanBuilderChannels, commission, clientId, isLoadingMediaPlanBuilder]);
+
+  // Wrapper to update channels and trigger auto-save
+  const handleChannelsChange = (channels: MediaPlanChannel[]) => {
+    setMediaPlanBuilderChannels(channels);
+  };
+
+  // Wrapper to update commission and trigger auto-save
+  const handleCommissionChange = (value: number) => {
+    setCommission(value);
   };
 
   if (loading) {
@@ -218,14 +367,35 @@ export default function NewClientDashboard() {
           <Card className="bg-white shadow-md">
             <CardContent className="p-6">
               <h2 className="text-xl font-semibold text-[#0f172a] mb-4">Media Plan Builder</h2>
-              <MediaPlanGrid />
+              {isLoadingMediaPlanBuilder ? (
+                <div className="flex items-center justify-center py-8">
+                  <p className="text-[#64748b]">Loading media plan builder...</p>
+                </div>
+              ) : (
+                <MediaPlanGrid 
+                  channels={mediaPlanBuilderChannels}
+                  onChannelsChange={handleChannelsChange}
+                  commission={commission}
+                  onCommissionChange={handleCommissionChange}
+                />
+              )}
             </CardContent>
           </Card>
         </section>
 
         {/* Media Channels Section */}
         <section className="mt-8" aria-label="Media channels budget pacing">
-          <MediaChannels activePlan={activePlan} clientId={clientId} />
+          <MediaChannels 
+            activePlan={activePlan} 
+            clientId={clientId}
+            mediaPlanBuilderChannels={mediaPlanBuilderChannels}
+            commission={commission}
+          />
+        </section>
+
+        {/* Ad Platform Connections Section */}
+        <section className="mt-8" aria-label="Ad platform connections">
+          <AdPlatformConnector clientId={clientId} />
         </section>
       </div>
 

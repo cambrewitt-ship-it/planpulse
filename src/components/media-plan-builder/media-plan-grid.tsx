@@ -137,15 +137,22 @@ function generateWeeklyDateRanges(startDate: Date, endDate: Date): WeekRange[] {
 interface MediaPlanGridProps {
   channels?: MediaPlanChannel[];
   onChannelsChange?: (channels: MediaPlanChannel[]) => void;
+  commission?: number;
+  onCommissionChange?: (commission: number) => void;
 }
 
-export function MediaPlanGrid({ channels: externalChannels, onChannelsChange }: MediaPlanGridProps) {
+export function MediaPlanGrid({ channels: externalChannels, onChannelsChange, commission: externalCommission, onCommissionChange }: MediaPlanGridProps) {
   // Use internal state if not controlled
   const [internalChannels, setInternalChannels] = useState<MediaPlanChannel[]>(() => [
     createEmptyChannel(),
   ]);
   const channels = externalChannels ?? internalChannels;
   const setChannels = onChannelsChange ?? setInternalChannels;
+  
+  // Commission state
+  const [internalCommission, setInternalCommission] = useState<number>(0);
+  const commission = externalCommission ?? internalCommission;
+  const setCommission = onCommissionChange ?? setInternalCommission;
   
   // Drag state
   const [dragState, setDragState] = useState<{
@@ -259,8 +266,24 @@ const getMonthKey = (date: Date): string => {
 
   // Check if a week overlaps with a flight
   const weekOverlapsFlight = (week: WeekRange, flight: MediaFlight): boolean => {
+    // Convert dates to Date objects if they're strings
+    const flightStart = flight.startWeek instanceof Date 
+      ? flight.startWeek 
+      : new Date(flight.startWeek);
+    const flightEnd = flight.endWeek instanceof Date 
+      ? flight.endWeek 
+      : new Date(flight.endWeek);
+    
     // Week overlaps if it starts before flight ends and ends after flight starts
-    return week.weekStart <= flight.endWeek && week.weekEnd >= flight.startWeek;
+    // Compare dates by setting time to start of day to avoid time component issues
+    const normalizeDate = (date: Date) => {
+      const normalized = new Date(date);
+      normalized.setHours(0, 0, 0, 0);
+      return normalized;
+    };
+    
+    return normalizeDate(week.weekStart) <= normalizeDate(flightEnd) && 
+           normalizeDate(week.weekEnd) >= normalizeDate(flightStart);
   };
 
   // Get the flight that covers a week (returns first matching flight)
@@ -373,13 +396,25 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
           const selectedWeeks = weeks.slice(startIdx, endIdx + 1);
           const overlappingFlights = channel.flights.filter(flight => {
             // Check if flight overlaps with selected range
-            const flightStart = new Date(flight.startWeek);
-            const flightEnd = new Date(flight.endWeek);
+            const flightStart = flight.startWeek instanceof Date 
+              ? flight.startWeek 
+              : new Date(flight.startWeek);
+            const flightEnd = flight.endWeek instanceof Date 
+              ? flight.endWeek 
+              : new Date(flight.endWeek);
             const selectionStart = selectedWeeks[0].weekStart;
             const selectionEnd = selectedWeeks[selectedWeeks.length - 1].weekEnd;
             
+            // Normalize dates for comparison
+            const normalizeDate = (date: Date) => {
+              const normalized = new Date(date);
+              normalized.setHours(0, 0, 0, 0);
+              return normalized;
+            };
+            
             // Flight overlaps if it starts before selection ends and ends after selection starts
-            return flightStart <= selectionEnd && flightEnd >= selectionStart;
+            return normalizeDate(flightStart) <= normalizeDate(selectionEnd) && 
+                   normalizeDate(flightEnd) >= normalizeDate(selectionStart);
           });
           
           if (overlappingFlights.length > 0) {
@@ -472,16 +507,28 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
       const sharesMonths = Array.from(selectionMonths).some(month => flightMonths.has(month));
       
       // Check if flight overlaps or is adjacent to selection
-      const flightStart = new Date(flight.startWeek);
-      const flightEnd = new Date(flight.endWeek);
+      const flightStart = flight.startWeek instanceof Date 
+        ? flight.startWeek 
+        : new Date(flight.startWeek);
+      const flightEnd = flight.endWeek instanceof Date 
+        ? flight.endWeek 
+        : new Date(flight.endWeek);
       const selectionStart = startWeek.weekStart;
       const selectionEnd = endWeek.weekEnd;
       
+      // Normalize dates for comparison
+      const normalizeDate = (date: Date) => {
+        const normalized = new Date(date);
+        normalized.setHours(0, 0, 0, 0);
+        return normalized;
+      };
+      
       // Overlaps if flight starts before selection ends and ends after selection starts
       // Adjacent if they're next to each other (within 1 week)
-      const overlaps = flightStart <= selectionEnd && flightEnd >= selectionStart;
-      const isAdjacent = Math.abs(flightEnd.getTime() - selectionStart.getTime()) <= 7 * 24 * 60 * 60 * 1000 ||
-                         Math.abs(flightStart.getTime() - selectionEnd.getTime()) <= 7 * 24 * 60 * 60 * 1000;
+      const overlaps = normalizeDate(flightStart) <= normalizeDate(selectionEnd) && 
+                       normalizeDate(flightEnd) >= normalizeDate(selectionStart);
+      const isAdjacent = Math.abs(normalizeDate(flightEnd).getTime() - normalizeDate(selectionStart).getTime()) <= 7 * 24 * 60 * 60 * 1000 ||
+                         Math.abs(normalizeDate(flightStart).getTime() - normalizeDate(selectionEnd).getTime()) <= 7 * 24 * 60 * 60 * 1000;
       
       if (sharesMonths && (overlaps || isAdjacent)) {
         combinableFlights.push(flight);
@@ -515,8 +562,12 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
       let combinedEnd = endWeek.weekEnd;
       
       combinableFlights.forEach(flight => {
-        const flightStart = new Date(flight.startWeek);
-        const flightEnd = new Date(flight.endWeek);
+        const flightStart = flight.startWeek instanceof Date 
+          ? flight.startWeek 
+          : new Date(flight.startWeek);
+        const flightEnd = flight.endWeek instanceof Date 
+          ? flight.endWeek 
+          : new Date(flight.endWeek);
         if (flightStart < combinedStart) combinedStart = flightStart;
         if (flightEnd > combinedEnd) combinedEnd = flightEnd;
       });
@@ -671,6 +722,29 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
 
   return (
     <div className="w-full overflow-hidden border border-gray-300 rounded-lg relative">
+      {/* Commission Header */}
+      <div className="flex justify-end items-center gap-2 px-4 py-2 bg-gray-50 border-b border-gray-300">
+        <Label htmlFor="commission" className="text-sm font-medium text-gray-700">
+          Commission:
+        </Label>
+        <div className="flex items-center gap-1">
+          <Input
+            id="commission"
+            type="number"
+            min="0"
+            max="100"
+            step="0.1"
+            value={commission || ''}
+            onChange={(e) => {
+              const value = parseFloat(e.target.value) || 0;
+              setCommission(value);
+            }}
+            className="w-20 h-8 text-sm"
+            placeholder="0"
+          />
+          <span className="text-sm text-gray-600">%</span>
+        </div>
+      </div>
       <div className="overflow-x-auto w-full">
         <table className="border-collapse w-full">
           <thead className="bg-gray-100 sticky top-0 z-10">
@@ -942,14 +1016,29 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                               );
                             })()}
                             {channel.flights?.map((flight) => {
+                              // Convert dates to Date objects if they're strings
+                              const flightStart = flight.startWeek instanceof Date 
+                                ? flight.startWeek 
+                                : new Date(flight.startWeek);
+                              const flightEnd = flight.endWeek instanceof Date 
+                                ? flight.endWeek 
+                                : new Date(flight.endWeek);
+                              
+                              // Normalize dates for comparison (ignore time component)
+                              const normalizeDate = (date: Date) => {
+                                const normalized = new Date(date);
+                                normalized.setHours(0, 0, 0, 0);
+                                return normalized.getTime();
+                              };
+                              
                               const flightStartIndex = weeks.findIndex(
-                                (w) => w.weekStart.getTime() === new Date(flight.startWeek).getTime()
+                                (w) => normalizeDate(w.weekStart) === normalizeDate(flightStart)
                               );
                               const flightEndIndex = weeks.findIndex(
-                                (w) => w.weekEnd.getTime() === new Date(flight.endWeek).getTime()
+                                (w) => normalizeDate(w.weekEnd) === normalizeDate(flightEnd)
                               );
 
-                              if (weekIdx === flightStartIndex) {
+                              if (weekIdx === flightStartIndex && flightStartIndex !== -1) {
                                 const channelBudgetColor = getChannelBudgetColor(channel.channelName);
                                 return (
                                   <div

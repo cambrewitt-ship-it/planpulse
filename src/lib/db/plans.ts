@@ -435,3 +435,154 @@ export async function deleteMediaPlan(planId: string) {
 
   return { success: true };
 }
+
+// Media Plan Builder functions
+export interface MediaPlanBuilderData {
+  channels: any[];
+  commission: number;
+}
+
+// Convert Date objects to ISO strings for JSON storage
+function serializeMediaPlanBuilderData(data: MediaPlanBuilderData): any {
+  const serializedChannels = (data.channels || []).map(channel => ({
+    ...channel,
+    flights: (channel.flights || []).map((flight: any) => {
+      let startWeek: string;
+      let endWeek: string;
+      
+      // Handle startWeek
+      if (flight.startWeek instanceof Date) {
+        startWeek = flight.startWeek.toISOString();
+      } else if (typeof flight.startWeek === 'string') {
+        startWeek = flight.startWeek;
+      } else {
+        startWeek = new Date().toISOString();
+      }
+      
+      // Handle endWeek
+      if (flight.endWeek instanceof Date) {
+        endWeek = flight.endWeek.toISOString();
+      } else if (typeof flight.endWeek === 'string') {
+        endWeek = flight.endWeek;
+      } else {
+        endWeek = new Date().toISOString();
+      }
+      
+      return {
+        ...flight,
+        startWeek,
+        endWeek,
+      };
+    }),
+  }));
+
+  return {
+    channels: serializedChannels,
+    commission: typeof data.commission === 'number' ? data.commission : 0,
+  };
+}
+
+// Convert ISO strings back to Date objects
+function deserializeMediaPlanBuilderData(data: any): MediaPlanBuilderData {
+  const deserializedChannels = (data.channels || []).map((channel: any) => ({
+    ...channel,
+    flights: (channel.flights || []).map((flight: any) => ({
+      ...flight,
+      startWeek: flight.startWeek ? new Date(flight.startWeek) : new Date(),
+      endWeek: flight.endWeek ? new Date(flight.endWeek) : new Date(),
+    })),
+  }));
+
+  return {
+    channels: deserializedChannels,
+    commission: data.commission || 0,
+  };
+}
+
+export async function saveClientMediaPlanBuilder(
+  clientId: string,
+  data: MediaPlanBuilderData,
+  supabaseClient?: typeof supabase
+) {
+  const dbClient = supabaseClient || supabase;
+  
+  console.log('saveClientMediaPlanBuilder called with:', { 
+    clientId, 
+    channelsCount: data.channels?.length || 0, 
+    commission: data.commission 
+  });
+
+  try {
+    const serializedData = serializeMediaPlanBuilderData(data);
+    console.log('Serialized data:', { 
+      channelsCount: serializedData.channels?.length || 0, 
+      commission: serializedData.commission 
+    });
+
+    // Use upsert to insert or update
+    const { data: result, error } = await dbClient
+      .from('client_media_plan_builder')
+      .upsert(
+        {
+          client_id: clientId,
+          channels: serializedData.channels,
+          commission: serializedData.commission,
+        },
+        {
+          onConflict: 'client_id',
+        }
+      )
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Database error in saveClientMediaPlanBuilder:', error);
+      console.error('Error details:', {
+        message: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint
+      });
+      throw error;
+    }
+    
+    console.log('Successfully saved to database');
+    return result;
+  } catch (error: any) {
+    console.error('Error in saveClientMediaPlanBuilder:', error);
+    // If it's already a Supabase error, re-throw it
+    if (error.code || error.message) {
+      throw error;
+    }
+    // Otherwise, wrap it in a more descriptive error
+    throw new Error(`Failed to save media plan builder data: ${error.message || 'Unknown error'}`);
+  }
+}
+
+export async function getClientMediaPlanBuilder(
+  clientId: string,
+  supabaseClient?: typeof supabase
+): Promise<MediaPlanBuilderData | null> {
+  const dbClient = supabaseClient || supabase;
+  
+  const { data, error } = await dbClient
+    .from('client_media_plan_builder')
+    .select('*')
+    .eq('client_id', clientId)
+    .single();
+
+  if (error) {
+    // If no data exists yet, return null (not an error)
+    if (error.code === 'PGRST116') {
+      return null;
+    }
+    throw error;
+  }
+
+  if (!data) return null;
+
+  return deserializeMediaPlanBuilderData({
+    channels: data.channels,
+    commission: data.commission,
+  });
+}

@@ -59,10 +59,65 @@ export async function GET(request: NextRequest) {
       .eq('client_id', clientId)
       .eq('platform', platform)
       .eq('connection_status', 'active')
-      .single();
+      .maybeSingle();
 
-    if (connectionError || !connection) {
-      // No active connection found
+    if (connectionError) {
+      console.error('Error querying ad_platform_connections:', connectionError);
+      return NextResponse.json({
+        accountName: null,
+        accountId: null,
+        hasConnection: false,
+      });
+    }
+
+    // For Meta Ads, if no client-specific connection exists, check if user has any connection
+    // and if accounts exist - Meta Ads accounts are user-level, not client-level
+    if (!connection && platform === 'meta-ads') {
+      // Check if user has any Meta Ads connection (any client)
+      const { data: anyConnection } = await supabase
+        .from('ad_platform_connections')
+        .select('connection_id, connection_status')
+        .eq('user_id', user.id)
+        .eq('platform', platform)
+        .eq('connection_status', 'active')
+        .limit(1)
+        .maybeSingle();
+      
+      // If user has a connection (even for a different client), check for accounts
+      if (anyConnection) {
+        const { data: account, error: accountError } = await supabase
+          .from('meta_ads_accounts')
+          .select('account_name, account_id')
+          .eq('user_id', user.id)
+          .eq('is_active', true)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (accountError) {
+          console.error('Error fetching Meta Ads account:', accountError);
+        }
+
+        // Return account if found, even though connection is for a different client
+        if (account) {
+          return NextResponse.json({
+            accountName: account.account_name || null,
+            accountId: account.account_id || null,
+            hasConnection: true,
+          });
+        }
+      }
+      
+      // No connection found at all
+      return NextResponse.json({
+        accountName: null,
+        accountId: null,
+        hasConnection: false,
+      });
+    }
+
+    if (!connection) {
+      // No active connection found for this client (non-Meta platforms)
       return NextResponse.json({
         accountName: null,
         accountId: null,
@@ -115,6 +170,12 @@ export async function GET(request: NextRequest) {
           accountId: null,
           hasConnection: true,
         });
+      }
+
+      // If no account found, still return hasConnection: true since the connection exists
+      // but log it for debugging
+      if (!account) {
+        console.warn(`Meta Ads connection exists for client ${clientId} but no active account found for user ${user.id}`);
       }
 
       return NextResponse.json({
