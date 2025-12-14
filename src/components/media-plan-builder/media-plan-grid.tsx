@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -154,6 +154,9 @@ export function MediaPlanGrid({ channels: externalChannels, onChannelsChange, co
   const commission = externalCommission ?? internalCommission;
   const setCommission = onCommissionChange ?? setInternalCommission;
   
+  // Year navigation state (default to current year)
+  const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
+  
   // Drag state
   const [dragState, setDragState] = useState<{
     channelId: string | null;
@@ -196,11 +199,14 @@ export function MediaPlanGrid({ channels: externalChannels, onChannelsChange, co
       hasFocusedInputRef.current = false;
     }
   }, [activeSelection]);
-  // Hardcoded date range: Dec 1 2024 - Feb 28 2025
-  const startDate = new Date(2024, 11, 1); // December 1, 2024 (month is 0-indexed)
-  const endDate = new Date(2025, 1, 28); // February 28, 2025
   
-  const weeks = generateWeeklyDateRanges(startDate, endDate);
+  // Generate date range based on selected year (full calendar year)
+  const startDate = new Date(selectedYear, 0, 1); // January 1 of selected year
+  const endDate = new Date(selectedYear, 11, 31); // December 31 of selected year
+  
+  // Generate weeks and filter to only include weeks that start in the selected year
+  const allWeeks = generateWeeklyDateRanges(startDate, endDate);
+  const weeks = allWeeks.filter(week => week.weekStart.getFullYear() === selectedYear);
   
   // Group weeks by month
   const monthGroups: Array<{ month: string; weeks: WeekRange[] }> = [];
@@ -722,27 +728,62 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
 
   return (
     <div className="w-full overflow-hidden border border-gray-300 rounded-lg relative">
-      {/* Commission Header */}
-      <div className="flex justify-end items-center gap-2 px-4 py-2 bg-gray-50 border-b border-gray-300">
-        <Label htmlFor="commission" className="text-sm font-medium text-gray-700">
-          Commission:
-        </Label>
-        <div className="flex items-center gap-1">
-          <Input
-            id="commission"
-            type="number"
-            min="0"
-            max="100"
-            step="0.1"
-            value={commission || ''}
-            onChange={(e) => {
-              const value = parseFloat(e.target.value) || 0;
-              setCommission(value);
-            }}
-            className="w-20 h-8 text-sm"
-            placeholder="0"
-          />
-          <span className="text-sm text-gray-600">%</span>
+      {/* Year Navigation and Commission Header */}
+      <div className="flex justify-between items-center gap-4 px-4 py-3 bg-gray-50 border-b border-gray-300">
+        {/* Year Navigation */}
+        <div className="flex items-center gap-3">
+          <Label className="text-sm font-medium text-gray-700">
+            Year:
+          </Label>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => setSelectedYear(selectedYear - 1)}
+              className="h-8 w-8"
+              title="Previous year"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <div className="min-w-[80px] text-center">
+              <span className="text-lg font-semibold text-gray-900">
+                {selectedYear}
+              </span>
+            </div>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => setSelectedYear(selectedYear + 1)}
+              className="h-8 w-8"
+              title="Next year"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+        
+        {/* Commission Input */}
+        <div className="flex items-center gap-2">
+          <Label htmlFor="commission" className="text-sm font-medium text-gray-700">
+            Commission:
+          </Label>
+          <div className="flex items-center gap-1">
+            <Input
+              id="commission"
+              type="number"
+              min="0"
+              max="100"
+              step="0.1"
+              value={commission || ''}
+              onChange={(e) => {
+                const value = parseFloat(e.target.value) || 0;
+                setCommission(value);
+              }}
+              className="w-20 h-8 text-sm"
+              placeholder="0"
+            />
+            <span className="text-sm text-gray-600">%</span>
+          </div>
         </div>
       </div>
       <div className="overflow-x-auto w-full">

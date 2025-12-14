@@ -119,11 +119,12 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
     return null;
   };
 
-  // Initialize selectedMonths with earliest month with budget for each channel
+  // Initialize selectedMonths with current month for each channel
   useEffect(() => {
     if (!mediaPlanBuilderChannels && !activePlan) return;
     
     const initialSelectedMonths: Record<string, Date> = {};
+    const currentMonth = startOfMonth(new Date()); // Default to current month
     
     // Get all channel IDs
     const channelIds: string[] = [];
@@ -137,15 +138,12 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
       });
     }
     
-    // Find earliest month with budget for each channel
+    // Set current month as default for each channel
     channelIds.forEach(channelId => {
-      const earliestMonth = findEarliestMonthWithBudget(channelId);
-      if (earliestMonth) {
-        initialSelectedMonths[channelId] = earliestMonth;
-      }
+      initialSelectedMonths[channelId] = currentMonth;
     });
     
-    // Update state if we found any months, preserving existing selections
+    // Update state if we found any channels, preserving existing selections
     if (Object.keys(initialSelectedMonths).length > 0) {
       setSelectedMonths(prev => {
         const updated = { ...prev };
@@ -271,6 +269,7 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
             platform: 'google-ads',
             startDate,
             endDate,
+            clientId: clientId || undefined,
           }),
         });
       } else {
@@ -638,8 +637,8 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
       const hasConnectedAccount = !!accountId && !!connectedAccounts[channelType];
       console.log('transformActivePlanChannels: accountId:', accountId, 'hasConnectedAccount:', hasConnectedAccount, 'for channelType:', channelType);
       
-      // Get selected month for this channel (default to earliest month with budget, or current month)
-      const selectedMonth = selectedMonths[channel.id] || findEarliestMonthWithBudget(channel.id) || new Date();
+      // Get selected month for this channel (default to current month)
+      const selectedMonth = selectedMonths[channel.id] || startOfMonth(new Date());
       const selectedMonthKey = format(selectedMonth, 'yyyy-MM');
       
       // Check if this is a MediaPlanBuilder channel (has _monthlySpendTotals or we have original channels)
@@ -842,7 +841,11 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
           selectedMonth
         ),
         isMetaAds: isMetaAdsChannel(channel.channel),
-        onRefreshSpend: () => fetchLiveSpendData(channel.id, channel.channel, selectedMonth),
+        onRefreshSpend: (month?: Date) => {
+          // Use the provided month, or fall back to the current selected month for this channel
+          const currentMonth = month || selectedMonths[channel.id] || selectedMonth;
+          fetchLiveSpendData(channel.id, channel.channel, currentMonth);
+        },
         onMonthChange: (month: Date) => {
           // Update selected month and fetch data for the new month
           setSelectedMonths(prev => ({ ...prev, [channel.id]: month }));

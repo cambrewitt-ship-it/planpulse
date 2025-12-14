@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import { Nango } from '@nangohq/node';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import type { Database } from '@/types/database';
+import { toNangoPlatform } from '@/lib/platform-mapping';
 
 export async function POST(request: NextRequest) {
   console.log('=== POST /api/ads/fetch-spend ===');
@@ -12,7 +13,7 @@ export async function POST(request: NextRequest) {
     // Parse request body
     const body = await request.json();
     console.log('Request body:', body);
-    const { platform, startDate, endDate } = body;
+    const { platform, startDate, endDate, clientId } = body;
 
     // Validate required parameters
     if (!platform || !startDate || !endDate) {
@@ -69,13 +70,20 @@ export async function POST(request: NextRequest) {
     }
 
     // Look up user's connection for the platform
-    // Get the most recent active connection (user may have multiple connections for different clients)
-    const { data: connections, error: dbError } = await supabase
+    // If clientId is provided, filter by it; otherwise get the most recent connection
+    let query = supabase
       .from('ad_platform_connections')
-      .select('connection_id, platform, connection_status')
+      .select('connection_id, platform, connection_status, client_id')
       .eq('user_id', user.id)
       .eq('platform', platform)
-      .eq('connection_status', 'active')
+      .eq('connection_status', 'active');
+    
+    // Filter by client_id if provided
+    if (clientId) {
+      query = query.eq('client_id', clientId);
+    }
+    
+    const { data: connections, error: dbError } = await query
       .order('created_at', { ascending: false })
       .limit(1);
 
@@ -116,7 +124,9 @@ export async function POST(request: NextRequest) {
     console.log('Platform:', platform);
     console.log('Date Range:', { startDate, endDate });
     console.log('User ID:', user.id);
+    console.log('Client ID:', clientId);
     console.log('Connection ID:', connection.connection_id);
+    console.log('Connection client_id:', connection.client_id);
 
     if (platform === 'google-ads') {
       try {
@@ -138,28 +148,46 @@ export async function POST(request: NextRequest) {
 
         console.log(`Found ${googleAdsAccounts.length} Google Ads account(s)`);
 
-        // Step 2: Get the OAuth access token from Nango's connection
-        // We'll use Nango's API to get the connection details
-        const nangoResponse = await fetch(
-          `https://api.nango.dev/connection/${connection.connection_id}?provider_config_key=google-ads`,
-          {
-            method: 'GET',
-            headers: {
-              'Authorization': `Bearer ${nangoSecretKey}`,
-              'Content-Type': 'application/json'
-            }
+        // Step 2: Get the OAuth access token from Nango's connection using SDK
+        console.log('Step 2: Getting access token from Nango...');
+        console.log('Connection ID:', connection.connection_id);
+        console.log('Provider config key:', toNangoPlatform('google-ads'));
+        
+        let nangoConnection;
+        try {
+          nangoConnection = await nango.getConnection(toNangoPlatform('google-ads'), connection.connection_id);
+          console.log('Nango connection retrieved successfully');
+        } catch (nangoError: any) {
+          console.error('Failed to get Nango connection:', {
+            status: nangoError.status,
+            message: nangoError.message,
+            code: nangoError.code,
+            response: nangoError.response
+          });
+          
+          // Check if connection exists in Nango
+          try {
+            const allConnections = await nango.listConnections();
+            console.log('All Nango connections:', JSON.stringify(allConnections, null, 2));
+          } catch (listError) {
+            console.error('Could not list connections:', listError);
           }
-        );
-
-        if (!nangoResponse.ok) {
-          throw new Error(`Failed to get Nango connection: ${nangoResponse.status}`);
+          
+          return Response.json({
+            success: false,
+            error: 'Google Ads connection not found or expired. Please reconnect your Google Ads account.',
+            details: nangoError.message,
+            connectionId: connection.connection_id
+          }, { status: 424 });
         }
-
-        const nangoData = await nangoResponse.json();
-        const accessToken = nangoData.credentials?.access_token;
+        
+        const accessToken = nangoConnection.credentials?.access_token;
 
         if (!accessToken) {
-          throw new Error('No access token found in Nango connection');
+          return Response.json({
+            success: false,
+            error: 'No access token found in Google Ads connection. Please reconnect your account.'
+          }, { status: 401 });
         }
 
         console.log('✓ Got OAuth token from Nango');

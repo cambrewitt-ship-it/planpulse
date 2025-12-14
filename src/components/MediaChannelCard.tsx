@@ -49,7 +49,7 @@ interface MediaChannelCardProps {
     monthBudget: number;
     spendData: SpendData[];
     isMetaAds?: boolean;
-    onRefreshSpend?: () => void;
+    onRefreshSpend?: (month?: Date) => void;
     isFetchingSpend?: boolean;
     spendError?: string;
     onActionPointsChange?: () => void;
@@ -851,36 +851,12 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
           {/* Right Section - Chart (60%) */}
           <div className="lg:col-span-3">
             <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-3">
-                <h4 className="text-sm font-semibold text-[#0f172a]">Budget Pacing</h4>
-                {/* Month Navigation */}
-                <div className="flex items-center gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleMonthChange(subMonths(selectedMonth, 1))}
-                    className="h-7 w-7 p-0"
-                  >
-                    <ChevronLeft className="h-3 w-3" />
-                  </Button>
-                  <span className="text-xs font-medium text-[#0f172a] min-w-[80px] text-center">
-                    {format(selectedMonth, 'MMM yyyy')}
-                  </span>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleMonthChange(addMonths(selectedMonth, 1))}
-                    className="h-7 w-7 p-0"
-                  >
-                    <ChevronRight className="h-3 w-3" />
-                  </Button>
-                </div>
-              </div>
+              <h4 className="text-sm font-semibold text-[#0f172a]">Budget Pacing</h4>
               {channel.onRefreshSpend && (
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={channel.onRefreshSpend}
+                  onClick={() => channel.onRefreshSpend?.(selectedMonth)}
                   disabled={channel.isFetchingSpend}
                   className="h-7 text-xs"
                 >
@@ -895,8 +871,32 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
               </div>
             )}
             
-            {/* Stats Section */}
-            <div className="grid grid-cols-3 gap-3 mb-4">
+            {/* Stats Section with Month Navigation */}
+            <div className="flex items-start gap-3 mb-4">
+              {/* Month Navigation */}
+              <div className="flex items-center gap-2 pt-3">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleMonthChange(subMonths(selectedMonth, 1))}
+                  className="h-7 w-7 p-0"
+                >
+                  <ChevronLeft className="h-3 w-3" />
+                </Button>
+                <span className="text-xs font-medium text-[#0f172a] min-w-[80px] text-center">
+                  {format(selectedMonth, 'MMM yyyy')}
+                </span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleMonthChange(addMonths(selectedMonth, 1))}
+                  className="h-7 w-7 p-0"
+                >
+                  <ChevronRight className="h-3 w-3" />
+                </Button>
+              </div>
+              {/* Stats Columns */}
+              <div className="grid grid-cols-3 gap-3 flex-1">
               <div className="bg-[#f8fafc] rounded-lg p-3 border border-[#e2e8f0]">
                 <p className="text-xs text-[#64748b] mb-1">Current Daily Spend</p>
                 <p className="text-lg font-semibold text-[#0f172a]">
@@ -918,6 +918,7 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
                     ? `$${projectedMonthlySpend.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                     : '—'}
                 </p>
+              </div>
               </div>
             </div>
 
