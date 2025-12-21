@@ -8,10 +8,10 @@
  */
 
 // Internal platform names (used in our database)
-export type InternalPlatform = 'google-ads' | 'meta-ads';
+export type InternalPlatform = 'google-ads' | 'meta-ads' | 'google-analytics';
 
 // Nango provider config keys
-export type NangoPlatform = 'google-ads' | 'facebook';
+export type NangoPlatform = 'google-ads' | 'facebook' | 'google-analytics';
 
 /**
  * Convert internal platform name to Nango provider config key
@@ -24,6 +24,9 @@ export function toNangoPlatform(internalPlatform: InternalPlatform | string): Na
   }
   if (internalPlatform === 'google-ads') {
     return 'google-ads';
+  }
+  if (internalPlatform === 'google-analytics') {
+    return 'google-analytics';
   }
   // Fallback: if already a Nango platform name, return as-is
   return internalPlatform as NangoPlatform;
@@ -41,6 +44,9 @@ export function toInternalPlatform(nangoPlatform: NangoPlatform | string): Inter
   if (nangoPlatform === 'google-ads') {
     return 'google-ads';
   }
+  if (nangoPlatform === 'google-analytics') {
+    return 'google-analytics';
+  }
   // Fallback: if already internal platform name, return as-is
   return nangoPlatform as InternalPlatform;
 }
@@ -56,6 +62,7 @@ export function getPlatformDisplayName(platform: string): string {
   const displayNames: Record<InternalPlatform, string> = {
     'google-ads': 'Google Ads',
     'meta-ads': 'Meta Ads (Facebook)',
+    'google-analytics': 'Google Analytics',
   };
   
   return displayNames[internalPlatform] || platform;

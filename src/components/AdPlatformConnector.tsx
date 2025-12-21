@@ -10,12 +10,13 @@ import { Label } from './ui/label';
 interface ConnectionStatus {
   'google-ads': boolean;
   'facebook': boolean;
+  'google-analytics': boolean;
   'linkedin': boolean;
   'tiktok': boolean;
 }
 
 interface Platform {
-  id: 'google-ads' | 'facebook' | 'linkedin' | 'tiktok';
+  id: 'google-ads' | 'facebook' | 'google-analytics' | 'linkedin' | 'tiktok';
   name: string;
   displayName: string;
   description: string;
@@ -48,6 +49,23 @@ interface DiscoveredMetaAccount {
   currency: string;
 }
 
+interface GoogleAnalyticsAccount {
+  id: string;
+  propertyId: string;
+  propertyName: string | null;
+  accountId: string | null;
+  accountName: string | null;
+  isActive: boolean;
+  createdAt: string;
+}
+
+interface DiscoveredGoogleAnalyticsAccount {
+  propertyId: string;
+  propertyName: string;
+  accountId: string;
+  accountName: string;
+}
+
 const platforms: Platform[] = [
   {
     id: 'google-ads',
@@ -64,6 +82,14 @@ const platforms: Platform[] = [
     description: 'Connect your Meta advertising account',
     icon: '📘', // Replace with actual logo
     color: 'from-blue-600 to-indigo-600',
+  },
+  {
+    id: 'google-analytics',
+    name: 'Google Analytics',
+    displayName: 'Google Analytics',
+    description: 'Connect your Google Analytics account',
+    icon: '📊',
+    color: 'from-orange-500 to-yellow-500',
   },
   {
     id: 'linkedin',
@@ -93,6 +119,7 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>({
     'google-ads': false,
     'facebook': false,
+    'google-analytics': false,
   });
   const [loadingStates, setLoadingStates] = useState<Record<string, boolean>>({});
   const [isInitialLoading, setIsInitialLoading] = useState(true);
@@ -116,6 +143,16 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
   const [isSavingMetaAccounts, setIsSavingMetaAccounts] = useState(false);
   const [metaAccountMessage, setMetaAccountMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  // Google Analytics account management state
+  const [showGoogleAnalyticsAccountManagement, setShowGoogleAnalyticsAccountManagement] = useState(false);
+  const [googleAnalyticsAccounts, setGoogleAnalyticsAccounts] = useState<GoogleAnalyticsAccount[]>([]);
+  const [discoveredGoogleAnalyticsAccounts, setDiscoveredGoogleAnalyticsAccounts] = useState<DiscoveredGoogleAnalyticsAccount[]>([]);
+  const [selectedGoogleAnalyticsAccounts, setSelectedGoogleAnalyticsAccounts] = useState<Set<string>>(new Set());
+  const [isLoadingGoogleAnalyticsAccounts, setIsLoadingGoogleAnalyticsAccounts] = useState(false);
+  const [isDiscoveringGoogleAnalyticsAccounts, setIsDiscoveringGoogleAnalyticsAccounts] = useState(false);
+  const [isSavingGoogleAnalyticsAccounts, setIsSavingGoogleAnalyticsAccounts] = useState(false);
+  const [googleAnalyticsAccountMessage, setGoogleAnalyticsAccountMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
   // Fetch connection status on mount
   useEffect(() => {
     if (clientId) {
@@ -138,6 +175,7 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
         const statusMap: ConnectionStatus = {
           'google-ads': false,
           'facebook': false,
+          'google-analytics': false,
           'linkedin': false,
           'tiktok': false,
         };
@@ -147,7 +185,7 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
             console.log('Processing connection:', conn);
             // Normalize 'meta-ads' to 'facebook' for UI consistency
             const uiPlatform = conn.platform === 'meta-ads' ? 'facebook' : conn.platform;
-            if (uiPlatform === 'google-ads' || uiPlatform === 'facebook') {
+            if (uiPlatform === 'google-ads' || uiPlatform === 'facebook' || uiPlatform === 'google-analytics') {
               statusMap[uiPlatform] = conn.status === 'active';
             }
           });
@@ -165,11 +203,11 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
     }
   };
 
-  const handleConnect = async (platformId: 'google-ads' | 'facebook') => {
+  const handleConnect = async (platformId: 'google-ads' | 'facebook' | 'google-analytics') => {
     setLoadingStates((prev) => ({ ...prev, [platformId]: true }));
 
     try {
-      // Initialize Nango
+      // Initialize Nango (works without public key if configured server-side)
       const nango = new Nango();
 
       // Open Connect UI
@@ -178,6 +216,11 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
           if (event.type === 'close') {
             console.log('User closed the modal');
             setLoadingStates((prev) => ({ ...prev, [platformId]: false }));
+          } else if (event.type === 'error') {
+            console.error('Nango connection error:', event);
+            setLoadingStates((prev) => ({ ...prev, [platformId]: false }));
+            const errorMessage = (event as any).error?.message || (event as any).error || 'An error occurred during connection';
+            alert(`Connection error: ${errorMessage}\n\nPlease check your Nango configuration and try again.`);
           } else if (event.type === 'connect') {
             console.log('Connection successful! Syncing to database...');
             
@@ -244,7 +287,7 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
     }
   };
 
-  const handleDisconnect = async (platformId: 'google-ads' | 'facebook') => {
+  const handleDisconnect = async (platformId: 'google-ads' | 'facebook' | 'google-analytics') => {
     if (!confirm(`Are you sure you want to disconnect ${platforms.find(p => p.id === platformId)?.displayName}?`)) {
       return;
     }
@@ -388,6 +431,13 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
     }
   }, [connectionStatus['facebook']]);
 
+  // Fetch Google Analytics accounts when connection status changes
+  useEffect(() => {
+    if (connectionStatus['google-analytics']) {
+      fetchGoogleAnalyticsAccounts();
+    }
+  }, [connectionStatus['google-analytics']]);
+
   // Fetch Meta Ads accounts
   const fetchMetaAdsAccounts = async () => {
     setIsLoadingMetaAccounts(true);
@@ -523,6 +573,143 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
     }
   };
 
+  // Fetch Google Analytics accounts
+  const fetchGoogleAnalyticsAccounts = async () => {
+    setIsLoadingGoogleAnalyticsAccounts(true);
+    try {
+      const response = await fetch('/api/ads/google-analytics/get-accounts');
+      if (response.ok) {
+        const data = await response.json();
+        setGoogleAnalyticsAccounts(data.accounts || []);
+      } else {
+        console.error('Failed to fetch Google Analytics accounts');
+      }
+    } catch (error) {
+      console.error('Error fetching Google Analytics accounts:', error);
+    } finally {
+      setIsLoadingGoogleAnalyticsAccounts(false);
+    }
+  };
+
+  // Discover Google Analytics accounts from Google Analytics API
+  const handleDiscoverGoogleAnalyticsAccounts = async () => {
+    setIsDiscoveringGoogleAnalyticsAccounts(true);
+    setGoogleAnalyticsAccountMessage(null);
+
+    try {
+      const response = await fetch('/api/ads/google-analytics/accounts');
+      
+      if (response.ok) {
+        const data = await response.json();
+        setDiscoveredGoogleAnalyticsAccounts(data.accounts || []);
+        setSelectedGoogleAnalyticsAccounts(new Set());
+        
+        if (data.accounts.length === 0) {
+          setGoogleAnalyticsAccountMessage({ type: 'error', text: 'No Google Analytics properties found' });
+        } else {
+          setGoogleAnalyticsAccountMessage({ type: 'success', text: `Found ${data.accounts.length} property(ies)` });
+        }
+      } else {
+        const errorData = await response.json();
+        setGoogleAnalyticsAccountMessage({ type: 'error', text: errorData.error || 'Failed to discover properties' });
+      }
+    } catch (error) {
+      console.error('Error discovering Google Analytics properties:', error);
+      setGoogleAnalyticsAccountMessage({ type: 'error', text: 'Failed to discover properties. Please try again.' });
+    } finally {
+      setIsDiscoveringGoogleAnalyticsAccounts(false);
+    }
+  };
+
+  // Toggle Google Analytics account selection
+  const toggleGoogleAnalyticsAccountSelection = (propertyId: string) => {
+    setSelectedGoogleAnalyticsAccounts(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(propertyId)) {
+        newSet.delete(propertyId);
+      } else {
+        newSet.add(propertyId);
+      }
+      return newSet;
+    });
+  };
+
+  // Save selected Google Analytics accounts
+  const handleSaveGoogleAnalyticsAccounts = async () => {
+    if (selectedGoogleAnalyticsAccounts.size === 0) {
+      setGoogleAnalyticsAccountMessage({ type: 'error', text: 'Please select at least one property' });
+      return;
+    }
+
+    setIsSavingGoogleAnalyticsAccounts(true);
+    setGoogleAnalyticsAccountMessage(null);
+
+    try {
+      const accountsToSave = discoveredGoogleAnalyticsAccounts
+        .filter(acc => selectedGoogleAnalyticsAccounts.has(acc.propertyId))
+        .map(acc => ({
+          propertyId: acc.propertyId,
+          propertyName: acc.propertyName,
+          accountId: acc.accountId,
+          accountName: acc.accountName,
+        }));
+
+      const response = await fetch('/api/ads/google-analytics/save-accounts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accounts: accountsToSave }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setGoogleAnalyticsAccountMessage({ type: 'success', text: `${accountsToSave.length} property(ies) added successfully!` });
+        setDiscoveredGoogleAnalyticsAccounts([]);
+        setSelectedGoogleAnalyticsAccounts(new Set());
+        await fetchGoogleAnalyticsAccounts();
+        
+        // Clear success message after 3 seconds
+        setTimeout(() => setGoogleAnalyticsAccountMessage(null), 3000);
+      } else {
+        setGoogleAnalyticsAccountMessage({ type: 'error', text: data.error || 'Failed to save properties' });
+      }
+    } catch (error) {
+      console.error('Error saving Google Analytics accounts:', error);
+      setGoogleAnalyticsAccountMessage({ type: 'error', text: 'Failed to save properties. Please try again.' });
+    } finally {
+      setIsSavingGoogleAnalyticsAccounts(false);
+    }
+  };
+
+  // Delete Google Analytics account
+  const handleDeleteGoogleAnalyticsAccount = async (accountId: string, propertyName: string) => {
+    if (!confirm(`Remove property ${propertyName}?`)) {
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/ads/google-analytics/delete-account', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accountId }),
+      });
+
+      if (response.ok) {
+        setGoogleAnalyticsAccountMessage({ type: 'success', text: 'Property removed successfully!' });
+        await fetchGoogleAnalyticsAccounts();
+        
+        // Clear success message after 3 seconds
+        setTimeout(() => setGoogleAnalyticsAccountMessage(null), 3000);
+      } else {
+        const data = await response.json();
+        setGoogleAnalyticsAccountMessage({ type: 'error', text: data.error || 'Failed to remove property' });
+      }
+    } catch (error) {
+      console.error('Error deleting Google Analytics account:', error);
+      setGoogleAnalyticsAccountMessage({ type: 'error', text: 'Failed to remove property. Please try again.' });
+    }
+  };
+
   if (isInitialLoading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -570,6 +757,13 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
                       ) : platform.id === 'facebook' ? (
                         <svg className="w-12 h-12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                           <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" fill="#1877F2"/>
+                        </svg>
+                      ) : platform.id === 'google-analytics' ? (
+                        <svg className="w-12 h-12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#F9AB00"/>
+                          <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#E37400"/>
+                          <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#F9AB00"/>
+                          <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#E37400"/>
                         </svg>
                       ) : platform.id === 'linkedin' ? (
                         <svg className="w-12 h-12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -1005,6 +1199,197 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
                                     variant="outline"
                                     size="sm"
                                     onClick={() => handleDeleteMetaAccount(account.id, account.accountName || account.accountId)}
+                                    className="text-red-600 hover:bg-red-50 border-red-200"
+                                  >
+                                    Remove
+                                  </Button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Google Analytics Account Management */}
+                {platform.id === 'google-analytics' && isConnected && !isLoading && (
+                  <div className="mt-4 pt-4 border-t border-gray-200">
+                    <Button
+                      variant="outline"
+                      onClick={() => setShowGoogleAnalyticsAccountManagement(!showGoogleAnalyticsAccountManagement)}
+                      className="w-full mb-3 text-sm font-medium"
+                    >
+                      {showGoogleAnalyticsAccountManagement ? '▼' : '▶'} Manage Google Analytics Properties
+                    </Button>
+
+                    {showGoogleAnalyticsAccountManagement && (
+                      <div className="space-y-4 animate-in slide-in-from-top duration-200">
+                        {/* Success/Error Messages */}
+                        {googleAnalyticsAccountMessage && (
+                          <div
+                            className={`p-3 rounded-lg text-sm ${
+                              googleAnalyticsAccountMessage.type === 'success'
+                                ? 'bg-green-50 text-green-800 border border-green-200'
+                                : 'bg-red-50 text-red-800 border border-red-200'
+                            }`}
+                          >
+                            {googleAnalyticsAccountMessage.text}
+                          </div>
+                        )}
+
+                        {/* Discover Properties Section */}
+                        <div className="bg-gray-50 p-4 rounded-lg space-y-3">
+                          <h4 className="font-semibold text-sm text-gray-900">Add New Properties</h4>
+                          
+                          <Button
+                            onClick={handleDiscoverGoogleAnalyticsAccounts}
+                            disabled={isDiscoveringGoogleAnalyticsAccounts}
+                            className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+                          >
+                            {isDiscoveringGoogleAnalyticsAccounts ? (
+                              <span className="flex items-center justify-center">
+                                <svg
+                                  className="animate-spin -ml-1 mr-2 h-4 w-4 text-white"
+                                  xmlns="http://www.w3.org/2000/svg"
+                                  fill="none"
+                                  viewBox="0 0 24 24"
+                                >
+                                  <circle
+                                    className="opacity-25"
+                                    cx="12"
+                                    cy="12"
+                                    r="10"
+                                    stroke="currentColor"
+                                    strokeWidth="4"
+                                  ></circle>
+                                  <path
+                                    className="opacity-75"
+                                    fill="currentColor"
+                                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                                  ></path>
+                                </svg>
+                                Discovering...
+                              </span>
+                            ) : (
+                              '🔍 Discover My Properties'
+                            )}
+                          </Button>
+
+                          {/* Discovered Properties List with Checkboxes */}
+                          {discoveredGoogleAnalyticsAccounts.length > 0 && (
+                            <div className="space-y-2">
+                              <p className="text-xs text-gray-600 font-medium">
+                                Select properties to add:
+                              </p>
+                              <div className="max-h-48 overflow-y-auto space-y-2 border border-gray-200 rounded p-2">
+                                {discoveredGoogleAnalyticsAccounts.map((account) => (
+                                  <label
+                                    key={account.propertyId}
+                                    className="flex items-center space-x-3 p-2 hover:bg-gray-100 rounded cursor-pointer"
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedGoogleAnalyticsAccounts.has(account.propertyId)}
+                                      onChange={() => toggleGoogleAnalyticsAccountSelection(account.propertyId)}
+                                      className="w-4 h-4 text-blue-600 rounded"
+                                    />
+                                    <div className="flex-1">
+                                      <div className="text-sm font-medium text-gray-900">
+                                        {account.propertyName}
+                                      </div>
+                                      <div className="text-xs text-gray-500 font-mono">
+                                        {account.propertyId}
+                                      </div>
+                                      {account.accountName && (
+                                        <div className="text-xs text-gray-400">
+                                          Account: {account.accountName}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </label>
+                                ))}
+                              </div>
+
+                              <Button
+                                onClick={handleSaveGoogleAnalyticsAccounts}
+                                disabled={isSavingGoogleAnalyticsAccounts || selectedGoogleAnalyticsAccounts.size === 0}
+                                className="w-full bg-green-600 hover:bg-green-700 text-white"
+                              >
+                                {isSavingGoogleAnalyticsAccounts ? (
+                                  <span className="flex items-center justify-center">
+                                    <svg
+                                      className="animate-spin -ml-1 mr-2 h-4 w-4 text-white"
+                                      xmlns="http://www.w3.org/2000/svg"
+                                      fill="none"
+                                      viewBox="0 0 24 24"
+                                    >
+                                      <circle
+                                        className="opacity-25"
+                                        cx="12"
+                                        cy="12"
+                                        r="10"
+                                        stroke="currentColor"
+                                        strokeWidth="4"
+                                      ></circle>
+                                      <path
+                                        className="opacity-75"
+                                        fill="currentColor"
+                                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                                      ></path>
+                                    </svg>
+                                    Saving...
+                                  </span>
+                                ) : (
+                                  `✓ Save Selected Properties (${selectedGoogleAnalyticsAccounts.size})`
+                                )}
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Saved Properties List */}
+                        <div className="space-y-2">
+                          <h4 className="font-semibold text-sm text-gray-900">Saved Properties</h4>
+                          
+                          {isLoadingGoogleAnalyticsAccounts ? (
+                            <div className="flex items-center justify-center py-4">
+                              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                            </div>
+                          ) : googleAnalyticsAccounts.length === 0 ? (
+                            <div className="text-center py-6 bg-gray-50 rounded-lg border-2 border-dashed border-gray-200">
+                              <p className="text-sm text-gray-500">No properties added yet</p>
+                            </div>
+                          ) : (
+                            <div className="space-y-2">
+                              {googleAnalyticsAccounts.map((account) => (
+                                <div
+                                  key={account.id}
+                                  className="flex items-center justify-between p-3 bg-white border border-gray-200 rounded-lg hover:border-gray-300 transition-colors"
+                                >
+                                  <div className="flex-1">
+                                    <div className="flex items-center space-x-2">
+                                      <span className="text-sm font-medium text-gray-900">
+                                        {account.propertyName || 'Unnamed Property'}
+                                      </span>
+                                      {account.isActive && (
+                                        <span className="text-xs text-green-600">●</span>
+                                      )}
+                                    </div>
+                                    <p className="text-xs text-gray-500 font-mono mt-0.5">
+                                      {account.propertyId}
+                                    </p>
+                                    {account.accountName && (
+                                      <p className="text-xs text-gray-400 mt-0.5">
+                                        Account: {account.accountName}
+                                      </p>
+                                    )}
+                                  </div>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handleDeleteGoogleAnalyticsAccount(account.id, account.propertyName || account.propertyId)}
                                     className="text-red-600 hover:bg-red-50 border-red-200"
                                   >
                                     Remove

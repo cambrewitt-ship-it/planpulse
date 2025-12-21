@@ -227,13 +227,19 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
 
   // Fetch live spend data for Meta Ads or Google Ads
   const fetchLiveSpendData = async (channelId: string, channelName: string, month?: Date) => {
+    console.log(`[MediaChannels] fetchLiveSpendData called:`, { channelId, channelName, month });
+    
     const isMeta = isMetaAdsChannel(channelName);
     const isGoogle = isGoogleAdsChannel(channelName);
     
+    console.log(`[MediaChannels] Channel detection:`, { isMeta, isGoogle, channelName });
+    
     if (!isMeta && !isGoogle) {
+      console.log(`[MediaChannels] Channel is neither Meta nor Google, skipping fetch`);
       return;
     }
 
+    console.log(`[MediaChannels] Starting fetch for ${isGoogle ? 'Google' : 'Meta'} Ads...`);
     setFetchingSpend(prev => ({ ...prev, [channelId]: true }));
     setSpendErrors(prev => ({ ...prev, [channelId]: '' }));
 
@@ -244,6 +250,15 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
 
       const startDate = format(monthStart, 'yyyy-MM-dd');
       const endDate = format(monthEnd, 'yyyy-MM-dd');
+      
+      console.log(`[MediaChannels] Date range calculation:`, {
+        targetMonth,
+        monthStart,
+        monthEnd,
+        startDate,
+        endDate,
+        channelName
+      });
 
       let response;
       if (isMeta) {
@@ -276,17 +291,44 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
         return;
       }
 
+      console.log(`[MediaChannels] API response status:`, response.status, response.statusText);
+      
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        console.error(`[MediaChannels] API error:`, { status: response.status, errorData });
         throw new Error(errorData.error || `HTTP ${response.status}: Failed to fetch spend data`);
       }
 
       const data = await response.json();
+      console.log(`[MediaChannels] Raw API response:`, data);
       
-      if (data.success && data.data) {
-        setLiveSpendData(prev => ({ ...prev, [channelId]: data.data }));
+      console.log(`[MediaChannels] Fetch spend response for ${channelName}:`, {
+        success: data.success,
+        dataLength: data.data?.length || 0,
+        data: data.data?.slice(0, 3), // Log first 3 items for debugging
+        error: data.error,
+        platform: data.platform
+      });
+      
+      if (data.success) {
+        // Set data even if empty (empty array means no spend, not an error)
+        setLiveSpendData(prev => ({ ...prev, [channelId]: data.data || [] }));
+        
+        if (data.data && data.data.length === 0) {
+          console.log(`[MediaChannels] No spend data found for ${channelName} in the requested date range`);
+          
+          // Check if there are errors that explain why data is empty
+          if (data.errors && data.errors.length > 0) {
+            const errorMessages = data.errors.map((e: any) => e.error || e.message).join('; ');
+            console.warn(`[MediaChannels] Errors while fetching spend data:`, errorMessages);
+            // Set error message so user knows why data is missing
+            setSpendErrors(prev => ({ ...prev, [channelId]: errorMessages }));
+          }
+        }
       } else {
-        throw new Error(data.error || 'Failed to fetch spend data');
+        // API returned an error response
+        const errorMsg = data.error || data.errors?.[0]?.error || 'Failed to fetch spend data';
+        throw new Error(errorMsg);
       }
     } catch (error) {
       console.error(`Error fetching spend data for ${channelName}:`, error);
@@ -410,19 +452,27 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
     // Create a map of dates to spend from live data
     const liveSpendByDate = new Map<string, number>();
     
-    // Process live spend data if available
+        // Process live spend data if available
     if (liveData && liveData.length > 0) {
+      console.log(`[MediaChannels] Processing live spend data for channel ${channelId}:`, {
+        liveDataLength: liveData.length,
+        accountId,
+        hasConnectedAccount,
+        sampleItem: liveData[0]
+      });
+      
       liveData.forEach((item) => {
-        // Filter by account ID if provided (to show only data for the connected account)
+        // Filter by account ID only if explicitly provided (to show only data for the connected account)
         // For Google Ads, use customerId; for Meta Ads, use accountId
-        if (accountId) {
+        // If no accountId is set, show all data (aggregated across all accounts)
+        if (accountId && hasConnectedAccount) {
+          let shouldInclude = false;
+          
           if (item.accountId) {
             // Meta Ads format
             const itemAccountId = String(item.accountId);
             const connectedId = String(accountId);
-            if (itemAccountId !== connectedId) {
-              return;
-            }
+            shouldInclude = itemAccountId === connectedId;
           } else if (item.customerId) {
             // Google Ads format - customerId is formatted like "123-456-7890"
             const itemCustomerId = String(item.customerId);
@@ -430,11 +480,14 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
             // Compare both with and without dashes
             const itemClean = itemCustomerId.replace(/-/g, '');
             const connectedClean = connectedId.replace(/-/g, '');
-            if (itemClean !== connectedClean && itemCustomerId !== connectedId) {
-              return;
-            }
+            shouldInclude = itemClean === connectedClean || itemCustomerId === connectedId;
+          }
+          
+          if (!shouldInclude) {
+            return; // Skip this item if it doesn't match the connected account
           }
         }
+        // If no accountId filter, include all data (aggregate across all accounts)
         
         // Handle both Meta Ads (dateStart) and Google Ads (date) formats
         let dateKey: string | null = null;
@@ -485,7 +538,8 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
     // Planned spend comes from weekly plans only
     
     // Check if we have any live spend data
-    const hasLiveSpendData = hasConnectedAccount && liveData && liveData.length > 0 && accountId;
+    // Show data if we have it, even without a connected account (user might want to see all their accounts)
+    const hasLiveSpendData = liveData && liveData.length > 0;
     
     // Build cumulative data
     // Meta API returns daily spend (not cumulative), so we accumulate day by day
@@ -842,8 +896,16 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
         ),
         isMetaAds: isMetaAdsChannel(channel.channel),
         onRefreshSpend: (month?: Date) => {
+          console.log(`[MediaChannels] onRefreshSpend called:`, {
+            channelId: channel.id,
+            channelName: channel.channel,
+            providedMonth: month,
+            selectedMonthForChannel: selectedMonths[channel.id],
+            defaultSelectedMonth: selectedMonth
+          });
           // Use the provided month, or fall back to the current selected month for this channel
           const currentMonth = month || selectedMonths[channel.id] || selectedMonth;
+          console.log(`[MediaChannels] Calling fetchLiveSpendData with month:`, currentMonth);
           fetchLiveSpendData(channel.id, channel.channel, currentMonth);
         },
         onMonthChange: (month: Date) => {

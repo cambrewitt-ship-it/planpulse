@@ -71,6 +71,7 @@ export async function POST(request: NextRequest) {
 
     // Look up user's connection for the platform
     // If clientId is provided, filter by it; otherwise get the most recent connection
+    // For Google Ads and Meta Ads, if no client-specific connection exists, fall back to any user connection
     let query = supabase
       .from('ad_platform_connections')
       .select('connection_id, platform, connection_status, client_id')
@@ -95,14 +96,32 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!connections || connections.length === 0) {
+    // If no connection found and clientId was provided, for Google Ads and Meta Ads,
+    // fall back to checking for any connection (since accounts are user-level)
+    let connection = connections?.[0];
+    if (!connection && clientId && (platform === 'google-ads' || platform === 'meta-ads')) {
+      console.log(`No connection found for client ${clientId}, checking for any ${platform} connection...`);
+      const { data: anyConnections, error: anyConnectionError } = await supabase
+        .from('ad_platform_connections')
+        .select('connection_id, platform, connection_status, client_id')
+        .eq('user_id', user.id)
+        .eq('platform', platform)
+        .eq('connection_status', 'active')
+        .order('created_at', { ascending: false })
+        .limit(1);
+      
+      if (!anyConnectionError && anyConnections && anyConnections.length > 0) {
+        connection = anyConnections[0];
+        console.log(`Found connection for different client: ${connection.client_id}, using it for client ${clientId}`);
+      }
+    }
+
+    if (!connection) {
       return Response.json(
         { error: 'Platform not connected. Please connect your account first.' },
         { status: 404 }
       );
     }
-
-    const connection = connections[0];
 
     // Initialize Nango with correct secret key
     const nangoSecretKey = process.env.NANGO_SECRET_KEY_DEV_PLAN_CHECK;
@@ -142,20 +161,30 @@ export async function POST(request: NextRequest) {
         if (accountsError || !googleAdsAccounts || googleAdsAccounts.length === 0) {
           return Response.json({
             success: false,
-            error: 'No Google Ads accounts configured'
+            error: 'No Google Ads accounts configured. Please visit /api/ads/google-ads/accounts to see available accounts and save them.'
           }, { status: 404 });
         }
 
         console.log(`Found ${googleAdsAccounts.length} Google Ads account(s)`);
+        googleAdsAccounts.forEach((account, idx) => {
+          console.log(`  Account ${idx + 1}:`, {
+            customerId: account.customer_id,
+            accountName: account.account_name,
+            isActive: account.is_active
+          });
+        });
 
         // Step 2: Get the OAuth access token from Nango's connection using SDK
+        // Use the connection_id from the saved Google Ads account (not from the client-filtered connection)
+        // This ensures we use the correct OAuth token for the account
+        const accountConnectionId = googleAdsAccounts[0].connection_id;
         console.log('Step 2: Getting access token from Nango...');
-        console.log('Connection ID:', connection.connection_id);
+        console.log('Account Connection ID:', accountConnectionId);
         console.log('Provider config key:', toNangoPlatform('google-ads'));
-        
+
         let nangoConnection;
         try {
-          nangoConnection = await nango.getConnection(toNangoPlatform('google-ads'), connection.connection_id);
+          nangoConnection = await nango.getConnection(toNangoPlatform('google-ads'), accountConnectionId);
           console.log('Nango connection retrieved successfully');
         } catch (nangoError: any) {
           console.error('Failed to get Nango connection:', {
@@ -177,7 +206,7 @@ export async function POST(request: NextRequest) {
             success: false,
             error: 'Google Ads connection not found or expired. Please reconnect your Google Ads account.',
             details: nangoError.message,
-            connectionId: connection.connection_id
+            connectionId: accountConnectionId
           }, { status: 424 });
         }
         
@@ -192,14 +221,53 @@ export async function POST(request: NextRequest) {
 
         console.log('✓ Got OAuth token from Nango');
 
-        // Get MCC ID from environment
+        // Get MCC ID from environment (optional - only needed if using MCC account)
         const mccId = process.env.GOOGLE_ADS_MCC_ID;
-        if (!mccId) {
-          throw new Error('GOOGLE_ADS_MCC_ID not configured in environment variables');
+        const cleanMccId = mccId ? mccId.replace(/-/g, '') : null;
+        if (cleanMccId) {
+          console.log(`Using MCC ID: ${mccId} (clean: ${cleanMccId})`);
+        } else {
+          console.log('No MCC ID configured - using direct customer access');
         }
-        console.log(`Using MCC ID: ${mccId}`);
 
-        // Step 3: For each customer ID, call Google Ads API directly
+        // Step 3: First, verify which customers are accessible
+        console.log('Step 3: Verifying accessible customers...');
+        let accessibleCustomerIds: string[] = [];
+        try {
+          const listCustomersUrl = 'https://googleads.googleapis.com/v16/customers:listAccessibleCustomers';
+          const listHeaders: Record<string, string> = {
+            'Authorization': `Bearer ${accessToken}`,
+            'developer-token': process.env.GOOGLE_ADS_DEVELOPER_TOKEN || '',
+          };
+
+          // Only add login-customer-id if MCC is configured
+          if (cleanMccId) {
+            listHeaders['login-customer-id'] = cleanMccId;
+          }
+
+          const listResponse = await fetch(listCustomersUrl, {
+            method: 'GET',
+            headers: listHeaders
+          });
+          
+          if (listResponse.ok) {
+            const listData = await listResponse.json();
+            const accessibleResources = listData.resourceNames || [];
+            // Extract customer IDs from resource names (format: customers/1234567890)
+            accessibleCustomerIds = accessibleResources.map((resource: string) => {
+              const match = resource.match(/customers\/(\d+)/);
+              return match ? match[1] : null;
+            }).filter(Boolean);
+            console.log(`✓ Found ${accessibleCustomerIds.length} accessible customers: ${accessibleCustomerIds.join(', ')}`);
+          } else {
+            console.warn(`⚠ Could not list accessible customers (status ${listResponse.status}). Will try anyway...`);
+          }
+        } catch (listError) {
+          console.warn(`⚠ Error listing accessible customers:`, listError);
+          // Continue anyway
+        }
+
+        // Step 4: For each customer ID, call Google Ads API directly
         const allSpendData = [];
         const errors = [];
 
@@ -208,7 +276,18 @@ export async function POST(request: NextRequest) {
           // Strip dashes from customer ID for API call
           const cleanCustomerId = customerId.replace(/-/g, '');
           
-          const query = `
+          // Check if customer is accessible
+          if (accessibleCustomerIds.length > 0 && !accessibleCustomerIds.includes(cleanCustomerId)) {
+            console.warn(`⚠ Customer ID ${customerId} (${cleanCustomerId}) is not in the list of accessible customers`);
+            errors.push({
+              customerId: customerId,
+              accountName: account.account_name,
+              error: `Customer ID ${customerId} is not accessible through your MCC account. Please verify the customer is linked to MCC ${mccId} and that you have permission to access it.`
+            });
+            continue;
+          }
+          
+            const query = `
             SELECT
               campaign.id,
               campaign.name,
@@ -219,19 +298,41 @@ export async function POST(request: NextRequest) {
             ORDER BY segments.date DESC
           `;
 
-          console.log(`\nFetching data for customer ${customerId} (clean: ${cleanCustomerId})...`);
+          console.log(`\n=== Fetching Google Ads spend data ===`);
+          console.log(`  Customer ID (raw): ${customerId}`);
+          console.log(`  Customer ID (clean, for API): ${cleanCustomerId}`);
+          console.log(`  Account Name: ${account.account_name || 'N/A'}`);
+          console.log(`  Date range: ${startDate} to ${endDate}`);
+          console.log(`  Full query:`, query);
 
           try {
+            // Google Ads API requires customer IDs without dashes in the URL
+            // Also verify the customer ID is properly formatted (10 digits)
+            if (cleanCustomerId.length !== 10) {
+              throw new Error(`Invalid customer ID format: ${customerId} (cleaned: ${cleanCustomerId}). Customer IDs must be 10 digits.`);
+            }
+            
+            const apiUrl = `https://googleads.googleapis.com/v16/customers/${cleanCustomerId}/googleAds:search`;
+            console.log(`  API URL: ${apiUrl}`);
+
+            // Build headers - only include login-customer-id if MCC is configured
+            const requestHeaders: Record<string, string> = {
+              'Authorization': `Bearer ${accessToken}`,
+              'developer-token': process.env.GOOGLE_ADS_DEVELOPER_TOKEN || '',
+              'Content-Type': 'application/json',
+            };
+
+            // Only add login-customer-id if MCC is configured
+            if (cleanMccId) {
+              requestHeaders['login-customer-id'] = cleanMccId;
+              console.log(`  Using MCC login-customer-id: ${cleanMccId}`);
+            }
+
             const response = await fetch(
-              `https://googleads.googleapis.com/v16/customers/${cleanCustomerId}/googleAds:search`,
+              apiUrl,
               {
                 method: 'POST',
-                headers: {
-                  'Authorization': `Bearer ${accessToken}`,
-                  'developer-token': process.env.GOOGLE_ADS_DEVELOPER_TOKEN || '',
-                  'Content-Type': 'application/json',
-                  'login-customer-id': mccId
-                },
+                headers: requestHeaders,
                 body: JSON.stringify({ query: query })
               }
             );
@@ -239,27 +340,104 @@ export async function POST(request: NextRequest) {
             console.log(`Response status: ${response.status}`);
 
             if (!response.ok) {
-              const errorText = await response.text();
-              console.error(`Error response:`, errorText.substring(0, 500));
-              throw new Error(`Google Ads API error: ${response.status}`);
+              let errorText = '';
+              let errorJson = null;
+              try {
+                errorText = await response.text();
+                // Try to parse as JSON for better error messages
+                try {
+                  errorJson = JSON.parse(errorText);
+                } catch {
+                  // Not JSON, that's okay
+                }
+              } catch (e) {
+                errorText = 'Could not read error response';
+              }
+              
+              console.error(`❌ Google Ads API error for customer ${customerId}:`, {
+                status: response.status,
+                statusText: response.statusText,
+                errorText: errorText.substring(0, 1000),
+                errorJson: errorJson,
+                url: `https://googleads.googleapis.com/v16/customers/${cleanCustomerId}/googleAds:search`
+              });
+              
+              // Provide more helpful error messages
+              if (response.status === 404) {
+                const errorMessage = errorJson?.error?.message || errorJson?.error || 'Customer ID not found or not accessible';
+                console.error(`  🔴 404 Error Details:`, {
+                  customerId,
+                  cleanCustomerId,
+                  mccId,
+                  errorMessage,
+                  possibleCauses: [
+                    'Customer ID is not linked to your MCC account (2246810345)',
+                    'Customer ID does not exist',
+                    'Access token does not have permission to access this customer',
+                    'Customer ID format might be incorrect'
+                  ]
+                });
+                
+                errors.push({
+                  customerId: customerId,
+                  accountName: account.account_name,
+                  error: `404 - Customer ID ${customerId} not found or not accessible. Please verify: (1) This customer is linked to your MCC account ${mccId}, (2) The customer ID is correct, (3) Your Google Ads account has access to this customer.`
+                });
+              } else {
+                errors.push({
+                  customerId: customerId,
+                  accountName: account.account_name,
+                  error: `Google Ads API error ${response.status}: ${errorJson?.error?.message || errorJson?.error || errorText.substring(0, 200)}`
+                });
+              }
+              // Continue to next account instead of throwing
+              continue;
             }
 
             const data = await response.json();
             console.log(`✓ Success! Got ${data.results?.length || 0} results`);
+            console.log(`  Query date range: ${startDate} to ${endDate}`);
+            console.log(`  Customer ID: ${customerId} (clean: ${cleanCustomerId})`);
+            
+            if (!data.results || data.results.length === 0) {
+              console.log(`  ⚠ No results returned from Google Ads API for date range ${startDate} to ${endDate}`);
+              console.log(`  This could mean:`);
+              console.log(`    - No campaigns have spend in this date range`);
+              console.log(`    - Date range is in the future (no spend data yet)`);
+              console.log(`    - All campaigns are paused or have no activity`);
+              console.log(`    - Customer ID doesn't have access to campaigns with spend`);
+              console.log(`  Full response keys:`, Object.keys(data));
+              if (data.fieldMask) {
+                console.log(`  Field mask:`, data.fieldMask);
+              }
+              if (data.requestId) {
+                console.log(`  Request ID:`, data.requestId);
+              }
+              // Log first 500 chars of response for debugging
+              const responseStr = JSON.stringify(data, null, 2);
+              console.log(`  Response preview:`, responseStr.substring(0, 500));
+            }
 
             // Process results
             if (data.results && Array.isArray(data.results)) {
               for (const result of data.results) {
+                const spend = (result.metrics?.costMicros || 0) / 1000000;
+                const date = result.segments?.date || '';
+                console.log(`  - Date: ${date}, Spend: $${spend}, Campaign: ${result.campaign?.name || 'N/A'}`);
+                
                 allSpendData.push({
                   customerId: customerId,
                   accountName: account.account_name,
                   campaignId: result.campaign?.id?.toString() || '',
                   campaignName: result.campaign?.name || '',
-                  date: result.segments?.date || '',
-                  spend: (result.metrics?.costMicros || 0) / 1000000,
+                  date: date,
+                  spend: spend,
                   currency: 'USD'
                 });
               }
+            } else {
+              console.log('  ⚠ No results array in response or results is empty');
+              console.log('  Response structure:', Object.keys(data));
             }
 
           } catch (error: any) {
@@ -272,6 +450,33 @@ export async function POST(request: NextRequest) {
           }
         }
 
+        console.log(`=== GOOGLE ADS FETCH COMPLETE ===`);
+        console.log(`Total spend data items: ${allSpendData.length}`);
+        console.log(`Accounts processed: ${googleAdsAccounts.length}`);
+        console.log(`Errors: ${errors.length}`);
+        if (allSpendData.length > 0) {
+          console.log(`Sample data:`, allSpendData.slice(0, 3));
+        }
+        
+        // Return response - if we have errors, still return success but include errors
+        // Only return error status if all accounts failed
+        const hasAnySuccess = allSpendData.length > 0;
+        const hasAnyErrors = errors.length > 0;
+        
+        if (!hasAnySuccess && hasAnyErrors && googleAdsAccounts.length > 0) {
+          // All accounts failed - return error status
+          const firstError = errors[0];
+          return Response.json({
+            success: false,
+            platform: 'google-ads',
+            dateRange: { startDate, endDate },
+            data: [],
+            error: firstError.error,
+            errors: errors,
+            accountsProcessed: googleAdsAccounts.length
+          }, { status: 404 });
+        }
+        
         return Response.json({
           success: true,
           platform: 'google-ads',

@@ -856,7 +856,15 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => channel.onRefreshSpend?.(selectedMonth)}
+                  onClick={() => {
+                    console.log(`[MediaChannelCard] Refresh button clicked for channel:`, {
+                      channelId: channel.id,
+                      channelName: channel.name,
+                      selectedMonth: selectedMonth,
+                      hasRefreshHandler: !!channel.onRefreshSpend
+                    });
+                    channel.onRefreshSpend?.(selectedMonth);
+                  }}
                   disabled={channel.isFetchingSpend}
                   className="h-7 text-xs"
                 >
