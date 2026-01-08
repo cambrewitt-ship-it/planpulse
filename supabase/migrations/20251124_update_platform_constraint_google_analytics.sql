@@ -9,3 +9,4 @@ ALTER TABLE ad_platform_connections
 ADD CONSTRAINT ad_platform_connections_platform_check
 CHECK (platform IN ('google-ads', 'meta-ads', 'google-analytics'));
 
+

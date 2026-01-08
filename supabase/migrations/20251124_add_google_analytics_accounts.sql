@@ -34,3 +34,4 @@ CREATE POLICY "Users can delete own Google Analytics accounts"
   ON google_analytics_accounts FOR DELETE
   USING (auth.uid() = user_id);
 
+
