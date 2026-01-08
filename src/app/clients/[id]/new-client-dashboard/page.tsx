@@ -13,6 +13,9 @@ import { useEffect, useState, useRef } from 'react';
 import { getClients, getMediaPlans, getPlanById, updateClient } from '@/lib/db/plans';
 import PlanEditForm from '@/components/plan-entry/PlanEditForm';
 import AdPlatformConnector from '@/components/AdPlatformConnector';
+import { UnifiedAnalyticsChart } from '@/components/ui/unified-analytics-chart';
+import { fetchAnalyticsData, GA4DataPoint, SpendDataPoint } from '@/lib/api/analytics-data-integration';
+import { subDays, format } from 'date-fns';
 
 interface Client {
   id: string;
@@ -51,13 +54,37 @@ export default function NewClientDashboard() {
   const [isEditingClientNotes, setIsEditingClientNotes] = useState(false);
   const [editingClientNotes, setEditingClientNotes] = useState('');
   const [isSavingClientNotes, setIsSavingClientNotes] = useState(false);
+  const [ga4Data, setGa4Data] = useState<GA4DataPoint[]>([]);
+  const [spendData, setSpendData] = useState<SpendDataPoint[]>([]);
+  const [loadingAnalytics, setLoadingAnalytics] = useState(false);
+  const [availableMetrics, setAvailableMetrics] = useState<string[]>([]);
+  const [ga4Error, setGa4Error] = useState<string | undefined>();
+  const [ga4ActivationUrl, setGa4ActivationUrl] = useState<string | undefined>();
+  const [selectedMetrics, setSelectedMetrics] = useState<string[]>([
+    'activeUsers',    // Active users
+    'eventCount',     // Total events
+    'conversions',    // Key events (conversions)
+  ]);
+  const [analyticsDateRange, setAnalyticsDateRange] = useState({
+    startDate: format(subDays(new Date(), 30), 'yyyy-MM-dd'),
+    endDate: format(new Date(), 'yyyy-MM-dd'),
+  });
 
   useEffect(() => {
     if (clientId) {
       loadData();
       loadMediaPlanBuilderData();
+      loadAnalyticsData();
     }
   }, [clientId]);
+
+  // Reload analytics when date range changes
+  useEffect(() => {
+    if (clientId && selectedMetrics.length > 0) {
+      loadAnalyticsData(selectedMetrics);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analyticsDateRange.startDate, analyticsDateRange.endDate, clientId]);
 
   const loadData = async () => {
     try {
@@ -310,6 +337,160 @@ export default function NewClientDashboard() {
     setCommission(value);
   };
 
+  // Load analytics data (GA4 + Spend)
+  const loadAnalyticsData = async (metricsToFetch?: string[]) => {
+    if (!clientId) return;
+    
+    setLoadingAnalytics(true);
+    try {
+      // Use provided metrics or default set
+      const metrics = metricsToFetch || selectedMetrics.length > 0 
+        ? selectedMetrics 
+        : [
+            'activeUsers',
+            'conversions',
+            'totalUsers',
+            'sessions',
+            'screenPageViews',
+            'eventCount',
+          ];
+
+      const result = await fetchAnalyticsData({
+        startDate: analyticsDateRange.startDate,
+        endDate: analyticsDateRange.endDate,
+        clientId: clientId,
+        includeSpendData: true,
+        metrics: metrics,
+      });
+
+      console.log('📊 Analytics data result:', {
+        ga4DataLength: result.ga4Data?.length || 0,
+        spendDataLength: result.spendData?.length || 0,
+        ga4DataSample: result.ga4Data?.[0],
+        ga4DataKeys: result.ga4Data?.[0] ? Object.keys(result.ga4Data[0]) : [],
+        spendDataSample: result.spendData?.[0],
+        requestedMetrics: metrics,
+        errors: result.errors,
+        ga4Error: result.ga4Error,
+        ga4ErrorDetails: result.ga4ErrorDetails,
+        ga4ActivationUrl: result.ga4ActivationUrl,
+        fullResult: result,
+      });
+      
+      // Check for GA4 API errors
+      if (result.ga4Error) {
+        setGa4Error(result.ga4Error);
+        setGa4ActivationUrl(result.ga4ActivationUrl);
+        setGa4Data([]);
+        setSpendData(result.spendData || []);
+        return; // Don't process further
+      } else {
+        setGa4Error(undefined);
+        setGa4ActivationUrl(undefined);
+      }
+      
+      if (result.errors && result.errors.length > 0) {
+        const apiError = result.errors.find((e: string) => 
+          e.includes('not enabled') || 
+          e.includes('SERVICE_DISABLED') ||
+          e.includes('has not been used')
+        );
+        
+        if (apiError) {
+          console.error('GA4 API not enabled error:', apiError);
+          setGa4Error(apiError);
+          setGa4Data([]);
+          setSpendData(result.spendData || []);
+          return; // Don't process further
+        }
+      }
+      
+      if (!result.ga4Data || result.ga4Data.length === 0) {
+        console.error('No GA4 data returned!', {
+          result,
+          metrics,
+          dateRange: analyticsDateRange,
+        });
+      }
+
+      setGa4Data(result.ga4Data || []);
+      
+      // Enhance spend data with plan information
+      const enhancedSpendData = (result.spendData || []).map(point => {
+        // Try to match spend data to active plan based on date range
+        const matchingPlan = plans.find(plan => {
+          if (plan.status?.toLowerCase() !== 'active') return false;
+          const planStart = new Date(plan.start_date);
+          const planEnd = new Date(plan.end_date);
+          const pointDate = new Date(point.date);
+          return pointDate >= planStart && pointDate <= planEnd;
+        });
+        
+        return {
+          ...point,
+          planId: matchingPlan?.id,
+          planName: matchingPlan?.name,
+        };
+      });
+      
+      setSpendData(enhancedSpendData);
+
+      // Update available metrics from the response
+      if (result.ga4Data && result.ga4Data.length > 0) {
+        const metricsInData = new Set<string>();
+        result.ga4Data[0] && Object.keys(result.ga4Data[0]).forEach(key => {
+          if (key !== 'date') {
+            metricsInData.add(key);
+          }
+        });
+        const newAvailableMetrics = Array.from(metricsInData);
+        console.log('Available metrics from data:', newAvailableMetrics);
+        setAvailableMetrics(newAvailableMetrics);
+        
+        // Ensure selected metrics that are in data are kept
+        const validSelectedMetrics = selectedMetrics.filter(m => 
+          newAvailableMetrics.includes(m) || metrics.includes(m)
+        );
+        if (validSelectedMetrics.length !== selectedMetrics.length) {
+          setSelectedMetrics(validSelectedMetrics);
+        }
+      } else {
+        console.warn('No GA4 data returned');
+      }
+
+      if (result.errors && result.errors.length > 0) {
+        console.warn('Analytics data loading warnings:', result.errors);
+      }
+    } catch (error) {
+      console.error('Error loading analytics data:', error);
+      // Don't show error to user, just log it
+    } finally {
+      setLoadingAnalytics(false);
+    }
+  };
+
+  // Handle adding a new metric
+  const handleAddMetric = async (metric: string) => {
+    if (selectedMetrics.includes(metric)) {
+      return; // Already selected
+    }
+
+    // Add to selected metrics first
+    const newMetrics = [...selectedMetrics, metric];
+    setSelectedMetrics(newMetrics);
+    
+    // Then fetch data with the new metric
+    await loadAnalyticsData(newMetrics);
+  };
+
+  // Handle metrics change from chart
+  const handleMetricsChange = (metrics: string[]) => {
+    setSelectedMetrics(metrics);
+    if (metrics.length > 0) {
+      loadAnalyticsData(metrics);
+    }
+  };
+
   if (loading) {
     return (
       <div className="w-full min-h-screen bg-[#f8fafc] font-sans flex items-center justify-center">
@@ -489,6 +670,34 @@ export default function NewClientDashboard() {
         {/* Ad Platform Connections Section */}
         <section className="mt-8" aria-label="Ad platform connections">
           <AdPlatformConnector clientId={clientId} />
+        </section>
+
+        {/* Analytics & Spend Overview Section */}
+        <section className="mt-8" aria-label="Analytics and spend overview">
+          {loadingAnalytics ? (
+            <Card className="bg-white shadow-md">
+              <CardContent className="p-6">
+                <div className="flex items-center justify-center py-12">
+                  <p className="text-[#64748b]">Loading analytics data...</p>
+                </div>
+              </CardContent>
+            </Card>
+          ) : (
+            <UnifiedAnalyticsChart
+              ga4Data={ga4Data}
+              spendData={spendData}
+              startDate={analyticsDateRange.startDate}
+              endDate={analyticsDateRange.endDate}
+              height={500}
+              mediaPlans={plans}
+              onAddMetric={handleAddMetric}
+              availableMetrics={availableMetrics}
+              selectedMetrics={selectedMetrics}
+              onMetricsChange={handleMetricsChange}
+              ga4Error={ga4Error}
+              ga4ActivationUrl={ga4ActivationUrl}
+            />
+          )}
         </section>
       </div>
 
