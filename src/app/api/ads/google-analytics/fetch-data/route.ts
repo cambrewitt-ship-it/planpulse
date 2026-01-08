@@ -6,18 +6,48 @@ import { Nango } from '@nangohq/node';
 import { toNangoPlatform } from '@/lib/platform-mapping';
 
 export async function POST(request: NextRequest) {
-  console.log('=== POST /api/ads/google-analytics/fetch-data ===');
+  console.log('');
+  console.log('╔══════════════════════════════════════════════════════════════╗');
+  console.log('║  POST /api/ads/google-analytics/fetch-data                   ║');
+  console.log('╚══════════════════════════════════════════════════════════════╝');
+  console.log('Timestamp:', new Date().toISOString());
+  
+  let body: any = null;
   
   try {
-    const body = await request.json();
+    // Parse request body with error handling
+    try {
+      body = await request.json();
+    } catch (parseError: any) {
+      console.error('GA4 API Error: Failed to parse request body:', parseError);
+      return NextResponse.json({
+        success: false,
+        error: 'Invalid request body',
+        errorDetails: parseError.message,
+        stack: process.env.NODE_ENV === 'development' ? parseError.stack : undefined,
+      }, { status: 400 });
+    }
+
     const { startDate, endDate, metrics, propertyId, clientId } = body;
+
+    // Log all incoming parameters
+    console.log('GA4 API route called with params:', {
+      propertyId: propertyId || '(not specified - will use all active properties)',
+      clientId: clientId || '(not specified)',
+      startDate,
+      endDate,
+      metrics: metrics || '(using defaults)',
+      timestamp: new Date().toISOString(),
+    });
 
     // Validate required parameters
     if (!startDate || !endDate) {
-      return NextResponse.json(
-        { error: 'Missing required parameters: startDate, endDate' },
-        { status: 400 }
-      );
+      console.error('GA4 API Error: Missing required date parameters');
+      return NextResponse.json({
+        success: false,
+        error: 'Missing required parameters: startDate, endDate',
+        received: { startDate, endDate },
+      }, { status: 400 });
     }
 
     // Validate date range
@@ -25,17 +55,21 @@ export async function POST(request: NextRequest) {
     const end = new Date(endDate);
     
     if (isNaN(start.getTime()) || isNaN(end.getTime())) {
-      return NextResponse.json(
-        { error: 'Invalid date format. Use ISO 8601 format (YYYY-MM-DD)' },
-        { status: 400 }
-      );
+      console.error('GA4 API Error: Invalid date format', { startDate, endDate });
+      return NextResponse.json({
+        success: false,
+        error: 'Invalid date format. Use ISO 8601 format (YYYY-MM-DD)',
+        received: { startDate, endDate },
+      }, { status: 400 });
     }
 
     if (end < start) {
-      return NextResponse.json(
-        { error: 'endDate must be after startDate' },
-        { status: 400 }
-      );
+      console.error('GA4 API Error: endDate before startDate', { startDate, endDate });
+      return NextResponse.json({
+        success: false,
+        error: 'endDate must be after startDate',
+        received: { startDate, endDate },
+      }, { status: 400 });
     }
 
     // Default metrics if not provided - includes events, key events (conversions), and active users
@@ -55,18 +89,26 @@ export async function POST(request: NextRequest) {
     const { data: { session }, error: sessionError } = await supabase.auth.getSession();
 
     if (sessionError) {
-      console.error('Failed to retrieve session:', sessionError);
-      return NextResponse.json(
-        { error: 'Unable to verify session' },
-        { status: 500 }
-      );
+      console.error('GA4 API Error: Failed to retrieve session:', sessionError);
+      return NextResponse.json({
+        success: false,
+        error: 'Unable to verify session',
+        errorDetails: sessionError.message,
+      }, { status: 500 });
     }
 
     const user = session?.user;
 
     if (!user || !user.id) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      console.error('GA4 API Error: Unauthorized - no user in session');
+      return NextResponse.json({
+        success: false,
+        error: 'Unauthorized',
+        errorDetails: 'No authenticated user found in session',
+      }, { status: 401 });
     }
+
+    console.log('Authenticated user:', user.id);
 
     // Look up user's connection for Google Analytics
     let query = supabase
@@ -83,30 +125,56 @@ export async function POST(request: NextRequest) {
     const { data: connection, error: dbError } = await query.single();
 
     if (dbError || !connection) {
-      return NextResponse.json(
-        { error: 'Google Analytics not connected. Please connect your account first.' },
-        { status: 404 }
-      );
+      console.error('GA4 API Error: No Google Analytics connection found', { dbError, clientId });
+      return NextResponse.json({
+        success: false,
+        error: 'Google Analytics not connected. Please connect your account first.',
+        errorDetails: dbError?.message || 'No active connection found',
+      }, { status: 404 });
     }
+
+    console.log('Found GA connection:', { connectionId: connection.connection_id, platform: connection.platform });
 
     // Initialize Nango
     const nangoSecretKey = process.env.NANGO_SECRET_KEY_DEV_PLAN_CHECK;
     if (!nangoSecretKey) {
-      console.error('NANGO_SECRET_KEY_DEV_PLAN_CHECK not configured');
-      return NextResponse.json(
-        { error: 'Server configuration error: Nango secret key not found' },
-        { status: 500 }
-      );
+      console.error('GA4 API Error: NANGO_SECRET_KEY_DEV_PLAN_CHECK not configured');
+      return NextResponse.json({
+        success: false,
+        error: 'Server configuration error: Nango secret key not found',
+        errorDetails: 'Missing environment variable: NANGO_SECRET_KEY_DEV_PLAN_CHECK',
+      }, { status: 500 });
     }
 
     const nango = new Nango({ secretKey: nangoSecretKey });
 
-    // Get the OAuth access token from Nango
-    const nangoConnection = await nango.getConnection(toNangoPlatform('google-analytics'), connection.connection_id);
-    const accessToken = nangoConnection.credentials?.access_token;
+    // Get the OAuth access token from Nango with error handling
+    let accessToken: string;
+    try {
+      console.log('Fetching Nango connection for:', { platform: toNangoPlatform('google-analytics'), connectionId: connection.connection_id });
+      const nangoConnection = await nango.getConnection(toNangoPlatform('google-analytics'), connection.connection_id);
+      accessToken = nangoConnection.credentials?.access_token as string;
 
-    if (!accessToken) {
-      throw new Error('No access token found in Nango connection');
+      if (!accessToken) {
+        console.error('GA4 API Error: No access token in Nango connection', {
+          hasCredentials: !!nangoConnection.credentials,
+          credentialKeys: nangoConnection.credentials ? Object.keys(nangoConnection.credentials) : [],
+        });
+        return NextResponse.json({
+          success: false,
+          error: 'No access token found in Nango connection',
+          errorDetails: 'OAuth credentials may have expired. Please reconnect your Google Analytics account.',
+        }, { status: 401 });
+      }
+      console.log('Successfully retrieved access token from Nango');
+    } catch (nangoError: any) {
+      console.error('GA4 API Error: Failed to get Nango connection:', nangoError);
+      return NextResponse.json({
+        success: false,
+        error: 'Failed to retrieve OAuth credentials',
+        errorDetails: nangoError.message,
+        stack: process.env.NODE_ENV === 'development' ? nangoError.stack : undefined,
+      }, { status: 500 });
     }
 
     console.log('=== GA4 DATA FETCH ===');
@@ -116,6 +184,7 @@ export async function POST(request: NextRequest) {
     console.log('Connection ID:', connection.connection_id);
 
     // Get Google Analytics properties from database
+    console.log('Querying GA4 properties from database...');
     let propertiesQuery = supabase
       .from('google_analytics_accounts')
       .select('*')
@@ -123,19 +192,41 @@ export async function POST(request: NextRequest) {
       .eq('is_active', true);
 
     if (propertyId) {
+      console.log('Filtering by specific propertyId:', propertyId);
       propertiesQuery = propertiesQuery.eq('property_id', propertyId);
     }
 
     const { data: gaAccounts, error: accountsError } = await propertiesQuery;
 
-    if (accountsError || !gaAccounts || gaAccounts.length === 0) {
+    // Check if we have any GA properties configured
+    if (accountsError) {
+      console.error('GA4 API Error: Database query failed:', accountsError);
       return NextResponse.json({
         success: false,
-        error: 'No Google Analytics properties configured'
-      }, { status: 404 });
+        error: 'Failed to query Google Analytics properties',
+        errorDetails: accountsError.message,
+      }, { status: 500 });
     }
 
-    console.log(`Found ${gaAccounts.length} GA4 property/properties`);
+    if (!gaAccounts || gaAccounts.length === 0) {
+      console.error('GA4 API Error: No Google Analytics properties configured', {
+        userId: user.id,
+        requestedPropertyId: propertyId,
+      });
+      return NextResponse.json({
+        success: false,
+        error: 'Google Analytics property ID not configured',
+        errorDetails: propertyId 
+          ? `No active property found with ID: ${propertyId}` 
+          : 'No active Google Analytics properties found for this user. Please configure a GA4 property in your settings.',
+      }, { status: 400 });
+    }
+
+    console.log(`✓ Found ${gaAccounts.length} GA4 property/properties:`, gaAccounts.map(a => ({
+      propertyId: a.property_id,
+      propertyName: a.property_name,
+      isActive: a.is_active,
+    })));
 
     // Map metric names to GA4 API metric names
     // Note: GA4 Data API uses these exact metric names
@@ -177,17 +268,13 @@ export async function POST(request: NextRequest) {
       console.log(`\nFetching data for GA4 property ${propertyId}...`);
 
       try {
-        // Format dates for GA4 API (YYYYMMDD)
-        const formatDateForGA4 = (dateStr: string) => {
-          return dateStr.replace(/-/g, '');
-        };
-
         // GA4 Data API request body - property is in URL, not in body
+        // Note: GA4 API accepts YYYY-MM-DD format directly (NOT YYYYMMDD)
         const requestBody = {
           dateRanges: [
             {
-              startDate: formatDateForGA4(startDate),
-              endDate: formatDateForGA4(endDate),
+              startDate: startDate,  // Already in YYYY-MM-DD format
+              endDate: endDate,      // Already in YYYY-MM-DD format
             }
           ],
           dimensions: dimensions.map(d => ({ name: d })),
@@ -269,8 +356,10 @@ export async function POST(request: NextRequest) {
 
           for (const row of data.rows) {
             const dateValue = row.dimensionValues?.[0]?.value || '';
-            // Convert GA4 date format (YYYYMMDD) to ISO (YYYY-MM-DD)
-            const formattedDate = dateValue.length === 8 
+            // GA4 API returns dates in YYYY-MM-DD format (or YYYYMMDD depending on request)
+            // If it's already in YYYY-MM-DD format, use as-is
+            // If it's in YYYYMMDD format (8 digits), convert to YYYY-MM-DD
+            const formattedDate = dateValue.length === 8 && !dateValue.includes('-')
               ? `${dateValue.substring(0, 4)}-${dateValue.substring(4, 6)}-${dateValue.substring(6, 8)}`
               : dateValue;
 
@@ -414,23 +503,26 @@ export async function POST(request: NextRequest) {
     });
 
   } catch (error: any) {
-    console.error('=== Error in google-analytics/fetch-data API route ===');
+    console.error('');
+    console.error('╔══════════════════════════════════════════════════════════════╗');
+    console.error('║  GA4 API ERROR - Unhandled Exception                         ║');
+    console.error('╚══════════════════════════════════════════════════════════════╝');
+    console.error('Timestamp:', new Date().toISOString());
     console.error('Error name:', error.name);
     console.error('Error message:', error.message);
     console.error('Error stack:', error.stack);
-    console.error('Full error object:', error);
+    console.error('Request body:', body);
+    console.error('Full error object:', JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
     
     // Return error with more details for debugging
-    return NextResponse.json(
-      {
-        success: false,
-        error: 'Internal server error',
-        details: error.message || 'Unknown error',
-        errorName: error.name,
-        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
-      },
-      { status: 500 }
-    );
+    return NextResponse.json({
+      success: false,
+      error: error.message || 'Internal server error',
+      errorDetails: `${error.name}: ${error.message}`,
+      errorName: error.name,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+      timestamp: new Date().toISOString(),
+    }, { status: 500 });
   }
 }
 

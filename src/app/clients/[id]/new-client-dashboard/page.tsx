@@ -4,18 +4,20 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { User, Pencil, Check, X } from 'lucide-react';
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { User, Pencil, Check, X, DollarSign, TrendingUp, TrendingDown, Target, Minus, Download, CheckCircle } from 'lucide-react';
 import RollingCalendar from '@/components/RollingCalendar';
 import MediaChannels from '@/components/MediaChannels';
 import { MediaPlanGrid, MediaPlanChannel } from '@/components/media-plan-builder/media-plan-grid';
 import { useParams } from 'next/navigation';
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import { getClients, getMediaPlans, getPlanById, updateClient } from '@/lib/db/plans';
 import PlanEditForm from '@/components/plan-entry/PlanEditForm';
 import AdPlatformConnector from '@/components/AdPlatformConnector';
-import { UnifiedAnalyticsChart } from '@/components/ui/unified-analytics-chart';
-import { fetchAnalyticsData, GA4DataPoint, SpendDataPoint } from '@/lib/api/analytics-data-integration';
-import { subDays, format } from 'date-fns';
+import { CACChart } from '@/components/ui/cac-chart';
+import { DateRangePicker } from '@/components/ui/date-range-picker';
+import { fetchAnalyticsData, calculateCostPerMetric, SpendDataPoint, CostMetricPoint } from '@/lib/api/analytics-data-integration';
+import { subDays, format, differenceInDays, parseISO } from 'date-fns';
 
 interface Client {
   id: string;
@@ -31,6 +33,51 @@ interface MediaPlan {
   total_budget: number;
   status: string;
   channels?: any[];
+}
+
+// Metric options for cost calculation, grouped by category
+const METRIC_GROUPS = [
+  {
+    label: 'Conversion Metrics',
+    metrics: [
+      { value: 'conversions', label: 'Conversions' },
+    ],
+  },
+  {
+    label: 'User Metrics',
+    metrics: [
+      { value: 'activeUsers', label: 'Active Users' },
+      { value: 'totalUsers', label: 'Total Users' },
+      { value: 'newUsers', label: 'New Users' },
+    ],
+  },
+  {
+    label: 'Engagement Metrics',
+    metrics: [
+      { value: 'sessions', label: 'Sessions' },
+      { value: 'engagedSessions', label: 'Engaged Sessions' },
+      { value: 'eventCount', label: 'Events' },
+      { value: 'bounceRate', label: 'Bounces (inverted)' },
+    ],
+  },
+] as const;
+
+// Flat array of all metric options for iteration
+const METRIC_OPTIONS = METRIC_GROUPS.flatMap(group => group.metrics);
+
+// Get singular display name for metric (for title)
+function getMetricDisplayName(metricKey: string): string {
+  const displayNames: Record<string, string> = {
+    conversions: 'Conversion',
+    activeUsers: 'Active User',
+    totalUsers: 'Total User',
+    newUsers: 'New User',
+    sessions: 'Session',
+    engagedSessions: 'Engaged Session',
+    eventCount: 'Event',
+    bounceRate: 'Bounce',
+  };
+  return displayNames[metricKey] || metricKey;
 }
 
 export default function NewClientDashboard() {
@@ -54,37 +101,195 @@ export default function NewClientDashboard() {
   const [isEditingClientNotes, setIsEditingClientNotes] = useState(false);
   const [editingClientNotes, setEditingClientNotes] = useState('');
   const [isSavingClientNotes, setIsSavingClientNotes] = useState(false);
-  const [ga4Data, setGa4Data] = useState<GA4DataPoint[]>([]);
   const [spendData, setSpendData] = useState<SpendDataPoint[]>([]);
+  const [cacMetrics, setCacMetrics] = useState<CostMetricPoint[]>([]);
+  const [cacError, setCacError] = useState<string | undefined>();
+  const [cacErrorDetails, setCacErrorDetails] = useState<string | undefined>();
   const [loadingAnalytics, setLoadingAnalytics] = useState(false);
-  const [availableMetrics, setAvailableMetrics] = useState<string[]>([]);
-  const [ga4Error, setGa4Error] = useState<string | undefined>();
-  const [ga4ActivationUrl, setGa4ActivationUrl] = useState<string | undefined>();
-  const [selectedMetrics, setSelectedMetrics] = useState<string[]>([
-    'activeUsers',    // Active users
-    'eventCount',     // Total events
-    'conversions',    // Key events (conversions)
-  ]);
-  const [analyticsDateRange, setAnalyticsDateRange] = useState({
-    startDate: format(subDays(new Date(), 30), 'yyyy-MM-dd'),
-    endDate: format(new Date(), 'yyyy-MM-dd'),
+  const [selectedMetric, setSelectedMetric] = useState<string>('conversions');
+  const [availableMetrics, setAvailableMetrics] = useState<Set<string>>(new Set(['conversions']));
+  const [previousPeriodMetrics, setPreviousPeriodMetrics] = useState<CostMetricPoint[] | null>(null);
+  const [loadingComparison, setLoadingComparison] = useState(false);
+  const [exportToast, setExportToast] = useState<string | null>(null);
+  const [analyticsDateRange, setAnalyticsDateRange] = useState(() => {
+    const today = new Date();
+    const thirtyDaysAgo = subDays(today, 30);
+    const startDate = format(thirtyDaysAgo, 'yyyy-MM-dd');
+    const endDate = format(today, 'yyyy-MM-dd');
+    
+    console.log('🗓️ Initializing date range:');
+    console.log('  Today:', today);
+    console.log('  30 days ago:', thirtyDaysAgo);
+    console.log('  Start date formatted:', startDate);
+    console.log('  End date formatted:', endDate);
+    
+    return { startDate, endDate };
   });
+
+  // Calculate summary statistics from cacMetrics with trends
+  const summaryStats = useMemo(() => {
+    const emptyStats = {
+      totalSpend: 0,
+      totalMetricValue: 0,
+      averageCost: null as number | null,
+      spendTrend: null as number | null,
+      metricTrend: null as number | null,
+      costTrend: null as number | null,
+      spendSparkline: [] as number[],
+      metricSparkline: [] as number[],
+      costSparkline: [] as number[],
+    };
+
+    if (!cacMetrics || cacMetrics.length === 0) {
+      return emptyStats;
+    }
+
+    const totalSpend = cacMetrics.reduce((sum, point) => sum + (point.spend || 0), 0);
+    const totalMetricValue = cacMetrics.reduce((sum, point) => sum + (point.metricValue || 0), 0);
+    
+    // Calculate average cost only from days with valid data
+    const daysWithCost = cacMetrics.filter(point => point.dailyCost !== null && point.dailyCost !== undefined);
+    const averageCost = daysWithCost.length > 0
+      ? daysWithCost.reduce((sum, point) => sum + (point.dailyCost || 0), 0) / daysWithCost.length
+      : null;
+
+    // Calculate trends by comparing first half to second half of the period
+    const midpoint = Math.floor(cacMetrics.length / 2);
+    const firstHalf = cacMetrics.slice(0, midpoint);
+    const secondHalf = cacMetrics.slice(midpoint);
+
+    // Spend trend
+    const firstHalfSpend = firstHalf.reduce((sum, p) => sum + (p.spend || 0), 0);
+    const secondHalfSpend = secondHalf.reduce((sum, p) => sum + (p.spend || 0), 0);
+    const spendTrend = firstHalfSpend > 0 
+      ? ((secondHalfSpend - firstHalfSpend) / firstHalfSpend) * 100 
+      : null;
+
+    // Metric trend
+    const firstHalfMetric = firstHalf.reduce((sum, p) => sum + (p.metricValue || 0), 0);
+    const secondHalfMetric = secondHalf.reduce((sum, p) => sum + (p.metricValue || 0), 0);
+    const metricTrend = firstHalfMetric > 0 
+      ? ((secondHalfMetric - firstHalfMetric) / firstHalfMetric) * 100 
+      : null;
+
+    // Cost trend (compare average cost of first half vs second half)
+    const firstHalfCosts = firstHalf.filter(p => p.dailyCost !== null).map(p => p.dailyCost!);
+    const secondHalfCosts = secondHalf.filter(p => p.dailyCost !== null).map(p => p.dailyCost!);
+    const firstHalfAvgCost = firstHalfCosts.length > 0 
+      ? firstHalfCosts.reduce((a, b) => a + b, 0) / firstHalfCosts.length 
+      : null;
+    const secondHalfAvgCost = secondHalfCosts.length > 0 
+      ? secondHalfCosts.reduce((a, b) => a + b, 0) / secondHalfCosts.length 
+      : null;
+    const costTrend = firstHalfAvgCost && secondHalfAvgCost 
+      ? ((secondHalfAvgCost - firstHalfAvgCost) / firstHalfAvgCost) * 100 
+      : null;
+
+    // Generate sparkline data (last 14 points or all if less)
+    const sparklineLength = Math.min(14, cacMetrics.length);
+    const recentData = cacMetrics.slice(-sparklineLength);
+    
+    const spendSparkline = recentData.map(p => p.spend || 0);
+    const metricSparkline = recentData.map(p => p.metricValue || 0);
+    const costSparkline = recentData.map(p => p.dailyCost ?? 0);
+
+    return {
+      totalSpend,
+      totalMetricValue,
+      averageCost,
+      spendTrend,
+      metricTrend,
+      costTrend,
+      spendSparkline,
+      metricSparkline,
+      costSparkline,
+    };
+  }, [cacMetrics]);
+
+  // Helper to format currency consistently
+  const formatCurrency = (value: number | null) => {
+    if (value === null || value === undefined) return 'N/A';
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value);
+  };
+
+  // Simple SVG sparkline component
+  const Sparkline = ({ data, color, height = 24, width = 60 }: { data: number[]; color: string; height?: number; width?: number }) => {
+    if (!data || data.length < 2) return null;
+    
+    const max = Math.max(...data);
+    const min = Math.min(...data);
+    const range = max - min || 1;
+    
+    const points = data.map((value, index) => {
+      const x = (index / (data.length - 1)) * width;
+      const y = height - ((value - min) / range) * (height - 4) - 2;
+      return `${x},${y}`;
+    }).join(' ');
+
+    return (
+      <svg width={width} height={height} className="ml-auto">
+        <polyline
+          fill="none"
+          stroke={color}
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          points={points}
+        />
+      </svg>
+    );
+  };
+
+  // Trend indicator component
+  const TrendIndicator = ({ value, invertColors = false }: { value: number | null; invertColors?: boolean }) => {
+    if (value === null) return null;
+    
+    const isPositive = value > 0;
+    const isNeutral = Math.abs(value) < 1;
+    
+    // For cost, lower is better (invertColors = true)
+    // For spend/metrics, context dependent
+    let colorClass: string;
+    if (isNeutral) {
+      colorClass = 'text-gray-500';
+    } else if (invertColors) {
+      // Lower cost is good (green), higher cost is bad (red)
+      colorClass = isPositive ? 'text-red-500' : 'text-emerald-500';
+    } else {
+      // Higher spend/metrics is neutral-to-context-dependent
+      colorClass = isPositive ? 'text-emerald-500' : 'text-red-500';
+    }
+
+    const Icon = isNeutral ? Minus : isPositive ? TrendingUp : TrendingDown;
+
+    return (
+      <div className={`flex items-center gap-1 text-xs font-medium ${colorClass}`}>
+        <Icon className="w-3 h-3" />
+        <span>{Math.abs(value).toFixed(1)}%</span>
+      </div>
+    );
+  };
 
   useEffect(() => {
     if (clientId) {
       loadData();
       loadMediaPlanBuilderData();
-      loadAnalyticsData();
+      loadAnalyticsData(selectedMetric);
     }
   }, [clientId]);
 
-  // Reload analytics when date range changes
+  // Reload analytics when date range or selected metric changes
   useEffect(() => {
-    if (clientId && selectedMetrics.length > 0) {
-      loadAnalyticsData(selectedMetrics);
+    if (clientId) {
+      loadAnalyticsData(selectedMetric);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [analyticsDateRange.startDate, analyticsDateRange.endDate, clientId]);
+  }, [analyticsDateRange.startDate, analyticsDateRange.endDate, clientId, selectedMetric]);
 
   const loadData = async () => {
     try {
@@ -92,6 +297,10 @@ export default function NewClientDashboard() {
       const clients = await getClients();
       const foundClient = clients?.find((c: Client) => c.id === clientId);
       setClient(foundClient || null);
+
+      // Debug logging for GA4 property ID
+      console.log('🔍 Client GA4 Property ID:', (foundClient as any)?.google_analytics_property_id);
+      console.log('🔍 Full client object:', foundClient);
 
       // Load plans for this client
       const clientPlans = await getMediaPlans(clientId);
@@ -337,87 +546,73 @@ export default function NewClientDashboard() {
     setCommission(value);
   };
 
-  // Load analytics data (GA4 + Spend)
-  const loadAnalyticsData = async (metricsToFetch?: string[]) => {
+  // Load analytics data (GA4 + Spend) for cost per metric calculation
+  const loadAnalyticsData = async (metricKey: string = 'conversions') => {
     if (!clientId) return;
     
     setLoadingAnalytics(true);
     try {
-      // Use provided metrics or default set
-      const metrics = metricsToFetch || selectedMetrics.length > 0 
-        ? selectedMetrics 
-        : [
-            'activeUsers',
-            'conversions',
-            'totalUsers',
-            'sessions',
-            'screenPageViews',
-            'eventCount',
-          ];
+      // Fetch all metrics to check availability
+      const allMetricKeys = METRIC_OPTIONS.map(m => m.value);
 
+      // Note: The API route will automatically fetch the property_id from google_analytics_accounts
+      // based on the user's active connection, so we don't need to pass it explicitly
       const result = await fetchAnalyticsData({
         startDate: analyticsDateRange.startDate,
         endDate: analyticsDateRange.endDate,
         clientId: clientId,
+        // propertyId will be fetched by the API route from google_analytics_accounts
         includeSpendData: true,
-        metrics: metrics,
+        metrics: allMetricKeys,
       });
 
-      console.log('📊 Analytics data result:', {
+      console.log('📊 Cost Per Metric Analytics data result:', {
         ga4DataLength: result.ga4Data?.length || 0,
         spendDataLength: result.spendData?.length || 0,
-        ga4DataSample: result.ga4Data?.[0],
-        ga4DataKeys: result.ga4Data?.[0] ? Object.keys(result.ga4Data[0]) : [],
-        spendDataSample: result.spendData?.[0],
-        requestedMetrics: metrics,
+        metricKey,
         errors: result.errors,
-        ga4Error: result.ga4Error,
-        ga4ErrorDetails: result.ga4ErrorDetails,
-        ga4ActivationUrl: result.ga4ActivationUrl,
-        fullResult: result,
       });
-      
-      // Check for GA4 API errors
-      if (result.ga4Error) {
-        setGa4Error(result.ga4Error);
-        setGa4ActivationUrl(result.ga4ActivationUrl);
-        setGa4Data([]);
-        setSpendData(result.spendData || []);
-        return; // Don't process further
-      } else {
-        setGa4Error(undefined);
-        setGa4ActivationUrl(undefined);
-      }
-      
-      if (result.errors && result.errors.length > 0) {
-        const apiError = result.errors.find((e: string) => 
-          e.includes('not enabled') || 
-          e.includes('SERVICE_DISABLED') ||
-          e.includes('has not been used')
-        );
-        
-        if (apiError) {
-          console.error('GA4 API not enabled error:', apiError);
-          setGa4Error(apiError);
-          setGa4Data([]);
-          setSpendData(result.spendData || []);
-          return; // Don't process further
-        }
-      }
-      
-      if (!result.ga4Data || result.ga4Data.length === 0) {
-        console.error('No GA4 data returned!', {
-          result,
-          metrics,
-          dateRange: analyticsDateRange,
+
+      // Check which metrics have non-null values in the GA4 data
+      const metricsWithData = new Set<string>();
+      if (result.ga4Data && result.ga4Data.length > 0) {
+        allMetricKeys.forEach(metric => {
+          const hasData = result.ga4Data.some(point => {
+            const value = point[metric];
+            return value !== null && value !== undefined && value !== '' && Number(value) > 0;
+          });
+          if (hasData) {
+            metricsWithData.add(metric);
+          }
         });
       }
 
-      setGa4Data(result.ga4Data || []);
+      console.log('📊 Available metrics:', Array.from(metricsWithData));
+      setAvailableMetrics(metricsWithData);
+
+      // NOTE: Removed automatic fallback to 'conversions' for debugging
+      // Allow user to select any metric - chart will show Data Quality Notice if no data
+      // If you need to re-enable fallback logic, uncomment the block below:
+      /*
+      let effectiveMetricKey = metricKey;
+      if (!metricsWithData.has(metricKey)) {
+        if (metricsWithData.has('conversions')) {
+          effectiveMetricKey = 'conversions';
+        } else if (metricsWithData.size > 0) {
+          effectiveMetricKey = Array.from(metricsWithData)[0];
+        }
+        if (effectiveMetricKey !== metricKey) {
+          console.log(`📊 Selected metric "${metricKey}" not available, defaulting to "${effectiveMetricKey}"`);
+          setSelectedMetric(effectiveMetricKey);
+        }
+      }
+      */
+      
+      // Use the selected metric as-is, even if no data available
+      const effectiveMetricKey = metricKey;
       
       // Enhance spend data with plan information
       const enhancedSpendData = (result.spendData || []).map(point => {
-        // Try to match spend data to active plan based on date range
         const matchingPlan = plans.find(plan => {
           if (plan.status?.toLowerCase() !== 'active') return false;
           const planStart = new Date(plan.start_date);
@@ -435,60 +630,152 @@ export default function NewClientDashboard() {
       
       setSpendData(enhancedSpendData);
 
-      // Update available metrics from the response
-      if (result.ga4Data && result.ga4Data.length > 0) {
-        const metricsInData = new Set<string>();
-        result.ga4Data[0] && Object.keys(result.ga4Data[0]).forEach(key => {
-          if (key !== 'date') {
-            metricsInData.add(key);
-          }
-        });
-        const newAvailableMetrics = Array.from(metricsInData);
-        console.log('Available metrics from data:', newAvailableMetrics);
-        setAvailableMetrics(newAvailableMetrics);
-        
-        // Ensure selected metrics that are in data are kept
-        const validSelectedMetrics = selectedMetrics.filter(m => 
-          newAvailableMetrics.includes(m) || metrics.includes(m)
-        );
-        if (validSelectedMetrics.length !== selectedMetrics.length) {
-          setSelectedMetrics(validSelectedMetrics);
-        }
+      // Calculate cost per metric from spend and GA4 data
+      const costResult = calculateCostPerMetric(enhancedSpendData, result.ga4Data || [], effectiveMetricKey);
+      
+      if (costResult.error) {
+        console.error('Cost calculation error:', costResult.error, costResult.errorDetails);
+        setCacError(costResult.error);
+        setCacErrorDetails(costResult.errorDetails);
+        setCacMetrics([]);
       } else {
-        console.warn('No GA4 data returned');
+        setCacError(undefined);
+        setCacErrorDetails(undefined);
+        setCacMetrics(costResult.data);
       }
 
       if (result.errors && result.errors.length > 0) {
         console.warn('Analytics data loading warnings:', result.errors);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error loading analytics data:', error);
-      // Don't show error to user, just log it
+      setCacError('Failed to load analytics data');
+      setCacErrorDetails(error.message || 'Unknown error');
+      setCacMetrics([]);
     } finally {
       setLoadingAnalytics(false);
     }
   };
 
-  // Handle adding a new metric
-  const handleAddMetric = async (metric: string) => {
-    if (selectedMetrics.includes(metric)) {
-      return; // Already selected
+  // Load previous period data for comparison
+  const loadPreviousPeriodData = async (enabled: boolean) => {
+    if (!enabled) {
+      setPreviousPeriodMetrics(null);
+      return;
     }
 
-    // Add to selected metrics first
-    const newMetrics = [...selectedMetrics, metric];
-    setSelectedMetrics(newMetrics);
-    
-    // Then fetch data with the new metric
-    await loadAnalyticsData(newMetrics);
+    if (!clientId) return;
+
+    setLoadingComparison(true);
+    try {
+      // Calculate previous period date range (same length as current)
+      const startDate = parseISO(analyticsDateRange.startDate);
+      const endDate = parseISO(analyticsDateRange.endDate);
+      const periodLength = differenceInDays(endDate, startDate);
+      
+      const prevEndDate = subDays(startDate, 1);
+      const prevStartDate = subDays(prevEndDate, periodLength);
+
+      const allMetricKeys = METRIC_OPTIONS.map(m => m.value);
+
+      const result = await fetchAnalyticsData({
+        startDate: format(prevStartDate, 'yyyy-MM-dd'),
+        endDate: format(prevEndDate, 'yyyy-MM-dd'),
+        clientId: clientId,
+        includeSpendData: true,
+        metrics: allMetricKeys,
+      });
+
+      console.log('📊 Previous Period Analytics data result:', {
+        ga4DataLength: result.ga4Data?.length || 0,
+        spendDataLength: result.spendData?.length || 0,
+        prevStartDate: format(prevStartDate, 'yyyy-MM-dd'),
+        prevEndDate: format(prevEndDate, 'yyyy-MM-dd'),
+      });
+
+      // Enhance spend data
+      const enhancedSpendData = (result.spendData || []).map(point => ({
+        ...point,
+      }));
+
+      // Calculate cost per metric for previous period
+      const costResult = calculateCostPerMetric(enhancedSpendData, result.ga4Data || [], selectedMetric);
+      
+      if (!costResult.error) {
+        setPreviousPeriodMetrics(costResult.data);
+      } else {
+        console.warn('Previous period calculation error:', costResult.error);
+        setPreviousPeriodMetrics(null);
+      }
+    } catch (error: any) {
+      console.error('Error loading previous period data:', error);
+      setPreviousPeriodMetrics(null);
+    } finally {
+      setLoadingComparison(false);
+    }
   };
 
-  // Handle metrics change from chart
-  const handleMetricsChange = (metrics: string[]) => {
-    setSelectedMetrics(metrics);
-    if (metrics.length > 0) {
-      loadAnalyticsData(metrics);
+  // Export chart data as CSV
+  const exportToCSV = () => {
+    if (!cacMetrics || cacMetrics.length === 0) {
+      setExportToast('No data to export');
+      setTimeout(() => setExportToast(null), 3000);
+      return;
     }
+
+    // Get metric display name for headers and filename
+    const metricLabel = METRIC_OPTIONS.find(m => m.value === selectedMetric)?.label || selectedMetric;
+    const metricDisplayName = getMetricDisplayName(selectedMetric);
+
+    // Create CSV headers
+    const headers = [
+      'Date',
+      'Spend ($)',
+      metricLabel,
+      `Cost Per ${metricDisplayName} ($)`,
+      '7-Day Avg ($)',
+      '14-Day Avg ($)',
+      '30-Day Avg ($)',
+    ];
+
+    // Create CSV rows
+    const rows = cacMetrics.map(point => [
+      point.date,
+      point.spend?.toFixed(2) ?? '',
+      point.metricValue ?? '',
+      point.dailyCost?.toFixed(2) ?? '',
+      point.cost_7d?.toFixed(2) ?? '',
+      point.cost_14d?.toFixed(2) ?? '',
+      point.cost_30d?.toFixed(2) ?? '',
+    ]);
+
+    // Combine headers and rows
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.join(',')),
+    ].join('\n');
+
+    // Create blob and download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    
+    // Generate filename: cost-per-{metricName}-{clientName}-{dateRange}.csv
+    const clientName = (client?.name || 'client').toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    const dateRange = `${analyticsDateRange.startDate}-to-${analyticsDateRange.endDate}`;
+    const filename = `cost-per-${selectedMetric.toLowerCase()}-${clientName}-${dateRange}.csv`;
+    
+    link.setAttribute('href', url);
+    link.setAttribute('download', filename);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    // Show success toast
+    setExportToast(`Exported ${cacMetrics.length} rows to ${filename}`);
+    setTimeout(() => setExportToast(null), 4000);
   };
 
   if (loading) {
@@ -672,32 +959,171 @@ export default function NewClientDashboard() {
           <AdPlatformConnector clientId={clientId} />
         </section>
 
-        {/* Analytics & Spend Overview Section */}
-        <section className="mt-8" aria-label="Analytics and spend overview">
+        {/* Customer Acquisition Cost (CAC) Overview Section */}
+        <section className="mt-8" aria-label="Customer acquisition cost overview">
+          <div className="mb-4 flex items-center justify-between flex-wrap gap-4">
+            <h2 className="text-xl font-semibold text-[#0f172a]">Cost Per {getMetricDisplayName(selectedMetric)} Overview</h2>
+            <div className="flex items-center gap-3">
+              <Select 
+                value={selectedMetric} 
+                onValueChange={(value) => {
+                  // Allow all metrics to be selected regardless of data availability
+                  // The chart will show a Data Quality Notice if no data exists
+                  setSelectedMetric(value);
+                }}
+              >
+                <SelectTrigger className="w-[200px] h-9 text-sm">
+                  <SelectValue placeholder="Select metric" />
+                </SelectTrigger>
+                <SelectContent>
+                  {METRIC_GROUPS.map((group) => (
+                    <SelectGroup key={group.label}>
+                      <SelectLabel className="text-xs font-semibold text-gray-500 uppercase tracking-wider px-2 py-1.5">
+                        {group.label}
+                      </SelectLabel>
+                      {group.metrics.map((option) => {
+                        const isAvailable = availableMetrics.has(option.value);
+                        return (
+                          <SelectItem 
+                            key={option.value} 
+                            value={option.value}
+                            // Removed disabled={!isAvailable} to allow all metrics to be selectable
+                            className={!isAvailable ? 'text-gray-500' : ''}
+                          >
+                            <div className="flex items-center justify-between w-full gap-2">
+                              <span>{option.label}</span>
+                              {!isAvailable && (
+                                <span className="text-xs text-amber-500 italic">No data</span>
+                              )}
+                            </div>
+                          </SelectItem>
+                        );
+                      })}
+                    </SelectGroup>
+                  ))}
+                </SelectContent>
+              </Select>
+              <DateRangePicker
+                value={analyticsDateRange}
+                onChange={setAnalyticsDateRange}
+                disabled={loadingAnalytics}
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={exportToCSV}
+                disabled={loadingAnalytics || !cacMetrics || cacMetrics.length === 0}
+                className="h-9 px-3 gap-2"
+              >
+                <Download className="w-4 h-4" />
+                Export
+              </Button>
+            </div>
+          </div>
+
+          {/* Summary Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            {/* Total Spend Card */}
+            <Card className="bg-white shadow-md hover:shadow-lg transition-shadow">
+              <CardContent className="p-4">
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center flex-shrink-0">
+                      <DollarSign className="w-5 h-5 text-emerald-600" />
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-500 font-medium">Total Spend</p>
+                      <p className="text-xl font-bold text-[#0f172a]">
           {loadingAnalytics ? (
-            <Card className="bg-white shadow-md">
-              <CardContent className="p-6">
-                <div className="flex items-center justify-center py-12">
-                  <p className="text-[#64748b]">Loading analytics data...</p>
+                          <span className="inline-block w-20 h-6 bg-gray-200 animate-pulse rounded" />
+                        ) : (
+                          formatCurrency(summaryStats.totalSpend)
+                        )}
+                      </p>
+                      {!loadingAnalytics && (
+                        <TrendIndicator value={summaryStats.spendTrend} />
+                      )}
+                    </div>
+                  </div>
+                  {!loadingAnalytics && summaryStats.spendSparkline.length > 1 && (
+                    <Sparkline data={summaryStats.spendSparkline} color="#10b981" />
+                  )}
                 </div>
               </CardContent>
             </Card>
-          ) : (
-            <UnifiedAnalyticsChart
-              ga4Data={ga4Data}
-              spendData={spendData}
-              startDate={analyticsDateRange.startDate}
-              endDate={analyticsDateRange.endDate}
-              height={500}
-              mediaPlans={plans}
-              onAddMetric={handleAddMetric}
-              availableMetrics={availableMetrics}
-              selectedMetrics={selectedMetrics}
-              onMetricsChange={handleMetricsChange}
-              ga4Error={ga4Error}
-              ga4ActivationUrl={ga4ActivationUrl}
-            />
-          )}
+
+            {/* Total Metric Value Card */}
+            <Card className="bg-white shadow-md hover:shadow-lg transition-shadow">
+              <CardContent className="p-4">
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
+                      <Target className="w-5 h-5 text-blue-600" />
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-500 font-medium">Total {METRIC_OPTIONS.find(m => m.value === selectedMetric)?.label || 'Metric'}</p>
+                      <p className="text-xl font-bold text-[#0f172a]">
+                        {loadingAnalytics ? (
+                          <span className="inline-block w-16 h-6 bg-gray-200 animate-pulse rounded" />
+                        ) : (
+                          new Intl.NumberFormat('en-US').format(summaryStats.totalMetricValue)
+                        )}
+                      </p>
+                      {!loadingAnalytics && (
+                        <TrendIndicator value={summaryStats.metricTrend} />
+                      )}
+                    </div>
+                  </div>
+                  {!loadingAnalytics && summaryStats.metricSparkline.length > 1 && (
+                    <Sparkline data={summaryStats.metricSparkline} color="#3b82f6" />
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Average Cost Per Metric Card */}
+            <Card className="bg-white shadow-md hover:shadow-lg transition-shadow">
+              <CardContent className="p-4">
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center flex-shrink-0">
+                      <TrendingUp className="w-5 h-5 text-purple-600" />
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-500 font-medium">Avg Cost Per {getMetricDisplayName(selectedMetric)}</p>
+                      <p className="text-xl font-bold text-[#0f172a]">
+                        {loadingAnalytics ? (
+                          <span className="inline-block w-20 h-6 bg-gray-200 animate-pulse rounded" />
+                        ) : summaryStats.averageCost !== null ? (
+                          formatCurrency(summaryStats.averageCost)
+                        ) : (
+                          <span className="text-gray-400">N/A</span>
+                        )}
+                      </p>
+                      {!loadingAnalytics && (
+                        <TrendIndicator value={summaryStats.costTrend} invertColors />
+                      )}
+                    </div>
+                  </div>
+                  {!loadingAnalytics && summaryStats.costSparkline.length > 1 && (
+                    <Sparkline data={summaryStats.costSparkline} color="#8b5cf6" />
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <CACChart 
+            cacMetrics={cacMetrics} 
+            previousPeriodMetrics={previousPeriodMetrics}
+            height={400} 
+            isLoading={loadingAnalytics}
+            isComparisonLoading={loadingComparison}
+            selectedMetric={selectedMetric}
+            error={cacError}
+            errorDetails={cacErrorDetails}
+            onComparisonToggle={loadPreviousPeriodData}
+          />
         </section>
       </div>
 
@@ -709,6 +1135,22 @@ export default function NewClientDashboard() {
           onSave={handlePlanSaved}
           onDelete={handlePlanSaved}
         />
+      )}
+
+      {/* Export Toast Notification */}
+      {exportToast && (
+        <div className="fixed bottom-4 right-4 z-50 animate-in slide-in-from-bottom-4 fade-in duration-300">
+          <div className="bg-emerald-600 text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 max-w-md">
+            <CheckCircle className="w-5 h-5 flex-shrink-0" />
+            <p className="text-sm font-medium">{exportToast}</p>
+            <button 
+              onClick={() => setExportToast(null)}
+              className="ml-auto text-emerald-200 hover:text-white transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
