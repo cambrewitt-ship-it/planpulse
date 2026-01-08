@@ -50,6 +50,7 @@ export interface FetchAnalyticsDataOptions {
   propertyId?: string;
   clientId?: string;
   includeSpendData?: boolean;
+  eventName?: string;
 }
 
 export interface AnalyticsDataResponse {
@@ -66,7 +67,8 @@ export async function fetchGA4Data(
   endDate: string,
   metrics?: string[],
   propertyId?: string,
-  clientId?: string
+  clientId?: string,
+  eventName?: string
 ): Promise<{ 
   data: GA4DataPoint[]; 
   error?: string;
@@ -82,6 +84,7 @@ export async function fetchGA4Data(
   console.log('Metrics:', metrics);
   console.log('Property ID:', propertyId || '(will use active properties from database)');
   console.log('Client ID:', clientId);
+  console.log('Event Name:', eventName || '(all events)');
   console.log('════════════════════════════════════════════════════════');
   console.log('');
 
@@ -95,6 +98,7 @@ export async function fetchGA4Data(
       metrics,
       propertyId,
       clientId,
+      eventName,
     };
 
     console.log('🔵 Making GA4 API request to:', '/api/ads/google-analytics/fetch-data');
@@ -303,6 +307,7 @@ export async function fetchAnalyticsData(
     propertyId,
     clientId,
     includeSpendData = true,
+    eventName,
   } = options;
 
   const errors: string[] = [];
@@ -313,7 +318,8 @@ export async function fetchAnalyticsData(
     endDate,
     metrics,
     propertyId,
-    clientId
+    clientId,
+    eventName
   );
 
   if (ga4Result.error) {

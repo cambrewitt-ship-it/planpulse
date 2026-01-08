@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    const { startDate, endDate, metrics, propertyId, clientId } = body;
+    const { startDate, endDate, metrics, propertyId, clientId, eventName } = body;
 
     // Log all incoming parameters
     console.log('GA4 API route called with params:', {
@@ -37,6 +37,7 @@ export async function POST(request: NextRequest) {
       startDate,
       endDate,
       metrics: metrics || '(using defaults)',
+      eventName: eventName || '(not specified - all events)',
       timestamp: new Date().toISOString(),
     });
 
@@ -270,7 +271,7 @@ export async function POST(request: NextRequest) {
       try {
         // GA4 Data API request body - property is in URL, not in body
         // Note: GA4 API accepts YYYY-MM-DD format directly (NOT YYYYMMDD)
-        const requestBody = {
+        const requestBody: any = {
           dateRanges: [
             {
               startDate: startDate,  // Already in YYYY-MM-DD format
@@ -280,6 +281,20 @@ export async function POST(request: NextRequest) {
           dimensions: dimensions.map(d => ({ name: d })),
           metrics: ga4Metrics.map(m => ({ name: m })),
         };
+
+        // If eventName is specified, add dimension filter to only count that specific event
+        if (eventName && ga4Metrics.includes('eventCount')) {
+          console.log(`Adding dimension filter for event: ${eventName}`);
+          requestBody.dimensionFilter = {
+            filter: {
+              fieldName: 'eventName',
+              stringFilter: {
+                matchType: 'EXACT',
+                value: eventName,
+              },
+            },
+          };
+        }
 
         // GA4 Data API endpoint format: properties/{propertyId}:runReport
         const url = `https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runReport`;

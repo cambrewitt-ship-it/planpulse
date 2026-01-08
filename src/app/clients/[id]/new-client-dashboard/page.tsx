@@ -111,6 +111,9 @@ export default function NewClientDashboard() {
   const [previousPeriodMetrics, setPreviousPeriodMetrics] = useState<CostMetricPoint[] | null>(null);
   const [loadingComparison, setLoadingComparison] = useState(false);
   const [exportToast, setExportToast] = useState<string | null>(null);
+  const [selectedEventName, setSelectedEventName] = useState<string | null>(null);
+  const [availableEventNames, setAvailableEventNames] = useState<Array<{ name: string; count: number }>>([]);
+  const [loadingEventNames, setLoadingEventNames] = useState(false);
   const [analyticsDateRange, setAnalyticsDateRange] = useState(() => {
     const today = new Date();
     const thirtyDaysAgo = subDays(today, 30);
@@ -279,17 +282,25 @@ export default function NewClientDashboard() {
     if (clientId) {
       loadData();
       loadMediaPlanBuilderData();
-      loadAnalyticsData(selectedMetric);
+      loadAnalyticsData(selectedMetric, selectedMetric === 'eventCount' ? selectedEventName : null);
     }
   }, [clientId]);
 
-  // Reload analytics when date range or selected metric changes
+  // Load event names when eventCount metric is selected
+  useEffect(() => {
+    if (clientId && selectedMetric === 'eventCount' && availableEventNames.length === 0) {
+      loadEventNames();
+    }
+  }, [clientId, selectedMetric]);
+
+  // Reload analytics when date range, selected metric, or event name changes
   useEffect(() => {
     if (clientId) {
-      loadAnalyticsData(selectedMetric);
+      const eventName = selectedMetric === 'eventCount' ? selectedEventName : null;
+      loadAnalyticsData(selectedMetric, eventName);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [analyticsDateRange.startDate, analyticsDateRange.endDate, clientId, selectedMetric]);
+  }, [analyticsDateRange.startDate, analyticsDateRange.endDate, clientId, selectedMetric, selectedEventName]);
 
   const loadData = async () => {
     try {
@@ -546,8 +557,44 @@ export default function NewClientDashboard() {
     setCommission(value);
   };
 
+  // Fetch available event names from GA4
+  const loadEventNames = async () => {
+    if (!clientId) return;
+    
+    setLoadingEventNames(true);
+    try {
+      const response = await fetch('/api/ads/google-analytics/event-names', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ clientId }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.eventNames) {
+          console.log('📊 Event names loaded:', data.eventNames.length);
+          setAvailableEventNames(data.eventNames);
+          // Auto-select the first event if none selected
+          if (!selectedEventName && data.eventNames.length > 0) {
+            setSelectedEventName(data.eventNames[0].name);
+          }
+        }
+      } else {
+        console.error('Failed to load event names:', response.status);
+        setAvailableEventNames([]);
+      }
+    } catch (error) {
+      console.error('Error loading event names:', error);
+      setAvailableEventNames([]);
+    } finally {
+      setLoadingEventNames(false);
+    }
+  };
+
   // Load analytics data (GA4 + Spend) for cost per metric calculation
-  const loadAnalyticsData = async (metricKey: string = 'conversions') => {
+  const loadAnalyticsData = async (metricKey: string = 'conversions', eventName: string | null = null) => {
     if (!clientId) return;
     
     setLoadingAnalytics(true);
@@ -564,6 +611,7 @@ export default function NewClientDashboard() {
         // propertyId will be fetched by the API route from google_analytics_accounts
         includeSpendData: true,
         metrics: allMetricKeys,
+        eventName: eventName || undefined,
       });
 
       console.log('📊 Cost Per Metric Analytics data result:', {
@@ -678,12 +726,15 @@ export default function NewClientDashboard() {
 
       const allMetricKeys = METRIC_OPTIONS.map(m => m.value);
 
+      const eventName = selectedMetric === 'eventCount' ? selectedEventName : null;
+
       const result = await fetchAnalyticsData({
         startDate: format(prevStartDate, 'yyyy-MM-dd'),
         endDate: format(prevEndDate, 'yyyy-MM-dd'),
         clientId: clientId,
         includeSpendData: true,
         metrics: allMetricKeys,
+        eventName: eventName || undefined,
       });
 
       console.log('📊 Previous Period Analytics data result:', {
@@ -962,7 +1013,7 @@ export default function NewClientDashboard() {
         {/* Customer Acquisition Cost (CAC) Overview Section */}
         <section className="mt-8" aria-label="Customer acquisition cost overview">
           <div className="mb-4 flex items-center justify-between flex-wrap gap-4">
-            <h2 className="text-xl font-semibold text-[#0f172a]">Cost Per {getMetricDisplayName(selectedMetric)} Overview</h2>
+            <h2 className="text-xl font-semibold text-[#0f172a]">Cost Per {selectedMetric === 'eventCount' && selectedEventName ? selectedEventName : getMetricDisplayName(selectedMetric)} Overview</h2>
             <div className="flex items-center gap-3">
               <Select 
                 value={selectedMetric} 
@@ -970,6 +1021,10 @@ export default function NewClientDashboard() {
                   // Allow all metrics to be selected regardless of data availability
                   // The chart will show a Data Quality Notice if no data exists
                   setSelectedMetric(value);
+                  // Reset event name when switching away from eventCount
+                  if (value !== 'eventCount') {
+                    setSelectedEventName(null);
+                  }
                 }}
               >
                 <SelectTrigger className="w-[200px] h-9 text-sm">
@@ -1003,6 +1058,34 @@ export default function NewClientDashboard() {
                   ))}
                 </SelectContent>
               </Select>
+              {/* Event Name Selector - shown when eventCount is selected */}
+              {selectedMetric === 'eventCount' && (
+                <Select 
+                  value={selectedEventName || ''} 
+                  onValueChange={(value) => setSelectedEventName(value)}
+                  disabled={loadingEventNames}
+                >
+                  <SelectTrigger className="w-[200px] h-9 text-sm">
+                    <SelectValue placeholder={loadingEventNames ? "Loading events..." : "Select event"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableEventNames.length === 0 && !loadingEventNames ? (
+                      <SelectItem value="_none" disabled>
+                        No events found
+                      </SelectItem>
+                    ) : (
+                      availableEventNames.map((event) => (
+                        <SelectItem key={event.name} value={event.name}>
+                          <div className="flex items-center justify-between w-full gap-2">
+                            <span className="truncate">{event.name}</span>
+                            <span className="text-xs text-gray-400">({event.count.toLocaleString()})</span>
+                          </div>
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+              )}
               <DateRangePicker
                 value={analyticsDateRange}
                 onChange={setAnalyticsDateRange}
