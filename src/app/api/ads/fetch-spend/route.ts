@@ -175,9 +175,9 @@ export async function POST(request: NextRequest) {
         });
 
         // Step 2: Get the OAuth access token from Nango's connection using SDK
-        // Use the connection_id from the saved Google Ads account (not from the client-filtered connection)
+        // Use the connection_id from ad_platform_connections (current active connection)
         // This ensures we use the correct OAuth token for the account
-        const accountConnectionId = googleAdsAccounts[0].connection_id;
+        const accountConnectionId = connection.connection_id;
         console.log('Step 2: Getting access token from Nango...');
         console.log('Account Connection ID:', accountConnectionId);
         console.log('Provider config key:', toNangoPlatform('google-ads'));
