@@ -230,41 +230,50 @@ export async function POST(request: NextRequest) {
           console.log('No MCC ID configured - using direct customer access');
         }
 
-        // Step 3: First, verify which customers are accessible
-        console.log('Step 3: Verifying accessible customers...');
-        let accessibleCustomerIds: string[] = [];
-        try {
-          const listCustomersUrl = 'https://googleads.googleapis.com/v16/customers:listAccessibleCustomers';
-          const listHeaders: Record<string, string> = {
-            'Authorization': `Bearer ${accessToken}`,
-            'developer-token': process.env.GOOGLE_ADS_DEVELOPER_TOKEN || '',
-          };
+        // Step 3: Get MCC client accounts (more reliable than listAccessibleCustomers for MCC setups)
+        console.log('Step 3: Verifying accessible customers via MCC...');
+        let mccClientIds: string[] = [];
 
-          // Only add login-customer-id if MCC is configured
-          if (cleanMccId) {
-            listHeaders['login-customer-id'] = cleanMccId;
-          }
+        if (cleanMccId) {
+          try {
+            // Query the MCC to get all linked client accounts
+            const mccQuery = `
+              SELECT
+                customer_client.id,
+                customer_client.descriptive_name,
+                customer_client.manager
+              FROM customer_client
+              WHERE customer_client.level <= 1
+            `;
 
-          const listResponse = await fetch(listCustomersUrl, {
-            method: 'GET',
-            headers: listHeaders
-          });
-          
-          if (listResponse.ok) {
-            const listData = await listResponse.json();
-            const accessibleResources = listData.resourceNames || [];
-            // Extract customer IDs from resource names (format: customers/1234567890)
-            accessibleCustomerIds = accessibleResources.map((resource: string) => {
-              const match = resource.match(/customers\/(\d+)/);
-              return match ? match[1] : null;
-            }).filter(Boolean);
-            console.log(`✓ Found ${accessibleCustomerIds.length} accessible customers: ${accessibleCustomerIds.join(', ')}`);
-          } else {
-            console.warn(`⚠ Could not list accessible customers (status ${listResponse.status}). Will try anyway...`);
+            const mccSearchUrl = `https://googleads.googleapis.com/v19/customers/${cleanMccId}/googleAds:search`;
+            const mccResponse = await fetch(mccSearchUrl, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'developer-token': process.env.GOOGLE_ADS_DEVELOPER_TOKEN || '',
+                'Content-Type': 'application/json',
+                'login-customer-id': cleanMccId,
+              },
+              body: JSON.stringify({ query: mccQuery })
+            });
+
+            if (mccResponse.ok) {
+              const mccData = await mccResponse.json();
+              mccClientIds = (mccData.results || [])
+                .filter((result: any) => !result.customerClient?.manager) // Exclude manager accounts
+                .map((result: any) => result.customerClient?.id?.toString())
+                .filter(Boolean);
+              console.log(`✓ Found ${mccClientIds.length} client accounts under MCC: ${mccClientIds.join(', ')}`);
+            } else {
+              const errorText = await mccResponse.text();
+              console.warn(`⚠ Could not query MCC for client accounts (status ${mccResponse.status}): ${errorText.substring(0, 200)}`);
+            }
+          } catch (mccError) {
+            console.warn(`⚠ Error querying MCC for client accounts:`, mccError);
           }
-        } catch (listError) {
-          console.warn(`⚠ Error listing accessible customers:`, listError);
-          // Continue anyway
+        } else {
+          console.log('No MCC configured - will attempt direct access to accounts');
         }
 
         // Step 4: For each customer ID, call Google Ads API directly
@@ -275,14 +284,14 @@ export async function POST(request: NextRequest) {
           const customerId = account.customer_id;
           // Strip dashes from customer ID for API call
           const cleanCustomerId = customerId.replace(/-/g, '');
-          
-          // Check if customer is accessible
-          if (accessibleCustomerIds.length > 0 && !accessibleCustomerIds.includes(cleanCustomerId)) {
-            console.warn(`⚠ Customer ID ${customerId} (${cleanCustomerId}) is not in the list of accessible customers`);
+
+          // Check if customer is in MCC client list (if MCC is configured)
+          if (cleanMccId && mccClientIds.length > 0 && !mccClientIds.includes(cleanCustomerId)) {
+            console.warn(`⚠ Customer ID ${customerId} (${cleanCustomerId}) is not in the MCC client accounts list`);
             errors.push({
               customerId: customerId,
               accountName: account.account_name,
-              error: `Customer ID ${customerId} is not accessible through your MCC account. Please verify the customer is linked to MCC ${mccId} and that you have permission to access it.`
+              error: `Customer ID ${customerId} is not linked to MCC ${mccId}. Please verify the customer is properly linked in Google Ads.`
             });
             continue;
           }
@@ -312,7 +321,7 @@ export async function POST(request: NextRequest) {
               throw new Error(`Invalid customer ID format: ${customerId} (cleaned: ${cleanCustomerId}). Customer IDs must be 10 digits.`);
             }
             
-            const apiUrl = `https://googleads.googleapis.com/v16/customers/${cleanCustomerId}/googleAds:search`;
+            const apiUrl = `https://googleads.googleapis.com/v19/customers/${cleanCustomerId}/googleAds:search`;
             console.log(`  API URL: ${apiUrl}`);
 
             // Build headers - only include login-customer-id if MCC is configured
@@ -359,7 +368,7 @@ export async function POST(request: NextRequest) {
                 statusText: response.statusText,
                 errorText: errorText.substring(0, 1000),
                 errorJson: errorJson,
-                url: `https://googleads.googleapis.com/v16/customers/${cleanCustomerId}/googleAds:search`
+                url: `https://googleads.googleapis.com/v19/customers/${cleanCustomerId}/googleAds:search`
               });
               
               // Provide more helpful error messages

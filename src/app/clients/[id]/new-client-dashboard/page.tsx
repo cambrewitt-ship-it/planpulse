@@ -9,6 +9,7 @@ import { User, Pencil, Check, X, DollarSign, TrendingUp, TrendingDown, Target, M
 import RollingCalendar from '@/components/RollingCalendar';
 import MediaChannels from '@/components/MediaChannels';
 import { MediaPlanGrid, MediaPlanChannel } from '@/components/media-plan-builder/media-plan-grid';
+import TodoSection from '@/components/TodoSection';
 import { useParams } from 'next/navigation';
 import { useEffect, useState, useRef, useMemo } from 'react';
 import { getClients, getMediaPlans, getPlanById, updateClient } from '@/lib/db/plans';
@@ -973,6 +974,9 @@ export default function NewClientDashboard() {
         <section className="mt-8" aria-label="Rolling calendar with daily tasks">
           <RollingCalendar activePlan={activePlan} />
         </section>
+
+        {/* To Do Section */}
+        <TodoSection mediaPlanBuilderChannels={mediaPlanBuilderChannels} />
 
         {/* Media Plan Builder Section */}
         <section className="mt-8" aria-label="Media plan builder">

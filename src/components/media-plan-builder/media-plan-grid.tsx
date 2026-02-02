@@ -208,6 +208,41 @@ export function MediaPlanGrid({ channels: externalChannels, onChannelsChange, co
   const allWeeks = generateWeeklyDateRanges(startDate, endDate);
   const weeks = allWeeks.filter(week => week.weekStart.getFullYear() === selectedYear);
   
+  // Calculate current week commencing (Monday of current week)
+  const getCurrentWeekCommencing = (): Date => {
+    const today = new Date();
+    const dayOfWeek = today.getDay(); // 0 = Sunday, 1 = Monday, etc.
+    const daysToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    const currentWeekStart = new Date(today);
+    currentWeekStart.setDate(today.getDate() + daysToMonday);
+    currentWeekStart.setHours(0, 0, 0, 0);
+    return currentWeekStart;
+  };
+  
+  // Find the index of the current week commencing
+  const currentWeekCommencing = getCurrentWeekCommencing();
+  const normalizeDate = (date: Date) => {
+    const normalized = new Date(date);
+    normalized.setHours(0, 0, 0, 0);
+    return normalized.getTime();
+  };
+  const currentWeekIndex = weeks.findIndex(week => 
+    normalizeDate(week.weekStart) === normalizeDate(currentWeekCommencing)
+  );
+  
+  // Calculate current day of week position (0 = Sunday, 1 = Monday, etc.)
+  // Monday should be at left (0px), Sunday at right (~34px)
+  const getCurrentDayPosition = (): number => {
+    const today = new Date();
+    const dayOfWeek = today.getDay(); // 0 = Sunday, 1 = Monday, etc.
+    const cellWidth = 40;
+    // Map: Monday (1) = 0, Tuesday (2) = 1, ..., Sunday (0) = 6
+    const dayIndex = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+    // Position within the 40px column (distribute across 7 days)
+    return (dayIndex * cellWidth) / 7;
+  };
+  const currentDayPosition = getCurrentDayPosition();
+  
   // Group weeks by month
   const monthGroups: Array<{ month: string; weeks: WeekRange[] }> = [];
   let currentMonth = "";
@@ -832,6 +867,17 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                   }`}
                   style={{ height: '80px' }}
                 >
+                  {/* Vertical red line for current day of week */}
+                  {currentWeekIndex >= 0 && weekIdx === currentWeekIndex && (
+                    <div
+                      className="absolute top-0 bottom-0 bg-red-500 pointer-events-none"
+                      style={{
+                        left: `${currentDayPosition}px`,
+                        width: '2px',
+                        zIndex: 9999,
+                      }}
+                    />
+                  )}
                   <div className="transform -rotate-90 origin-center whitespace-nowrap">
                     {formatWeekDate(week.weekStart)}
                   </div>
@@ -1005,6 +1051,17 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                               handleWeekCellMouseDown(channel.id, weekIdx, e);
                             }}
                           >
+                            {/* Vertical red line for current day of week */}
+                            {currentWeekIndex >= 0 && weekIdx === currentWeekIndex && (
+                              <div
+                                className="absolute top-0 bottom-0 bg-red-500 pointer-events-none"
+                                style={{
+                                  left: `${currentDayPosition}px`,
+                                  width: '2px',
+                                  zIndex: 9999,
+                                }}
+                              />
+                            )}
                             {/* Inline budget input spanning across selected cells */}
                             {isFirstSelectedCell && activeSelection && (() => {
                               const channelBudgetColor = getChannelBudgetColor(channel.channelName);
@@ -1086,6 +1143,17 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                                     key={flight.id}
                                     className={`absolute inset-0 z-50 flex items-center justify-center text-white font-semibold text-sm ${channelBudgetColor}`}
                                   >
+                                    {/* Vertical red line for current day of week */}
+                                    {currentWeekIndex >= 0 && weekIdx === currentWeekIndex && (
+                                      <div
+                                        className="absolute top-0 bottom-0 bg-red-500 pointer-events-none"
+                                        style={{
+                                          left: `${currentDayPosition}px`,
+                                          width: '2px',
+                                          zIndex: 9999,
+                                        }}
+                                      />
+                                    )}
                                     {(() => {
                                       const totalBudget = Object.values(flight.monthlySpend).reduce((sum, amount) => sum + amount, 0);
                                       return formatCurrency(totalBudget);
@@ -1129,6 +1197,19 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                                     }}
                                     onClick={(e) => handleFlightBlockClick(channel.id, flight, e)}
                                   >
+                                    {/* Vertical red line for current day of week - show if current week is within this flight's range */}
+                                    {currentWeekIndex >= 0 && 
+                                     currentWeekIndex >= startIdx && 
+                                     currentWeekIndex <= endIdx && (
+                                      <div
+                                        className="absolute top-0 bottom-0 bg-red-500 pointer-events-none"
+                                        style={{
+                                          left: `${(currentWeekIndex - startIdx) * cellWidth + currentDayPosition}px`,
+                                          width: '2px',
+                                          zIndex: 9999,
+                                        }}
+                                      />
+                                    )}
                                     {isFirstWeek && totalSpend > 0 && formatCurrency(totalSpend)}
                                     {/* Resize handles */}
                                     {isFirstWeek && (
@@ -1186,6 +1267,17 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                               handleWeekCellMouseDown(channel.id, weekIdx, e);
                             }}
                           >
+                            {/* Vertical red line for current day of week */}
+                            {currentWeekIndex >= 0 && weekIdx === currentWeekIndex && (
+                              <div
+                                className="absolute top-0 bottom-0 bg-red-500 pointer-events-none"
+                                style={{
+                                  left: `${currentDayPosition}px`,
+                                  width: '2px',
+                                  zIndex: 9999,
+                                }}
+                              />
+                            )}
                             {/* Inline budget input spanning across selected cells */}
                             {shouldShowInput && (() => {
                               const channelBudgetColor = getChannelBudgetColor(channel.channelName);
@@ -1253,7 +1345,20 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                                     width: `${blockWidth}px`,
                                     zIndex: 10 + flightLayerIdx,
                                   }}
-                                />
+                                >
+                                  {/* Vertical red line for current day of week - show if current week is within this flight's range */}
+                                  {currentWeekIndex >= 0 && 
+                                   currentWeekIndex >= startIdx && 
+                                   currentWeekIndex <= endIdx && (
+                                    <div
+                                      className="absolute top-0 bottom-0 w-0.5 bg-red-500 pointer-events-none"
+                                      style={{
+                                        left: `${(currentWeekIndex - startIdx) * cellWidth + currentDayPosition}px`,
+                                        zIndex: 1000,
+                                      }}
+                                    />
+                                  )}
+                                </div>
                               );
                             })}
                           </td>
