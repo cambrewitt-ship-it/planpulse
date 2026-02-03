@@ -59,21 +59,10 @@ export function MediaChannelSpendChart({
     return null;
   };
 
-  // Convert hex color to RGB for opacity manipulation
-  const hexToRgb = (hex: string) => {
-    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-    return result
-      ? {
-          r: parseInt(result[1], 16),
-          g: parseInt(result[2], 16),
-          b: parseInt(result[3], 16),
-        }
-      : { r: 59, g: 130, b: 246 }; // Default blue-500
-  };
-
-  const rgb = hexToRgb(channelColor);
-  const plannedColor = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.5)`;
-  const actualColor = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.9)`;
+  // Use consistent colors matching MediaChannelCard: blue for actual, gray for planned
+  const plannedColor = "#94a3b8"; // Gray - matches MediaChannelCard
+  const actualColor = "#2563eb"; // Blue - matches MediaChannelCard
+  const projectedColor = "#93c5fd"; // Light blue - matches MediaChannelCard
 
   return (
     <div className="w-full h-full">
@@ -86,24 +75,24 @@ export function MediaChannelSpendChart({
             <linearGradient id={`colorPlanned-${channelName}`} x1="0" y1="0" x2="0" y2="1">
               <stop
                 offset="5%"
-                stopColor={channelColor}
+                stopColor={plannedColor}
                 stopOpacity={0.5}
               />
               <stop
                 offset="95%"
-                stopColor={channelColor}
-                stopOpacity={0.1}
+                stopColor={plannedColor}
+                stopOpacity={0.5}
               />
             </linearGradient>
             <linearGradient id={`colorActual-${channelName}`} x1="0" y1="0" x2="0" y2="1">
               <stop
                 offset="5%"
-                stopColor={channelColor}
+                stopColor={actualColor}
                 stopOpacity={0.9}
               />
               <stop
                 offset="95%"
-                stopColor={channelColor}
+                stopColor={actualColor}
                 stopOpacity={0.3}
               />
             </linearGradient>
@@ -126,36 +115,38 @@ export function MediaChannelSpendChart({
             iconType="line"
           />
           
-          {/* Planned spend - 50% opacity area */}
+          {/* Planned spend - gray dashed line with area fill */}
           <Area
             type="monotone"
             dataKey="planned"
             stroke={plannedColor}
             strokeWidth={2}
+            strokeDasharray="5 5"
             fill={`url(#colorPlanned-${channelName})`}
-            fillOpacity={0.5}
+            connectNulls={false}
             name="Planned"
           />
           
-          {/* Actual spend - 90% opacity area */}
+          {/* Actual spend - blue solid line with area fill */}
           <Area
             type="monotone"
             dataKey="actual"
             stroke={actualColor}
-            strokeWidth={2}
+            strokeWidth={2.5}
             fill={`url(#colorActual-${channelName})`}
-            fillOpacity={0.9}
+            connectNulls={false}
             name="Actual"
           />
           
-          {/* Projected - dashed line */}
+          {/* Projected - light blue dashed line */}
           <Line
-            type="monotone"
+            type="linear"
             dataKey="projected"
-            stroke={channelColor}
+            stroke={projectedColor}
             strokeWidth={2}
-            strokeDasharray="5 5"
+            strokeDasharray="3 3"
             dot={false}
+            connectNulls={false}
             name="Projected"
           />
         </AreaChart>

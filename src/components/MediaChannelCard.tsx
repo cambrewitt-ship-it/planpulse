@@ -379,13 +379,44 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
     };
   });
   
-  // Calculate Y-axis scale based on planned monthly spend
-  // Scale to the closest 50 above the planned monthly spend
+  // Calculate Y-axis scale based on both planned and actual spend data
   const plannedMonthlySpend = channel.monthBudget;
-  const yAxisMax = Math.ceil(plannedMonthlySpend / 50) * 50;
   
-  // Set tick count based on the scale (1 tick per unit)
-  const tickCount = yAxisMax;
+  // Find the maximum value from both planned and actual spend data
+  let maxPlannedSpend = 0;
+  let maxActualSpend = 0;
+  
+  chartDataWithActualSpendSplit.forEach((d) => {
+    if (d.plannedSpend !== null && d.plannedSpend > maxPlannedSpend) {
+      maxPlannedSpend = d.plannedSpend;
+    }
+    if (d.actualSpend !== null && d.actualSpend > maxActualSpend) {
+      maxActualSpend = d.actualSpend;
+    }
+  });
+  
+  // Use the maximum of planned spend, actual spend, and planned monthly budget
+  const maxValue = Math.max(maxPlannedSpend, maxActualSpend, plannedMonthlySpend);
+  
+  // Add 20% padding to ensure data is clearly visible, then round to a reasonable increment
+  const paddedMax = maxValue * 1.2;
+  
+  // Round to a reasonable increment based on the value
+  let increment: number;
+  if (paddedMax < 100) {
+    increment = 10; // For values under $100, round to nearest $10
+  } else if (paddedMax < 500) {
+    increment = 50; // For values under $500, round to nearest $50
+  } else if (paddedMax < 1000) {
+    increment = 100; // For values under $1000, round to nearest $100
+  } else {
+    increment = 200; // For larger values, round to nearest $200
+  }
+  
+  const yAxisMax = Math.ceil(paddedMax / increment) * increment;
+  
+  // Set reasonable tick count (not 1 per unit, which would be too many)
+  const tickCount = Math.min(10, Math.max(5, Math.ceil(yAxisMax / increment)));
   
   // Notify parent when month changes to fetch new data
   const handleMonthChange = (newMonth: Date) => {
@@ -1012,10 +1043,12 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
                     margin={{ top: 10, right: 10, left: 0, bottom: 25 }}
                   >
                     <defs>
+                      {/* Meta graph style: Light grey planned spend gradient */}
                       <linearGradient id={`colorPlanned-${channel.id}`} x1="0" y1="0" x2="0" y2="1">
                         <stop offset="5%" stopColor="#94a3b8" stopOpacity={0.5} />
                         <stop offset="95%" stopColor="#94a3b8" stopOpacity={0.5} />
                       </linearGradient>
+                      {/* Meta graph style: Blue actual spend gradient */}
                       <linearGradient id={`colorActual-${channel.id}`} x1="0" y1="0" x2="0" y2="1">
                         <stop offset="5%" stopColor="#2563eb" stopOpacity={0.9} />
                         <stop offset="95%" stopColor="#2563eb" stopOpacity={0.3} />
@@ -1047,7 +1080,7 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
                   
                   <Tooltip content={<CustomTooltip />} />
                   
-                  {/* Planned Spend Area (underneath) */}
+                  {/* Meta graph style: Planned Spend - light grey dashed diagonal line with area fill */}
                   <Area
                     type="monotone"
                     dataKey="plannedSpend"
@@ -1055,9 +1088,11 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
                     strokeWidth={2}
                     strokeDasharray="5 5"
                     fill={`url(#colorPlanned-${channel.id})`}
+                    fillOpacity={0.5}
                     connectNulls={false}
                     animationDuration={1500}
                     animationEasing="ease-in-out"
+                    style={{ stroke: '#94a3b8' }}
                   />
                   
                   {/* Projected Spend Line (extends from actual) */}
@@ -1071,25 +1106,28 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
                     connectNulls={false}
                     animationDuration={1500}
                     animationEasing="ease-in-out"
+                    style={{ stroke: '#93c5fd' }}
                   />
                   
-                  {/* Actual Spend Area - only up to today (no stroke, line drawn separately) */}
+                  {/* Meta graph style: Actual Spend Area - blue area fill under the line */}
                   <Area
                     type="monotone"
                     dataKey="actualSpendForArea"
                     stroke="none"
-                    fill={`url(#colorActual-${channel.id})`}
+                    fill="#2563eb"
+                    fillOpacity={0.3}
+                    connectNulls={false}
                     animationDuration={1500}
                     animationEasing="ease-in-out"
-                    connectNulls={false}
                   />
                   
-                  {/* Actual Spend Line - solid up to today */}
+                  {/* Meta graph style: Actual Spend Line - solid blue line with circular markers */}
                   <Line
                     type="monotone"
                     dataKey="actualSpendLineUpToToday"
                     stroke="#2563eb"
                     strokeWidth={2.5}
+                    style={{ stroke: '#2563eb' }}
                     dot={(props: any) => {
                       if (props.payload.projectedSpend !== null || props.payload.date > todayKey) {
                         return null; // Don't show dots on projected section or after today
@@ -1101,6 +1139,7 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
                           fill="#2563eb"
                           stroke="#fff"
                           strokeWidth={2}
+                          style={{ fill: '#2563eb', stroke: '#fff' }}
                         />
                       );
                     }}
@@ -1120,6 +1159,7 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
                     connectNulls={false}
                     animationDuration={1500}
                     animationEasing="ease-in-out"
+                    style={{ stroke: '#2563eb' }}
                   />
                 </ComposedChart>
               </ResponsiveContainer>

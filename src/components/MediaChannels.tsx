@@ -432,7 +432,8 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
     accountId?: string | null,
     hasConnectedAccount?: boolean,
     selectedMonth?: Date,
-    selectedCampaignId?: string // 'all' or specific campaign ID
+    selectedCampaignId?: string, // 'all' or specific campaign ID
+    channelName?: string // Channel name to determine if we should use linear planned spend
   ) => {
     const month = selectedMonth || new Date();
     const monthStart = startOfMonth(month);
@@ -447,6 +448,11 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
     const effectiveEndDate = thirtyDaysAhead > monthEnd ? thirtyDaysAhead : monthEnd;
     
     const allDays = eachDayOfInterval({ start: monthStart, end: effectiveEndDate });
+    
+    // Check if this is Google Ads or Meta Ads - use linear planned spend for these channels
+    const isGoogleAds = channelName && isGoogleAdsChannel(channelName);
+    const isMetaAds = channelName && isMetaAdsChannel(channelName);
+    const useLinearPlannedSpend = isGoogleAds || isMetaAds;
     
     // Calculate daily target
     const dailyTarget = monthBudget / allDays.length;
@@ -516,32 +522,61 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
       });
     }
     
-    // Create a map of dates to spend from weekly plans
+    // Create a map of dates to spend from weekly plans or linear calculation
     const plannedSpendByDate = new Map<string, number>();
     
-    // Process weekly plans to distribute spend across days
-    // For the planned line, always use budget_planned from the media plan
-    weeklyPlans.forEach((wp) => {
-      const weekStart = parseISO(wp.week_commencing);
-      const weekEnd = new Date(weekStart);
-      weekEnd.setDate(weekEnd.getDate() + 6);
+    if (useLinearPlannedSpend) {
+      // For Google Ads and Meta Ads: Calculate linear planned spend based on monthly budget
+      // Linear progression from $0 at start of month to monthBudget at end of month
+      const daysInMonth = eachDayOfInterval({ start: monthStart, end: monthEnd }).length;
+      const monthBudgetInDollars = monthBudget / 100; // Convert from cents to dollars
       
-      // Always use planned budget from the media plan for the planned line
-      // Commission is already applied in transformMediaPlanBuilderChannels or transformActivePlanChannels
-      const weekPlannedSpend = wp.budget_planned || 0;
-      const dailyPlannedSpend = weekPlannedSpend / 7;
-      
-      // Distribute across days in the week
-      for (let i = 0; i < 7; i++) {
-        const day = new Date(weekStart);
-        day.setDate(day.getDate() + i);
+      allDays.forEach((date) => {
+        const dateKey = format(date, 'yyyy-MM-dd');
         
-        if (isWithinInterval(day, { start: monthStart, end: effectiveEndDate })) {
-          const dateKey = format(day, 'yyyy-MM-dd');
-          plannedSpendByDate.set(dateKey, (plannedSpendByDate.get(dateKey) || 0) + dailyPlannedSpend);
+        // Only calculate for days within the selected month
+        if (date >= monthStart && date <= monthEnd) {
+          // Calculate day number (1-based) within the month
+          const dayNumber = Math.floor((date.getTime() - monthStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+          
+          // Linear calculation: (dayNumber / daysInMonth) * monthBudget
+          const linearPlannedSpend = (dayNumber / daysInMonth) * monthBudgetInDollars;
+          plannedSpendByDate.set(dateKey, linearPlannedSpend);
+        } else {
+          // For days outside the month, continue the linear trend
+          if (date > monthEnd) {
+            const daysPastMonthEnd = Math.floor((date.getTime() - monthEnd.getTime()) / (1000 * 60 * 60 * 24));
+            const dailyRate = monthBudgetInDollars / daysInMonth;
+            const linearPlannedSpend = monthBudgetInDollars + (dailyRate * daysPastMonthEnd);
+            plannedSpendByDate.set(dateKey, linearPlannedSpend);
+          }
         }
-      }
-    });
+      });
+    } else {
+      // For other channels: Process weekly plans to distribute spend across days
+      // For the planned line, always use budget_planned from the media plan
+      weeklyPlans.forEach((wp) => {
+        const weekStart = parseISO(wp.week_commencing);
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekEnd.getDate() + 6);
+        
+        // Always use planned budget from the media plan for the planned line
+        // Commission is already applied in transformMediaPlanBuilderChannels or transformActivePlanChannels
+        const weekPlannedSpend = wp.budget_planned || 0;
+        const dailyPlannedSpend = weekPlannedSpend / 7;
+        
+        // Distribute across days in the week
+        for (let i = 0; i < 7; i++) {
+          const day = new Date(weekStart);
+          day.setDate(day.getDate() + i);
+          
+          if (isWithinInterval(day, { start: monthStart, end: effectiveEndDate })) {
+            const dateKey = format(day, 'yyyy-MM-dd');
+            plannedSpendByDate.set(dateKey, (plannedSpendByDate.get(dateKey) || 0) + dailyPlannedSpend);
+          }
+        }
+      });
+    }
     
     // Keep planned and actual spend separate
     // Actual spend comes from live API data only
@@ -559,9 +594,16 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
     return allDays.map((date, index) => {
       const dateKey = format(date, 'yyyy-MM-dd');
       
-      // Get planned spend for this day (from weekly plans only)
+      // Get planned spend for this day (from linear calculation or weekly plans)
       const plannedDaySpend = plannedSpendByDate.get(dateKey) || 0;
-      cumulativePlanned += plannedDaySpend;
+      
+      // For linear planned spend, the value is already cumulative, so use it directly
+      // For weekly plans, accumulate day by day
+      if (useLinearPlannedSpend) {
+        cumulativePlanned = plannedDaySpend; // Linear calculation is already cumulative
+      } else {
+        cumulativePlanned += plannedDaySpend / 100; // Accumulate from weekly plans (convert from cents)
+      }
       
       // Get actual spend for this day (from live API data only)
       // Live data is in dollars, convert to cents for consistency
@@ -576,7 +618,7 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
       return {
         date: dateKey,
         actualSpend: shouldShowActual ? cumulativeActual / 100 : null, // Convert from cents to dollars
-        plannedSpend: cumulativePlanned / 100, // Convert from cents to dollars
+        plannedSpend: cumulativePlanned, // Already in dollars for both linear and weekly (weekly converted during accumulation)
         projectedSpend: null, // Will be calculated in MediaChannelCard
         projected: false
       };
@@ -918,7 +960,8 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
           accountId,
           hasConnectedAccount,
           selectedMonth,
-          selectedCampaignId
+          selectedCampaignId,
+          channel.channel // Pass channel name to determine if linear planned spend should be used
         ),
         isMetaAds: isMetaAdsChannel(channel.channel),
         onRefreshSpend: (month?: Date) => {
