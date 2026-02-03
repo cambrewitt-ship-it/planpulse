@@ -38,12 +38,6 @@ interface MediaPlan {
 // Metric options for cost calculation, grouped by category
 const METRIC_GROUPS = [
   {
-    label: 'Conversion Metrics',
-    metrics: [
-      { value: 'conversions', label: 'Conversions' },
-    ],
-  },
-  {
     label: 'User Metrics',
     metrics: [
       { value: 'activeUsers', label: 'Active Users' },
@@ -68,7 +62,6 @@ const METRIC_OPTIONS = METRIC_GROUPS.flatMap(group => group.metrics);
 // Get singular display name for metric (for title)
 function getMetricDisplayName(metricKey: string): string {
   const displayNames: Record<string, string> = {
-    conversions: 'Conversion',
     activeUsers: 'Active User',
     totalUsers: 'Total User',
     newUsers: 'New User',
@@ -106,8 +99,8 @@ export default function NewClientDashboard() {
   const [cacError, setCacError] = useState<string | undefined>();
   const [cacErrorDetails, setCacErrorDetails] = useState<string | undefined>();
   const [loadingAnalytics, setLoadingAnalytics] = useState(false);
-  const [selectedMetric, setSelectedMetric] = useState<string>('conversions');
-  const [availableMetrics, setAvailableMetrics] = useState<Set<string>>(new Set(['conversions']));
+  const [selectedMetric, setSelectedMetric] = useState<string>('activeUsers');
+  const [availableMetrics, setAvailableMetrics] = useState<Set<string>>(new Set(['activeUsers']));
   const [previousPeriodMetrics, setPreviousPeriodMetrics] = useState<CostMetricPoint[] | null>(null);
   const [loadingComparison, setLoadingComparison] = useState(false);
   const [exportToast, setExportToast] = useState<string | null>(null);
@@ -594,7 +587,7 @@ export default function NewClientDashboard() {
   };
 
   // Load analytics data (GA4 + Spend) for cost per metric calculation
-  const loadAnalyticsData = async (metricKey: string = 'conversions', eventName: string | null = null) => {
+  const loadAnalyticsData = async (metricKey: string = 'activeUsers', eventName: string | null = null) => {
     if (!clientId) return;
     
     setLoadingAnalytics(true);
@@ -638,14 +631,14 @@ export default function NewClientDashboard() {
       console.log('📊 Available metrics:', Array.from(metricsWithData));
       setAvailableMetrics(metricsWithData);
 
-      // NOTE: Removed automatic fallback to 'conversions' for debugging
+      // NOTE: Removed automatic fallback for debugging
       // Allow user to select any metric - chart will show Data Quality Notice if no data
       // If you need to re-enable fallback logic, uncomment the block below:
       /*
       let effectiveMetricKey = metricKey;
       if (!metricsWithData.has(metricKey)) {
-        if (metricsWithData.has('conversions')) {
-          effectiveMetricKey = 'conversions';
+        if (metricsWithData.has('activeUsers')) {
+          effectiveMetricKey = 'activeUsers';
         } else if (metricsWithData.size > 0) {
           effectiveMetricKey = Array.from(metricsWithData)[0];
         }
@@ -857,7 +850,7 @@ export default function NewClientDashboard() {
                   {/* Client Info */}
                   <div className="flex-1">
                     {isEditingClientName ? (
-                      <div className="flex items-center gap-2 mb-1">
+                      <div className="flex items-center gap-2 h-14">
                         <Input
                           value={editingClientName}
                           onChange={(e) => setEditingClientName(e.target.value)}
@@ -892,8 +885,8 @@ export default function NewClientDashboard() {
                         </Button>
                       </div>
                     ) : (
-                      <div className="flex items-center gap-2 group">
-                        <h1 className="text-3xl font-bold text-[#0f172a] mb-1">
+                      <div className="flex items-center gap-2 group h-14">
+                        <h1 className="text-3xl font-bold text-[#0f172a] leading-none">
                           {client?.name || 'Client Name'}
                         </h1>
                         <Button

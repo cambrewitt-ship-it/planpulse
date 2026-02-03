@@ -54,6 +54,7 @@ interface MediaChannelCardProps {
     status: 'Active' | 'Review' | 'Paused';
     actionPoints: ActionPoint[];
     monthBudget: number;
+    totalMonthlySpend?: number; // Total across all channels for Y-axis
     spendData: SpendData[];
     isMetaAds?: boolean;
     onRefreshSpend?: (month?: Date) => void;
@@ -379,41 +380,19 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
     };
   });
   
-  // Calculate Y-axis scale based on both planned and actual spend data
-  const plannedMonthlySpend = channel.monthBudget;
+  // Calculate planned monthly spend FOR THIS CHANNEL ONLY from the spend data
+  // Get the maximum planned spend value for the selected month (matches what the graph shows)
+  const plannedMonthlySpendForChannel = sortedData.length > 0
+    ? Math.max(...sortedData.map(d => d.plannedSpend || 0))
+    : (channel.monthBudget || 0);
   
-  // Find the maximum value from both planned and actual spend data
-  let maxPlannedSpend = 0;
-  let maxActualSpend = 0;
+  // Calculate Y-axis scale based on THIS CHANNEL's planned monthly spend
+  // Round planned monthly spend to the nearest $100
+  const increment = 100;
+  const yAxisMax = Math.ceil(plannedMonthlySpendForChannel / increment) * increment;
   
-  chartDataWithActualSpendSplit.forEach((d) => {
-    if (d.plannedSpend !== null && d.plannedSpend > maxPlannedSpend) {
-      maxPlannedSpend = d.plannedSpend;
-    }
-    if (d.actualSpend !== null && d.actualSpend > maxActualSpend) {
-      maxActualSpend = d.actualSpend;
-    }
-  });
-  
-  // Use the maximum of planned spend, actual spend, and planned monthly budget
-  const maxValue = Math.max(maxPlannedSpend, maxActualSpend, plannedMonthlySpend);
-  
-  // Add 20% padding to ensure data is clearly visible, then round to a reasonable increment
-  const paddedMax = maxValue * 1.2;
-  
-  // Round to a reasonable increment based on the value
-  let increment: number;
-  if (paddedMax < 100) {
-    increment = 10; // For values under $100, round to nearest $10
-  } else if (paddedMax < 500) {
-    increment = 50; // For values under $500, round to nearest $50
-  } else if (paddedMax < 1000) {
-    increment = 100; // For values under $1000, round to nearest $100
-  } else {
-    increment = 200; // For larger values, round to nearest $200
-  }
-  
-  const yAxisMax = Math.ceil(paddedMax / increment) * increment;
+  // Keep plannedMonthlySpend for backward compatibility (if needed elsewhere)
+  const plannedMonthlySpend = channel.totalMonthlySpend !== undefined ? channel.totalMonthlySpend : channel.monthBudget;
   
   // Set reasonable tick count (not 1 per unit, which would be too many)
   const tickCount = Math.min(10, Math.max(5, Math.ceil(yAxisMax / increment)));
@@ -564,11 +543,6 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
               Actual: ${data.actualSpend.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </p>
           )}
-          {data.projectedSpend !== null && (
-            <p className="text-sm text-[#93c5fd] font-medium">
-              Projected: ${data.projectedSpend.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </p>
-          )}
         </div>
       );
     }
@@ -593,12 +567,12 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
 
   // Calculate pacing status
   const calculatePacingStatus = () => {
-    if (!hasConnectedAccount || projectedMonthlySpend === null || plannedMonthlySpend === 0) {
+    if (!hasConnectedAccount || projectedMonthlySpend === null || plannedMonthlySpendForChannel === 0) {
       return null;
     }
 
     // Calculate percentage difference: (projected - planned) / planned * 100
-    const percentageDiff = ((projectedMonthlySpend - plannedMonthlySpend) / plannedMonthlySpend) * 100;
+    const percentageDiff = ((projectedMonthlySpend - plannedMonthlySpendForChannel) / plannedMonthlySpendForChannel) * 100;
     
     // Determine status based on percentage difference
     // Green: within ±10% (on track)
@@ -642,8 +616,8 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
     .filter(d => d.actualSpend !== null && d.date <= todayKey)
     .reduce((sum, d) => sum + (d.actualSpend || 0), 0);
   
-  const spendProgress = plannedMonthlySpend > 0 
-    ? (totalActualSpend / plannedMonthlySpend) * 100 
+  const spendProgress = plannedMonthlySpendForChannel > 0 
+    ? (totalActualSpend / plannedMonthlySpendForChannel) * 100 
     : 0;
 
   return (
@@ -990,16 +964,16 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
                 </p>
               </div>
               <div className="bg-[#f8fafc] rounded-lg p-3 border border-[#e2e8f0]">
-                <p className="text-xs text-[#64748b] mb-1">Planned Monthly Spend</p>
+                <p className="text-xs text-[#64748b] mb-1">Net Planned Spend</p>
                 <p className="text-lg font-semibold text-[#0f172a]">
-                  ${plannedMonthlySpend.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  ${plannedMonthlySpendForChannel.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </p>
               </div>
               <div className="bg-[#f8fafc] rounded-lg p-3 border border-[#e2e8f0]">
-                <p className="text-xs text-[#64748b] mb-1">Projected Monthly Spend</p>
+                <p className="text-xs text-[#64748b] mb-1">Actual Spend</p>
                 <p className="text-lg font-semibold text-[#0f172a]">
-                  {hasConnectedAccount && projectedMonthlySpend !== null
-                    ? `$${projectedMonthlySpend.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                  {hasConnectedAccount
+                    ? `$${totalActualSpend.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                     : '—'}
                 </p>
               </div>
@@ -1095,20 +1069,6 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
                     style={{ stroke: '#94a3b8' }}
                   />
                   
-                  {/* Projected Spend Line (extends from actual) */}
-                  <Line
-                    type="linear"
-                    dataKey="projectedSpend"
-                    stroke="#93c5fd"
-                    strokeWidth={2}
-                    strokeDasharray="3 3"
-                    dot={false}
-                    connectNulls={false}
-                    animationDuration={1500}
-                    animationEasing="ease-in-out"
-                    style={{ stroke: '#93c5fd' }}
-                  />
-                  
                   {/* Meta graph style: Actual Spend Area - blue area fill under the line */}
                   <Area
                     type="monotone"
@@ -1129,8 +1089,8 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
                     strokeWidth={2.5}
                     style={{ stroke: '#2563eb' }}
                     dot={(props: any) => {
-                      if (props.payload.projectedSpend !== null || props.payload.date > todayKey) {
-                        return null; // Don't show dots on projected section or after today
+                      if (props.payload.date > todayKey) {
+                        return null; // Don't show dots after today
                       }
                       return (
                         <Dot

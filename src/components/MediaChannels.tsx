@@ -172,6 +172,59 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
     return isNaN(result) ? 0 : result;
   };
 
+  // Helper function to calculate total monthly spend across all Media Plan Builder channels for a given month
+  const calculateTotalMonthlySpendForMonth = (month: Date): number => {
+    if (!mediaPlanBuilderChannels || mediaPlanBuilderChannels.length === 0) {
+      return 0;
+    }
+
+    const year = month.getFullYear();
+    const monthNum = month.getMonth() + 1;
+    const getMonthKeyFormat = `${year}-${monthNum}`; // e.g., "2024-12" or "2024-1"
+    const paddedMonthKey = `${year}-${String(monthNum).padStart(2, '0')}`; // e.g., "2024-12" or "2024-01"
+
+    let totalSpend = 0;
+
+    mediaPlanBuilderChannels.forEach((channel) => {
+      if (channel.flights) {
+        channel.flights.forEach((flight) => {
+          if (flight.monthlySpend) {
+            // Try all possible month key formats
+            let spend = 0;
+            if (flight.monthlySpend[getMonthKeyFormat] !== undefined) {
+              spend = flight.monthlySpend[getMonthKeyFormat];
+            } else if (flight.monthlySpend[paddedMonthKey] !== undefined) {
+              spend = flight.monthlySpend[paddedMonthKey];
+            } else {
+              // Check all keys and try to match by normalizing
+              Object.entries(flight.monthlySpend).forEach(([key, value]) => {
+                const normalizedKey = key.includes('-') 
+                  ? key.split('-').map((part, idx) => idx === 1 ? part.padStart(2, '0') : part).join('-')
+                  : key;
+                const unpaddedKey = normalizedKey.replace(/-0+(\d)$/, '-$1');
+                
+                if (normalizedKey === paddedMonthKey || 
+                    normalizedKey === getMonthKeyFormat ||
+                    unpaddedKey === getMonthKeyFormat ||
+                    key === getMonthKeyFormat ||
+                    key === paddedMonthKey) {
+                  spend = value as number;
+                }
+              });
+            }
+            
+            if (spend && !isNaN(spend)) {
+              totalSpend += spend;
+            }
+          }
+        });
+      }
+    });
+
+    // Apply commission to match what's shown in the media plan builder
+    return applyCommission(totalSpend);
+  };
+
   // Map channel names to icons
   const getChannelIcon = (channelName: string) => {
     const lowerName = channelName.toLowerCase();
@@ -784,107 +837,138 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
         let foundInOriginalChannels = false;
         
         // First, try to get directly from original MediaPlanBuilder channels (most reliable)
+        // Sum monthly spend across ALL channels with the same channel name (channel type)
+        // This ensures that if there are multiple rows (channels) for the same media channel type,
+        // their spend is summed together for the planned monthly spend
         if (originalMediaPlanChannels && originalMediaPlanChannels.length > 0) {
-          const originalChannel = originalMediaPlanChannels.find(c => c.id === channel.id);
+          // Get month key in getMonthKey format (unpadded) for lookup
+          const year = selectedMonth.getFullYear();
+          const month = selectedMonth.getMonth() + 1;
+          const getMonthKeyFormat = `${year}-${month}`; // e.g., "2024-12" or "2024-1"
           
-          // Debug: check if channel was found
-          if (!originalChannel) {
-            console.log('Channel not found in originalMediaPlanChannels:', {
-              channelId: channel.id,
-              availableIds: originalMediaPlanChannels.map(c => c.id),
-              channelName: channel.channel
-            });
-          }
-          if (originalChannel && originalChannel.flights) {
-            // Get month key in getMonthKey format (unpadded) for lookup
-            const year = selectedMonth.getFullYear();
-            const month = selectedMonth.getMonth() + 1;
-            const getMonthKeyFormat = `${year}-${month}`; // e.g., "2024-12" or "2024-1"
-            
-            // Also try padded format
-            const paddedMonthKey = `${year}-${String(month).padStart(2, '0')}`; // e.g., "2024-12" or "2024-01"
-            
-            // Debug logging
-            console.log('Looking up monthly spend for:', {
-              channelId: channel.id,
-              selectedMonth: selectedMonthKey,
-              getMonthKeyFormat,
-              paddedMonthKey,
-              flightsCount: originalChannel.flights.length,
-              flightMonthKeys: originalChannel.flights.map(f => f.monthlySpend ? Object.keys(f.monthlySpend) : [])
-            });
-            
-            // Sum monthly spend from all flights for this month
-            monthlySpendTotal = 0;
-            originalChannel.flights.forEach((flight) => {
-              if (flight.monthlySpend) {
-                // Try all possible formats - check each one explicitly
-                let spend = 0;
-                if (flight.monthlySpend[getMonthKeyFormat] !== undefined) {
-                  spend = flight.monthlySpend[getMonthKeyFormat];
-                  foundInOriginalChannels = true;
-                } else if (flight.monthlySpend[paddedMonthKey] !== undefined) {
-                  spend = flight.monthlySpend[paddedMonthKey];
-                  foundInOriginalChannels = true;
-                } else if (flight.monthlySpend[selectedMonthKey] !== undefined) {
-                  spend = flight.monthlySpend[selectedMonthKey];
-                  foundInOriginalChannels = true;
-                } else {
-                  // Last resort: check all keys and try to match by normalizing
-                  Object.entries(flight.monthlySpend).forEach(([key, value]) => {
-                    // Normalize the key from flight to compare with our formats
-                    const normalizedKey = key.includes('-') 
-                      ? key.split('-').map((part, idx) => idx === 1 ? part.padStart(2, '0') : part).join('-')
-                      : key;
-                    const unpaddedKey = normalizedKey.replace(/-0+(\d)$/, '-$1');
-                    
-                    // Check if this key matches our selected month
-                    if (normalizedKey === selectedMonthKey || 
-                        normalizedKey === paddedMonthKey ||
-                        unpaddedKey === getMonthKeyFormat ||
-                        key === getMonthKeyFormat ||
-                        key === paddedMonthKey ||
-                        key === selectedMonthKey) {
-                      spend = value as number;
-                      foundInOriginalChannels = true;
-                    }
-                  });
+          // Also try padded format
+          const paddedMonthKey = `${year}-${String(month).padStart(2, '0')}`; // e.g., "2024-12" or "2024-01"
+          
+          // Find all channels with the same channel name (same media channel type)
+          const channelsWithSameName = originalMediaPlanChannels.filter(c => 
+            getChannelDisplayName(c.channelName, c.format || '') === channelType
+          );
+          
+          // Debug logging
+          console.log('Looking up monthly spend for:', {
+            channelId: channel.id,
+            channelName: channel.channel,
+            channelType,
+            selectedMonth: selectedMonthKey,
+            getMonthKeyFormat,
+            paddedMonthKey,
+            channelsWithSameNameCount: channelsWithSameName.length,
+            allChannelNames: originalMediaPlanChannels.map(c => ({
+              id: c.id,
+              name: c.channelName,
+              displayName: getChannelDisplayName(c.channelName, c.format || '')
+            }))
+          });
+          
+          // Sum monthly spend from all flights across all channels with the same name
+          monthlySpendTotal = 0;
+          channelsWithSameName.forEach((originalChannel) => {
+            if (originalChannel.flights) {
+              originalChannel.flights.forEach((flight) => {
+                if (flight.monthlySpend) {
+                  // Try all possible formats - check each one explicitly
+                  let spend = 0;
+                  if (flight.monthlySpend[getMonthKeyFormat] !== undefined) {
+                    spend = flight.monthlySpend[getMonthKeyFormat];
+                    foundInOriginalChannels = true;
+                  } else if (flight.monthlySpend[paddedMonthKey] !== undefined) {
+                    spend = flight.monthlySpend[paddedMonthKey];
+                    foundInOriginalChannels = true;
+                  } else if (flight.monthlySpend[selectedMonthKey] !== undefined) {
+                    spend = flight.monthlySpend[selectedMonthKey];
+                    foundInOriginalChannels = true;
+                  } else {
+                    // Last resort: check all keys and try to match by normalizing
+                    Object.entries(flight.monthlySpend).forEach(([key, value]) => {
+                      // Normalize the key from flight to compare with our formats
+                      const normalizedKey = key.includes('-') 
+                        ? key.split('-').map((part, idx) => idx === 1 ? part.padStart(2, '0') : part).join('-')
+                        : key;
+                      const unpaddedKey = normalizedKey.replace(/-0+(\d)$/, '-$1');
+                      
+                      // Check if this key matches our selected month
+                      if (normalizedKey === selectedMonthKey || 
+                          normalizedKey === paddedMonthKey ||
+                          unpaddedKey === getMonthKeyFormat ||
+                          key === getMonthKeyFormat ||
+                          key === paddedMonthKey ||
+                          key === selectedMonthKey) {
+                        spend = value as number;
+                        foundInOriginalChannels = true;
+                      }
+                    });
+                  }
+                  
+                  if (spend && !isNaN(spend)) {
+                    monthlySpendTotal! += spend;
+                  }
                 }
-                
-                if (spend && !isNaN(spend)) {
-                  monthlySpendTotal! += spend;
-                }
-              }
-            });
-          }
+              });
+            }
+          });
         }
         
         // If not found from original channels, try stored totals
+        // Sum across all channels with the same channel type
         if (!foundInOriginalChannels && (monthlySpendTotal === undefined || monthlySpendTotal === 0)) {
-          const monthlySpendTotals = (channel as any)._monthlySpendTotals || {};
-          monthlySpendTotal = monthlySpendTotals[selectedMonthKey];
+          // Find all channels with the same channel name and sum their stored totals
+          const channelsWithSameName = channels.filter(c => 
+            getChannelDisplayName(c.channel, c.detail) === channelType
+          );
           
-          // If not found, try unpadded format
-          if (monthlySpendTotal === undefined || isNaN(monthlySpendTotal)) {
-            const unpaddedKey = selectedMonthKey.replace(/-0+(\d)$/, '-$1');
-            monthlySpendTotal = monthlySpendTotals[unpaddedKey];
-          }
-          
-          // If we found something in stored totals, mark as found
-          if (monthlySpendTotal !== undefined && !isNaN(monthlySpendTotal) && monthlySpendTotal > 0) {
-            foundInOriginalChannels = true;
-          }
+          monthlySpendTotal = 0;
+          channelsWithSameName.forEach((ch) => {
+            const monthlySpendTotals = (ch as any)._monthlySpendTotals || {};
+            let channelSpend = monthlySpendTotals[selectedMonthKey];
+            
+            // If not found, try unpadded format
+            if (channelSpend === undefined || isNaN(channelSpend)) {
+              const unpaddedKey = selectedMonthKey.replace(/-0+(\d)$/, '-$1');
+              channelSpend = monthlySpendTotals[unpaddedKey];
+            }
+            
+            if (channelSpend !== undefined && !isNaN(channelSpend)) {
+              monthlySpendTotal! += channelSpend;
+              foundInOriginalChannels = true;
+            }
+          });
         }
         
         // If still not found, fall back to calculating from weekly plans
+        // Sum weekly plans across all channels with the same channel type
         if (!foundInOriginalChannels && (monthlySpendTotal === undefined || isNaN(monthlySpendTotal) || monthlySpendTotal === 0)) {
           const selectedMonthStart = startOfMonth(selectedMonth);
           const selectedMonthEnd = endOfMonth(selectedMonth);
-          const selectedMonthWeeklyPlans = weeklyPlans.filter((wp) => {
+          
+          // Find all channels with the same channel name and sum their weekly plans
+          const channelsWithSameName = channels.filter(c => 
+            getChannelDisplayName(c.channel, c.detail) === channelType
+          );
+          
+          // Collect weekly plans from all channels with the same name
+          const allWeeklyPlans: ActivePlan['channels'][0]['weekly_plans'] = [];
+          channelsWithSameName.forEach((ch) => {
+            if (ch.weekly_plans) {
+              allWeeklyPlans.push(...ch.weekly_plans);
+            }
+          });
+          
+          const selectedMonthWeeklyPlans = allWeeklyPlans.filter((wp) => {
             if (!wp.week_commencing) return false;
             const weekStart = parseISO(wp.week_commencing);
             return isWithinInterval(weekStart, { start: selectedMonthStart, end: selectedMonthEnd });
           });
+          
           // Sum weekly plans and convert back to dollars (they're in cents)
           // Note: weekly plans already have commission applied, so we need to reverse it to get the original total
           const weeklyPlansTotal = selectedMonthWeeklyPlans.reduce((sum, wp) => {
@@ -945,6 +1029,9 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
         finalSelectedMonthBudget = selectedMonthBudget > 0 ? selectedMonthBudget : estimatedSelectedMonthBudget;
       }
       
+      // Calculate total monthly spend across all channels for the selected month
+      const totalMonthlySpend = calculateTotalMonthlySpendForMonth(selectedMonth);
+
       return {
         id: channel.id,
         name: channelType,
@@ -952,6 +1039,7 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
         status: 'Active' as const,
         actionPoints: actionPoints[channelType] || [],
         monthBudget: finalSelectedMonthBudget / 100, // Convert from cents
+        totalMonthlySpend: totalMonthlySpend, // Total across all channels for Y-axis
         spendData: generateMonthDataFromWeeklyPlans(
           weeklyPlans, 
           finalSelectedMonthBudget, 
@@ -1125,10 +1213,16 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
       const connectedAccount = firstChannel.connectedAccount;
       const connectedAccountId = firstChannel.connectedAccountId;
       
+      // Calculate total monthly spend for the selected month (should be same for all channels in group)
+      const totalMonthlySpend = firstChannel.totalMonthlySpend !== undefined 
+        ? firstChannel.totalMonthlySpend 
+        : totalMonthBudget;
+
       return {
         ...firstChannel,
         id: `grouped-${channelName}`, // Use a grouped ID
         monthBudget: totalMonthBudget,
+        totalMonthlySpend: totalMonthlySpend, // Preserve total monthly spend
         spendData: aggregatedSpendData,
         liveSpendData: allLiveSpendData,
         actionPoints: uniqueActionPoints,

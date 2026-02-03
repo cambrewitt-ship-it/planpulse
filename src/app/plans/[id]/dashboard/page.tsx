@@ -756,19 +756,32 @@ export default function PlanDashboardPage() {
                 actual: tf.actual
               }));
               
-              // Prepare chart data
-              const chartData = channel.timeFrames.flatMap(tf => {
-                const daysInPeriod = differenceInDays(parseISO(tf.endDate), parseISO(tf.startDate));
+              // Prepare chart data - ensure we only show data for this specific channel
+              // Sort timeFrames by start date to handle multiple months correctly
+              const sortedTimeFrames = [...channel.timeFrames].sort((a, b) => 
+                parseISO(a.startDate).getTime() - parseISO(b.startDate).getTime()
+              );
+              
+              const chartData = sortedTimeFrames.flatMap(tf => {
+                const startDate = parseISO(tf.startDate);
+                const endDate = parseISO(tf.endDate);
+                const daysInPeriod = differenceInDays(endDate, startDate) + 1; // +1 to include both start and end days
+                
+                // Calculate daily rates for THIS channel's timeframe only
                 const dailyPlanned = tf.planned / Math.max(daysInPeriod, 1);
                 const dailyActual = tf.actual / Math.max(daysInPeriod, 1);
                 
-                return Array.from({ length: Math.min(daysInPeriod, 30) }, (_, i) => {
-                  const date = format(addDays(parseISO(tf.startDate), i), 'yyyy-MM-dd');
+                // Generate data points for each day in this timeframe
+                return Array.from({ length: daysInPeriod }, (_, i) => {
+                  const date = format(addDays(startDate, i), 'yyyy-MM-dd');
                   return {
                     date,
+                    // Cumulative planned spend up to this day for THIS channel only
                     planned: dailyPlanned * (i + 1),
+                    // Cumulative actual spend up to this day for THIS channel only
                     actual: dailyActual * (i + 1),
-                    projected: dailyActual * daysInPeriod // Simple projection
+                    // Projected spend for THIS channel only
+                    projected: dailyActual * daysInPeriod
                   };
                 });
               });
@@ -788,6 +801,44 @@ export default function PlanDashboardPage() {
                   {/* Expanded Details */}
                   {isExpanded && (
                     <div className="bg-gray-50 p-6 space-y-6">
+                      {/* Summary Stats */}
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {/* Net Planned Spend */}
+                        <Card>
+                          <CardContent className="p-4">
+                            <p className="text-sm font-medium text-muted-foreground mb-1">
+                              Net Planned Spend
+                            </p>
+                            <p className="text-2xl font-bold">
+                              {(() => {
+                                // Calculate monthly planned spend FOR THIS SPECIFIC CHANNEL ONLY
+                                const today = new Date();
+                                const currentMonth = format(today, 'MMM yyyy');
+                                
+                                // Find the timeframe for the current month for THIS channel only
+                                const currentMonthTimeFrame = channel.timeFrames.find(tf => tf.period === currentMonth);
+                                
+                                // If found, use that month's planned spend for THIS channel
+                                if (currentMonthTimeFrame) {
+                                  return `$${currentMonthTimeFrame.planned.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                                }
+                                
+                                // Otherwise, use the most recent timeframe's planned spend for THIS channel
+                                const mostRecentTimeFrame = [...channel.timeFrames].sort((a, b) => 
+                                  parseISO(b.startDate).getTime() - parseISO(a.startDate).getTime()
+                                )[0];
+                                
+                                if (mostRecentTimeFrame) {
+                                  return `$${mostRecentTimeFrame.planned.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                                }
+                                
+                                return '$0.00';
+                              })()}
+                            </p>
+                          </CardContent>
+                        </Card>
+                      </div>
+                      
                       {/* Spend Chart */}
                       <div>
                         <h3 className="font-semibold mb-4 flex items-center gap-2">
