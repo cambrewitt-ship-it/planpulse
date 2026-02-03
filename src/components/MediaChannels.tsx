@@ -43,6 +43,7 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
   const [connectedAccounts, setConnectedAccounts] = useState<Record<string, string | null>>({});
   const [connectedAccountIds, setConnectedAccountIds] = useState<Record<string, string | null>>({});
   const [selectedMonths, setSelectedMonths] = useState<Record<string, Date>>({});
+  const [selectedCampaigns, setSelectedCampaigns] = useState<Record<string, string>>({}); // channelId -> campaignId ('all' means all campaigns)
 
   // Helper function to find the earliest month with budget > 0 for a channel
   const findEarliestMonthWithBudget = (channelId: string): Date | null => {
@@ -430,7 +431,8 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
     liveData?: any[],
     accountId?: string | null,
     hasConnectedAccount?: boolean,
-    selectedMonth?: Date
+    selectedMonth?: Date,
+    selectedCampaignId?: string // 'all' or specific campaign ID
   ) => {
     const month = selectedMonth || new Date();
     const monthStart = startOfMonth(month);
@@ -458,6 +460,7 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
         liveDataLength: liveData.length,
         accountId,
         hasConnectedAccount,
+        selectedCampaignId,
         sampleItem: liveData[0]
       });
       
@@ -487,7 +490,14 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
             return; // Skip this item if it doesn't match the connected account
           }
         }
-        // If no accountId filter, include all data (aggregate across all accounts)
+        
+        // Filter by campaign if a specific campaign is selected
+        if (selectedCampaignId && selectedCampaignId !== 'all') {
+          const itemCampaignId = item.campaignId || '';
+          if (itemCampaignId !== selectedCampaignId) {
+            return; // Skip this item if it doesn't match the selected campaign
+          }
+        }
         
         // Handle both Meta Ads (dateStart) and Google Ads (date) formats
         let dateKey: string | null = null;
@@ -695,6 +705,21 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
       const selectedMonth = selectedMonths[channel.id] || startOfMonth(new Date());
       const selectedMonthKey = format(selectedMonth, 'yyyy-MM');
       
+      // Get selected campaign for this channel (default to 'all')
+      const selectedCampaignId = selectedCampaigns[channel.id] || 'all';
+      
+      // Extract unique campaigns from live spend data for this channel
+      const channelLiveSpendData = liveSpendData[channel.id] || [];
+      const campaignsMap = new Map<string, { id: string; name: string }>();
+      channelLiveSpendData.forEach((item) => {
+        const campaignId = item.campaignId || '';
+        const campaignName = item.campaignName || '';
+        if (campaignId && campaignName && !campaignsMap.has(campaignId)) {
+          campaignsMap.set(campaignId, { id: campaignId, name: campaignName });
+        }
+      });
+      const campaigns = Array.from(campaignsMap.values());
+      
       // Check if this is a MediaPlanBuilder channel (has _monthlySpendTotals or we have original channels)
       const isMediaPlanBuilderChannel = !!(channel as any)._monthlySpendTotals || (originalMediaPlanChannels && originalMediaPlanChannels.some(c => c.id === channel.id));
       
@@ -892,7 +917,8 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
           liveSpendData[channel.id],
           accountId,
           hasConnectedAccount,
-          selectedMonth
+          selectedMonth,
+          selectedCampaignId
         ),
         isMetaAds: isMetaAdsChannel(channel.channel),
         onRefreshSpend: (month?: Date) => {
@@ -915,6 +941,10 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
             fetchLiveSpendData(channel.id, channel.channel, month);
           }
         },
+        onCampaignChange: (campaignId: string) => {
+          // Update selected campaign for this channel
+          setSelectedCampaigns(prev => ({ ...prev, [channel.id]: campaignId }));
+        },
         isFetchingSpend: fetchingSpend[channel.id] || false,
         spendError: spendErrors[channel.id],
         onActionPointsChange: () => fetchActionPoints(channelType),
@@ -922,12 +952,160 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
         connectedAccount: connectedAccounts[channelType] ?? undefined,
         liveSpendData: liveSpendData[channel.id] || [],
         connectedAccountId: accountId,
-        selectedMonth: selectedMonth
+        selectedMonth: selectedMonth,
+        campaigns: campaigns,
+        selectedCampaignId: selectedCampaignId
       };
     });
   };
 
   const channels = transformChannels();
+
+  // Group channels by name (channel type) to show only one card per channel
+  const groupChannelsByName = (channels: ReturnType<typeof transformChannels>) => {
+    const grouped = new Map<string, ReturnType<typeof transformChannels>>();
+    
+    channels.forEach((channel) => {
+      const channelName = channel.name;
+      if (!grouped.has(channelName)) {
+        grouped.set(channelName, []);
+      }
+      grouped.get(channelName)!.push(channel);
+    });
+    
+    // Aggregate data for each group
+    const aggregatedChannels = Array.from(grouped.entries()).map(([channelName, channelGroup]) => {
+      if (channelGroup.length === 1) {
+        // Only one channel, return as-is
+        return channelGroup[0];
+      }
+      
+      // Multiple channels with same name - aggregate them
+      const firstChannel = channelGroup[0];
+      
+      // Sum month budgets
+      const totalMonthBudget = channelGroup.reduce((sum, ch) => sum + (ch.monthBudget || 0), 0);
+      
+      // Merge and aggregate spend data
+      // Create a map of dates to aggregate spend data
+      const spendDataMap = new Map<string, { actualSpend: number | null; plannedSpend: number; projectedSpend: number | null; projected: boolean }>();
+      
+      channelGroup.forEach((ch) => {
+        if (ch.spendData) {
+          ch.spendData.forEach((dataPoint) => {
+            const existing = spendDataMap.get(dataPoint.date);
+            if (existing) {
+              // Aggregate: sum actual and planned (treat null as 0 for actualSpend)
+              const existingActual = existing.actualSpend ?? 0;
+              const newActual = dataPoint.actualSpend ?? 0;
+              const aggregatedActual = existingActual + newActual;
+              
+              spendDataMap.set(dataPoint.date, {
+                actualSpend: aggregatedActual > 0 ? aggregatedActual : null,
+                plannedSpend: existing.plannedSpend + dataPoint.plannedSpend,
+                projectedSpend: existing.projectedSpend ?? dataPoint.projectedSpend,
+                projected: existing.projected || dataPoint.projected
+              });
+            } else {
+              spendDataMap.set(dataPoint.date, {
+                actualSpend: dataPoint.actualSpend,
+                plannedSpend: dataPoint.plannedSpend,
+                projectedSpend: dataPoint.projectedSpend,
+                projected: dataPoint.projected
+              });
+            }
+          });
+        }
+      });
+      
+      // Convert map back to array and sort by date
+      const aggregatedSpendData = Array.from(spendDataMap.entries())
+        .map(([date, data]) => ({
+          date,
+          ...data
+        }))
+        .sort((a, b) => a.date.localeCompare(b.date));
+      
+      // Merge live spend data from all channels
+      const allLiveSpendData = channelGroup
+        .flatMap(ch => ch.liveSpendData || [])
+        .filter(Boolean);
+      
+      // Merge campaigns from all channels (deduplicate by ID)
+      const campaignsMap = new Map<string, { id: string; name: string }>();
+      channelGroup.forEach((ch) => {
+        if (ch.campaigns) {
+          ch.campaigns.forEach((campaign) => {
+            if (!campaignsMap.has(campaign.id)) {
+              campaignsMap.set(campaign.id, campaign);
+            }
+          });
+        }
+      });
+      const mergedCampaigns = Array.from(campaignsMap.values());
+      
+      // Combine action points (deduplicate by ID if they have one, otherwise by text)
+      const allActionPoints = channelGroup.flatMap(ch => ch.actionPoints || []);
+      const uniqueActionPoints = Array.from(
+        new Map(allActionPoints.map(ap => [ap.id || JSON.stringify(ap), ap])).values()
+      );
+      
+      // Use the first channel's selected month, or find earliest month with budget
+      const selectedMonth = firstChannel.selectedMonth || startOfMonth(new Date());
+      
+      // Use the first channel's selected campaign, or default to 'all'
+      const selectedCampaignId = firstChannel.selectedCampaignId || 'all';
+      
+      // Merge refresh handlers - use the first one that has it
+      const refreshHandler = channelGroup.find(ch => ch.onRefreshSpend)?.onRefreshSpend || firstChannel.onRefreshSpend;
+      
+      // Merge month change handlers - use the first one that has it
+      const monthChangeHandler = channelGroup.find(ch => ch.onMonthChange)?.onMonthChange || firstChannel.onMonthChange;
+      
+      // Merge campaign change handlers - update all channels in the group
+      const campaignChangeHandler = (campaignId: string) => {
+        channelGroup.forEach((ch) => {
+          ch.onCampaignChange?.(campaignId);
+        });
+      };
+      
+      // Determine if any channel is fetching
+      const isFetchingSpend = channelGroup.some(ch => ch.isFetchingSpend);
+      
+      // Combine spend errors
+      const spendError = channelGroup
+        .map(ch => ch.spendError)
+        .filter(Boolean)
+        .join('; ') || undefined;
+      
+      // Use the first channel's connected account info (they should all be the same for the same channel type)
+      const connectedAccount = firstChannel.connectedAccount;
+      const connectedAccountId = firstChannel.connectedAccountId;
+      
+      return {
+        ...firstChannel,
+        id: `grouped-${channelName}`, // Use a grouped ID
+        monthBudget: totalMonthBudget,
+        spendData: aggregatedSpendData,
+        liveSpendData: allLiveSpendData,
+        actionPoints: uniqueActionPoints,
+        selectedMonth,
+        campaigns: mergedCampaigns,
+        selectedCampaignId,
+        onRefreshSpend: refreshHandler,
+        onMonthChange: monthChangeHandler,
+        onCampaignChange: campaignChangeHandler,
+        isFetchingSpend,
+        spendError,
+        connectedAccount,
+        connectedAccountId
+      };
+    });
+    
+    return aggregatedChannels;
+  };
+
+  const groupedChannels = groupChannelsByName(channels);
 
   // If no channels from either source, show empty state
   const hasChannels = (mediaPlanBuilderChannels && mediaPlanBuilderChannels.length > 0) || 
@@ -949,7 +1127,7 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
   }
 
   // If channels exist but transformation resulted in empty array, show different message
-  if (channels.length === 0 && hasChannels) {
+  if (groupedChannels.length === 0 && hasChannels) {
     return (
       <div className="space-y-6">
         <div className="flex items-center justify-between mb-4">
@@ -974,10 +1152,10 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
     <div className="space-y-6">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-2xl font-bold text-[#0f172a]">Media Channels</h2>
-        <p className="text-sm text-[#64748b]">{channels.length} channel{channels.length !== 1 ? 's' : ''} active</p>
+        <p className="text-sm text-[#64748b]">{groupedChannels.length} channel{groupedChannels.length !== 1 ? 's' : ''} active</p>
       </div>
       
-      {channels.map((channel) => (
+      {groupedChannels.map((channel) => (
         <MediaChannelCard key={channel.id} channel={channel} />
       ))}
     </div>

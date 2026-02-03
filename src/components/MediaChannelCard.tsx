@@ -32,11 +32,18 @@ interface LiveSpendItem {
   accountId?: string;
   accountName?: string;
   customerId?: string; // Google Ads format
+  campaignId?: string; // Campaign ID
+  campaignName?: string; // Campaign name
   dateStart?: string; // Meta Ads format
   dateStop?: string; // Meta Ads format
   date?: string; // Google Ads format
   spend?: number;
   currency?: string;
+}
+
+interface Campaign {
+  id: string;
+  name: string;
 }
 
 interface MediaChannelCardProps {
@@ -58,6 +65,9 @@ interface MediaChannelCardProps {
     liveSpendData?: LiveSpendItem[];
     connectedAccountId?: string | null;
     selectedMonth?: Date;
+    campaigns?: Campaign[];
+    selectedCampaignId?: string;
+    onCampaignChange?: (campaignId: string) => void;
   };
   onToggleAction?: (channelId: string, actionId: string) => void;
 }
@@ -86,6 +96,23 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
       setSelectedMonth(channel.selectedMonth);
     }
   }, [channel.selectedMonth]);
+  
+  // Campaign filter state - "all" means show all campaigns
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string>(channel.selectedCampaignId || 'all');
+  
+  // Sync campaign filter with prop
+  useEffect(() => {
+    if (channel.selectedCampaignId !== undefined) {
+      setSelectedCampaignId(channel.selectedCampaignId);
+    }
+  }, [channel.selectedCampaignId]);
+  
+  // Handle campaign change
+  const handleCampaignChange = (campaignId: string) => {
+    setSelectedCampaignId(campaignId);
+    channel.onCampaignChange?.(campaignId);
+  };
+  
   const [newActionText, setNewActionText] = useState('');
   const [newActionCategory, setNewActionCategory] = useState<'SET UP' | 'ONGOING'>('SET UP');
   const [newActionResetFrequency, setNewActionResetFrequency] = useState<'weekly' | 'fortnightly' | 'monthly'>('weekly');
@@ -850,28 +877,46 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
 
           {/* Right Section - Chart (60%) */}
           <div className="lg:col-span-3">
-            <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center justify-between mb-3 gap-2">
               <h4 className="text-sm font-semibold text-[#0f172a]">Budget Pacing</h4>
-              {channel.onRefreshSpend && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    console.log(`[MediaChannelCard] Refresh button clicked for channel:`, {
-                      channelId: channel.id,
-                      channelName: channel.name,
-                      selectedMonth: selectedMonth,
-                      hasRefreshHandler: !!channel.onRefreshSpend
-                    });
-                    channel.onRefreshSpend?.(selectedMonth);
-                  }}
-                  disabled={channel.isFetchingSpend}
-                  className="h-7 text-xs"
-                >
-                  <RefreshCw className={`h-3 w-3 mr-1 ${channel.isFetchingSpend ? 'animate-spin' : ''}`} />
-                  {channel.isFetchingSpend ? 'Refreshing...' : 'Refresh Spend'}
-                </Button>
-              )}
+              <div className="flex items-center gap-2">
+                {/* Campaign Filter */}
+                {channel.campaigns && channel.campaigns.length > 0 && (
+                  <Select value={selectedCampaignId} onValueChange={handleCampaignChange}>
+                    <SelectTrigger className="h-7 text-xs w-[180px]">
+                      <SelectValue placeholder="All Campaigns" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Campaigns</SelectItem>
+                      {channel.campaigns.map((campaign) => (
+                        <SelectItem key={campaign.id} value={campaign.id}>
+                          {campaign.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                {channel.onRefreshSpend && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      console.log(`[MediaChannelCard] Refresh button clicked for channel:`, {
+                        channelId: channel.id,
+                        channelName: channel.name,
+                        selectedMonth: selectedMonth,
+                        hasRefreshHandler: !!channel.onRefreshSpend
+                      });
+                      channel.onRefreshSpend?.(selectedMonth);
+                    }}
+                    disabled={channel.isFetchingSpend}
+                    className="h-7 text-xs"
+                  >
+                    <RefreshCw className={`h-3 w-3 mr-1 ${channel.isFetchingSpend ? 'animate-spin' : ''}`} />
+                    {channel.isFetchingSpend ? 'Refreshing...' : 'Refresh Spend'}
+                  </Button>
+                )}
+              </div>
             </div>
             {channel.spendError && (
               <div className="mb-2 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">

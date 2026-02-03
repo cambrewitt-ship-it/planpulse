@@ -6,7 +6,6 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { User, Pencil, Check, X, DollarSign, TrendingUp, TrendingDown, Target, Minus, Download, CheckCircle } from 'lucide-react';
-import RollingCalendar from '@/components/RollingCalendar';
 import MediaChannels from '@/components/MediaChannels';
 import { MediaPlanGrid, MediaPlanChannel } from '@/components/media-plan-builder/media-plan-grid';
 import TodoSection from '@/components/TodoSection';
@@ -970,34 +969,29 @@ export default function NewClientDashboard() {
           </Card>
         </header>
 
-        {/* Rolling Calendar Section */}
-        <section className="mt-8" aria-label="Rolling calendar with daily tasks">
-          <RollingCalendar activePlan={activePlan} />
-        </section>
+        {/* Media Plan Builder Section */}
+        <section className="mt-8" aria-label="Media plan builder">
+            <Card className="bg-white shadow-md">
+              <CardContent className="p-6">
+                <h2 className="text-xl font-semibold text-[#0f172a] mb-4">Media Plan Builder</h2>
+                {isLoadingMediaPlanBuilder ? (
+                  <div className="flex items-center justify-center py-8">
+                    <p className="text-[#64748b]">Loading media plan builder...</p>
+                  </div>
+                ) : (
+                  <MediaPlanGrid 
+                    channels={mediaPlanBuilderChannels}
+                    onChannelsChange={handleChannelsChange}
+                    commission={commission}
+                    onCommissionChange={handleCommissionChange}
+                  />
+                )}
+              </CardContent>
+            </Card>
+          </section>
 
         {/* To Do Section */}
         <TodoSection mediaPlanBuilderChannels={mediaPlanBuilderChannels} />
-
-        {/* Media Plan Builder Section */}
-        <section className="mt-8" aria-label="Media plan builder">
-          <Card className="bg-white shadow-md">
-            <CardContent className="p-6">
-              <h2 className="text-xl font-semibold text-[#0f172a] mb-4">Media Plan Builder</h2>
-              {isLoadingMediaPlanBuilder ? (
-                <div className="flex items-center justify-center py-8">
-                  <p className="text-[#64748b]">Loading media plan builder...</p>
-                </div>
-              ) : (
-                <MediaPlanGrid 
-                  channels={mediaPlanBuilderChannels}
-                  onChannelsChange={handleChannelsChange}
-                  commission={commission}
-                  onCommissionChange={handleCommissionChange}
-                />
-              )}
-            </CardContent>
-          </Card>
-        </section>
 
         {/* Media Channels Section */}
         <section className="mt-8" aria-label="Media channels budget pacing">
@@ -1007,11 +1001,6 @@ export default function NewClientDashboard() {
             mediaPlanBuilderChannels={mediaPlanBuilderChannels}
             commission={commission}
           />
-        </section>
-
-        {/* Ad Platform Connections Section */}
-        <section className="mt-8" aria-label="Ad platform connections">
-          <AdPlatformConnector clientId={clientId} />
         </section>
 
         {/* Customer Acquisition Cost (CAC) Overview Section */}
@@ -1211,6 +1200,11 @@ export default function NewClientDashboard() {
             errorDetails={cacErrorDetails}
             onComparisonToggle={loadPreviousPeriodData}
           />
+        </section>
+
+        {/* Ad Platform Connections Section */}
+        <section className="mt-8" aria-label="Ad platform connections">
+          <AdPlatformConnector clientId={clientId} />
         </section>
       </div>
 

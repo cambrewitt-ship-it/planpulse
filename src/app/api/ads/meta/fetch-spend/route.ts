@@ -138,15 +138,15 @@ export async function POST(request: NextRequest) {
         console.log(`\nFetching data for Meta account ${accountId}...`);
 
         try {
-          // Build query params
+          // Build query params - fetch at campaign level to get campaign data
           const params = new URLSearchParams({
-            fields: 'spend,account_name,date_start,date_stop',
+            fields: 'spend,account_name,campaign_id,campaign_name,date_start,date_stop',
             time_range: JSON.stringify({
               since: startDate,
               until: endDate
             }),
             time_increment: '1', // Get daily breakdown
-            level: 'account',
+            level: 'campaign', // Changed from 'account' to 'campaign' to get campaign-level data
             access_token: accessToken
           });
 
@@ -176,6 +176,8 @@ export async function POST(request: NextRequest) {
               allSpendData.push({
                 accountId: accountId,
                 accountName: result.account_name || account.account_name,
+                campaignId: result.campaign_id || '',
+                campaignName: result.campaign_name || '',
                 dateStart: result.date_start || '',
                 dateStop: result.date_stop || '',
                 spend: parseFloat(result.spend || '0'),
