@@ -13,6 +13,7 @@ import { useState, useEffect } from 'react';
 import { RefreshCw, Plus, X, Edit2, Check, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { MediaChannelEnhancedView } from '@/components/ui/media-channel-enhanced-view';
 import { TimeFrame } from '@/lib/types/media-plan';
+import { DateRangePicker } from '@/components/ui/date-range-picker';
 
 interface ActionPoint {
   id: string;
@@ -92,6 +93,16 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
       return startOfMonth(parseISO(channel.spendData[0].date));
     }
     return new Date();
+  });
+
+  // Date range state for filtering
+  const [dateRange, setDateRange] = useState<{ startDate: string; endDate: string }>(() => {
+    const monthStart = startOfMonth(selectedMonth);
+    const monthEnd = endOfMonth(selectedMonth);
+    return {
+      startDate: format(monthStart, 'yyyy-MM-dd'),
+      endDate: format(monthEnd, 'yyyy-MM-dd'),
+    };
   });
   
   // Sync local state with prop when it changes
@@ -365,16 +376,16 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
     });
   };
 
-  // Filter data to show only the selected month
+  // Filter data to show only the selected date range
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const todayKey = format(today, 'yyyy-MM-dd');
   const selectedMonthStart = startOfMonth(selectedMonth);
   const selectedMonthEnd = endOfMonth(selectedMonth);
-  const selectedMonthStartKey = format(selectedMonthStart, 'yyyy-MM-dd');
-  const selectedMonthEndKey = format(selectedMonthEnd, 'yyyy-MM-dd');
-  
-  // Filter to show only dates within the selected month
+  const selectedMonthStartKey = dateRange.startDate;
+  const selectedMonthEndKey = dateRange.endDate;
+
+  // Filter to show only dates within the selected date range
   const filteredData = channel.spendData.filter(d => d.date >= selectedMonthStartKey && d.date <= selectedMonthEndKey);
   
   // Sort by date to ensure proper order
@@ -417,7 +428,24 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
   // Notify parent when month changes to fetch new data
   const handleMonthChange = (newMonth: Date) => {
     setSelectedMonth(newMonth);
+    // Update date range to match the new month
+    const monthStart = startOfMonth(newMonth);
+    const monthEnd = endOfMonth(newMonth);
+    setDateRange({
+      startDate: format(monthStart, 'yyyy-MM-dd'),
+      endDate: format(monthEnd, 'yyyy-MM-dd'),
+    });
     channel.onMonthChange?.(newMonth);
+  };
+
+  // Handle custom date range changes
+  const handleDateRangeChange = (newRange: { startDate: string; endDate: string }) => {
+    setDateRange(newRange);
+    // Update selected month to the start date's month
+    const startDate = parseISO(newRange.startDate);
+    setSelectedMonth(startOfMonth(startDate));
+    // Optionally fetch new data for this range
+    channel.onMonthChange?.(startDate);
   };
 
   // Calculate stats (reuse today and todayKey from above)
@@ -1126,6 +1154,12 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
                           <ChevronRight className="h-3 w-3" />
                         </Button>
                       </div>
+                      {/* Date Range Picker */}
+                      <DateRangePicker
+                        value={dateRange}
+                        onChange={handleDateRangeChange}
+                        disabled={channel.isFetchingSpend}
+                      />
                     </div>
                     <div className="flex items-center gap-2">
                       {/* Campaign Filter */}

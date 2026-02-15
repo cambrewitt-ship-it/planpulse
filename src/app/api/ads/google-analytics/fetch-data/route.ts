@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    const { startDate, endDate, metrics, propertyId, clientId, eventName } = body;
+    const { startDate, endDate, metrics, propertyId, clientId, eventName, eventNames } = body;
 
     // Log all incoming parameters
     console.log('GA4 API route called with params:', {
@@ -38,6 +38,7 @@ export async function POST(request: NextRequest) {
       endDate,
       metrics: metrics || '(using defaults)',
       eventName: eventName || '(not specified - all events)',
+      eventNames: eventNames || '(not specified)',
       timestamp: new Date().toISOString(),
     });
 
@@ -251,15 +252,20 @@ export async function POST(request: NextRequest) {
       .map(m => metricMapping[m] || m)
       .filter(Boolean);
 
+    // Determine query mode: event-specific or standard metrics
+    const isEventQuery = eventNames && Array.isArray(eventNames) && eventNames.length > 0;
+    
     // Add date dimension for time series
-    const dimensions = ['date'];
+    // For event queries, also add eventName dimension
+    const dimensions = isEventQuery ? ['eventName'] : ['date'];
 
     // Fetch data for each property
     const allData: Array<{
       propertyId: string;
       propertyName: string;
-      date: string;
-      [key: string]: string | number;
+      date?: string;
+      eventName?: string;
+      [key: string]: string | number | undefined;
     }> = [];
     const errors: Array<{ propertyId: string; error: string }> = [];
 
@@ -267,6 +273,7 @@ export async function POST(request: NextRequest) {
       const propertyId = account.property_id;
       
       console.log(`\nFetching data for GA4 property ${propertyId}...`);
+      console.log(`Query mode: ${isEventQuery ? 'EVENT-SPECIFIC' : 'STANDARD METRICS'}`);
 
       try {
         // GA4 Data API request body - property is in URL, not in body
@@ -279,11 +286,25 @@ export async function POST(request: NextRequest) {
             }
           ],
           dimensions: dimensions.map(d => ({ name: d })),
-          metrics: ga4Metrics.map(m => ({ name: m })),
+          metrics: isEventQuery 
+            ? [{ name: 'eventCount' }, { name: 'totalUsers' }]
+            : ga4Metrics.map(m => ({ name: m })),
         };
 
-        // If eventName is specified, add dimension filter to only count that specific event
-        if (eventName && ga4Metrics.includes('eventCount')) {
+        // Handle event filtering
+        if (isEventQuery) {
+          // NEW: Event-specific query with multiple events
+          console.log(`Adding dimension filter for events: ${eventNames.join(', ')}`);
+          requestBody.dimensionFilter = {
+            filter: {
+              fieldName: 'eventName',
+              inListFilter: {
+                values: eventNames
+              },
+            },
+          };
+        } else if (eventName && ga4Metrics.includes('eventCount')) {
+          // EXISTING: Single event filter (backward compatibility)
           console.log(`Adding dimension filter for event: ${eventName}`);
           requestBody.dimensionFilter = {
             filter: {
@@ -370,60 +391,101 @@ export async function POST(request: NextRequest) {
           });
 
           for (const row of data.rows) {
-            const dateValue = row.dimensionValues?.[0]?.value || '';
-            // GA4 API returns dates in YYYY-MM-DD format (or YYYYMMDD depending on request)
-            // If it's already in YYYY-MM-DD format, use as-is
-            // If it's in YYYYMMDD format (8 digits), convert to YYYY-MM-DD
-            const formattedDate = dateValue.length === 8 && !dateValue.includes('-')
-              ? `${dateValue.substring(0, 4)}-${dateValue.substring(4, 6)}-${dateValue.substring(6, 8)}`
-              : dateValue;
+            if (isEventQuery) {
+              // EVENT-SPECIFIC QUERY: dimension is eventName
+              const eventNameValue = row.dimensionValues?.[0]?.value || '';
+              
+              const dataPoint: {
+                propertyId: string;
+                propertyName: string;
+                eventName: string;
+                [key: string]: string | number;
+              } = {
+                propertyId: propertyId,
+                propertyName: account.property_name || propertyId,
+                eventName: eventNameValue,
+              };
 
-            const dataPoint: {
-              propertyId: string;
-              propertyName: string;
-              date: string;
-              [key: string]: string | number;
-            } = {
-              propertyId: propertyId,
-              propertyName: account.property_name || propertyId,
-              date: formattedDate,
-            };
-
-            // Map metric values using metricHeaders to ensure correct mapping
-            if (row.metricValues && Array.isArray(row.metricValues)) {
-              ga4Metrics.forEach((metric) => {
-                // Find the index of this metric in the response headers
-                const metricIndex = metricHeaderMap.get(metric);
+              // Map metric values for event query (eventCount and totalUsers)
+              if (row.metricValues && Array.isArray(row.metricValues)) {
+                const eventCountIndex = metricHeaderMap.get('eventCount');
+                const totalUsersIndex = metricHeaderMap.get('totalUsers');
                 
-                if (metricIndex !== undefined && row.metricValues[metricIndex]) {
-                  const metricValue = row.metricValues[metricIndex]?.value || '0';
-                  // Convert to number, handling different formats
-                  // GA4 sometimes returns values as strings like "123.45" or "0"
-                  let numericValue = 0;
-                  if (typeof metricValue === 'string') {
-                    numericValue = parseFloat(metricValue) || 0;
-                  } else if (typeof metricValue === 'number') {
-                    numericValue = metricValue;
-                  }
-                  dataPoint[metric] = numericValue;
-                } else {
-                  // Metric not found in response, set to 0
-                  console.warn(`Metric ${metric} not found in GA4 response headers`, {
-                    metric,
-                    availableHeaders: Array.from(metricHeaderMap.keys()),
-                    metricIndex,
-                  });
-                  dataPoint[metric] = 0;
+                if (eventCountIndex !== undefined && row.metricValues[eventCountIndex]) {
+                  const metricValue = row.metricValues[eventCountIndex]?.value || '0';
+                  dataPoint.eventCount = parseFloat(metricValue) || 0;
                 }
+                
+                if (totalUsersIndex !== undefined && row.metricValues[totalUsersIndex]) {
+                  const metricValue = row.metricValues[totalUsersIndex]?.value || '0';
+                  dataPoint.totalUsers = parseFloat(metricValue) || 0;
+                }
+              }
+              
+              console.log(`Event data point:`, {
+                eventName: eventNameValue,
+                eventCount: dataPoint.eventCount,
+                totalUsers: dataPoint.totalUsers,
               });
-            }
-            
-            console.log(`Data point for ${formattedDate}:`, {
-              date: formattedDate,
-              metrics: ga4Metrics.map(m => ({ metric: m, value: dataPoint[m] })),
-            });
 
-            allData.push(dataPoint);
+              allData.push(dataPoint);
+            } else {
+              // STANDARD METRICS QUERY: dimension is date
+              const dateValue = row.dimensionValues?.[0]?.value || '';
+              // GA4 API returns dates in YYYY-MM-DD format (or YYYYMMDD depending on request)
+              // If it's already in YYYY-MM-DD format, use as-is
+              // If it's in YYYYMMDD format (8 digits), convert to YYYY-MM-DD
+              const formattedDate = dateValue.length === 8 && !dateValue.includes('-')
+                ? `${dateValue.substring(0, 4)}-${dateValue.substring(4, 6)}-${dateValue.substring(6, 8)}`
+                : dateValue;
+
+              const dataPoint: {
+                propertyId: string;
+                propertyName: string;
+                date: string;
+                [key: string]: string | number;
+              } = {
+                propertyId: propertyId,
+                propertyName: account.property_name || propertyId,
+                date: formattedDate,
+              };
+
+              // Map metric values using metricHeaders to ensure correct mapping
+              if (row.metricValues && Array.isArray(row.metricValues)) {
+                ga4Metrics.forEach((metric) => {
+                  // Find the index of this metric in the response headers
+                  const metricIndex = metricHeaderMap.get(metric);
+                  
+                  if (metricIndex !== undefined && row.metricValues[metricIndex]) {
+                    const metricValue = row.metricValues[metricIndex]?.value || '0';
+                    // Convert to number, handling different formats
+                    // GA4 sometimes returns values as strings like "123.45" or "0"
+                    let numericValue = 0;
+                    if (typeof metricValue === 'string') {
+                      numericValue = parseFloat(metricValue) || 0;
+                    } else if (typeof metricValue === 'number') {
+                      numericValue = metricValue;
+                    }
+                    dataPoint[metric] = numericValue;
+                  } else {
+                    // Metric not found in response, set to 0
+                    console.warn(`Metric ${metric} not found in GA4 response headers`, {
+                      metric,
+                      availableHeaders: Array.from(metricHeaderMap.keys()),
+                      metricIndex,
+                    });
+                    dataPoint[metric] = 0;
+                  }
+                });
+              }
+              
+              console.log(`Data point for ${formattedDate}:`, {
+                date: formattedDate,
+                metrics: ga4Metrics.map(m => ({ metric: m, value: dataPoint[m] })),
+              });
+
+              allData.push(dataPoint);
+            }
           }
         }
 
@@ -441,81 +503,164 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Aggregate data by date (in case multiple properties)
-    const aggregatedData: Record<string, {
-      date: string;
-      [key: string]: string | number;
-    }> = {};
+    // Aggregate data (by event name for event queries, by date for standard queries)
+    if (isEventQuery) {
+      // EVENT QUERY: Aggregate by event name across properties
+      const aggregatedEvents: Record<string, {
+        name: string;
+        count: number;
+        users: number;
+      }> = {};
 
-    allData.forEach(point => {
-      const dateKey = point.date;
-      if (!aggregatedData[dateKey]) {
-        aggregatedData[dateKey] = {
-          date: dateKey,
-        };
-      }
+      allData.forEach(point => {
+        const eventKey = point.eventName as string;
+        if (!aggregatedEvents[eventKey]) {
+          aggregatedEvents[eventKey] = {
+            name: eventKey,
+            count: 0,
+            users: 0,
+          };
+        }
 
-      // Sum metrics across properties
-      ga4Metrics.forEach(metric => {
-        const currentValue = aggregatedData[dateKey][metric] as number || 0;
-        aggregatedData[dateKey][metric] = currentValue + (point[metric] as number || 0);
+        // Sum metrics across properties
+        aggregatedEvents[eventKey].count += (point.eventCount as number) || 0;
+        aggregatedEvents[eventKey].users += (point.totalUsers as number) || 0;
       });
-    });
 
-    const finalData = Object.values(aggregatedData).sort((a, b) => 
-      a.date.localeCompare(b.date)
-    );
-
-    console.log('Final aggregated data:', {
-      totalDataPoints: finalData.length,
-      samplePoint: finalData[0],
-      metrics: ga4Metrics,
-      dateRange: { startDate, endDate },
-      allDataLength: allData.length,
-      errorsCount: errors.length,
-    });
-
-    // If we have errors but no data, return error with helpful message
-    if (finalData.length === 0 && errors.length > 0) {
-      console.error('No data returned and errors occurred:', errors);
-      
-      // Check for API not enabled error
-      const apiDisabledError = errors.find(e => 
-        e.error.includes('has not been used') || 
-        e.error.includes('is disabled') ||
-        e.error.includes('SERVICE_DISABLED')
+      const eventsArray = Object.values(aggregatedEvents).sort((a, b) => 
+        b.count - a.count  // Sort by count descending
       );
-      
-      if (apiDisabledError) {
-        // Extract activation URL if present
-        const activationUrlMatch = apiDisabledError.error.match(/https:\/\/console\.developers\.google\.com[^\s]+/);
-        const activationUrl = activationUrlMatch ? activationUrlMatch[0] : null;
+
+      console.log('Final aggregated event data:', {
+        totalEvents: eventsArray.length,
+        sampleEvent: eventsArray[0],
+        dateRange: { startDate, endDate },
+        allDataLength: allData.length,
+        errorsCount: errors.length,
+      });
+
+      // If we have errors but no data, return error with helpful message
+      if (eventsArray.length === 0 && errors.length > 0) {
+        console.error('No data returned and errors occurred:', errors);
+        
+        // Check for API not enabled error
+        const apiDisabledError = errors.find(e => 
+          e.error.includes('has not been used') || 
+          e.error.includes('is disabled') ||
+          e.error.includes('SERVICE_DISABLED')
+        );
+        
+        if (apiDisabledError) {
+          // Extract activation URL if present
+          const activationUrlMatch = apiDisabledError.error.match(/https:\/\/console\.developers\.google\.com[^\s]+/);
+          const activationUrl = activationUrlMatch ? activationUrlMatch[0] : null;
+          
+          return NextResponse.json({
+            success: false,
+            error: 'Google Analytics Data API is not enabled',
+            errorDetails: apiDisabledError.error,
+            activationUrl: activationUrl,
+            errors: errors,
+          }, { status: 403 });
+        }
         
         return NextResponse.json({
           success: false,
-          error: 'Google Analytics Data API is not enabled',
-          errorDetails: apiDisabledError.error,
-          activationUrl: activationUrl,
+          error: `Failed to fetch GA4 data: ${errors.map(e => e.error).join('; ')}`,
           errors: errors,
-        }, { status: 403 });
+        }, { status: 500 });
       }
-      
-      return NextResponse.json({
-        success: false,
-        error: `Failed to fetch GA4 data: ${errors.map(e => e.error).join('; ')}`,
-        errors: errors,
-      }, { status: 500 });
-    }
 
-    return NextResponse.json({
-      success: true,
-      platform: 'google-analytics',
-      dateRange: { startDate, endDate },
-      metrics: ga4Metrics,
-      data: finalData,
-      propertiesProcessed: gaAccounts.length,
-      errors: errors.length > 0 ? errors : undefined
-    });
+      // Return event-specific response
+      return NextResponse.json({
+        success: true,
+        platform: 'google-analytics',
+        queryType: 'events',
+        dateRange: { startDate, endDate },
+        events: eventsArray,
+        propertiesProcessed: gaAccounts.length,
+        errors: errors.length > 0 ? errors : undefined
+      });
+
+    } else {
+      // STANDARD METRICS QUERY: Aggregate by date across properties
+      const aggregatedData: Record<string, {
+        date: string;
+        [key: string]: string | number;
+      }> = {};
+
+      allData.forEach(point => {
+        const dateKey = point.date as string;
+        if (!aggregatedData[dateKey]) {
+          aggregatedData[dateKey] = {
+            date: dateKey,
+          };
+        }
+
+        // Sum metrics across properties
+        ga4Metrics.forEach(metric => {
+          const currentValue = aggregatedData[dateKey][metric] as number || 0;
+          aggregatedData[dateKey][metric] = currentValue + (point[metric] as number || 0);
+        });
+      });
+
+      const finalData = Object.values(aggregatedData).sort((a, b) => 
+        a.date.localeCompare(b.date)
+      );
+
+      console.log('Final aggregated data:', {
+        totalDataPoints: finalData.length,
+        samplePoint: finalData[0],
+        metrics: ga4Metrics,
+        dateRange: { startDate, endDate },
+        allDataLength: allData.length,
+        errorsCount: errors.length,
+      });
+
+      // If we have errors but no data, return error with helpful message
+      if (finalData.length === 0 && errors.length > 0) {
+        console.error('No data returned and errors occurred:', errors);
+        
+        // Check for API not enabled error
+        const apiDisabledError = errors.find(e => 
+          e.error.includes('has not been used') || 
+          e.error.includes('is disabled') ||
+          e.error.includes('SERVICE_DISABLED')
+        );
+        
+        if (apiDisabledError) {
+          // Extract activation URL if present
+          const activationUrlMatch = apiDisabledError.error.match(/https:\/\/console\.developers\.google\.com[^\s]+/);
+          const activationUrl = activationUrlMatch ? activationUrlMatch[0] : null;
+          
+          return NextResponse.json({
+            success: false,
+            error: 'Google Analytics Data API is not enabled',
+            errorDetails: apiDisabledError.error,
+            activationUrl: activationUrl,
+            errors: errors,
+          }, { status: 403 });
+        }
+        
+        return NextResponse.json({
+          success: false,
+          error: `Failed to fetch GA4 data: ${errors.map(e => e.error).join('; ')}`,
+          errors: errors,
+        }, { status: 500 });
+      }
+
+      // Return standard metrics response
+      return NextResponse.json({
+        success: true,
+        platform: 'google-analytics',
+        queryType: 'metrics',
+        dateRange: { startDate, endDate },
+        metrics: ga4Metrics,
+        data: finalData,
+        propertiesProcessed: gaAccounts.length,
+        errors: errors.length > 0 ? errors : undefined
+      });
+    }
 
   } catch (error: any) {
     console.error('');

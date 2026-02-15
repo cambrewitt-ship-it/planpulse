@@ -5,7 +5,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { User, Pencil, Check, X, DollarSign, TrendingUp, TrendingDown, Target, Minus, Download, CheckCircle } from 'lucide-react';
+import { User, Pencil, Check, X, DollarSign, TrendingUp, TrendingDown, Target, Minus, Download, CheckCircle, Filter } from 'lucide-react';
+import Link from 'next/link';
 import MediaChannels from '@/components/MediaChannels';
 import { MediaPlanGrid, MediaPlanChannel } from '@/components/media-plan-builder/media-plan-grid';
 import TodoSection from '@/components/TodoSection';
@@ -1074,7 +1075,15 @@ export default function NewClientDashboard() {
         {/* Customer Acquisition Cost (CAC) Overview Section */}
         <section className="mt-8" aria-label="Customer acquisition cost overview">
           <div className="mb-4 flex items-center justify-between flex-wrap gap-4">
-            <h2 className="text-xl font-semibold text-[#0f172a]">Cost Per {selectedMetric === 'eventCount' && selectedEventName ? selectedEventName : getMetricDisplayName(selectedMetric)} Overview</h2>
+            <div className="flex items-center gap-3">
+              <h2 className="text-xl font-semibold text-[#0f172a]">Cost Per {selectedMetric === 'eventCount' && selectedEventName ? selectedEventName : getMetricDisplayName(selectedMetric)} Overview</h2>
+              <Link href={`/clients/${clientId}/funnels`}>
+                <Button variant="outline" size="sm" className="gap-2">
+                  <Filter className="w-4 h-4" />
+                  View Funnels
+                </Button>
+              </Link>
+            </div>
             <div className="flex items-center gap-3">
               <Select 
                 value={selectedMetric} 
