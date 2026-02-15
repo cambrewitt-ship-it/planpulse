@@ -13,7 +13,16 @@ import {
 } from "recharts";
 import { useMemo, useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { AlertTriangle, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { AlertTriangle, TrendingUp, TrendingDown, Minus, Filter, Facebook, Search, Linkedin, Music, Instagram } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuCheckboxItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
+import { Button } from "@/components/ui/button";
 
 interface CostMetricPoint {
   date: string;
@@ -35,6 +44,9 @@ interface CostPerMetricChartProps {
   selectedMetric?: string;
   onComparisonToggle?: (enabled: boolean) => void;
   isComparisonLoading?: boolean;
+  availableChannels?: Array<{ id: string; name: string }>;
+  selectedChannels?: Set<string>;
+  onChannelsChange?: (channels: Set<string>) => void;
 }
 
 // Get singular display name for metric
@@ -47,6 +59,33 @@ function getMetricDisplayName(metricKey: string): string {
     eventCount: 'Event',
   };
   return displayNames[metricKey] || metricKey;
+}
+
+// Get channel icon based on channel name or platform
+function getChannelIcon(channelName: string) {
+  const lowerName = channelName.toLowerCase();
+  // Check for Meta/Facebook (including meta-ads platform name)
+  if (lowerName.includes('facebook') || lowerName.includes('meta') || lowerName === 'meta-ads') {
+    return <Facebook className="w-4 h-4 text-blue-600" />;
+  }
+  // Check for Instagram
+  if (lowerName.includes('instagram')) {
+    return <Instagram className="w-4 h-4 text-pink-600" />;
+  }
+  // Check for Google (including google-ads platform name)
+  if (lowerName.includes('google') || lowerName === 'google-ads') {
+    return <Search className="w-4 h-4 text-red-600" />;
+  }
+  // Check for LinkedIn
+  if (lowerName.includes('linkedin')) {
+    return <Linkedin className="w-4 h-4 text-blue-700" />;
+  }
+  // Check for TikTok
+  if (lowerName.includes('tiktok')) {
+    return <Music className="w-4 h-4 text-black" />;
+  }
+  // Default icon
+  return <Filter className="w-4 h-4 text-gray-500" />;
 }
 
 // Metric configuration with Grafana colors - keys match new property names
@@ -67,6 +106,9 @@ export function CostPerMetricChart({
   selectedMetric = 'conversions',
   onComparisonToggle,
   isComparisonLoading = false,
+  availableChannels = [],
+  selectedChannels = new Set(),
+  onChannelsChange,
 }: CostPerMetricChartProps) {
   // State for comparison mode
   const [showComparison, setShowComparison] = useState(false);
@@ -420,23 +462,96 @@ export function CostPerMetricChart({
     );
   }
 
+  // Handle channel selection
+  const handleChannelToggle = (channelId: string) => {
+    if (!onChannelsChange) return;
+    const newSelected = new Set(selectedChannels);
+    if (newSelected.has(channelId)) {
+      newSelected.delete(channelId);
+    } else {
+      newSelected.add(channelId);
+    }
+    onChannelsChange(newSelected);
+  };
+
+  const handleSelectAll = () => {
+    if (!onChannelsChange) return;
+    onChannelsChange(new Set(availableChannels.map(ch => ch.id)));
+  };
+
+  const handleDeselectAll = () => {
+    if (!onChannelsChange) return;
+    onChannelsChange(new Set());
+  };
+
   return (
     <Card>
       <CardHeader className="pb-2">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-2">
           <CardTitle>Cost Per {metricDisplayName}</CardTitle>
-          <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={showComparison}
-              onChange={(e) => handleComparisonToggle(e.target.checked)}
-              className="w-4 h-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500"
-              disabled={isComparisonLoading}
-            />
-            <span className="text-gray-600 dark:text-gray-400">
-              {isComparisonLoading ? 'Loading...' : 'Compare with previous period'}
-            </span>
-          </label>
+          <div className="flex items-center gap-3">
+            {/* Channel Filter Dropdown */}
+            {availableChannels.length > 0 && onChannelsChange && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="gap-2">
+                    <Filter className="h-4 w-4" />
+                    Channels
+                    {selectedChannels.size > 0 && (
+                      <span className="ml-1 bg-primary text-primary-foreground rounded-full px-1.5 py-0.5 text-xs">
+                        {selectedChannels.size}
+                      </span>
+                    )}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuLabel>Filter by Channel</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <div className="flex gap-2 px-2 py-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={handleSelectAll}
+                    >
+                      Select All
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={handleDeselectAll}
+                    >
+                      Deselect All
+                    </Button>
+                  </div>
+                  <DropdownMenuSeparator />
+                  {availableChannels.map((channel) => (
+                    <DropdownMenuCheckboxItem
+                      key={channel.id}
+                      checked={selectedChannels.has(channel.id)}
+                      onCheckedChange={() => handleChannelToggle(channel.id)}
+                    >
+                      {channel.name}
+                    </DropdownMenuCheckboxItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+            {/* Comparison Toggle */}
+            <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={showComparison}
+                onChange={(e) => handleComparisonToggle(e.target.checked)}
+                className="w-4 h-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+                disabled={isComparisonLoading}
+              />
+              <span className="text-gray-600 dark:text-gray-400">
+                {isComparisonLoading ? 'Loading...' : 'Compare with previous period'}
+              </span>
+            </label>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="pt-0">

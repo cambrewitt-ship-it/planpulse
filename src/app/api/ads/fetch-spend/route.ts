@@ -5,6 +5,22 @@ import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import type { Database } from '@/types/database';
 import { toNangoPlatform } from '@/lib/platform-mapping';
 
+// TypeScript interface for Google Ads performance metrics
+interface GoogleAdMetrics {
+  customerId: string;
+  accountName: string;
+  campaignId: string;
+  campaignName: string;
+  date: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  ctr: number;
+  averageCpc: number;
+  conversions: number;
+  currency: string;
+}
+
 export async function POST(request: NextRequest) {
   console.log('=== POST /api/ads/fetch-spend ===');
   console.log('Request received');
@@ -277,8 +293,8 @@ export async function POST(request: NextRequest) {
         }
 
         // Step 4: For each customer ID, call Google Ads API directly
-        const allSpendData = [];
-        const errors = [];
+        const allSpendData: GoogleAdMetrics[] = [];
+        const errors: Array<{ customerId: string; accountName: string; error: string }> = [];
 
         for (const account of googleAdsAccounts) {
           const customerId = account.customer_id;
@@ -300,8 +316,13 @@ export async function POST(request: NextRequest) {
             SELECT
               campaign.id,
               campaign.name,
+              segments.date,
               metrics.cost_micros,
-              segments.date
+              metrics.impressions,
+              metrics.clicks,
+              metrics.ctr,
+              metrics.average_cpc,
+              metrics.conversions
             FROM campaign
             WHERE segments.date BETWEEN '${startDate}' AND '${endDate}'
             ORDER BY segments.date DESC
@@ -431,9 +452,15 @@ export async function POST(request: NextRequest) {
             if (data.results && Array.isArray(data.results)) {
               for (const result of data.results) {
                 const spend = (result.metrics?.costMicros || 0) / 1000000;
+                const averageCpc = (result.metrics?.averageCpc || 0) / 1000000;
+                const impressions = parseInt(result.metrics?.impressions || '0', 10);
+                const clicks = parseInt(result.metrics?.clicks || '0', 10);
+                const ctr = parseFloat(result.metrics?.ctr || '0');
+                const conversions = parseFloat(result.metrics?.conversions || '0');
                 const date = result.segments?.date || '';
-                console.log(`  - Date: ${date}, Spend: $${spend}, Campaign: ${result.campaign?.name || 'N/A'}`);
-                
+
+                console.log(`  - Date: ${date}, Spend: $${spend}, Impressions: ${impressions}, Clicks: ${clicks}, Campaign: ${result.campaign?.name || 'N/A'}`);
+
                 allSpendData.push({
                   customerId: customerId,
                   accountName: account.account_name,
@@ -441,6 +468,11 @@ export async function POST(request: NextRequest) {
                   campaignName: result.campaign?.name || '',
                   date: date,
                   spend: spend,
+                  impressions: impressions,
+                  clicks: clicks,
+                  ctr: ctr,
+                  averageCpc: averageCpc,
+                  conversions: conversions,
                   currency: 'USD'
                 });
               }

@@ -52,7 +52,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { channel_type, text, category, reset_frequency } = body;
+    const { channel_type, text, category, frequency, due_date } = body;
 
     if (!channel_type || !text || !text.trim()) {
       return NextResponse.json(
@@ -61,23 +61,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!category || !['SET UP', 'ONGOING'].includes(category)) {
+    if (!category || !['SET UP', 'HEALTH CHECK'].includes(category)) {
       return NextResponse.json(
-        { error: 'category must be either "SET UP" or "ONGOING"' },
-        { status: 400 }
-      );
-    }
-
-    if (category === 'ONGOING' && !reset_frequency) {
-      return NextResponse.json(
-        { error: 'reset_frequency is required for ONGOING action points' },
-        { status: 400 }
-      );
-    }
-
-    if (category === 'SET UP' && reset_frequency) {
-      return NextResponse.json(
-        { error: 'reset_frequency should not be set for SET UP action points' },
+        { error: 'category must be either "SET UP" or "HEALTH CHECK"' },
         { status: 400 }
       );
     }
@@ -90,15 +76,26 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const insertData: any = {
+      channel_type,
+      text: text.trim(),
+      category,
+      completed: false
+    };
+
+    // Add frequency for HEALTH CHECK items
+    if (category === 'HEALTH CHECK' && frequency) {
+      insertData.frequency = frequency;
+    }
+
+    // Add due_date for SET UP items
+    if (category === 'SET UP' && due_date) {
+      insertData.due_date = due_date;
+    }
+
     const { data, error } = await supabase
       .from('action_points')
-      .insert({
-        channel_type,
-        text: text.trim(),
-        category,
-        reset_frequency: category === 'ONGOING' ? reset_frequency : null,
-        completed: false
-      })
+      .insert(insertData)
       .select()
       .single();
 
@@ -124,7 +121,7 @@ export async function POST(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { id, text, completed, category, reset_frequency } = body;
+    const { id, text, completed, category, frequency, due_date } = body;
 
     if (!id) {
       return NextResponse.json(
@@ -155,29 +152,19 @@ export async function PUT(request: NextRequest) {
       updateData.completed = completed;
     }
     if (category !== undefined) {
-      if (!['SET UP', 'ONGOING'].includes(category)) {
+      if (!['SET UP', 'HEALTH CHECK'].includes(category)) {
         return NextResponse.json(
-          { error: 'category must be either "SET UP" or "ONGOING"' },
+          { error: 'category must be either "SET UP" or "HEALTH CHECK"' },
           { status: 400 }
         );
       }
       updateData.category = category;
-      
-      // Handle reset_frequency based on category
-      if (category === 'ONGOING') {
-        if (!reset_frequency) {
-          return NextResponse.json(
-            { error: 'reset_frequency is required for ONGOING action points' },
-            { status: 400 }
-          );
-        }
-        updateData.reset_frequency = reset_frequency;
-      } else {
-        updateData.reset_frequency = null;
-      }
-    } else if (reset_frequency !== undefined) {
-      // If category is not being updated but reset_frequency is, validate it
-      updateData.reset_frequency = reset_frequency;
+    }
+    if (frequency !== undefined) {
+      updateData.frequency = frequency;
+    }
+    if (due_date !== undefined) {
+      updateData.due_date = due_date;
     }
 
     const { data, error } = await supabase

@@ -95,6 +95,7 @@ export default function NewClientDashboard() {
   const [editingClientNotes, setEditingClientNotes] = useState('');
   const [isSavingClientNotes, setIsSavingClientNotes] = useState(false);
   const [spendData, setSpendData] = useState<SpendDataPoint[]>([]);
+  const [ga4Data, setGa4Data] = useState<any[]>([]);
   const [cacMetrics, setCacMetrics] = useState<CostMetricPoint[]>([]);
   const [cacError, setCacError] = useState<string | undefined>();
   const [cacErrorDetails, setCacErrorDetails] = useState<string | undefined>();
@@ -107,6 +108,8 @@ export default function NewClientDashboard() {
   const [selectedEventName, setSelectedEventName] = useState<string | null>(null);
   const [availableEventNames, setAvailableEventNames] = useState<Array<{ name: string; count: number }>>([]);
   const [loadingEventNames, setLoadingEventNames] = useState(false);
+  const [selectedChannels, setSelectedChannels] = useState<Set<string>>(new Set());
+  const [availableChannels, setAvailableChannels] = useState<Array<{ id: string; name: string }>>([]);
   const [analyticsDateRange, setAnalyticsDateRange] = useState(() => {
     const today = new Date();
     const thirtyDaysAgo = subDays(today, 30);
@@ -143,10 +146,9 @@ export default function NewClientDashboard() {
     const totalSpend = cacMetrics.reduce((sum, point) => sum + (point.spend || 0), 0);
     const totalMetricValue = cacMetrics.reduce((sum, point) => sum + (point.metricValue || 0), 0);
     
-    // Calculate average cost only from days with valid data
-    const daysWithCost = cacMetrics.filter(point => point.dailyCost !== null && point.dailyCost !== undefined);
-    const averageCost = daysWithCost.length > 0
-      ? daysWithCost.reduce((sum, point) => sum + (point.dailyCost || 0), 0) / daysWithCost.length
+    // Calculate average cost as Cost / Total Active User
+    const averageCost = totalMetricValue > 0
+      ? totalSpend / totalMetricValue
       : null;
 
     // Calculate trends by comparing first half to second half of the period
@@ -294,6 +296,30 @@ export default function NewClientDashboard() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [analyticsDateRange.startDate, analyticsDateRange.endDate, clientId, selectedMetric, selectedEventName]);
+
+  // Recalculate cost metrics when selected channels change
+  useEffect(() => {
+    if (spendData.length > 0 && ga4Data.length > 0 && availableChannels.length > 0 && selectedChannels.size > 0) {
+      // Filter spend data by selected channels
+      const filteredSpendData = spendData.filter(point => 
+        point.channelId && selectedChannels.has(point.channelId)
+      );
+
+      // Recalculate cost per metric with filtered spend data and cached GA4 data
+      const costResult = calculateCostPerMetric(filteredSpendData, ga4Data, selectedMetric);
+
+      if (!costResult.error) {
+        setCacError(undefined);
+        setCacErrorDetails(undefined);
+        setCacMetrics(costResult.data);
+      } else {
+        setCacError(costResult.error);
+        setCacErrorDetails(costResult.errorDetails);
+        setCacMetrics([]);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedChannels, spendData, ga4Data, selectedMetric]);
 
   const loadData = async () => {
     try {
@@ -652,7 +678,26 @@ export default function NewClientDashboard() {
       // Use the selected metric as-is, even if no data available
       const effectiveMetricKey = metricKey;
       
-      // Enhance spend data with plan information
+      // Helper function to get channel display name from platform
+      const getChannelDisplayNameFromPlatform = (platform?: string): string => {
+        if (!platform) return 'Unknown Channel';
+        const lowerPlatform = platform.toLowerCase();
+        if (lowerPlatform.includes('meta') || lowerPlatform.includes('facebook')) {
+          return 'Meta Ads';
+        }
+        if (lowerPlatform.includes('google')) {
+          return 'Google Search';
+        }
+        if (lowerPlatform.includes('linkedin')) {
+          return 'LinkedIn Ads';
+        }
+        if (lowerPlatform.includes('tiktok')) {
+          return 'TikTok Ads';
+        }
+        return platform;
+      };
+
+      // Enhance spend data with plan and channel information
       const enhancedSpendData = (result.spendData || []).map(point => {
         const matchingPlan = plans.find(plan => {
           if (plan.status?.toLowerCase() !== 'active') return false;
@@ -662,17 +707,47 @@ export default function NewClientDashboard() {
           return pointDate >= planStart && pointDate <= planEnd;
         });
         
+        // Create channel identifier from platform and accountName
+        const channelId = point.platform && point.accountName 
+          ? `${point.platform}_${point.accountName}` 
+          : point.platform || 'unknown';
+        // Use platform to determine channel display name instead of account name
+        const channelName = getChannelDisplayNameFromPlatform(point.platform);
+        
         return {
           ...point,
           planId: matchingPlan?.id,
           planName: matchingPlan?.name,
+          channelId,
+          channelName,
         };
       });
       
       setSpendData(enhancedSpendData);
+      setGa4Data(result.ga4Data || []);
 
-      // Calculate cost per metric from spend and GA4 data
-      const costResult = calculateCostPerMetric(enhancedSpendData, result.ga4Data || [], effectiveMetricKey);
+      // Extract unique channels from spend data
+      const channelMap = new Map<string, string>();
+      enhancedSpendData.forEach(point => {
+        if (point.channelId && point.channelName) {
+          channelMap.set(point.channelId, point.channelName);
+        }
+      });
+      const channels = Array.from(channelMap.entries()).map(([id, name]) => ({ id, name }));
+      setAvailableChannels(channels);
+      
+      // Initialize selected channels to all channels if not already set
+      if (selectedChannels.size === 0 && channels.length > 0) {
+        setSelectedChannels(new Set(channels.map(ch => ch.id)));
+      }
+
+      // Filter spend data by selected channels
+      const filteredSpendData = selectedChannels.size > 0
+        ? enhancedSpendData.filter(point => point.channelId && selectedChannels.has(point.channelId))
+        : enhancedSpendData;
+
+      // Calculate cost per metric from filtered spend and GA4 data
+      const costResult = calculateCostPerMetric(filteredSpendData, result.ga4Data || [], effectiveMetricKey);
       
       if (costResult.error) {
         console.error('Cost calculation error:', costResult.error, costResult.errorDetails);
@@ -1192,6 +1267,9 @@ export default function NewClientDashboard() {
             error={cacError}
             errorDetails={cacErrorDetails}
             onComparisonToggle={loadPreviousPeriodData}
+            availableChannels={availableChannels}
+            selectedChannels={selectedChannels}
+            onChannelsChange={setSelectedChannels}
           />
         </section>
 

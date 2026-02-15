@@ -11,13 +11,16 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, parseISO, addMonths, subMonths, addDays } from 'date-fns';
 import { useState, useEffect } from 'react';
 import { RefreshCw, Plus, X, Edit2, Check, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { MediaChannelEnhancedView } from '@/components/ui/media-channel-enhanced-view';
+import { TimeFrame } from '@/lib/types/media-plan';
 
 interface ActionPoint {
   id: string;
   text: string;
   completed: boolean;
-  category: 'SET UP' | 'ONGOING';
-  reset_frequency?: 'weekly' | 'fortnightly' | 'monthly' | null;
+  category: 'SET UP' | 'HEALTH CHECK';
+  frequency?: 'daily' | 'weekly' | 'fortnightly' | 'monthly' | null;
+  due_date?: string | null;
 }
 
 interface SpendData {
@@ -114,13 +117,14 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
     channel.onCampaignChange?.(campaignId);
   };
   
+  const [currentList, setCurrentList] = useState<'SET UP' | 'HEALTH CHECK'>('SET UP');
   const [newActionText, setNewActionText] = useState('');
-  const [newActionCategory, setNewActionCategory] = useState<'SET UP' | 'ONGOING'>('SET UP');
-  const [newActionResetFrequency, setNewActionResetFrequency] = useState<'weekly' | 'fortnightly' | 'monthly'>('weekly');
+  const [newActionFrequency, setNewActionFrequency] = useState<'daily' | 'weekly' | 'fortnightly' | 'monthly'>('weekly');
+  const [newActionDueDate, setNewActionDueDate] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState('');
-  const [editingCategory, setEditingCategory] = useState<'SET UP' | 'ONGOING'>('SET UP');
-  const [editingResetFrequency, setEditingResetFrequency] = useState<'weekly' | 'fortnightly' | 'monthly'>('weekly');
+  const [editingFrequency, setEditingFrequency] = useState<'daily' | 'weekly' | 'fortnightly' | 'monthly'>('weekly');
+  const [editingDueDate, setEditingDueDate] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
   const toggleAction = async (actionId: string) => {
@@ -175,22 +179,29 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
 
   const handleAddAction = async () => {
     if (!newActionText.trim()) return;
-    if (newActionCategory === 'ONGOING' && !newActionResetFrequency) {
-      alert('Please select a reset frequency for ONGOING action points');
-      return;
-    }
 
     try {
       setIsSaving(true);
+      const requestBody: any = {
+        channel_type: channel.channelType,
+        text: newActionText.trim(),
+        category: currentList
+      };
+
+      // Add frequency for HEALTH CHECK items
+      if (currentList === 'HEALTH CHECK') {
+        requestBody.frequency = newActionFrequency;
+      }
+
+      // Add due_date for SET UP items
+      if (currentList === 'SET UP' && newActionDueDate) {
+        requestBody.due_date = newActionDueDate;
+      }
+
       const response = await fetch('/api/action-points', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          channel_type: channel.channelType,
-          text: newActionText.trim(),
-          category: newActionCategory,
-          reset_frequency: newActionCategory === 'ONGOING' ? newActionResetFrequency : null
-        })
+        body: JSON.stringify(requestBody)
       });
 
       if (!response.ok) {
@@ -198,8 +209,8 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
       }
 
       setNewActionText('');
-      setNewActionCategory('SET UP');
-      setNewActionResetFrequency('weekly');
+      setNewActionDueDate('');
+      setNewActionFrequency('weekly');
       channel.onActionPointsChange?.();
     } catch (error) {
       console.error('Error creating action point:', error);
@@ -212,28 +223,34 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
   const handleStartEdit = (action: ActionPoint) => {
     setEditingId(action.id);
     setEditingText(action.text);
-    setEditingCategory(action.category);
-    setEditingResetFrequency(action.reset_frequency || 'weekly');
+    setEditingFrequency(action.frequency || 'weekly');
+    setEditingDueDate(action.due_date || '');
   };
 
   const handleSaveEdit = async () => {
     if (!editingId || !editingText.trim()) return;
-    if (editingCategory === 'ONGOING' && !editingResetFrequency) {
-      alert('Please select a reset frequency for ONGOING action points');
-      return;
-    }
 
     try {
       setIsSaving(true);
+      const updateBody: any = {
+        id: editingId,
+        text: editingText.trim()
+      };
+
+      // Add frequency for HEALTH CHECK items
+      if (currentList === 'HEALTH CHECK') {
+        updateBody.frequency = editingFrequency;
+      }
+
+      // Add due_date for SET UP items
+      if (currentList === 'SET UP') {
+        updateBody.due_date = editingDueDate || null;
+      }
+
       const response = await fetch('/api/action-points', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: editingId,
-          text: editingText.trim(),
-          category: editingCategory,
-          reset_frequency: editingCategory === 'ONGOING' ? editingResetFrequency : null
-        })
+        body: JSON.stringify(updateBody)
       });
 
       if (!response.ok) {
@@ -242,8 +259,8 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
 
       setEditingId(null);
       setEditingText('');
-      setEditingCategory('SET UP');
-      setEditingResetFrequency('weekly');
+      setEditingFrequency('weekly');
+      setEditingDueDate('');
       channel.onActionPointsChange?.();
     } catch (error) {
       console.error('Error updating action point:', error);
@@ -256,8 +273,8 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
   const handleCancelEdit = () => {
     setEditingId(null);
     setEditingText('');
-    setEditingCategory('SET UP');
-    setEditingResetFrequency('weekly');
+    setEditingFrequency('weekly');
+    setEditingDueDate('');
   };
 
   const handleDeleteAction = async (actionId: string) => {
@@ -593,6 +610,179 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
 
   const pacingStatus = calculatePacingStatus();
 
+  // Convert spend data to TimeFrame format for MediaChannelEnhancedView
+  // Group spend data by week/period to match TimeFrame structure
+  const convertToTimeFrames = (): TimeFrame[] => {
+    if (!channel.liveSpendData || channel.liveSpendData.length === 0) {
+      return [];
+    }
+
+    // Group data by date and aggregate metrics
+    const dataByDate = new Map<string, {
+      date: string;
+      spend: number;
+      impressions: number;
+      reach: number;
+      clicks: number;
+      conversions: number;
+      frequency: number;
+      impressionWeight: number; // For weighted average of frequency
+    }>();
+
+    channel.liveSpendData.forEach((item) => {
+      // Filter by connected account if applicable
+      if (channel.connectedAccountId) {
+        let matches = false;
+        if (item.accountId) {
+          matches = String(item.accountId) === String(channel.connectedAccountId);
+        } else if (item.customerId) {
+          const itemId = String(item.customerId).replace(/-/g, '');
+          const connectedId = String(channel.connectedAccountId).replace(/-/g, '');
+          matches = itemId === connectedId;
+        }
+        if (!matches) return;
+      }
+
+      // Filter by selected campaign if applicable
+      if (selectedCampaignId && selectedCampaignId !== 'all') {
+        if (item.campaignId !== selectedCampaignId) return;
+      }
+
+      // Get date from item (handle both Meta and Google formats)
+      const dateKey = item.date || item.dateStart || '';
+      if (!dateKey) return;
+
+      // Filter to selected month only
+      if (dateKey < selectedMonthStartKey || dateKey > selectedMonthEndKey) return;
+
+      const existing = dataByDate.get(dateKey);
+      const spend = item.spend || 0;
+      const impressions = (item as any).impressions || 0;
+      const reach = (item as any).reach || 0;
+      const clicks = (item as any).clicks || 0;
+      const conversions = (item as any).conversions || 0;
+      const frequency = (item as any).frequency || 0;
+
+      if (existing) {
+        existing.spend += spend;
+        existing.impressions += impressions;
+        existing.reach += reach;
+        existing.clicks += clicks;
+        existing.conversions += conversions;
+        // Weighted average for frequency
+        existing.impressionWeight += impressions;
+        if (impressions > 0 && frequency > 0) {
+          existing.frequency += frequency * impressions;
+        }
+      } else {
+        dataByDate.set(dateKey, {
+          date: dateKey,
+          spend,
+          impressions,
+          reach,
+          clicks,
+          conversions,
+          frequency: impressions > 0 && frequency > 0 ? frequency * impressions : 0,
+          impressionWeight: impressions,
+        });
+      }
+    });
+
+    // Convert map to TimeFrame array
+    // Group by week for better aggregation
+    const timeFrames: TimeFrame[] = [];
+    const sortedDates = Array.from(dataByDate.keys()).sort();
+
+    if (sortedDates.length === 0) return [];
+
+    // Group dates by week
+    let weekStart = sortedDates[0];
+    let weekData = {
+      spend: 0,
+      impressions: 0,
+      reach: 0,
+      clicks: 0,
+      conversions: 0,
+      frequency: 0,
+      impressionWeight: 0,
+    };
+
+    sortedDates.forEach((dateKey, index) => {
+      const data = dataByDate.get(dateKey)!;
+      weekData.spend += data.spend;
+      weekData.impressions += data.impressions;
+      weekData.reach += data.reach;
+      weekData.clicks += data.clicks;
+      weekData.conversions += data.conversions;
+      weekData.frequency += data.frequency;
+      weekData.impressionWeight += data.impressionWeight;
+
+      // Check if we should close this week (every 7 days or last item)
+      const currentDate = parseISO(dateKey);
+      const startDate = parseISO(weekStart);
+      const daysDiff = Math.floor((currentDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+
+      if (daysDiff >= 6 || index === sortedDates.length - 1) {
+        // Calculate metrics
+        const ctr = weekData.impressions > 0 ? weekData.clicks / weekData.impressions : 0;
+        const cpc = weekData.clicks > 0 ? weekData.spend / weekData.clicks : 0;
+        const cpm = weekData.impressions > 0 ? (weekData.spend / weekData.impressions) * 1000 : 0;
+        const avgFrequency = weekData.impressionWeight > 0 ? weekData.frequency / weekData.impressionWeight : 0;
+
+        timeFrames.push({
+          period: `${format(startDate, 'MMM d')} - ${format(currentDate, 'MMM d')}`,
+          planned: 0, // We don't have weekly planned from this view
+          actual: weekData.spend,
+          startDate: weekStart,
+          endDate: dateKey,
+          impressions: weekData.impressions,
+          reach: weekData.reach,
+          clicks: weekData.clicks,
+          ctr,
+          cpc,
+          cpm,
+          conversions: weekData.conversions,
+          frequency: avgFrequency,
+        });
+
+        // Reset for next week
+        if (index < sortedDates.length - 1) {
+          weekStart = sortedDates[index + 1];
+          weekData = {
+            spend: 0,
+            impressions: 0,
+            reach: 0,
+            clicks: 0,
+            conversions: 0,
+            frequency: 0,
+            impressionWeight: 0,
+          };
+        }
+      }
+    });
+
+    return timeFrames;
+  };
+
+  const timeFrames = convertToTimeFrames();
+
+  // Determine platform type from channel name
+  const getPlatformType = (): 'meta-ads' | 'google-ads' | 'organic' | 'other' => {
+    const lowerName = channel.name.toLowerCase();
+    if (lowerName.includes('meta') || lowerName.includes('facebook') || lowerName.includes('instagram')) {
+      return 'meta-ads';
+    }
+    if (lowerName.includes('google')) {
+      return 'google-ads';
+    }
+    if (lowerName.includes('organic') || lowerName.includes('seo')) {
+      return 'organic';
+    }
+    return 'other';
+  };
+
+  const platformType = getPlatformType();
+
   // Calculate month progress (percentage through the selected month)
   const daysInSelectedMonth = eachDayOfInterval({ start: selectedMonthStart, end: selectedMonthEnd }).length;
   const currentDate = new Date();
@@ -612,9 +802,13 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
   }
   
   // Calculate spend progress (actual spend / planned spend * 100)
-  const totalActualSpend = sortedData
-    .filter(d => d.actualSpend !== null && d.date <= todayKey)
-    .reduce((sum, d) => sum + (d.actualSpend || 0), 0);
+  // Get the last actual spend value from chart data (matches what the graph shows)
+  // This is the cumulative actual spend up to today, which is what the graph displays
+  const lastActualSpendData = chartDataWithActualSpendSplit
+    .filter(d => d.actualSpendLineUpToToday !== null && d.date <= todayKey)
+    .slice(-1)[0];
+  
+  const totalActualSpend = lastActualSpendData?.actualSpendLineUpToToday ?? 0;
   
   const spendProgress = plannedMonthlySpendForChannel > 0 
     ? (totalActualSpend / plannedMonthlySpendForChannel) * 100 
@@ -636,20 +830,6 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
                   <h3 className="text-lg font-semibold text-[#0f172a]">
                     {channel.name}
                   </h3>
-                  {pacingStatus && (
-                    <Badge
-                      className={`text-white font-medium text-xs ${
-                        pacingStatus.color === 'green'
-                          ? 'bg-green-500 hover:bg-green-600'
-                          : pacingStatus.color === 'orange'
-                          ? 'bg-orange-500 hover:bg-orange-600'
-                          : 'bg-red-500 hover:bg-red-600'
-                      }`}
-                    >
-                      {pacingStatus.statusText} {pacingStatus.isOver ? '+' : '-'}
-                      {pacingStatus.percentage.toFixed(1)}%
-                    </Badge>
-                  )}
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
                   <Badge className={`${getStatusColor(channel.status)} text-white font-medium`}>
@@ -664,71 +844,38 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
 
             {/* Action Points */}
             <div className="space-y-2">
-              <h4 className="text-sm font-semibold text-[#0f172a] mb-3">Action Items</h4>
-              
-              {/* Add new action point */}
-              <div className="space-y-2 mb-3">
-                <Input
-                  placeholder="Add new action item..."
-                  value={newActionText}
-                  onChange={(e) => setNewActionText(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !isSaving) {
-                      e.preventDefault();
-                      handleAddAction();
-                    }
-                  }}
-                  disabled={isSaving}
-                  className="h-8 text-sm"
-                />
-                <div className="flex gap-2">
-                  <Select
-                    value={newActionCategory}
-                    onValueChange={(value: 'SET UP' | 'ONGOING') => setNewActionCategory(value)}
-                    disabled={isSaving}
-                  >
-                    <SelectTrigger className="h-8 text-xs flex-1">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="SET UP">SET UP</SelectItem>
-                      <SelectItem value="ONGOING">ONGOING</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  {newActionCategory === 'ONGOING' && (
-                    <Select
-                      value={newActionResetFrequency}
-                      onValueChange={(value: 'weekly' | 'fortnightly' | 'monthly') => setNewActionResetFrequency(value)}
-                      disabled={isSaving}
-                    >
-                      <SelectTrigger className="h-8 text-xs flex-1">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="weekly">Weekly</SelectItem>
-                        <SelectItem value="fortnightly">Fortnightly</SelectItem>
-                        <SelectItem value="monthly">Monthly</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  )}
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="text-sm font-semibold text-[#0f172a]">Action Items</h4>
+                <div className="flex items-center gap-2">
                   <Button
                     size="sm"
-                    onClick={handleAddAction}
-                    disabled={!newActionText.trim() || isSaving}
-                    className="h-8 px-3"
+                    variant="outline"
+                    onClick={() => setCurrentList(currentList === 'SET UP' ? 'HEALTH CHECK' : 'SET UP')}
+                    className="h-7 w-7 p-0"
                   >
-                    <Plus className="h-3 w-3" />
+                    <ChevronLeft className="h-3 w-3" />
+                  </Button>
+                  <span className="text-xs font-semibold min-w-[100px] text-center">
+                    {currentList}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setCurrentList(currentList === 'SET UP' ? 'HEALTH CHECK' : 'SET UP')}
+                    className="h-7 w-7 p-0"
+                  >
+                    <ChevronRight className="h-3 w-3" />
                   </Button>
                 </div>
               </div>
 
               {/* Action points list */}
-              {channel.actionPoints.length === 0 ? (
+              {channel.actionPoints.filter(a => a.category === currentList).length === 0 ? (
                 <p className="text-xs text-[#94a3b8] text-center py-4">
-                  No action items yet. Add one above.
+                  No {currentList.toLowerCase()} items yet.
                 </p>
               ) : (
-                channel.actionPoints.map((action) => {
+                channel.actionPoints.filter(a => a.category === currentList).map((action) => {
                   const isCompleted = completedActions.has(action.id);
                   const isEditing = editingId === action.id;
 
@@ -747,51 +894,22 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
                       
                       {isEditing ? (
                         <div className="flex-1 space-y-2">
-                          <Input
-                            value={editingText}
-                            onChange={(e) => setEditingText(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter' && !isSaving) {
-                                e.preventDefault();
-                                handleSaveEdit();
-                              } else if (e.key === 'Escape') {
-                                handleCancelEdit();
-                              }
-                            }}
-                            disabled={isSaving}
-                            className="h-7 text-sm"
-                            autoFocus
-                          />
-                          <div className="flex gap-2">
-                            <Select
-                              value={editingCategory}
-                              onValueChange={(value: 'SET UP' | 'ONGOING') => setEditingCategory(value)}
+                          <div className="flex items-center gap-2">
+                            <Input
+                              value={editingText}
+                              onChange={(e) => setEditingText(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' && !isSaving) {
+                                  e.preventDefault();
+                                  handleSaveEdit();
+                                } else if (e.key === 'Escape') {
+                                  handleCancelEdit();
+                                }
+                              }}
                               disabled={isSaving}
-                            >
-                              <SelectTrigger className="h-7 text-xs flex-1">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="SET UP">SET UP</SelectItem>
-                                <SelectItem value="ONGOING">ONGOING</SelectItem>
-                              </SelectContent>
-                            </Select>
-                            {editingCategory === 'ONGOING' && (
-                              <Select
-                                value={editingResetFrequency}
-                                onValueChange={(value: 'weekly' | 'fortnightly' | 'monthly') => setEditingResetFrequency(value)}
-                                disabled={isSaving}
-                              >
-                                <SelectTrigger className="h-7 text-xs flex-1">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="weekly">Weekly</SelectItem>
-                                  <SelectItem value="fortnightly">Fortnightly</SelectItem>
-                                  <SelectItem value="monthly">Monthly</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            )}
+                              className="h-7 text-sm flex-1"
+                              autoFocus
+                            />
                             <Button
                               size="sm"
                               variant="ghost"
@@ -811,38 +929,79 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
                               <X className="h-3 w-3 text-gray-500" />
                             </Button>
                           </div>
+                          {currentList === 'HEALTH CHECK' && (
+                            <Select
+                              value={editingFrequency}
+                              onValueChange={(value: 'daily' | 'weekly' | 'fortnightly' | 'monthly') => setEditingFrequency(value)}
+                              disabled={isSaving}
+                            >
+                              <SelectTrigger className="h-7 text-xs w-full">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="daily">Daily</SelectItem>
+                                <SelectItem value="weekly">Weekly</SelectItem>
+                                <SelectItem value="fortnightly">Fortnightly</SelectItem>
+                                <SelectItem value="monthly">Monthly</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          )}
+                          {currentList === 'SET UP' && (
+                            <Input
+                              type="date"
+                              value={editingDueDate}
+                              onChange={(e) => setEditingDueDate(e.target.value)}
+                              disabled={isSaving}
+                              className="h-7 text-xs"
+                              placeholder="Due date"
+                            />
+                          )}
                         </div>
                       ) : (
                         <>
                           <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
                             <span
-                              className={`text-sm flex-1 min-w-0 ${
+                              className={`text-sm ${
                                 isCompleted
                                   ? 'line-through text-[#94a3b8]'
                                   : 'text-[#0f172a]'
                               }`}
-                              onClick={() => !isSaving && handleStartEdit(action)}
-                              role="button"
-                              tabIndex={0}
-                              onKeyDown={(e) => {
-                                if ((e.key === 'Enter' || e.key === ' ') && !isSaving) {
-                                  e.preventDefault();
-                                  handleStartEdit(action);
-                                }
-                              }}
                             >
                               {action.text}
                             </span>
-                            <Badge
-                              variant={action.category === 'SET UP' ? 'secondary' : 'default'}
-                              className="text-xs shrink-0"
-                            >
-                              {action.category}
-                            </Badge>
-                            {action.category === 'ONGOING' && action.reset_frequency && (
-                              <span className="text-xs text-[#64748b] shrink-0">
-                                {action.reset_frequency}
-                              </span>
+                            {currentList === 'HEALTH CHECK' && action.frequency && (
+                              <Badge variant="outline" className="text-xs">
+                                {action.frequency}
+                              </Badge>
+                            )}
+                            {currentList === 'SET UP' && action.due_date && (
+                              <Badge 
+                                variant="outline" 
+                                className={`text-xs ${
+                                  (() => {
+                                    const today = new Date();
+                                    today.setHours(0, 0, 0, 0);
+                                    const dueDate = new Date(action.due_date);
+                                    dueDate.setHours(0, 0, 0, 0);
+                                    const daysUntil = Math.ceil((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+                                    return daysUntil < 0 ? 'text-red-600 border-red-600' : 
+                                           daysUntil === 0 ? 'text-orange-600 border-orange-600' :
+                                           daysUntil <= 3 ? 'text-yellow-600 border-yellow-600' : '';
+                                  })()
+                                }`}
+                              >
+                                {(() => {
+                                  const today = new Date();
+                                  today.setHours(0, 0, 0, 0);
+                                  const dueDate = new Date(action.due_date);
+                                  dueDate.setHours(0, 0, 0, 0);
+                                  const daysUntil = Math.ceil((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+                                  if (daysUntil < 0) return `${Math.abs(daysUntil)} days overdue`;
+                                  if (daysUntil === 0) return 'Due today';
+                                  if (daysUntil === 1) return '1 day';
+                                  return `${daysUntil} days`;
+                                })()}
+                              </Badge>
                             )}
                           </div>
                           <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -877,259 +1036,322 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
                   );
                 })
               )}
+              
+              {/* Add new action item - at bottom */}
+              <div className="flex gap-2 mt-3 pt-3 border-t border-[#e2e8f0]">
+                <Input
+                  placeholder="Add new action item..."
+                  value={newActionText}
+                  onChange={(e) => setNewActionText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !isSaving) {
+                      e.preventDefault();
+                      handleAddAction();
+                    }
+                  }}
+                  disabled={isSaving}
+                  className="h-8 text-sm flex-1"
+                />
+                {currentList === 'HEALTH CHECK' && (
+                  <Select
+                    value={newActionFrequency}
+                    onValueChange={(value: 'daily' | 'weekly' | 'fortnightly' | 'monthly') => setNewActionFrequency(value)}
+                    disabled={isSaving}
+                  >
+                    <SelectTrigger className="h-8 text-xs w-[120px]">
+                      <SelectValue placeholder="Frequency" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="daily">Daily</SelectItem>
+                      <SelectItem value="weekly">Weekly</SelectItem>
+                      <SelectItem value="fortnightly">Fortnightly</SelectItem>
+                      <SelectItem value="monthly">Monthly</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
+                {currentList === 'SET UP' && (
+                  <Input
+                    type="date"
+                    value={newActionDueDate}
+                    onChange={(e) => setNewActionDueDate(e.target.value)}
+                    disabled={isSaving}
+                    className="h-8 text-xs w-[140px]"
+                    placeholder="Due date"
+                  />
+                )}
+                <Button
+                  size="sm"
+                  onClick={handleAddAction}
+                  disabled={!newActionText.trim() || isSaving}
+                  className="h-8 px-3"
+                >
+                  <Plus className="h-3 w-3 mr-1" />
+                  Add
+                </Button>
+              </div>
             </div>
           </div>
 
           {/* Right Section - Chart (60%) */}
           <div className="lg:col-span-3">
-            <div className="flex items-center justify-between mb-3 gap-2">
-              <h4 className="text-sm font-semibold text-[#0f172a]">Budget Pacing</h4>
-              <div className="flex items-center gap-2">
-                {/* Campaign Filter */}
-                {channel.campaigns && channel.campaigns.length > 0 && (
-                  <Select value={selectedCampaignId} onValueChange={handleCampaignChange}>
-                    <SelectTrigger className="h-7 text-xs w-[180px]">
-                      <SelectValue placeholder="All Campaigns" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Campaigns</SelectItem>
-                      {channel.campaigns.map((campaign) => (
-                        <SelectItem key={campaign.id} value={campaign.id}>
-                          {campaign.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-                {channel.onRefreshSpend && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      console.log(`[MediaChannelCard] Refresh button clicked for channel:`, {
-                        channelId: channel.id,
-                        channelName: channel.name,
-                        selectedMonth: selectedMonth,
-                        hasRefreshHandler: !!channel.onRefreshSpend
-                      });
-                      channel.onRefreshSpend?.(selectedMonth);
-                    }}
-                    disabled={channel.isFetchingSpend}
-                    className="h-7 text-xs"
-                  >
-                    <RefreshCw className={`h-3 w-3 mr-1 ${channel.isFetchingSpend ? 'animate-spin' : ''}`} />
-                    {channel.isFetchingSpend ? 'Refreshing...' : 'Refresh Spend'}
-                  </Button>
-                )}
-              </div>
-            </div>
-            {channel.spendError && (
-              <div className="mb-2 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">
-                {channel.spendError}
-              </div>
-            )}
-            
-            {/* Stats Section with Month Navigation */}
-            <div className="flex items-start gap-3 mb-4">
-              {/* Month Navigation */}
-              <div className="flex items-center gap-2 pt-3">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => handleMonthChange(subMonths(selectedMonth, 1))}
-                  className="h-7 w-7 p-0"
-                >
-                  <ChevronLeft className="h-3 w-3" />
-                </Button>
-                <span className="text-xs font-medium text-[#0f172a] min-w-[80px] text-center">
-                  {format(selectedMonth, 'MMM yyyy')}
-                </span>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => handleMonthChange(addMonths(selectedMonth, 1))}
-                  className="h-7 w-7 p-0"
-                >
-                  <ChevronRight className="h-3 w-3" />
-                </Button>
-              </div>
-              {/* Stats Columns */}
-              <div className="grid grid-cols-3 gap-3 flex-1">
-              <div className="bg-[#f8fafc] rounded-lg p-3 border border-[#e2e8f0]">
-                <p className="text-xs text-[#64748b] mb-1">Current Daily Spend</p>
-                <p className="text-lg font-semibold text-[#0f172a]">
-                  {hasConnectedAccount && currentDailySpend !== null
-                    ? `$${currentDailySpend.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                    : '—'}
-                </p>
-              </div>
-              <div className="bg-[#f8fafc] rounded-lg p-3 border border-[#e2e8f0]">
-                <p className="text-xs text-[#64748b] mb-1">Net Planned Spend</p>
-                <p className="text-lg font-semibold text-[#0f172a]">
-                  ${plannedMonthlySpendForChannel.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </p>
-              </div>
-              <div className="bg-[#f8fafc] rounded-lg p-3 border border-[#e2e8f0]">
-                <p className="text-xs text-[#64748b] mb-1">Actual Spend</p>
-                <p className="text-lg font-semibold text-[#0f172a]">
-                  {hasConnectedAccount
-                    ? `$${totalActualSpend.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                    : '—'}
-                </p>
-              </div>
-              </div>
-            </div>
+            <MediaChannelEnhancedView
+              timeFrames={timeFrames}
+              platformType={platformType}
+              channelName={channel.name}
+              selectedMonth={selectedMonth}
+              budgetView={
+                <>
+                  <div className="flex items-center justify-between mb-3 gap-2">
+                    <div className="flex items-center gap-3">
+                      <h4 className="text-sm font-semibold text-[#0f172a]">Budget Pacing</h4>
+                      {/* Month Navigation */}
+                      <div className="flex items-center gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleMonthChange(subMonths(selectedMonth, 1))}
+                          className="h-7 w-7 p-0"
+                        >
+                          <ChevronLeft className="h-3 w-3" />
+                        </Button>
+                        <span className="text-xs font-medium text-[#0f172a] min-w-[80px] text-center">
+                          {format(selectedMonth, 'MMM yyyy')}
+                        </span>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleMonthChange(addMonths(selectedMonth, 1))}
+                          className="h-7 w-7 p-0"
+                        >
+                          <ChevronRight className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {/* Campaign Filter */}
+                      {channel.campaigns && channel.campaigns.length > 0 && (
+                        <Select value={selectedCampaignId} onValueChange={handleCampaignChange}>
+                          <SelectTrigger className="h-7 text-xs w-[180px]">
+                            <SelectValue placeholder="All Campaigns" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All Campaigns</SelectItem>
+                            {channel.campaigns.map((campaign) => (
+                              <SelectItem key={campaign.id} value={campaign.id}>
+                                {campaign.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                      {channel.onRefreshSpend && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            console.log(`[MediaChannelCard] Refresh button clicked for channel:`, {
+                              channelId: channel.id,
+                              channelName: channel.name,
+                              selectedMonth: selectedMonth,
+                              hasRefreshHandler: !!channel.onRefreshSpend
+                            });
+                            channel.onRefreshSpend?.(selectedMonth);
+                          }}
+                          disabled={channel.isFetchingSpend}
+                          className="h-7 text-xs"
+                        >
+                          <RefreshCw className={`h-3 w-3 mr-1 ${channel.isFetchingSpend ? 'animate-spin' : ''}`} />
+                          {channel.isFetchingSpend ? 'Refreshing...' : 'Refresh Spend'}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                  {channel.spendError && (
+                    <div className="mb-2 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">
+                      {channel.spendError}
+                    </div>
+                  )}
 
-            {/* Progress Bars Section */}
-            <div className="space-y-3 mb-4">
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-[#64748b]">Month Progress</span>
-                  <span className="text-xs font-semibold text-[#0f172a]">{monthProgress.toFixed(1)}%</span>
-                </div>
-                <Progress value={monthProgress} className="h-2" />
-              </div>
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-[#64748b]">Spend Progress</span>
-                  <span className="text-xs font-semibold text-[#0f172a]">
-                    {hasConnectedAccount ? `${spendProgress.toFixed(1)}%` : '—'}
-                  </span>
-                </div>
-                <Progress 
-                  value={spendProgress} 
-                  className={`h-2 ${
-                    spendProgress > 100 
-                      ? '[&>div]:bg-red-500' 
-                      : spendProgress > 80 
-                      ? '[&>div]:bg-orange-500' 
-                      : '[&>div]:bg-green-500'
-                  }`}
-                />
-              </div>
-            </div>
-            
-            <div className="relative">
-              <div className="h-[300px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart
-                    data={chartDataWithActualSpendSplit}
-                    margin={{ top: 10, right: 10, left: 0, bottom: 25 }}
-                  >
-                    <defs>
-                      {/* Meta graph style: Light grey planned spend gradient */}
-                      <linearGradient id={`colorPlanned-${channel.id}`} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#94a3b8" stopOpacity={0.5} />
-                        <stop offset="95%" stopColor="#94a3b8" stopOpacity={0.5} />
-                      </linearGradient>
-                      {/* Meta graph style: Blue actual spend gradient */}
-                      <linearGradient id={`colorActual-${channel.id}`} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#2563eb" stopOpacity={0.9} />
-                        <stop offset="95%" stopColor="#2563eb" stopOpacity={0.3} />
-                      </linearGradient>
-                      <linearGradient id={`colorProjected-${channel.id}`} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#93c5fd" stopOpacity={0.6} />
-                        <stop offset="95%" stopColor="#93c5fd" stopOpacity={0.1} />
-                      </linearGradient>
-                    </defs>
-                    
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                    
-                    <XAxis
-                      dataKey="date"
-                      tickFormatter={formatDate}
-                      stroke="#64748b"
-                      style={{ fontSize: '12px' }}
-                      interval={0}
-                      domain={['dataMin', 'dataMax']}
-                    />
-                  
-                  <YAxis
-                    tickFormatter={formatCurrency}
-                    stroke="#64748b"
-                    style={{ fontSize: '12px' }}
-                    domain={[0, yAxisMax]}
-                    tickCount={tickCount}
-                  />
-                  
-                  <Tooltip content={<CustomTooltip />} />
-                  
-                  {/* Meta graph style: Planned Spend - light grey dashed diagonal line with area fill */}
-                  <Area
-                    type="monotone"
-                    dataKey="plannedSpend"
-                    stroke="#94a3b8"
-                    strokeWidth={2}
-                    strokeDasharray="5 5"
-                    fill={`url(#colorPlanned-${channel.id})`}
-                    fillOpacity={0.5}
-                    connectNulls={false}
-                    animationDuration={1500}
-                    animationEasing="ease-in-out"
-                    style={{ stroke: '#94a3b8' }}
-                  />
-                  
-                  {/* Meta graph style: Actual Spend Area - blue area fill under the line */}
-                  <Area
-                    type="monotone"
-                    dataKey="actualSpendForArea"
-                    stroke="none"
-                    fill="#2563eb"
-                    fillOpacity={0.3}
-                    connectNulls={false}
-                    animationDuration={1500}
-                    animationEasing="ease-in-out"
-                  />
-                  
-                  {/* Meta graph style: Actual Spend Line - solid blue line with circular markers */}
-                  <Line
-                    type="monotone"
-                    dataKey="actualSpendLineUpToToday"
-                    stroke="#2563eb"
-                    strokeWidth={2.5}
-                    style={{ stroke: '#2563eb' }}
-                    dot={(props: any) => {
-                      if (props.payload.date > todayKey) {
-                        return null; // Don't show dots after today
-                      }
-                      return (
-                        <Dot
-                          {...props}
-                          r={4}
-                          fill="#2563eb"
-                          stroke="#fff"
-                          strokeWidth={2}
-                          style={{ fill: '#2563eb', stroke: '#fff' }}
+                  {/* Stats Section */}
+                  <div className="mb-4">
+                    {/* Stats Columns */}
+                    <div className="grid grid-cols-3 gap-3">
+                    <div className="bg-[#f8fafc] rounded-lg p-3 border border-[#e2e8f0]">
+                      <p className="text-xs text-[#64748b] mb-1">Current Daily Spend</p>
+                      <p className="text-lg font-semibold text-[#0f172a]">
+                        {hasConnectedAccount && currentDailySpend !== null
+                          ? `$${currentDailySpend.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                          : '—'}
+                      </p>
+                    </div>
+                    <div className="bg-[#f8fafc] rounded-lg p-3 border border-[#e2e8f0]">
+                      <p className="text-xs text-[#64748b] mb-1">Net Planned Spend</p>
+                      <p className="text-lg font-semibold text-[#0f172a]">
+                        ${plannedMonthlySpendForChannel.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </p>
+                    </div>
+                    <div className="bg-[#f8fafc] rounded-lg p-3 border border-[#e2e8f0]">
+                      <p className="text-xs text-[#64748b] mb-1">Actual Spend</p>
+                      <p className="text-lg font-semibold text-[#0f172a]">
+                        {hasConnectedAccount
+                          ? `$${totalActualSpend.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                          : '—'}
+                      </p>
+                    </div>
+                    </div>
+                  </div>
+
+                  {/* Progress Bars Section */}
+                  <div className="space-y-3 mb-4">
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium text-[#64748b]">Month Progress</span>
+                        <span className="text-xs font-semibold text-[#0f172a]">{monthProgress.toFixed(1)}%</span>
+                      </div>
+                      <Progress value={monthProgress} className="h-2" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium text-[#64748b]">Spend Progress</span>
+                        <span className="text-xs font-semibold text-[#0f172a]">
+                          {hasConnectedAccount ? `${spendProgress.toFixed(1)}%` : '—'}
+                        </span>
+                      </div>
+                      <Progress
+                        value={spendProgress > 100 ? 100 : spendProgress}
+                        className={`h-2 ${
+                          spendProgress > 100
+                            ? '[&>div]:bg-red-500'
+                            : '[&>div]:bg-green-500'
+                        }`}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="relative">
+                    <div className="h-[300px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <ComposedChart
+                          data={chartDataWithActualSpendSplit}
+                          margin={{ top: 10, right: 10, left: 0, bottom: 25 }}
+                        >
+                          <defs>
+                            {/* Meta graph style: Light grey planned spend gradient */}
+                            <linearGradient id={`colorPlanned-${channel.id}`} x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#94a3b8" stopOpacity={0.5} />
+                              <stop offset="95%" stopColor="#94a3b8" stopOpacity={0.5} />
+                            </linearGradient>
+                            {/* Meta graph style: Blue actual spend gradient */}
+                            <linearGradient id={`colorActual-${channel.id}`} x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#2563eb" stopOpacity={0.9} />
+                              <stop offset="95%" stopColor="#2563eb" stopOpacity={0.3} />
+                            </linearGradient>
+                            <linearGradient id={`colorProjected-${channel.id}`} x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#93c5fd" stopOpacity={0.6} />
+                              <stop offset="95%" stopColor="#93c5fd" stopOpacity={0.1} />
+                            </linearGradient>
+                          </defs>
+
+                          <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+
+                          <XAxis
+                            dataKey="date"
+                            tickFormatter={formatDate}
+                            stroke="#64748b"
+                            style={{ fontSize: '12px' }}
+                            interval={0}
+                            domain={['dataMin', 'dataMax']}
+                          />
+
+                        <YAxis
+                          tickFormatter={formatCurrency}
+                          stroke="#64748b"
+                          style={{ fontSize: '12px' }}
+                          domain={[0, yAxisMax]}
+                          tickCount={tickCount}
                         />
-                      );
-                    }}
-                    connectNulls={false}
-                    animationDuration={1500}
-                    animationEasing="ease-in-out"
-                  />
-                  
-                  {/* Actual Spend Line - dotted after today */}
-                  <Line
-                    type="monotone"
-                    dataKey="actualSpendLineAfterToday"
-                    stroke="#2563eb"
-                    strokeWidth={2.5}
-                    strokeDasharray="5 5"
-                    dot={false}
-                    connectNulls={false}
-                    animationDuration={1500}
-                    animationEasing="ease-in-out"
-                    style={{ stroke: '#2563eb' }}
-                  />
-                </ComposedChart>
-              </ResponsiveContainer>
-              </div>
-              <div className="absolute left-0 right-[10px] bottom-[-20px] text-center">
-                <p className="text-base font-semibold text-[#64748b] tracking-wide">
-                  {format(selectedMonth, 'MMMM').toUpperCase()}
-                </p>
-              </div>
-            </div>
+
+                        <Tooltip content={<CustomTooltip />} />
+
+                        {/* Meta graph style: Planned Spend - light grey dashed diagonal line with area fill */}
+                        <Area
+                          type="monotone"
+                          dataKey="plannedSpend"
+                          stroke="#94a3b8"
+                          strokeWidth={2}
+                          strokeDasharray="5 5"
+                          fill={`url(#colorPlanned-${channel.id})`}
+                          fillOpacity={0.5}
+                          connectNulls={false}
+                          animationDuration={1500}
+                          animationEasing="ease-in-out"
+                          style={{ stroke: '#94a3b8' }}
+                        />
+
+                        {/* Meta graph style: Actual Spend Area - blue area fill under the line */}
+                        <Area
+                          type="monotone"
+                          dataKey="actualSpendForArea"
+                          stroke="none"
+                          fill="#2563eb"
+                          fillOpacity={0.3}
+                          connectNulls={false}
+                          animationDuration={1500}
+                          animationEasing="ease-in-out"
+                        />
+
+                        {/* Meta graph style: Actual Spend Line - solid blue line with circular markers */}
+                        <Line
+                          type="monotone"
+                          dataKey="actualSpendLineUpToToday"
+                          stroke="#2563eb"
+                          strokeWidth={2.5}
+                          style={{ stroke: '#2563eb' }}
+                          dot={(props: any) => {
+                            if (props.payload.date > todayKey) {
+                              return null; // Don't show dots after today
+                            }
+                            return (
+                              <Dot
+                                {...props}
+                                r={4}
+                                fill="#2563eb"
+                                stroke="#fff"
+                                strokeWidth={2}
+                                style={{ fill: '#2563eb', stroke: '#fff' }}
+                              />
+                            );
+                          }}
+                          connectNulls={false}
+                          animationDuration={1500}
+                          animationEasing="ease-in-out"
+                        />
+
+                        {/* Actual Spend Line - dotted after today */}
+                        <Line
+                          type="monotone"
+                          dataKey="actualSpendLineAfterToday"
+                          stroke="#2563eb"
+                          strokeWidth={2.5}
+                          strokeDasharray="5 5"
+                          dot={false}
+                          connectNulls={false}
+                          animationDuration={1500}
+                          animationEasing="ease-in-out"
+                          style={{ stroke: '#2563eb' }}
+                        />
+                      </ComposedChart>
+                    </ResponsiveContainer>
+                    </div>
+                    <div className="absolute left-0 right-[10px] bottom-[-20px] text-center">
+                      <p className="text-base font-semibold text-[#64748b] tracking-wide">
+                        {format(selectedMonth, 'MMMM').toUpperCase()}
+                      </p>
+                    </div>
+                  </div>
+                </>
+              }
+            />
           </div>
         </div>
       </CardContent>

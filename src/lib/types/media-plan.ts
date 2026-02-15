@@ -4,6 +4,15 @@ export interface TimeFrame {
   actual: number;
   startDate: string; // ISO date
   endDate: string; // ISO date
+  // Performance metrics (optional - populated when syncing with ad platforms)
+  impressions?: number;
+  reach?: number; // Meta Ads only
+  clicks?: number;
+  ctr?: number; // Click-through rate as decimal (0.05 = 5%)
+  cpc?: number; // Cost per click
+  cpm?: number; // Cost per 1000 impressions (Meta Ads)
+  conversions?: number; // Google Ads only
+  frequency?: number; // Meta Ads only - average impressions per person
 }
 
 export interface ChecklistItem {

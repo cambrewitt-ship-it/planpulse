@@ -81,15 +81,16 @@ export default function TopBar() {
             </Link>
             
             <div className="flex items-center gap-4">
-              <Link href="/plans">
-                <Button variant={pathname === '/plans' ? 'default' : 'ghost'} size="sm">
-                  Plans
+              <Link href="/agency">
+                <Button variant={pathname === '/agency' ? 'default' : 'ghost'} size="sm">
+                  <LayoutDashboard className="h-4 w-4 mr-2" />
+                  Agency
                 </Button>
               </Link>
               <Link href="/dashboard">
                 <Button variant={pathname === '/dashboard' ? 'default' : 'ghost'} size="sm">
-                  <LayoutDashboard className="h-4 w-4 mr-2" />
-                  Dashboard
+                  <Users className="h-4 w-4 mr-2" />
+                  Clients
                 </Button>
               </Link>
             </div>

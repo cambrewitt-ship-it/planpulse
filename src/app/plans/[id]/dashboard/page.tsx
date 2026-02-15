@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import PlanEditForm from '@/components/plan-entry/PlanEditForm';
 import Link from 'next/link';
-import { ArrowLeft, Calendar, DollarSign, TrendingUp, AlertCircle, CheckCircle2, Clock, Target, Edit, Plus, ChevronDown, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Calendar, DollarSign, TrendingUp, AlertCircle, CheckCircle2, Clock, Target, Edit, Plus, ChevronDown, ChevronRight, ChevronLeft } from 'lucide-react';
 import { format, differenceInDays, isAfter, isBefore, parseISO, startOfWeek, addWeeks, addDays, isToday, isSameDay } from 'date-fns';
 import { CHANNEL_OPTIONS } from '@/types/media-plan';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
@@ -76,6 +76,11 @@ export default function PlanDashboardPage() {
   const [mediaChannels, setMediaChannels] = useState<MediaChannel[]>([]);
   const [loadingSpendData, setLoadingSpendData] = useState(false);
   const [expandedChannels, setExpandedChannels] = useState<Set<string>>(new Set());
+  const [channelActionListView, setChannelActionListView] = useState<Record<string, 'setup' | 'health'>>({});
+  const [channelActionItems, setChannelActionItems] = useState<Record<string, {
+    setup: Array<{ id: string; text: string; completed: boolean }>;
+    health: Array<{ id: string; text: string; completed: boolean }>;
+  }>>({});
 
   useEffect(() => {
     if (planId) {
@@ -92,6 +97,33 @@ export default function PlanDashboardPage() {
       // Transform plan data to MediaChannel format
       const channels = transformToMediaChannels(planData as PlanDashboardData);
       setMediaChannels(channels);
+      
+      // Initialize action items for each channel
+      const initialActionItems: Record<string, {
+        setup: Array<{ id: string; text: string; completed: boolean }>;
+        health: Array<{ id: string; text: string; completed: boolean }>;
+      }> = {};
+      
+      const initialListView: Record<string, 'setup' | 'health'> = {};
+      
+      channels.forEach(channel => {
+        initialActionItems[channel.id] = {
+          setup: [
+            { id: `${channel.id}-setup-1`, text: 'Define campaign objectives', completed: false },
+            { id: `${channel.id}-setup-2`, text: 'Set up ad account', completed: false },
+            { id: `${channel.id}-setup-3`, text: 'Configure tracking', completed: false },
+          ],
+          health: [
+            { id: `${channel.id}-health-1`, text: 'Check daily spend', completed: false },
+            { id: `${channel.id}-health-2`, text: 'Review performance metrics', completed: false },
+            { id: `${channel.id}-health-3`, text: 'Monitor ad delivery', completed: false },
+          ],
+        };
+        initialListView[channel.id] = 'setup';
+      });
+      
+      setChannelActionItems(initialActionItems);
+      setChannelActionListView(initialListView);
       
       // Fetch real spend data from ad platforms
       await syncSpendData(channels, planData as PlanDashboardData);
@@ -797,6 +829,99 @@ export default function PlanDashboardPage() {
                     pacingScore={pacingStatus}
                     onViewDetails={() => toggleChannelExpanded(channel.id)}
                   />
+                  
+                  {/* Action Items - Always Visible */}
+                  <div className="p-6 border-b">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="font-semibold flex items-center gap-2">
+                        <Target className="h-4 w-4" />
+                        Action Items
+                      </h3>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => {
+                            setChannelActionListView(prev => ({
+                              ...prev,
+                              [channel.id]: prev[channel.id] === 'setup' ? 'health' : 'setup'
+                            }));
+                          }}
+                        >
+                          <ChevronLeft className="h-4 w-4" />
+                        </Button>
+                        <span className="font-semibold min-w-[120px] text-center text-sm">
+                          {channelActionListView[channel.id] === 'setup' ? 'Set Up' : 'Health Check'}
+                        </span>
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => {
+                            setChannelActionListView(prev => ({
+                              ...prev,
+                              [channel.id]: prev[channel.id] === 'setup' ? 'health' : 'setup'
+                            }));
+                          }}
+                        >
+                          <ChevronRight className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                    
+                    <div className="bg-white rounded-lg p-4 border space-y-2">
+                      {(channelActionItems[channel.id]?.[channelActionListView[channel.id] || 'setup'] || []).map((item) => (
+                        <div key={item.id} className="flex items-center gap-3 p-2 hover:bg-gray-50 rounded">
+                          <input
+                            type="checkbox"
+                            checked={item.completed}
+                            onChange={() => {
+                              const currentList = channelActionListView[channel.id] || 'setup';
+                              setChannelActionItems(prev => ({
+                                ...prev,
+                                [channel.id]: {
+                                  ...prev[channel.id],
+                                  [currentList]: prev[channel.id][currentList].map(i =>
+                                    i.id === item.id ? { ...i, completed: !i.completed } : i
+                                  ),
+                                },
+                              }));
+                            }}
+                            className="w-4 h-4 rounded border-gray-300"
+                          />
+                          <span className={item.completed ? 'line-through text-gray-500' : ''}>
+                            {item.text}
+                          </span>
+                        </div>
+                      ))}
+                      
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="w-full mt-2"
+                        onClick={() => {
+                          const currentList = channelActionListView[channel.id] || 'setup';
+                          const newItem = {
+                            id: `${channel.id}-${currentList}-${Date.now()}`,
+                            text: `New ${currentList === 'setup' ? 'setup' : 'health check'} item`,
+                            completed: false,
+                          };
+                          
+                          setChannelActionItems(prev => ({
+                            ...prev,
+                            [channel.id]: {
+                              ...prev[channel.id],
+                              [currentList]: [...prev[channel.id][currentList], newItem],
+                            },
+                          }));
+                        }}
+                      >
+                        <Plus className="h-4 w-4 mr-2" />
+                        Add Item
+                      </Button>
+                    </div>
+                  </div>
                   
                   {/* Expanded Details */}
                   {isExpanded && (

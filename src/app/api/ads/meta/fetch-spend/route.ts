@@ -5,6 +5,25 @@ import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import type { Database } from '@/types/database';
 import { toNangoPlatform } from '@/lib/platform-mapping';
 
+// TypeScript interface for Meta Ads performance metrics
+interface MetaAdMetrics {
+  accountId: string;
+  accountName: string;
+  campaignId: string;
+  campaignName: string;
+  dateStart: string;
+  dateStop: string;
+  spend: number;
+  impressions: number;
+  reach: number;
+  clicks: number;
+  ctr: number;
+  cpc: number;
+  cpm: number;
+  frequency: number;
+  currency: string;
+}
+
 export async function POST(request: NextRequest) {
   console.log('=== POST /api/ads/meta/fetch-spend ===');
   console.log('Request received');
@@ -129,18 +148,25 @@ export async function POST(request: NextRequest) {
       console.log('✓ Got OAuth token from Nango');
 
       // Step 3: For each account, call Meta Marketing API
-      const allSpendData = [];
-      const errors = [];
+      const allSpendData: MetaAdMetrics[] = [];
+      const errors: Array<{ accountId: string; accountName: string; error: string }> = [];
 
       for (const account of metaAdsAccounts) {
-        const accountId = account.account_id;
+        let accountId = account.account_id;
+        
+        // Ensure account ID has the 'act_' prefix if it doesn't already
+        // Meta API returns account IDs with 'act_' prefix, but we should handle both cases
+        if (accountId && !accountId.startsWith('act_')) {
+          // If it's just a number, add the prefix
+          accountId = `act_${accountId}`;
+        }
         
         console.log(`\nFetching data for Meta account ${accountId}...`);
 
         try {
           // Build query params - fetch at campaign level to get campaign data
           const params = new URLSearchParams({
-            fields: 'spend,account_name,campaign_id,campaign_name,date_start,date_stop',
+            fields: 'spend,impressions,reach,clicks,ctr,cpc,cpm,frequency,account_name,campaign_id,campaign_name,date_start,date_stop',
             time_range: JSON.stringify({
               since: startDate,
               until: endDate
@@ -164,7 +190,106 @@ export async function POST(request: NextRequest) {
           if (!response.ok) {
             const errorText = await response.text();
             console.error(`Error response:`, errorText.substring(0, 500));
-            throw new Error(`Meta Marketing API error: ${response.status}`);
+            
+            // Try to parse the error response to get more details
+            let errorMessage = `Meta Marketing API error: ${response.status}`;
+            let isExpiredToken = false;
+            
+            try {
+              const errorData = JSON.parse(errorText);
+              if (errorData.error) {
+                const metaError = errorData.error;
+                
+                // Check for expired token (error code 463)
+                if (metaError.error_subcode === 463 || 
+                    (metaError.message && metaError.message.includes('Session has expired')) ||
+                    (metaError.message && metaError.message.includes('expired'))) {
+                  isExpiredToken = true;
+                  errorMessage = 'Your Meta Ads connection has expired. Please reconnect your Meta Ads account in the platform settings.';
+                } else {
+                  errorMessage = `Meta Marketing API error: ${metaError.message || metaError.type || response.status}`;
+                  if (metaError.error_subcode) {
+                    errorMessage += ` (Code: ${metaError.error_subcode})`;
+                  }
+                }
+              }
+            } catch (e) {
+              // If parsing fails, use the raw error text (truncated)
+              if (errorText) {
+                // Check for expired token in raw text
+                if (errorText.includes('Session has expired') || errorText.includes('expired')) {
+                  isExpiredToken = true;
+                  errorMessage = 'Your Meta Ads connection has expired. Please reconnect your Meta Ads account in the platform settings.';
+                } else {
+                  errorMessage += `: ${errorText.substring(0, 200)}`;
+                }
+              }
+            }
+            
+            // If it's an expired token, try to refresh via Nango first
+            if (isExpiredToken) {
+              try {
+                console.log('Attempting to refresh Meta Ads token via Nango...');
+                // Nango should handle token refresh automatically, but we can try to get a fresh connection
+                const refreshedConnection = await nango.getConnection(toNangoPlatform('meta-ads'), connection.connection_id);
+                const refreshedToken = refreshedConnection.credentials?.access_token;
+                
+                if (refreshedToken && refreshedToken !== accessToken) {
+                  console.log('Token was refreshed, retrying API call...');
+                  // Retry the API call with the refreshed token
+                  const retryParams = new URLSearchParams({
+                    fields: 'spend,impressions,reach,clicks,ctr,cpc,cpm,frequency,account_name,campaign_id,campaign_name,date_start,date_stop',
+                    time_range: JSON.stringify({
+                      since: startDate,
+                      until: endDate
+                    }),
+                    time_increment: '1',
+                    level: 'campaign',
+                    access_token: refreshedToken
+                  });
+                  
+                  const retryUrl = `https://graph.facebook.com/v18.0/${accountId}/insights?${retryParams.toString()}`;
+                  const retryResponse = await fetch(retryUrl, {
+                    method: 'GET',
+                    headers: {
+                      'Content-Type': 'application/json'
+                    }
+                  });
+                  
+                  if (retryResponse.ok) {
+                    console.log('✓ Retry successful after token refresh');
+                    const retryData = await retryResponse.json();
+                    if (retryData.data && Array.isArray(retryData.data)) {
+                      for (const result of retryData.data) {
+                        allSpendData.push({
+                          accountId: accountId,
+                          accountName: result.account_name || account.account_name,
+                          campaignId: result.campaign_id || '',
+                          campaignName: result.campaign_name || '',
+                          dateStart: result.date_start || '',
+                          dateStop: result.date_stop || '',
+                          spend: parseFloat(result.spend || '0'),
+                          impressions: parseInt(result.impressions || '0', 10),
+                          reach: parseInt(result.reach || '0', 10),
+                          clicks: parseInt(result.clicks || '0', 10),
+                          ctr: parseFloat(result.ctr || '0'),
+                          cpc: parseFloat(result.cpc || '0'),
+                          cpm: parseFloat(result.cpm || '0'),
+                          frequency: parseFloat(result.frequency || '0'),
+                          currency: account.currency || 'USD'
+                        });
+                      }
+                    }
+                    continue; // Skip to next account
+                  }
+                }
+              } catch (refreshError) {
+                console.error('Token refresh failed:', refreshError);
+                // Continue with the expired token error message
+              }
+            }
+            
+            throw new Error(errorMessage);
           }
 
           const data = await response.json();
@@ -181,6 +306,13 @@ export async function POST(request: NextRequest) {
                 dateStart: result.date_start || '',
                 dateStop: result.date_stop || '',
                 spend: parseFloat(result.spend || '0'),
+                impressions: parseInt(result.impressions || '0', 10),
+                reach: parseInt(result.reach || '0', 10),
+                clicks: parseInt(result.clicks || '0', 10),
+                ctr: parseFloat(result.ctr || '0'),
+                cpc: parseFloat(result.cpc || '0'),
+                cpm: parseFloat(result.cpm || '0'),
+                frequency: parseFloat(result.frequency || '0'),
                 currency: account.currency || 'USD'
               });
             }

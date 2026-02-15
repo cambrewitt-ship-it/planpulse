@@ -2,15 +2,25 @@ import { MediaChannel, TimeFrame } from "../types/media-plan";
 import { parseISO, format, isWithinInterval } from "date-fns";
 
 /**
- * API response types
+ * API response types with performance metrics
  */
 interface MetaAdsSpendData {
   accountId: string;
   accountName: string;
+  campaignId: string;
+  campaignName: string;
   dateStart: string;
   dateStop: string;
   spend: number;
   currency: string;
+  // Performance metrics
+  impressions: number;
+  reach: number;
+  clicks: number;
+  ctr: number;
+  cpc: number;
+  cpm: number;
+  frequency: number;
 }
 
 interface GoogleAdsSpendData {
@@ -21,6 +31,12 @@ interface GoogleAdsSpendData {
   date: string;
   spend: number;
   currency: string;
+  // Performance metrics
+  impressions: number;
+  clicks: number;
+  ctr: number;
+  averageCpc: number;
+  conversions: number;
 }
 
 interface SpendApiResponse {
@@ -155,8 +171,20 @@ export async function fetchChannelSpendData(
 }
 
 /**
- * Transform API spend data into TimeFrame format
- * Maps spend data to the correct time periods (months or weeks)
+ * Interface for aggregated metrics per timeframe
+ */
+interface TimeFrameMetrics {
+  spend: number;
+  impressions: number;
+  clicks: number;
+  conversions: number;
+  reach: number; // Meta only
+  frequency: number; // Meta only
+}
+
+/**
+ * Transform API spend data into TimeFrame format with performance metrics
+ * Maps spend data to the correct time periods (months or weeks) and aggregates metrics
  */
 function transformSpendDataToTimeFrames(
   apiData: (MetaAdsSpendData | GoogleAdsSpendData)[],
@@ -173,17 +201,16 @@ function transformSpendDataToTimeFrames(
     }
   });
 
-  // Create a map of timeframe periods to accumulated spend
-  const spendByPeriod = new Map<string, number>();
+  // Create a map of timeframe periods to accumulated metrics
+  const metricsByPeriod = new Map<string, TimeFrameMetrics>();
 
-  // Process each spend data point
+  // Process each spend data point and aggregate metrics
   for (const item of filteredData) {
     let itemDate: Date;
 
     // Extract date from the API response
     if (platformType === "meta-ads") {
       const metaItem = item as MetaAdsSpendData;
-      // Use the start date of the period
       itemDate = parseISO(metaItem.dateStart);
     } else {
       const googleItem = item as GoogleAdsSpendData;
@@ -198,18 +225,90 @@ function transformSpendDataToTimeFrames(
       if (
         isWithinInterval(itemDate, { start: timeFrameStart, end: timeFrameEnd })
       ) {
-        const currentSpend = spendByPeriod.get(timeFrame.period) || 0;
-        spendByPeriod.set(timeFrame.period, currentSpend + item.spend);
+        // Get or initialize metrics for this period
+        const currentMetrics = metricsByPeriod.get(timeFrame.period) || {
+          spend: 0,
+          impressions: 0,
+          clicks: 0,
+          conversions: 0,
+          reach: 0,
+          frequency: 0,
+        };
+
+        // Aggregate metrics based on platform type
+        if (platformType === "meta-ads") {
+          const metaItem = item as MetaAdsSpendData;
+          currentMetrics.spend += metaItem.spend;
+          currentMetrics.impressions += metaItem.impressions || 0;
+          currentMetrics.clicks += metaItem.clicks || 0;
+          currentMetrics.reach += metaItem.reach || 0;
+          // For frequency, we'll calculate weighted average later
+          currentMetrics.frequency += (metaItem.frequency || 0) * (metaItem.impressions || 1);
+        } else {
+          const googleItem = item as GoogleAdsSpendData;
+          currentMetrics.spend += googleItem.spend;
+          currentMetrics.impressions += googleItem.impressions || 0;
+          currentMetrics.clicks += googleItem.clicks || 0;
+          currentMetrics.conversions += googleItem.conversions || 0;
+        }
+
+        metricsByPeriod.set(timeFrame.period, currentMetrics);
         break; // Move to next item once we've found the matching timeframe
       }
     }
   }
 
-  // Update timeframes with actual spend data
-  return existingTimeFrames.map((timeFrame) => ({
-    ...timeFrame,
-    actual: spendByPeriod.get(timeFrame.period) || 0,
-  }));
+  // Update timeframes with actual spend data and performance metrics
+  return existingTimeFrames.map((timeFrame) => {
+    const metrics = metricsByPeriod.get(timeFrame.period);
+
+    if (!metrics) {
+      // No data for this timeframe
+      return {
+        ...timeFrame,
+        actual: 0,
+      };
+    }
+
+    // Calculate derived metrics
+    const ctr = metrics.impressions > 0
+      ? metrics.clicks / metrics.impressions
+      : 0;
+
+    const cpc = metrics.clicks > 0
+      ? metrics.spend / metrics.clicks
+      : 0;
+
+    const cpm = metrics.impressions > 0
+      ? (metrics.spend / metrics.impressions) * 1000
+      : 0;
+
+    // For Meta Ads, calculate weighted average frequency
+    const frequency = platformType === "meta-ads" && metrics.impressions > 0
+      ? metrics.frequency / metrics.impressions
+      : undefined;
+
+    // Build the updated timeframe with metrics
+    const updatedTimeFrame: TimeFrame = {
+      ...timeFrame,
+      actual: metrics.spend,
+      impressions: metrics.impressions,
+      clicks: metrics.clicks,
+      ctr: ctr,
+      cpc: cpc,
+    };
+
+    // Add platform-specific metrics
+    if (platformType === "meta-ads") {
+      updatedTimeFrame.reach = metrics.reach;
+      updatedTimeFrame.cpm = cpm;
+      updatedTimeFrame.frequency = frequency;
+    } else {
+      updatedTimeFrame.conversions = metrics.conversions;
+    }
+
+    return updatedTimeFrame;
+  });
 }
 
 /**
