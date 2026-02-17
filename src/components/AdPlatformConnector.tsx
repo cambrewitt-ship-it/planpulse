@@ -127,10 +127,12 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
     'google-ads': false,
     'facebook': false,
     'google-analytics': false,
+    'linkedin': false,
+    'tiktok': false,
   });
   const [loadingStates, setLoadingStates] = useState<Record<string, boolean>>({});
   const [isInitialLoading, setIsInitialLoading] = useState(true);
-  const [openModal, setOpenModal] = useState<'google-ads' | 'facebook' | 'google-analytics' | null>(null);
+  const [openModal, setOpenModal] = useState<'google-ads' | 'facebook' | 'google-analytics' | 'linkedin' | 'tiktok' | null>(null);
   
   // Google Ads account management state
   const [googleAdsAccounts, setGoogleAdsAccounts] = useState<GoogleAdsAccount[]>([]);
@@ -208,7 +210,7 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
     }
   };
 
-  const handleConnect = async (platformId: 'google-ads' | 'facebook' | 'google-analytics') => {
+  const handleConnect = async (platformId: 'google-ads' | 'facebook' | 'google-analytics' | 'linkedin' | 'tiktok') => {
     setLoadingStates((prev) => ({ ...prev, [platformId]: true }));
 
     try {
@@ -293,7 +295,7 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
     }
   };
 
-  const handleDisconnect = async (platformId: 'google-ads' | 'facebook' | 'google-analytics') => {
+  const handleDisconnect = async (platformId: 'google-ads' | 'facebook' | 'google-analytics' | 'linkedin' | 'tiktok') => {
     if (!confirm(`Are you sure you want to disconnect ${platforms.find(p => p.id === platformId)?.displayName}?`)) {
       return;
     }

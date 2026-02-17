@@ -1,11 +1,14 @@
 // src/lib/health/calculations.ts
-// Health calculation logic for Master Agency Dashboard
+// Health calculation logic — reads from the real data sources used by new-client-dashboard:
+//   - client_media_plan_builder (JSONB) for channel list + planned budget
+//   - client_action_point_completions + action_points for task completion
+//   - ad_performance_metrics for actual spend
 
-import { supabase } from '@/lib/supabase/client';
-import type { ClientHealthStatus, ClientTask, HealthStatus } from '@/types/database';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import type { ClientHealthStatus, HealthStatus } from '@/types/database';
 
 // ============================================================================
-// TYPE DEFINITIONS
+// TYPES
 // ============================================================================
 
 export interface ChannelHealthMetrics {
@@ -29,425 +32,324 @@ export interface RefreshAllResult {
 }
 
 // ============================================================================
-// HELPER FUNCTIONS
+// HELPERS
 // ============================================================================
 
 /**
- * Get count of overdue tasks for a client
+ * Get action point counts for a client, using per-client completions table.
+ * Returns { total, completed, overdueCount } based on action_points where
+ * channel_type matches the client's media plan channels.
  */
-export async function getOverdueTasksForClient(clientId: string): Promise<number> {
+export async function getActionPointStatsForClient(
+  supabase: SupabaseClient,
+  clientId: string
+): Promise<{ total: number; completed: number; overdueIncomplete: number }> {
   try {
-    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
-
-    const { data, error } = await supabase
-      .from('client_tasks')
-      .select('id')
+    // 1. Get the client's channel types from client_media_plan_builder
+    const { data: planData } = await supabase
+      .from('client_media_plan_builder')
+      .select('channels')
       .eq('client_id', clientId)
-      .eq('completed', false)
-      .or(`due_date.lt.${today},next_due_date.lt.${today}`);
+      .single();
 
-    if (error) {
-      console.error('Error fetching overdue tasks:', error);
-      return 0;
+    if (!planData?.channels || !Array.isArray(planData.channels) || planData.channels.length === 0) {
+      return { total: 0, completed: 0, overdueIncomplete: 0 };
     }
 
-    return data?.length || 0;
+    // Normalise channel names to "Title Case" to match action_points.channel_type
+    const channelTypes = [
+      ...new Set(
+        (planData.channels as any[])
+          .filter((ch: any) => ch.channelName)
+          .map((ch: any) =>
+            ch.channelName
+              .toLowerCase()
+              .split(' ')
+              .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
+              .join(' ')
+          )
+      ),
+    ];
+
+    if (channelTypes.length === 0) {
+      return { total: 0, completed: 0, overdueIncomplete: 0 };
+    }
+
+    // 2. Fetch all action points for those channel types
+    const { data: actionPoints } = await supabase
+      .from('action_points')
+      .select('id, due_date, category')
+      .in('channel_type', channelTypes);
+
+    if (!actionPoints || actionPoints.length === 0) {
+      return { total: 0, completed: 0, overdueIncomplete: 0 };
+    }
+
+    const apIds = actionPoints.map((ap: any) => ap.id);
+
+    // 3. Fetch per-client completions
+    const { data: completions } = await supabase
+      .from('client_action_point_completions')
+      .select('action_point_id, completed')
+      .eq('client_id', clientId)
+      .in('action_point_id', apIds);
+
+    const completionMap = new Map(
+      (completions || []).map((c: any) => [c.action_point_id, c.completed])
+    );
+
+    const total = actionPoints.length;
+    const completed = actionPoints.filter((ap: any) =>
+      completionMap.get(ap.id) === true
+    ).length;
+
+    // Count SET UP tasks that are overdue and not completed
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const overdueIncomplete = actionPoints.filter((ap: any) => {
+      if (completionMap.get(ap.id) === true) return false;
+      if (!ap.due_date) return false;
+      const due = new Date(ap.due_date);
+      due.setHours(0, 0, 0, 0);
+      return due < today;
+    }).length;
+
+    return { total, completed, overdueIncomplete };
   } catch (err) {
-    console.error('Exception in getOverdueTasksForClient:', err);
-    return 0;
+    console.error('Exception in getActionPointStatsForClient:', err);
+    return { total: 0, completed: 0, overdueIncomplete: 0 };
   }
 }
 
 /**
- * Get count of upcoming tasks within specified days for a client
+ * Get active channel count from client_media_plan_builder JSONB.
  */
-export async function getUpcomingTasksForClient(
-  clientId: string,
-  days: number
+export async function getActiveChannelCount(
+  supabase: SupabaseClient,
+  clientId: string
 ): Promise<number> {
   try {
-    const today = new Date();
-    const futureDate = new Date();
-    futureDate.setDate(today.getDate() + days);
-
-    const todayStr = today.toISOString().split('T')[0];
-    const futureStr = futureDate.toISOString().split('T')[0];
-
-    const { data, error } = await supabase
-      .from('client_tasks')
-      .select('id')
+    const { data } = await supabase
+      .from('client_media_plan_builder')
+      .select('channels')
       .eq('client_id', clientId)
-      .eq('completed', false)
-      .or(
-        `and(due_date.gte.${todayStr},due_date.lte.${futureStr}),` +
-        `and(next_due_date.gte.${todayStr},next_due_date.lte.${futureStr})`
-      );
+      .single();
 
-    if (error) {
-      console.error('Error fetching upcoming tasks:', error);
-      return 0;
-    }
-
-    return data?.length || 0;
-  } catch (err) {
-    console.error('Exception in getUpcomingTasksForClient:', err);
+    if (!data?.channels || !Array.isArray(data.channels)) return 0;
+    return (data.channels as any[]).filter((ch: any) => ch.channelName).length;
+  } catch {
     return 0;
   }
 }
 
 /**
- * Calculate budget variance for a channel (returns percentage)
- * Returns actual/planned * 100
- * Returns 100 if no budget data available
+ * Get planned budget (sum of all flight budgets) from client_media_plan_builder.
+ * Returns value in the same unit stored (dollars, not cents — convert at call site if needed).
  */
-export async function getBudgetVarianceForChannel(channelId: string): Promise<number> {
+export async function getPlannedBudgetForClient(
+  supabase: SupabaseClient,
+  clientId: string
+): Promise<number> {
   try {
-    const { data: weeklyPlans, error } = await supabase
-      .from('weekly_plans')
-      .select('budget_planned, budget_actual')
-      .eq('channel_id', channelId);
+    const { data } = await supabase
+      .from('client_media_plan_builder')
+      .select('channels')
+      .eq('client_id', clientId)
+      .single();
 
-    if (error) {
-      console.error('Error fetching weekly plans:', error);
-      return 100; // Neutral variance if error
+    if (!data?.channels || !Array.isArray(data.channels)) return 0;
+
+    let total = 0;
+    for (const channel of data.channels as any[]) {
+      for (const flight of channel.flights || []) {
+        total += Number(flight.budget) || 0;
+      }
     }
-
-    if (!weeklyPlans || weeklyPlans.length === 0) {
-      return 100; // Neutral variance if no data
-    }
-
-    const totalPlanned = weeklyPlans.reduce((sum, wp) => sum + wp.budget_planned, 0);
-    const totalActual = weeklyPlans.reduce((sum, wp) => sum + wp.budget_actual, 0);
-
-    if (totalPlanned === 0) {
-      return 100; // Neutral if no budget planned
-    }
-
-    return (totalActual / totalPlanned) * 100;
-  } catch (err) {
-    console.error('Exception in getBudgetVarianceForChannel:', err);
-    return 100;
+    return total;
+  } catch {
+    return 0;
   }
 }
 
 /**
- * Check if all setup tasks are completed for a channel
+ * Get total actual spend for a client from ad_performance_metrics.
+ * Uses the last 30 days if no date range specified.
  */
-export async function isChannelSetupComplete(channelId: string): Promise<boolean> {
+export async function getActualSpendForClient(
+  supabase: SupabaseClient,
+  clientId: string,
+  startDate?: string,
+  endDate?: string
+): Promise<number> {
   try {
-    const { data: setupTasks, error } = await supabase
-      .from('client_tasks')
-      .select('id, completed')
-      .eq('channel_id', channelId)
-      .eq('task_type', 'setup');
+    const end = endDate || new Date().toISOString().split('T')[0];
+    const start =
+      startDate ||
+      (() => {
+        const d = new Date();
+        d.setDate(d.getDate() - 30);
+        return d.toISOString().split('T')[0];
+      })();
 
-    if (error) {
-      console.error('Error checking setup tasks:', error);
-      return true; // Assume complete if error (don't penalize)
-    }
+    const { data } = await supabase
+      .from('ad_performance_metrics')
+      .select('spend')
+      .eq('client_id', clientId)
+      .gte('date', start)
+      .lte('date', end);
 
-    if (!setupTasks || setupTasks.length === 0) {
-      return true; // No setup tasks = setup complete
-    }
-
-    return setupTasks.every(task => task.completed);
-  } catch (err) {
-    console.error('Exception in isChannelSetupComplete:', err);
-    return true;
+    return (data || []).reduce((sum: number, row: any) => sum + Number(row.spend || 0), 0);
+  } catch {
+    return 0;
   }
-}
-
-/**
- * Calculate days until a given date
- * Returns null if date is in the past or null
- */
-function daysUntilDate(targetDate: string | null): number | null {
-  if (!targetDate) return null;
-
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const target = new Date(targetDate);
-  target.setHours(0, 0, 0, 0);
-
-  const diffMs = target.getTime() - today.getTime();
-  const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-
-  return diffDays >= 0 ? diffDays : null;
 }
 
 // ============================================================================
-// MAIN CALCULATION FUNCTIONS
+// MAIN CALCULATION
 // ============================================================================
 
 /**
- * Calculate health status for a single channel
- */
-export async function calculateChannelHealth(channelId: string): Promise<ChannelHealth> {
-  const reasons: string[] = [];
-  let status: HealthStatus = 'green';
-
-  try {
-    // 1. Fetch channel details
-    const { data: channel, error: channelError } = await supabase
-      .from('channels')
-      .select(`
-        id,
-        client_id,
-        channel,
-        detail,
-        created_at
-      `)
-      .eq('id', channelId)
-      .single();
-
-    if (channelError || !channel) {
-      console.error('Error fetching channel:', channelError);
-      return {
-        channelId,
-        status: 'green',
-        reasons: ['Channel not found'],
-        metrics: {
-          overdueTasks: 0,
-          upcomingTasks: 0,
-          budgetVariance: 100,
-          setupComplete: true,
-          daysToStart: null,
-        },
-      };
-    }
-
-    // 2. Get channel start date from associated media plan
-    const { data: plan, error: planError } = await supabase
-      .from('media_plans')
-      .select('start_date')
-      .eq('id', channel.id) // This might need adjustment based on your schema
-      .single();
-
-    const startDate = plan?.start_date || null;
-    const daysToStart = daysUntilDate(startDate);
-
-    // 3. Count overdue tasks for this channel
-    const { data: overdueTasks, error: overdueError } = await supabase
-      .from('client_tasks')
-      .select('id')
-      .eq('channel_id', channelId)
-      .eq('completed', false)
-      .or(`due_date.lt.${new Date().toISOString().split('T')[0]},next_due_date.lt.${new Date().toISOString().split('T')[0]}`);
-
-    const overdueCount = overdueTasks?.length || 0;
-
-    // 4. Count upcoming tasks (next 3 days)
-    const threeDaysFromNow = new Date();
-    threeDaysFromNow.setDate(threeDaysFromNow.getDate() + 3);
-    const threeDaysStr = threeDaysFromNow.toISOString().split('T')[0];
-    const todayStr = new Date().toISOString().split('T')[0];
-
-    const { data: upcomingTasks, error: upcomingError } = await supabase
-      .from('client_tasks')
-      .select('id')
-      .eq('channel_id', channelId)
-      .eq('completed', false)
-      .or(
-        `and(due_date.gte.${todayStr},due_date.lte.${threeDaysStr}),` +
-        `and(next_due_date.gte.${todayStr},next_due_date.lte.${threeDaysStr})`
-      );
-
-    const upcomingCount = upcomingTasks?.length || 0;
-
-    // 5. Calculate budget variance
-    const budgetVariance = await getBudgetVarianceForChannel(channelId);
-
-    // 6. Check setup completion
-    const setupComplete = await isChannelSetupComplete(channelId);
-
-    // 7. Apply traffic light rules
-    
-    // RED CONDITIONS
-    if (overdueCount >= 2) {
-      status = 'red';
-      reasons.push(`${overdueCount} overdue tasks`);
-    }
-
-    if (!setupComplete && daysToStart !== null && daysToStart < 3) {
-      status = 'red';
-      reasons.push(`Setup incomplete with ${daysToStart} days until launch`);
-    }
-
-    if (budgetVariance > 120) {
-      status = 'red';
-      reasons.push(`Budget overspend: ${budgetVariance.toFixed(1)}%`);
-    }
-
-    if (budgetVariance < 80 && budgetVariance > 0) {
-      status = 'red';
-      reasons.push(`Budget underspend: ${budgetVariance.toFixed(1)}%`);
-    }
-
-    // AMBER CONDITIONS (only if not already red)
-    if (status !== 'red') {
-      if (overdueCount === 1) {
-        status = 'amber';
-        reasons.push('1 overdue task');
-      }
-
-      if (upcomingCount >= 2 && daysToStart !== null && daysToStart < 3) {
-        status = 'amber';
-        reasons.push(`${upcomingCount} tasks due within 3 days of launch`);
-      }
-
-      if (!setupComplete && daysToStart !== null && daysToStart >= 3 && daysToStart < 7) {
-        status = 'amber';
-        reasons.push(`Setup incomplete with ${daysToStart} days until launch`);
-      }
-
-      if (budgetVariance >= 110 && budgetVariance <= 120) {
-        status = 'amber';
-        reasons.push(`Budget slightly over: ${budgetVariance.toFixed(1)}%`);
-      }
-
-      if (budgetVariance >= 80 && budgetVariance < 90) {
-        status = 'amber';
-        reasons.push(`Budget slightly under: ${budgetVariance.toFixed(1)}%`);
-      }
-    }
-
-    // GREEN (default)
-    if (status === 'green' && reasons.length === 0) {
-      reasons.push('All metrics healthy');
-    }
-
-    return {
-      channelId,
-      status,
-      reasons,
-      metrics: {
-        overdueTasks: overdueCount,
-        upcomingTasks: upcomingCount,
-        budgetVariance,
-        setupComplete,
-        daysToStart,
-      },
-    };
-  } catch (err) {
-    console.error('Exception in calculateChannelHealth:', err);
-    return {
-      channelId,
-      status: 'green',
-      reasons: ['Error calculating health'],
-      metrics: {
-        overdueTasks: 0,
-        upcomingTasks: 0,
-        budgetVariance: 100,
-        setupComplete: true,
-        daysToStart: null,
-      },
-    };
-  }
-}
-
-/**
- * Calculate health status for a client (aggregates all channels)
+ * Calculate health status for a client using real data sources.
+ *
+ * Traffic light rules:
+ *   RED:   2+ overdue action points  OR  spend > 120% of plan  OR  spend < 60% of plan (with data)
+ *   AMBER: 1 overdue action point    OR  spend 110-120%        OR  spend 60-80%
+ *   GREEN: everything else
  */
 export async function calculateClientHealth(
+  supabase: SupabaseClient,
   clientId: string
 ): Promise<ClientHealthStatus | null> {
   try {
-    // 1. Fetch all active channels for this client
-    const { data: channels, error: channelsError } = await supabase
-      .from('channels')
-      .select('id, plan_id')
-      .eq('client_id', clientId);
-
-    if (channelsError) {
-      console.error('Error fetching channels:', channelsError);
-      return null;
-    }
-
-    // 2. Calculate health for each channel
-    const channelHealthPromises = (channels || []).map(ch =>
-      calculateChannelHealth(ch.id)
-    );
-    const channelHealthResults = await Promise.all(channelHealthPromises);
-
-    // 3. Determine worst status (red > amber > green)
+    const reasons: string[] = [];
     let clientStatus: HealthStatus = 'green';
-    if (channelHealthResults.some(ch => ch.status === 'red')) {
+
+    // 1. Action point stats
+    const { total, completed, overdueIncomplete } =
+      await getActionPointStatsForClient(supabase, clientId);
+
+    // 2. Channel count
+    const activeChannelCount = await getActiveChannelCount(supabase, clientId);
+
+    // 3. Budget
+    const plannedBudget = await getPlannedBudgetForClient(supabase, clientId);
+    const actualSpend = await getActualSpendForClient(supabase, clientId);
+
+    // Budget variance as percentage (actual / planned * 100)
+    const budgetVariance =
+      plannedBudget > 0 ? (actualSpend / plannedBudget) * 100 : null;
+
+    // --- Apply traffic light rules ---
+
+    // Task rules
+    if (overdueIncomplete >= 2) {
       clientStatus = 'red';
-    } else if (channelHealthResults.some(ch => ch.status === 'amber')) {
-      clientStatus = 'amber';
+      reasons.push(`${overdueIncomplete} overdue action points`);
+    } else if (overdueIncomplete === 1) {
+      if (clientStatus !== 'red') clientStatus = 'amber';
+      reasons.push('1 overdue action point');
     }
 
-    // 4. Count overdue and at-risk tasks
-    const totalOverdueTasks = await getOverdueTasksForClient(clientId);
-    const atRiskTasks = await getUpcomingTasksForClient(clientId, 7);
-
-    // 5. Calculate total budget and spend
-    const { data: mediaPlans, error: plansError } = await supabase
-      .from('media_plans')
-      .select('id, total_budget, status')
-      .eq('client_id', clientId)
-      .eq('status', 'active');
-
-    const totalBudgetCents = (mediaPlans || []).reduce(
-      (sum, plan) => sum + plan.total_budget,
-      0
-    );
-
-    // Get total spent from weekly_plans for active channels
-    const channelIds = (channels || []).map(ch => ch.id);
-    let totalSpentCents = 0;
-
-    if (channelIds.length > 0) {
-      const { data: weeklyPlans, error: weeklyError } = await supabase
-        .from('weekly_plans')
-        .select('budget_actual')
-        .in('channel_id', channelIds);
-
-      totalSpentCents = (weeklyPlans || []).reduce(
-        (sum, wp) => sum + wp.budget_actual,
-        0
-      );
+    // Spend rules (only when we have planned budget data)
+    if (budgetVariance !== null) {
+      if (budgetVariance > 120) {
+        clientStatus = 'red';
+        reasons.push(`Overspend: ${budgetVariance.toFixed(0)}% of plan`);
+      } else if (budgetVariance < 60 && actualSpend > 0) {
+        clientStatus = 'red';
+        reasons.push(`Underspend: ${budgetVariance.toFixed(0)}% of plan`);
+      } else if (budgetVariance >= 110 && budgetVariance <= 120) {
+        if (clientStatus !== 'red') clientStatus = 'amber';
+        reasons.push(`Slightly over budget: ${budgetVariance.toFixed(0)}%`);
+      } else if (budgetVariance >= 60 && budgetVariance < 80 && actualSpend > 0) {
+        if (clientStatus !== 'red') clientStatus = 'amber';
+        reasons.push(`Slightly under budget: ${budgetVariance.toFixed(0)}%`);
+      }
     }
 
-    // 6. Calculate budget health percentage
-    const budgetHealthPercentage =
-      totalBudgetCents > 0 ? (totalSpentCents / totalBudgetCents) * 100 : null;
+    if (clientStatus === 'green' && reasons.length === 0) {
+      reasons.push('All metrics healthy');
+    }
 
-    // 7. Find next critical date
-    const { data: upcomingTasks, error: tasksError } = await supabase
-      .from('client_tasks')
-      .select('title, due_date, next_due_date')
-      .eq('client_id', clientId)
-      .eq('completed', false)
-      .order('due_date', { ascending: true, nullsFirst: false })
-      .limit(1);
-
+    // 4. Find next due incomplete action point
     let nextCriticalDate: string | null = null;
     let nextCriticalTask: string | null = null;
 
-    if (upcomingTasks && upcomingTasks.length > 0) {
-      const task = upcomingTasks[0];
-      nextCriticalDate = task.due_date || task.next_due_date || null;
-      nextCriticalTask = task.title;
+    try {
+      const { data: planData } = await supabase
+        .from('client_media_plan_builder')
+        .select('channels')
+        .eq('client_id', clientId)
+        .single();
+
+      if (planData?.channels && Array.isArray(planData.channels)) {
+        const channelTypes = [
+          ...new Set(
+            (planData.channels as any[])
+              .filter((ch: any) => ch.channelName)
+              .map((ch: any) =>
+                ch.channelName
+                  .toLowerCase()
+                  .split(' ')
+                  .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
+                  .join(' ')
+              )
+          ),
+        ];
+
+        if (channelTypes.length > 0) {
+          const { data: apWithDates } = await supabase
+            .from('action_points')
+            .select('id, text, due_date')
+            .in('channel_type', channelTypes)
+            .not('due_date', 'is', null)
+            .order('due_date', { ascending: true })
+            .limit(10);
+
+          if (apWithDates && apWithDates.length > 0) {
+            const { data: clientCompletions } = await supabase
+              .from('client_action_point_completions')
+              .select('action_point_id, completed')
+              .eq('client_id', clientId)
+              .in('action_point_id', apWithDates.map((ap: any) => ap.id));
+
+            const doneSet = new Set(
+              (clientCompletions || [])
+                .filter((c: any) => c.completed)
+                .map((c: any) => c.action_point_id)
+            );
+
+            const nextIncomplete = apWithDates.find(
+              (ap: any) => !doneSet.has(ap.id)
+            );
+            if (nextIncomplete) {
+              nextCriticalDate = nextIncomplete.due_date;
+              nextCriticalTask = nextIncomplete.text;
+            }
+          }
+        }
+      }
+    } catch {
+      // non-fatal
     }
 
-    // 8. Upsert to client_health_status table
+    // 5. Upsert to client_health_status
     const healthStatus: Omit<ClientHealthStatus, 'id' | 'created_at' | 'updated_at'> = {
       client_id: clientId,
       status: clientStatus,
-      active_channel_count: channels?.length || 0,
-      total_overdue_tasks: totalOverdueTasks,
-      at_risk_tasks: atRiskTasks,
-      total_budget_cents: totalBudgetCents,
-      total_spent_cents: totalSpentCents,
-      budget_health_percentage: budgetHealthPercentage,
+      active_channel_count: activeChannelCount,
+      total_overdue_tasks: overdueIncomplete,
+      at_risk_tasks: total - completed,        // total incomplete
+      total_budget_cents: Math.round(plannedBudget * 100),
+      total_spent_cents: Math.round(actualSpend * 100),
+      budget_health_percentage: budgetVariance,
       next_critical_date: nextCriticalDate,
       next_critical_task: nextCriticalTask,
       last_calculated_at: new Date().toISOString(),
     };
 
-    const { data: upsertedHealth, error: upsertError } = await supabase
+    const { data: upserted, error: upsertError } = await supabase
       .from('client_health_status')
       .upsert(healthStatus, { onConflict: 'client_id' })
       .select()
@@ -458,7 +360,7 @@ export async function calculateClientHealth(
       return null;
     }
 
-    return upsertedHealth;
+    return upserted;
   } catch (err) {
     console.error('Exception in calculateClientHealth:', err);
     return null;
@@ -466,59 +368,36 @@ export async function calculateClientHealth(
 }
 
 /**
- * Refresh health status for all clients
+ * Refresh health status for all clients.
  */
-export async function refreshAllClientHealth(): Promise<RefreshAllResult> {
-  const result: RefreshAllResult = {
-    updated: 0,
-    errors: [],
-  };
+export async function refreshAllClientHealth(
+  supabase: SupabaseClient
+): Promise<RefreshAllResult> {
+  const result: RefreshAllResult = { updated: 0, errors: [] };
 
   try {
-    // 1. Fetch all client IDs
-    const { data: clients, error: clientsError } = await supabase
+    const { data: clients, error } = await supabase
       .from('clients')
       .select('id');
 
-    if (clientsError) {
-      console.error('Error fetching clients:', clientsError);
+    if (error || !clients) {
+      console.error('Error fetching clients:', error);
       return result;
     }
 
-    if (!clients || clients.length === 0) {
-      console.log('No clients found to refresh');
-      return result;
-    }
-
-    console.log(`Refreshing health for ${clients.length} clients...`);
-
-    // 2. Calculate health for each client
     for (const client of clients) {
       try {
-        const health = await calculateClientHealth(client.id);
+        const health = await calculateClientHealth(supabase, client.id);
         if (health) {
           result.updated++;
-          console.log(`✓ Updated health for client ${client.id}: ${health.status}`);
         } else {
-          result.errors.push({
-            clientId: client.id,
-            error: 'Failed to calculate health',
-          });
-          console.error(`✗ Failed to update health for client ${client.id}`);
+          result.errors.push({ clientId: client.id, error: 'Failed to calculate health' });
         }
       } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : 'Unknown error';
-        result.errors.push({
-          clientId: client.id,
-          error: errorMsg,
-        });
-        console.error(`✗ Exception for client ${client.id}:`, err);
+        const msg = err instanceof Error ? err.message : 'Unknown error';
+        result.errors.push({ clientId: client.id, error: msg });
       }
     }
-
-    console.log(
-      `Refresh complete: ${result.updated} updated, ${result.errors.length} errors`
-    );
   } catch (err) {
     console.error('Exception in refreshAllClientHealth:', err);
   }

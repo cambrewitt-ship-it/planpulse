@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
+import { createClient } from '@/lib/supabase/server';
 import { Nango } from "@nangohq/node";
 import { toNangoPlatform } from "@/lib/platform-mapping";
 
@@ -44,13 +43,12 @@ export async function POST(request: Request) {
   const nangoPlatform = rawPlatform ? toNangoPlatform(rawPlatform) : rawPlatform;
   console.log("Platform mapping:", { raw: rawPlatform, nango: nangoPlatform });
 
-  const cookieStore = await cookies();
   
   // Debug: Check what cookies we have
   const allCookies = cookieStore.getAll();
   console.log("Available cookies:", allCookies.map(c => c.name));
   
-  const supabase = createRouteHandlerClient<Database>({ cookies: () => cookieStore });
+  const supabase = await createClient();
 
   const {
     data: { session },
@@ -80,9 +78,7 @@ export async function POST(request: Request) {
 
   try {
     console.log("Creating Nango connect session for user:", user.id, "client:", clientId);
-    console.log("NANGO_SECRET_KEY_DEV_PLAN_CHECK is set:", !!secretKey);
-    console.log("Secret key preview:", secretKey?.substring(0, 10) + "...");
-    
+
     const requestBody = {
       end_user: {
         id: `${user.id}:${clientId}`,

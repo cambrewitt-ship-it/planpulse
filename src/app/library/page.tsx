@@ -24,7 +24,7 @@ interface ActionPoint {
   id: string;
   text: string;
   completed: boolean;
-  category: 'SET UP' | 'ONGOING';
+  category: 'SET UP' | 'HEALTH CHECK';
   channel_type: string;
 }
 
@@ -59,8 +59,9 @@ export default function LibraryPage() {
   const [editingNotes, setEditingNotes] = useState('');
   const [addingActionPointChannelType, setAddingActionPointChannelType] = useState<string | null>(null);
   const [newActionPointText, setNewActionPointText] = useState('');
-  const [newActionPointCategory, setNewActionPointCategory] = useState<'SET UP' | 'ONGOING'>('SET UP');
-  const [newActionPointResetFrequency, setNewActionPointResetFrequency] = useState<'weekly' | 'fortnightly' | 'monthly'>('weekly');
+  const [newActionPointCategory, setNewActionPointCategory] = useState<'SET UP' | 'HEALTH CHECK'>('SET UP');
+  const [newActionPointFrequency, setNewActionPointFrequency] = useState<'daily' | 'weekly' | 'fortnightly' | 'monthly'>('weekly');
+  const [actionPointFilter, setActionPointFilter] = useState<Record<string, 'SET UP' | 'HEALTH CHECK'>>({});
 
   useEffect(() => {
     loadLibraryEntries();
@@ -212,8 +213,8 @@ export default function LibraryPage() {
       return;
     }
 
-    if (newActionPointCategory === 'ONGOING' && !newActionPointResetFrequency) {
-      alert('Please select a reset frequency for ONGOING action points');
+    if (newActionPointCategory === 'HEALTH CHECK' && !newActionPointFrequency) {
+      alert('Please select a frequency for HEALTH CHECK action points');
       return;
     }
 
@@ -226,7 +227,7 @@ export default function LibraryPage() {
           channel_type: channelType,
           text: newActionPointText.trim(),
           category: newActionPointCategory,
-          reset_frequency: newActionPointCategory === 'ONGOING' ? newActionPointResetFrequency : null,
+          frequency: newActionPointCategory === 'HEALTH CHECK' ? newActionPointFrequency : null,
         }),
       });
 
@@ -238,7 +239,7 @@ export default function LibraryPage() {
       // Reset form
       setNewActionPointText('');
       setNewActionPointCategory('SET UP');
-      setNewActionPointResetFrequency('weekly');
+      setNewActionPointFrequency('weekly');
       setAddingActionPointChannelType(null);
 
       // Reload action points for this channel type
@@ -414,7 +415,9 @@ export default function LibraryPage() {
       ) : (
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
           {libraryEntries.map((entry) => {
-            const channelActionPoints = actionPoints[entry.channel_type] || [];
+            const allChannelActionPoints = actionPoints[entry.channel_type] || [];
+            const currentFilter = actionPointFilter[entry.channel_type] || 'SET UP';
+            const channelActionPoints = allChannelActionPoints.filter(ap => ap.category === currentFilter);
             const isEditing = editingId === entry.id;
 
             return (
@@ -517,8 +520,30 @@ export default function LibraryPage() {
                         </Button>
                       )}
                     </div>
+                    
+                    {/* Category Toggle */}
+                    {!isEditing && (
+                      <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
+                        <Button
+                          size="sm"
+                          variant={currentFilter === 'SET UP' ? 'default' : 'ghost'}
+                          onClick={() => setActionPointFilter(prev => ({ ...prev, [entry.channel_type]: 'SET UP' }))}
+                          className="h-7 text-xs flex-1"
+                        >
+                          Set Up
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant={currentFilter === 'HEALTH CHECK' ? 'default' : 'ghost'}
+                          onClick={() => setActionPointFilter(prev => ({ ...prev, [entry.channel_type]: 'HEALTH CHECK' }))}
+                          className="h-7 text-xs flex-1"
+                        >
+                          Health Check
+                        </Button>
+                      </div>
+                    )}
                     {channelActionPoints.length === 0 ? (
-                      <p className="text-xs text-gray-500">No action points for this channel</p>
+                      <p className="text-xs text-gray-500">No {currentFilter.toLowerCase()} action points for this channel</p>
                     ) : (
                       <div className="space-y-2 max-h-64 overflow-y-auto">
                         {channelActionPoints.map((actionPoint) => (
@@ -586,24 +611,25 @@ export default function LibraryPage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="action-point-category">Category</Label>
-              <Select value={newActionPointCategory} onValueChange={(value: 'SET UP' | 'ONGOING') => setNewActionPointCategory(value)}>
+              <Select value={newActionPointCategory} onValueChange={(value: 'SET UP' | 'HEALTH CHECK') => setNewActionPointCategory(value)}>
                 <SelectTrigger id="action-point-category">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="SET UP">SET UP</SelectItem>
-                  <SelectItem value="ONGOING">ONGOING</SelectItem>
+                  <SelectItem value="HEALTH CHECK">HEALTH CHECK</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            {newActionPointCategory === 'ONGOING' && (
+            {newActionPointCategory === 'HEALTH CHECK' && (
               <div className="space-y-2">
-                <Label htmlFor="action-point-reset-frequency">Reset Frequency</Label>
-                <Select value={newActionPointResetFrequency} onValueChange={(value: 'weekly' | 'fortnightly' | 'monthly') => setNewActionPointResetFrequency(value)}>
-                  <SelectTrigger id="action-point-reset-frequency">
+                <Label htmlFor="action-point-frequency">Frequency</Label>
+                <Select value={newActionPointFrequency} onValueChange={(value: 'daily' | 'weekly' | 'fortnightly' | 'monthly') => setNewActionPointFrequency(value)}>
+                  <SelectTrigger id="action-point-frequency">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="daily">Daily</SelectItem>
                     <SelectItem value="weekly">Weekly</SelectItem>
                     <SelectItem value="fortnightly">Fortnightly</SelectItem>
                     <SelectItem value="monthly">Monthly</SelectItem>
@@ -617,7 +643,7 @@ export default function LibraryPage() {
               setAddingActionPointChannelType(null);
               setNewActionPointText('');
               setNewActionPointCategory('SET UP');
-              setNewActionPointResetFrequency('weekly');
+              setNewActionPointFrequency('weekly');
             }}>
               Cancel
             </Button>

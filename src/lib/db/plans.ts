@@ -14,9 +14,19 @@ export async function getClients() {
 }
 
 export async function createClient(name: string) {
+  // Get the current user
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) {
+    throw new Error('User must be authenticated to create a client');
+  }
+
   const { data, error } = await supabase
     .from('clients')
-    .insert({ name })
+    .insert({
+      name,
+      user_id: user.id
+    })
     .select()
     .single();
   

@@ -1,14 +1,12 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+import { createClient } from '@/lib/supabase/server';
 import type { Database } from '@/types/database';
 import { Nango } from '@nangohq/node';
 import { toNangoPlatform } from '@/lib/platform-mapping';
 
 export async function GET() {
   try {
-    const cookieStore = await cookies();
-    const supabase = createRouteHandlerClient<Database>({ cookies: () => cookieStore });
+    const supabase = await createClient();
 
     const { data: { session } } = await supabase.auth.getSession();
 
@@ -40,7 +38,7 @@ export async function GET() {
         if (connection) {
           const nango = new Nango({ secretKey: process.env.NANGO_SECRET_KEY_DEV_PLAN_CHECK || '' });
           const nangoConnection = await nango.getConnection(toNangoPlatform('google-ads'), connection.connection_id);
-          const accessToken = nangoConnection.credentials?.access_token;
+          const accessToken = (nangoConnection.credentials as any)?.access_token;
 
           if (accessToken) {
             // Test 1: List accessible customers

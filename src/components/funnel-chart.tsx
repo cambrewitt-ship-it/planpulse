@@ -16,11 +16,18 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 
+interface Client {
+  id: string;
+  name: string;
+  logo_url?: string | null;
+}
+
 interface FunnelChartProps {
   funnelStages: FunnelStage[];
   totalCost: number;
   dateRange: { startDate: string; endDate: string };
   isLoading?: boolean;
+  client?: Client;
 }
 
 export function FunnelChart({
@@ -28,16 +35,33 @@ export function FunnelChart({
   totalCost,
   dateRange,
   isLoading = false,
+  client,
 }: FunnelChartProps) {
   const formatDateRange = (start: string, end: string) => {
     const startDate = new Date(start);
     const endDate = new Date(end);
-    const formatter = new Intl.DateTimeFormat('en-US', { 
-      month: 'short', 
-      day: 'numeric',
-      year: 'numeric'
-    });
-    return `${formatter.format(startDate)} - ${formatter.format(endDate)}`;
+
+    const startDay = startDate.getDate();
+    const endDay = endDate.getDate();
+
+    const startMonthFormatter = new Intl.DateTimeFormat('en-US', { month: 'short' });
+    const endMonthFormatter = new Intl.DateTimeFormat('en-US', { month: 'short' });
+
+    const startMonth = startMonthFormatter.format(startDate);
+    const endMonth = endMonthFormatter.format(endDate);
+
+    // Add ordinal suffix
+    const getOrdinalSuffix = (day: number) => {
+      if (day > 3 && day < 21) return 'th';
+      switch (day % 10) {
+        case 1: return 'st';
+        case 2: return 'nd';
+        case 3: return 'rd';
+        default: return 'th';
+      }
+    };
+
+    return `${startDay} ${startMonth} – ${endDay}${getOrdinalSuffix(endDay)} ${endMonth}`;
   };
 
   const calculateCPM = (spend: number, impressions: number): string => {
@@ -63,98 +87,161 @@ export function FunnelChart({
   }
 
   return (
-    <Card className="p-6 w-full">
+    <Card className="p-8 w-full">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-2">
-        <div className="text-sm text-slate-600">
-          <span className="font-medium">Period:</span>{' '}
+      <div className="flex justify-between items-start mb-6">
+        <div className="text-base text-slate-900">
+          <span className="font-normal">Period:</span>{' '}
           {formatDateRange(dateRange.startDate, dateRange.endDate)}
         </div>
-        <div className="text-sm font-semibold text-slate-900">
-          Media Spend:{' '}
-          <span className="text-lg">${totalCost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+        <div className="flex items-center gap-8">
+          <div className="text-base font-normal text-slate-900">
+            Media Spend:{' '}
+            <span className="font-semibold text-lg">
+              ${totalCost.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+            </span>
+          </div>
+          {client?.logo_url && (
+            <div className="flex items-center">
+              <img
+                src={client.logo_url}
+                alt={`${client.name} logo`}
+                className="h-10 w-auto object-contain"
+              />
+            </div>
+          )}
         </div>
       </div>
 
       {/* Funnel Stages */}
-      <div className="space-y-0">
+      <div className="space-y-0 relative">
+        {/* SVG Funnel Outline */}
+        <svg
+          className="absolute inset-0 pointer-events-none z-20"
+          viewBox="0 0 100 100"
+          preserveAspectRatio="none"
+          style={{ width: '100%', height: '100%' }}
+        >
+          {funnelStages.map((_, index) => {
+            const topLeftPercent = 20 + (index * 3.5);
+            const topRightPercent = 80 - (index * 3.5);
+            const bottomLeftPercent = 20 + ((index + 1) * 3.5);
+            const bottomRightPercent = 80 - ((index + 1) * 3.5);
+
+            const stageHeight = 100 / funnelStages.length;
+            const y1 = index * stageHeight;
+            const y2 = (index + 1) * stageHeight;
+
+            return (
+              <g key={`funnel-stage-${index}`}>
+                {/* Top horizontal line */}
+                <line
+                  x1={topLeftPercent}
+                  y1={y1}
+                  x2={topRightPercent}
+                  y2={y1}
+                  stroke="#1e293b"
+                  strokeWidth="0.6"
+                />
+
+                {/* Left side line */}
+                <line
+                  x1={topLeftPercent}
+                  y1={y1}
+                  x2={bottomLeftPercent}
+                  y2={y2}
+                  stroke="#1e293b"
+                  strokeWidth="0.6"
+                />
+
+                {/* Right side line */}
+                <line
+                  x1={topRightPercent}
+                  y1={y1}
+                  x2={bottomRightPercent}
+                  y2={y2}
+                  stroke="#1e293b"
+                  strokeWidth="0.6"
+                />
+
+                {/* Bottom horizontal line */}
+                <line
+                  x1={bottomLeftPercent}
+                  y1={y2}
+                  x2={bottomRightPercent}
+                  y2={y2}
+                  stroke="#1e293b"
+                  strokeWidth="0.6"
+                />
+              </g>
+            );
+          })}
+        </svg>
+        
         <TooltipProvider>
           {funnelStages.map((stage, index) => {
             const isFirstStage = index === 0;
             const isImpressions = stage.metricKey === 'impressions';
-            
-            // Calculate trapezoid width percentages based on position
-            const topLeftPercent = 5 + (index * 3);
-            const topRightPercent = 95 - (index * 3);
-            const bottomLeftPercent = 5 + ((index + 1) * 3);
-            const bottomRightPercent = 95 - ((index + 1) * 3);
 
             return (
               <Tooltip key={stage.id}>
                 <TooltipTrigger asChild>
-                  <div
-                    className="funnel-stage-container relative group cursor-pointer transition-transform duration-200 hover:scale-[1.02] hover:z-10"
-                    style={{
-                      clipPath: `polygon(
-                        ${topLeftPercent}% 0%,
-                        ${topRightPercent}% 0%,
-                        ${bottomRightPercent}% 100%,
-                        ${bottomLeftPercent}% 100%
-                      )`,
-                      border: '2px solid #1e293b',
-                      padding: '1.5rem',
-                      background: 'white',
-                      marginBottom: '-2px',
-                      minHeight: '120px',
-                    }}
-                  >
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center h-full">
-                      {/* LEFT: Conversion Rate */}
-                      <div className="text-left">
-                        {!isFirstStage && stage.conversionRate !== undefined ? (
-                          <div>
-                            <div className="text-2xl font-bold text-slate-900">
-                              {stage.conversionRate.toFixed(2)}%
-                            </div>
-                            <div className="text-sm text-slate-500 mt-1">
-                              Conversion
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="text-sm text-slate-400">-</div>
-                        )}
-                      </div>
+                  <div className="relative z-10">
+                    {/* Horizontal dividing line (except after last stage) */}
+                    {index < funnelStages.length - 1 && (
+                      <div className="absolute left-0 right-0 bottom-0 h-px bg-slate-300 z-30" />
+                    )}
 
-                      {/* CENTER: Stage Name and Value */}
-                      <div className="text-center">
-                        <div className="text-lg font-semibold text-slate-900 mb-1">
-                          {stage.displayName}
+                    <div className="funnel-stage-container relative group cursor-pointer transition-all duration-200 hover:shadow-lg hover:-translate-y-1 hover:z-10 bg-white py-6">
+                      <div className="flex items-center h-full">
+                        {/* LEFT: Conversion Rate - Outside funnel */}
+                        <div className="flex-1 flex justify-center" style={{ maxWidth: '25%' }}>
+                          {!isFirstStage && stage.conversionRate !== undefined ? (
+                            <div className="text-center">
+                              <div className="text-2xl font-bold text-slate-900">
+                                {stage.conversionRate.toFixed(2)}%
+                              </div>
+                              <div className="text-sm text-slate-600 mt-1">
+                                Conversion
+                              </div>
+                            </div>
+                          ) : null}
                         </div>
-                        <div className="text-xs text-slate-500 mb-2">
-                          ({stage.eventName || stage.metricKey})
-                        </div>
-                        <div className="text-3xl font-bold text-slate-900">
-                          {formatLargeNumber(stage.value)}
-                        </div>
-                      </div>
 
-                      {/* RIGHT: Cost Per Action */}
-                      <div className="text-right">
-                        {stage.costPerAction !== undefined ? (
-                          <div>
-                            <div className="text-sm text-slate-600 mb-1">
-                              {isImpressions ? 'Cost per 1,000 Imps' : `Cost per ${stage.displayName}`}
-                            </div>
-                            <div className="text-xl font-bold text-slate-900">
-                              {isImpressions 
-                                ? calculateCPM(totalCost, stage.value)
-                                : formatCostPerAction(stage.costPerAction)
-                              }
-                            </div>
+                        {/* CENTER: Stage Name and Value - Inside funnel */}
+                        <div className="flex-1 text-center">
+                          <div className="text-lg font-semibold text-slate-900 mb-1">
+                            {stage.displayName}
                           </div>
-                        ) : (
-                          <div className="text-sm text-slate-400">-</div>
-                        )}
+                          {stage.eventName && (
+                            <div className="text-xs text-slate-500 mb-2">
+                              ({stage.eventName})
+                            </div>
+                          )}
+                          <div className="text-3xl font-bold text-slate-900">
+                            {formatLargeNumber(stage.value)}
+                          </div>
+                        </div>
+
+                        {/* RIGHT: Cost Per Action - Outside funnel */}
+                        <div className="flex-1 flex justify-center" style={{ maxWidth: '25%' }}>
+                          {stage.costPerAction !== undefined ? (
+                            <div className="text-center">
+                              <div className="text-sm text-slate-600 mb-1">
+                                {isImpressions
+                                  ? 'Cost per 1,000 Imps:'
+                                  : `Cost per ${stage.displayName.replace(/s$/, '')}:`
+                                }
+                              </div>
+                              <div className="text-xl font-bold text-slate-900">
+                                {isImpressions
+                                  ? calculateCPM(totalCost, stage.value)
+                                  : formatCostPerAction(stage.costPerAction)
+                                }
+                              </div>
+                            </div>
+                          ) : null}
+                        </div>
                       </div>
                     </div>
                   </div>

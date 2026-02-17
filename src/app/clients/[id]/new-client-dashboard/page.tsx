@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { User, Pencil, Check, X, DollarSign, TrendingUp, TrendingDown, Target, Minus, Download, CheckCircle, Filter } from 'lucide-react';
+import { User, Pencil, Check, X, DollarSign, TrendingUp, TrendingDown, Target, Minus, Download, CheckCircle, Filter, Plus, Eye, Edit } from 'lucide-react';
 import Link from 'next/link';
 import MediaChannels from '@/components/MediaChannels';
 import { MediaPlanGrid, MediaPlanChannel } from '@/components/media-plan-builder/media-plan-grid';
@@ -19,11 +19,15 @@ import { CACChart } from '@/components/ui/cac-chart';
 import { DateRangePicker } from '@/components/ui/date-range-picker';
 import { fetchAnalyticsData, calculateCostPerMetric, SpendDataPoint, CostMetricPoint } from '@/lib/api/analytics-data-integration';
 import { subDays, format, differenceInDays, parseISO } from 'date-fns';
+import { FunnelChart } from '@/components/funnel-chart';
+import { FunnelStage, MediaPlanFunnel, FunnelConfig } from '@/lib/types/funnel';
+import { FunnelBuilderModal } from '@/components/funnel-builder-modal';
 
 interface Client {
   id: string;
   name: string;
   notes?: string | null;
+  logo_url?: string | null;
 }
 
 interface MediaPlan {
@@ -55,10 +59,10 @@ const METRIC_GROUPS = [
       { value: 'bounceRate', label: 'Bounces (inverted)' },
     ],
   },
-] as const;
+];
 
 // Flat array of all metric options for iteration
-const METRIC_OPTIONS = METRIC_GROUPS.flatMap(group => group.metrics);
+const METRIC_OPTIONS: any = METRIC_GROUPS.flatMap(group => group.metrics);
 
 // Get singular display name for metric (for title)
 function getMetricDisplayName(metricKey: string): string {
@@ -111,6 +115,21 @@ export default function NewClientDashboard() {
   const [loadingEventNames, setLoadingEventNames] = useState(false);
   const [selectedChannels, setSelectedChannels] = useState<Set<string>>(new Set());
   const [availableChannels, setAvailableChannels] = useState<Array<{ id: string; name: string }>>([]);
+  const [viewMode, setViewMode] = useState<'cost-per' | 'funnels'>('cost-per');
+  const [funnels, setFunnels] = useState<MediaPlanFunnel[]>([]);
+  const [selectedFunnelId, setSelectedFunnelId] = useState<string | null>(null);
+  const [funnelStages, setFunnelStages] = useState<FunnelStage[]>([]);
+  const [loadingFunnels, setLoadingFunnels] = useState(false);
+  const [isFunnelBuilderOpen, setIsFunnelBuilderOpen] = useState(false);
+  const [editingFunnel, setEditingFunnel] = useState<MediaPlanFunnel | null>(null);
+  const [mediaChannels, setMediaChannels] = useState<any[]>([]);
+  const [actionPointsStats, setActionPointsStats] = useState<{ totalAll: number; completedAll: number; trafficLightColor: string; loading: boolean }>({ totalAll: 0, completedAll: 0, trafficLightColor: 'bg-gray-400', loading: true });
+  const [actionPointsRefetchTrigger, setActionPointsRefetchTrigger] = useState(0);
+
+  // Handler to trigger refetch of action points across all components
+  const handleActionPointsChange = () => {
+    setActionPointsRefetchTrigger(prev => prev + 1);
+  };
   const [analyticsDateRange, setAnalyticsDateRange] = useState(() => {
     const today = new Date();
     const thirtyDaysAgo = subDays(today, 30);
@@ -279,6 +298,7 @@ export default function NewClientDashboard() {
       loadData();
       loadMediaPlanBuilderData();
       loadAnalyticsData(selectedMetric, selectedMetric === 'eventCount' ? selectedEventName : null);
+      loadFunnels();
     }
   }, [clientId]);
 
@@ -294,6 +314,11 @@ export default function NewClientDashboard() {
     if (clientId) {
       const eventName = selectedMetric === 'eventCount' ? selectedEventName : null;
       loadAnalyticsData(selectedMetric, eventName);
+      
+      // Recalculate funnel if one is selected
+      if (selectedFunnelId) {
+        calculateFunnel(selectedFunnelId);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [analyticsDateRange.startDate, analyticsDateRange.endDate, clientId, selectedMetric, selectedEventName]);
@@ -302,7 +327,7 @@ export default function NewClientDashboard() {
   useEffect(() => {
     if (spendData.length > 0 && ga4Data.length > 0 && availableChannels.length > 0 && selectedChannels.size > 0) {
       // Filter spend data by selected channels
-      const filteredSpendData = spendData.filter(point => 
+      const filteredSpendData = spendData.filter((point: any) =>
         point.channelId && selectedChannels.has(point.channelId)
       );
 
@@ -898,6 +923,113 @@ export default function NewClientDashboard() {
     setTimeout(() => setExportToast(null), 4000);
   };
 
+  const loadFunnels = async () => {
+    setLoadingFunnels(true);
+    try {
+      // Load media channels
+      const channelsResponse = await fetch(`/api/media-plan/channels?clientId=${clientId}`);
+      const channelsData = await channelsResponse.json();
+      
+      if (channelsData.success && channelsData.channels) {
+        setMediaChannels(channelsData.channels);
+      }
+
+      // Load funnels
+      const response = await fetch(`/api/funnels?clientId=${clientId}`);
+      const data = await response.json();
+      
+      if (data.success && data.funnels) {
+        setFunnels(data.funnels);
+        
+        // Auto-select first funnel if available
+        if (data.funnels.length > 0 && !selectedFunnelId) {
+          const firstFunnelId = data.funnels[0].id;
+          setSelectedFunnelId(firstFunnelId);
+          await calculateFunnel(firstFunnelId);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load funnels:', error);
+    } finally {
+      setLoadingFunnels(false);
+    }
+  };
+
+  const calculateFunnel = async (funnelId: string) => {
+    setLoadingFunnels(true);
+    try {
+      const response = await fetch(
+        `/api/funnels/${funnelId}/calculate?startDate=${analyticsDateRange.startDate}&endDate=${analyticsDateRange.endDate}`
+      );
+      const data = await response.json();
+      
+      if (data.success && data.stages) {
+        setFunnelStages(data.stages);
+      }
+    } catch (error) {
+      console.error('Failed to calculate funnel:', error);
+      setFunnelStages([]);
+    } finally {
+      setLoadingFunnels(false);
+    }
+  };
+
+  const handleFunnelSaved = async (config: FunnelConfig) => {
+    try {
+      if (editingFunnel) {
+        // Update existing funnel
+        const response = await fetch(`/api/funnels/${editingFunnel.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            channelIds: config.channelIds,
+            name: config.name,
+            config,
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          const errorMessage = errorData.error || errorData.details || 'Failed to update funnel';
+          console.error('API Error:', errorMessage, errorData);
+          throw new Error(errorMessage);
+        }
+      } else {
+        // Create new funnel
+        const response = await fetch('/api/funnels', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            channelIds: config.channelIds,
+            name: config.name,
+            config,
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          const errorMessage = errorData.error || errorData.details || 'Failed to create funnel';
+          console.error('API Error:', errorMessage, errorData);
+          throw new Error(errorMessage);
+        }
+      }
+
+      // Refresh funnels list
+      await loadFunnels();
+      
+      // Recalculate the currently selected funnel to show updated data
+      if (selectedFunnelId) {
+        await calculateFunnel(selectedFunnelId);
+      }
+      
+      setIsFunnelBuilderOpen(false);
+      setEditingFunnel(null);
+    } catch (error) {
+      console.error('Failed to save funnel:', error);
+      // TODO: Show error toast to user
+    }
+  };
+
   if (loading) {
     return (
       <div className="w-full min-h-screen bg-[#f8fafc] font-sans flex items-center justify-center">
@@ -913,7 +1045,10 @@ export default function NewClientDashboard() {
         <header role="banner" aria-label="Client dashboard header">
           <Card className="bg-white shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 ease-in-out">
             <CardContent className="py-6">
-              <div className="flex items-start gap-4">
+              {/* Top Row: Avatar + Client Name and Action Points Title aligned horizontally */}
+              <div className="flex items-baseline gap-6 mb-4">
+                {/* Left: Avatar + Client Name (1/3) */}
+                <div className="flex items-center gap-4 flex-[1]">
                   {/* Circular Avatar */}
                   <div 
                     className="flex-shrink-0 w-14 h-14 rounded-full bg-[#e2e8f0] flex items-center justify-center"
@@ -923,61 +1058,86 @@ export default function NewClientDashboard() {
                     <User className="w-8 h-8 text-[#64748b]" />
                   </div>
                   
-                  {/* Client Info */}
+                  {/* Client Name */}
+                  {isEditingClientName ? (
+                    <div className="flex items-center gap-2 flex-1">
+                      <Input
+                        value={editingClientName}
+                        onChange={(e) => setEditingClientName(e.target.value)}
+                        className="text-3xl font-bold h-auto py-1 px-2"
+                        autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            handleSaveClientName();
+                          } else if (e.key === 'Escape') {
+                            handleCancelEditClientName();
+                          }
+                        }}
+                        disabled={isSavingClientName}
+                      />
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={handleSaveClientName}
+                        disabled={isSavingClientName || !editingClientName.trim()}
+                        className="h-8 w-8"
+                      >
+                        <Check className="h-4 w-4 text-green-600" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={handleCancelEditClientName}
+                        disabled={isSavingClientName}
+                        className="h-8 w-8"
+                      >
+                        <X className="h-4 w-4 text-red-600" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 group flex-1">
+                      <h1 className="text-3xl font-bold text-[#0f172a] leading-none">
+                        {client?.name || 'Client Name'}
+                      </h1>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={handleStartEditClientName}
+                        className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+                        title="Edit client name"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Right: Action Points Title (2/3) */}
+                <div className="flex-[2] flex items-center gap-3">
+                  <h2 className="text-2xl font-bold text-[#64748b] leading-none">Action Points</h2>
+                  {/* Traffic light + tally */}
+                  {!actionPointsStats.loading && actionPointsStats.totalAll > 0 && (
+                    <div className="flex items-center gap-2">
+                      <span className={`inline-block w-3 h-3 rounded-full ${actionPointsStats.trafficLightColor}`} />
+                      <span className="text-sm text-[#64748b]">
+                        {actionPointsStats.completedAll}/{actionPointsStats.totalAll} completed
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Bottom Row: Client Notes and Action Points Content */}
+              <div className="flex items-start gap-6">
+                {/* Left: Spacer + Client Notes (1/3) */}
+                <div className="flex items-start gap-4 flex-[1]">
+                  {/* Spacer to align with avatar */}
+                  <div className="flex-shrink-0 w-14" />
+                  
+                  {/* Client Notes */}
                   <div className="flex-1">
-                    {isEditingClientName ? (
-                      <div className="flex items-center gap-2 h-14">
-                        <Input
-                          value={editingClientName}
-                          onChange={(e) => setEditingClientName(e.target.value)}
-                          className="text-3xl font-bold h-auto py-1 px-2"
-                          autoFocus
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              handleSaveClientName();
-                            } else if (e.key === 'Escape') {
-                              handleCancelEditClientName();
-                            }
-                          }}
-                          disabled={isSavingClientName}
-                        />
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          onClick={handleSaveClientName}
-                          disabled={isSavingClientName || !editingClientName.trim()}
-                          className="h-8 w-8"
-                        >
-                          <Check className="h-4 w-4 text-green-600" />
-                        </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          onClick={handleCancelEditClientName}
-                          disabled={isSavingClientName}
-                          className="h-8 w-8"
-                        >
-                          <X className="h-4 w-4 text-red-600" />
-                        </Button>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-2 group h-14">
-                        <h1 className="text-3xl font-bold text-[#0f172a] leading-none">
-                          {client?.name || 'Client Name'}
-                        </h1>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          onClick={handleStartEditClientName}
-                          className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
-                          title="Edit client name"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    )}
                     {isEditingClientNotes ? (
-                      <div className="mt-2 space-y-2">
+                      <div className="space-y-2">
                         <Textarea
                           value={editingClientNotes}
                           onChange={(e) => setEditingClientNotes(e.target.value)}
@@ -1015,7 +1175,7 @@ export default function NewClientDashboard() {
                         </div>
                       </div>
                     ) : (
-                      <div className="mt-2 group/notes">
+                      <div className="group/notes">
                         {client?.notes && (
                           <p className="text-[#64748b] text-sm md:text-base whitespace-pre-wrap">
                             {client.notes}
@@ -1034,6 +1194,19 @@ export default function NewClientDashboard() {
                     )}
                   </div>
                 </div>
+
+                {/* Right: Action Points Content (2/3) */}
+                <div className="flex-[2]">
+                  <TodoSection
+                    mediaPlanBuilderChannels={mediaPlanBuilderChannels}
+                    clientId={clientId}
+                    embedded={true}
+                    onStatsUpdate={setActionPointsStats}
+                    onActionPointsChange={handleActionPointsChange}
+                    actionPointsRefetchTrigger={actionPointsRefetchTrigger}
+                  />
+                </div>
+              </div>
             </CardContent>
           </Card>
         </header>
@@ -1059,9 +1232,6 @@ export default function NewClientDashboard() {
             </Card>
           </section>
 
-        {/* To Do Section */}
-        <TodoSection mediaPlanBuilderChannels={mediaPlanBuilderChannels} />
-
         {/* Media Channels Section */}
         <section className="mt-8" aria-label="Media channels budget pacing">
           <MediaChannels 
@@ -1069,6 +1239,8 @@ export default function NewClientDashboard() {
             clientId={clientId}
             mediaPlanBuilderChannels={mediaPlanBuilderChannels}
             commission={commission}
+            actionPointsRefetchTrigger={actionPointsRefetchTrigger}
+            onActionPointsChange={handleActionPointsChange}
           />
         </section>
 
@@ -1266,20 +1438,119 @@ export default function NewClientDashboard() {
             </Card>
           </div>
 
-          <CACChart 
-            cacMetrics={cacMetrics} 
-            previousPeriodMetrics={previousPeriodMetrics}
-            height={400} 
-            isLoading={loadingAnalytics}
-            isComparisonLoading={loadingComparison}
-            selectedMetric={selectedMetric}
-            error={cacError}
-            errorDetails={cacErrorDetails}
-            onComparisonToggle={loadPreviousPeriodData}
-            availableChannels={availableChannels}
-            selectedChannels={selectedChannels}
-            onChannelsChange={setSelectedChannels}
-          />
+          {/* View Mode Toggle */}
+          <div className="flex justify-center gap-2 mb-6">
+            <Button
+              variant={viewMode === 'cost-per' ? 'default' : 'outline'}
+              onClick={() => setViewMode('cost-per')}
+              className="min-w-[140px]"
+            >
+              Cost Per Chart
+            </Button>
+            <Button
+              variant={viewMode === 'funnels' ? 'default' : 'outline'}
+              onClick={() => setViewMode('funnels')}
+              className="min-w-[140px]"
+            >
+              Funnels
+            </Button>
+          </div>
+
+          {viewMode === 'cost-per' ? (
+            <CACChart 
+              cacMetrics={cacMetrics} 
+              previousPeriodMetrics={previousPeriodMetrics}
+              height={400} 
+              isLoading={loadingAnalytics}
+              isComparisonLoading={loadingComparison}
+              selectedMetric={selectedMetric}
+              error={cacError}
+              errorDetails={cacErrorDetails}
+              onComparisonToggle={loadPreviousPeriodData}
+              availableChannels={availableChannels}
+              selectedChannels={selectedChannels}
+              onChannelsChange={setSelectedChannels}
+            />
+          ) : (
+            <div className="space-y-4">
+              {/* Funnel Selector */}
+              <Card>
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold">Funnels</h3>
+                    <Button
+                      onClick={() => setIsFunnelBuilderOpen(true)}
+                      size="sm"
+                    >
+                      <Plus className="w-4 h-4 mr-2" />
+                      Create Funnel
+                    </Button>
+                  </div>
+                  
+                  {loadingFunnels && funnels.length === 0 ? (
+                    <p className="text-sm text-gray-500">Loading funnels...</p>
+                  ) : funnels.length === 0 ? (
+                    <p className="text-sm text-gray-500">No funnels created yet. Click "Create Funnel" to get started.</p>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {funnels.map((funnel) => (
+                        <div
+                          key={funnel.id}
+                          className={`p-3 rounded-lg border-2 transition-all ${
+                            selectedFunnelId === funnel.id
+                              ? 'border-blue-500 bg-blue-50'
+                              : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <button
+                              onClick={async () => {
+                                if (loadingFunnels) return;
+                                setSelectedFunnelId(funnel.id);
+                                await calculateFunnel(funnel.id);
+                              }}
+                              disabled={loadingFunnels}
+                              className="flex-1 text-left flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              <Eye className="w-4 h-4 text-gray-500" />
+                              <span className="font-medium text-sm">{funnel.name}</span>
+                            </button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingFunnel(funnel);
+                                setIsFunnelBuilderOpen(true);
+                              }}
+                              className="h-7 w-7"
+                              title="Edit funnel"
+                            >
+                              <Pencil className="h-3 w-3" />
+                            </Button>
+                          </div>
+                          <p className="text-xs text-gray-500 mt-1">
+                            {(funnel.config as FunnelConfig).stages.length} stages
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Funnel Chart */}
+              {selectedFunnelId && (
+                <FunnelChart
+                  funnelStages={funnelStages}
+                  totalCost={summaryStats.totalSpend}
+                  dateRange={analyticsDateRange}
+                  isLoading={loadingFunnels}
+                  client={client}
+                />
+              )}
+            </div>
+          )}
         </section>
 
         {/* Ad Platform Connections Section */}
@@ -1313,6 +1584,18 @@ export default function NewClientDashboard() {
           </div>
         </div>
       )}
+
+      {/* Funnel Builder Modal */}
+      <FunnelBuilderModal
+        isOpen={isFunnelBuilderOpen}
+        onClose={() => {
+          setIsFunnelBuilderOpen(false);
+          setEditingFunnel(null);
+        }}
+        onSave={handleFunnelSaved}
+        initialConfig={editingFunnel?.config as FunnelConfig | undefined}
+        availableChannels={mediaChannels}
+      />
     </div>
   );
 }

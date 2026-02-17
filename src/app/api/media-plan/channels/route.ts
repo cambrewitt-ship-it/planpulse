@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+import { createClient } from '@/lib/supabase/server';
 import type { Database } from '@/types/database';
 
 // GET /api/media-plan/channels?clientId={id} - List all channels for a client
@@ -17,8 +16,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Get authenticated user
-    const cookieStore = await cookies();
-    const supabase = createRouteHandlerClient<Database>({ cookies: () => cookieStore });
+    const supabase = await createClient();
     
     const { data: { session }, error: sessionError } = await supabase.auth.getSession();
 

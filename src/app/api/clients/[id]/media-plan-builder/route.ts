@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+import { createClient } from '@/lib/supabase/server';
 import type { Database } from '@/types/database';
 import { getClientMediaPlanBuilder, saveClientMediaPlanBuilder } from '@/lib/db/plans';
 
@@ -21,8 +20,7 @@ export async function GET(
       );
     }
 
-    const cookieStore = await cookies();
-    const supabase = createRouteHandlerClient<Database>({ cookies: () => cookieStore });
+    const supabase = await createClient();
 
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user) {
@@ -94,8 +92,7 @@ export async function POST(
       );
     }
 
-    const cookieStore = await cookies();
-    const supabase = createRouteHandlerClient<Database>({ cookies: () => cookieStore });
+    const supabase = await createClient();
 
     // Verify Supabase client is properly initialized
     if (!supabase) {

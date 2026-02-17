@@ -2,9 +2,8 @@
  * Helper functions for storing and retrieving ad performance metrics
  */
 
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
-import { cookies } from 'next/headers';
-import type { Database, AdPerformanceMetricInsert } from '@/types/database';
+import { createClient } from '@/lib/supabase/server';
+import type { AdPerformanceMetricInsert } from '@/types/database';
 
 /**
  * Save Google Ads metrics to the database
@@ -27,8 +26,7 @@ export async function saveGoogleAdsMetrics(
     currency: string;
   }>
 ) {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient<Database>({ cookies: () => cookieStore });
+  const supabase = await createClient();
 
   const metricsToInsert: AdPerformanceMetricInsert[] = metrics.map(metric => ({
     user_id: userId,
@@ -93,8 +91,7 @@ export async function saveMetaAdsMetrics(
     currency: string;
   }>
 ) {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient<Database>({ cookies: () => cookieStore });
+  const supabase = await createClient();
 
   const metricsToInsert: AdPerformanceMetricInsert[] = metrics.map(metric => ({
     user_id: userId,
@@ -145,8 +142,7 @@ export async function getAdMetrics(
   endDate: string,
   clientId?: string | null
 ) {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient<Database>({ cookies: () => cookieStore });
+  const supabase = await createClient();
 
   let query = supabase
     .from('ad_performance_metrics')
@@ -181,8 +177,7 @@ export async function getAggregatedMetricsByCampaign(
   endDate: string,
   clientId?: string | null
 ) {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient<Database>({ cookies: () => cookieStore });
+  const supabase = await createClient();
 
   // This would typically use a database view or RPC for aggregation
   // For now, fetch and aggregate in memory

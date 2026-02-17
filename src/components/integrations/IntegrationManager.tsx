@@ -58,7 +58,7 @@ export default function IntegrationManager({ clientId, clientName }: Integration
     if (typeof window !== 'undefined' && NANGO_PUBLIC_KEY) {
       const nangoInstance = new Nango({ publicKey: NANGO_PUBLIC_KEY });
       setNango(nangoInstance);
-      console.log('Nango initialized with public key:', NANGO_PUBLIC_KEY.substring(0, 10) + '...');
+      console.log('Nango initialized successfully');
     }
     checkConnections();
   }, []);
@@ -81,8 +81,8 @@ export default function IntegrationManager({ clientId, clientName }: Integration
 
   const handleConnect = async (integrationId: string) => {
     if (!nango) {
-      alert('Nango not initialized. Please check your public key configuration.');
-      console.error('Nango is null. NANGO_PUBLIC_KEY:', NANGO_PUBLIC_KEY);
+      alert('Nango not initialized. Please check your configuration.');
+      console.error('Nango is null');
       return;
     }
 
@@ -185,10 +185,7 @@ export default function IntegrationManager({ clientId, clientName }: Integration
           Nango is not initialized. Please check your configuration.
         </p>
         <p className="text-sm text-gray-600">
-          Make sure NEXT_PUBLIC_NANGO_PUBLIC_KEY is set in your .env.local file
-        </p>
-        <p className="text-xs text-gray-500 mt-2">
-          Current value: {NANGO_PUBLIC_KEY ? 'Set' : 'Missing'}
+          Make sure NEXT_PUBLIC_NANGO_PUBLIC_KEY is set in your environment variables
         </p>
       </div>
     );

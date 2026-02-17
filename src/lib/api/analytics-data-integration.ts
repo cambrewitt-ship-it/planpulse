@@ -348,7 +348,7 @@ export async function fetchAnalyticsData(
     ga4Error: ga4Error,
     ga4ErrorDetails: ga4ErrorDetails,
     ga4ActivationUrl: ga4ActivationUrl,
-  };
+  } as any;
 }
 
 /**

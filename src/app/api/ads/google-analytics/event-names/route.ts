@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+import { createClient } from '@/lib/supabase/server';
 import type { Database } from '@/types/database';
 import { Nango } from '@nangohq/node';
 import { toNangoPlatform } from '@/lib/platform-mapping';
@@ -36,8 +35,7 @@ export async function POST(request: NextRequest) {
     });
 
     // Get authenticated user
-    const cookieStore = await cookies();
-    const supabase = createRouteHandlerClient<Database>({ cookies: () => cookieStore });
+    const supabase = await createClient();
     
     const { data: { session }, error: sessionError } = await supabase.auth.getSession();
 
@@ -106,7 +104,7 @@ export async function POST(request: NextRequest) {
     try {
       console.log('Fetching Nango connection for:', { platform: toNangoPlatform('google-analytics'), connectionId: connection.connection_id });
       const nangoConnection = await nango.getConnection(toNangoPlatform('google-analytics'), connection.connection_id);
-      accessToken = nangoConnection.credentials?.access_token as string;
+      accessToken = (nangoConnection.credentials as any)?.access_token as string;
 
       if (!accessToken) {
         console.error('Event Names API Error: No access token in Nango connection');

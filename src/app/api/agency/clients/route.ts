@@ -2,8 +2,7 @@
 // API endpoint for fetching all clients with health status
 
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+import { createClient } from '@/lib/supabase/server';
 import type { Database, ClientWithHealth, HealthStatus } from '@/types/database';
 import { calculateClientHealth } from '@/lib/health/calculations';
 
@@ -27,8 +26,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Auth check
-    const cookieStore = await cookies();
-    const supabase = createRouteHandlerClient<Database>({ cookies: () => cookieStore });
+    const supabase = await createClient();
 
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user) {
@@ -36,15 +34,14 @@ export async function GET(request: NextRequest) {
     }
 
     // Fetch all clients with left join to health status
-    let query = supabase
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: clientsData, error: clientsError } = await (supabase as any)
       .from('clients')
       .select(`
         *,
         client_health_status (*)
       `)
       .order('name', { ascending: true });
-
-    const { data: clientsData, error: clientsError } = await query;
 
     if (clientsError) {
       console.error('Error fetching clients:', clientsError);
@@ -64,7 +61,7 @@ export async function GET(request: NextRequest) {
         // If no health status exists, calculate it on the fly
         if (!health) {
           console.log(`No health status for client ${client.id}, calculating...`);
-          health = await calculateClientHealth(client.id);
+          health = await calculateClientHealth(supabase, client.id);
         }
 
         return {

@@ -32,8 +32,7 @@ export default function LoginPage() {
       if (error) throw error;
 
       if (data.session) {
-        router.push('/');
-        router.refresh();
+        window.location.href = '/';
       }
     } catch (error: any) {
       setError(error.message || 'Failed to login');

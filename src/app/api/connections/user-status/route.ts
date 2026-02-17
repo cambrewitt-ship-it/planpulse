@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+import { createClient } from '@/lib/supabase/server';
 import type { Database } from '@/types/database';
 
 export async function GET(request: Request) {
@@ -8,8 +7,7 @@ export async function GET(request: Request) {
   
   try {
     // Get authenticated user
-    const cookieStore = await cookies();
-    const supabase = createRouteHandlerClient<Database>({ cookies: () => cookieStore });
+    const supabase = await createClient();
     
     console.log('Getting session...');
     const { data: { session }, error: sessionError } = await supabase.auth.getSession();

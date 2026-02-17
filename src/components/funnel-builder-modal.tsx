@@ -60,11 +60,14 @@ interface MediaChannel {
 }
 
 interface FunnelBuilderModalProps {
-  isOpen: boolean;
+  isOpen?: boolean;
+  open?: boolean;
   onClose: () => void;
+  onOpenChange?: (open: boolean) => void;
   onSave: (config: FunnelConfig) => Promise<void>;
   initialConfig?: FunnelConfig | null;
   availableChannels: MediaChannel[];
+  clientId?: string;
 }
 
 interface StageConfig extends Omit<FunnelStage, 'value' | 'conversionRate' | 'costPerAction'> {}
@@ -185,25 +188,14 @@ function SortableStageRow({
 
         {/* Stage Configuration */}
         <div className="flex-1 space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Stage Name */}
-            <div>
-              <Label htmlFor={`stage-name-${index}`}>Stage Name</Label>
-              <Input
-                id={`stage-name-${index}`}
-                value={stage.displayName}
-                onChange={(e) => onUpdate(index, { displayName: e.target.value })}
-                placeholder="e.g., App Installs"
-              />
-            </div>
-
+          <div className="flex flex-col md:flex-row gap-0 md:gap-x-[6px]">
             {/* Data Source */}
-            <div>
+            <div className="flex-1">
               <Label htmlFor={`stage-source-${index}`}>Data Source</Label>
               <Select
                 value={stage.source}
                 onValueChange={(value: 'meta' | 'google' | 'ga4') => {
-                  onUpdate(index, { 
+                  onUpdate(index, {
                     source: value,
                     metricKey: SOURCE_METRICS[value][0].value,
                     eventName: undefined,
@@ -220,31 +212,31 @@ function SortableStageRow({
                 </SelectContent>
               </Select>
             </div>
-          </div>
 
-          {/* Metric Selection */}
-          <div>
-            <Label htmlFor={`stage-metric-${index}`}>Metric</Label>
-            <Select
-              value={stage.metricKey}
-              onValueChange={(value) => {
-                onUpdate(index, { 
-                  metricKey: value,
-                  eventName: value === 'eventCount' ? stage.eventName : undefined,
-                });
-              }}
-            >
-              <SelectTrigger id={`stage-metric-${index}`}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {SOURCE_METRICS[stage.source].map((metric) => (
-                  <SelectItem key={metric.value} value={metric.value}>
-                    {metric.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {/* Metric Selection */}
+            <div className="flex-1">
+              <Label htmlFor={`stage-metric-${index}`}>Metric</Label>
+              <Select
+                value={stage.metricKey}
+                onValueChange={(value) => {
+                  onUpdate(index, {
+                    metricKey: value,
+                    eventName: value === 'eventCount' ? stage.eventName : undefined,
+                  });
+                }}
+              >
+                <SelectTrigger id={`stage-metric-${index}`}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SOURCE_METRICS[stage.source].map((metric) => (
+                    <SelectItem key={metric.value} value={metric.value}>
+                      {metric.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           {/* GA4 Event Name (shown when eventCount is selected) */}
@@ -265,8 +257,8 @@ function SortableStageRow({
                 </PopoverTrigger>
                 <PopoverContent className="w-full p-0" align="start">
                   <Command>
-                    <CommandInput 
-                      placeholder="Search events or type custom..." 
+                    <CommandInput
+                      placeholder="Search events or type custom..."
                       value={eventSearch}
                       onValueChange={setEventSearch}
                     />
@@ -323,7 +315,7 @@ function SortableStageRow({
                   </Command>
                 </PopoverContent>
               </Popover>
-              
+
               {/* Event Preview */}
               {selectedEvent && (
                 <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded-md">
@@ -332,7 +324,7 @@ function SortableStageRow({
                   </p>
                 </div>
               )}
-              
+
               {/* Warning for custom events not in list */}
               {!isLoadingEvents && stage.eventName && !selectedEvent && (
                 <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded-md">
@@ -346,6 +338,23 @@ function SortableStageRow({
               )}
             </div>
           )}
+
+          {/* Stage Name (Optional - at bottom) */}
+          <div>
+            <Label htmlFor={`stage-name-${index}`}>
+              Stage Name <span className="text-xs text-gray-500">(Optional)</span>
+            </Label>
+            <Input
+              id={`stage-name-${index}`}
+              value={stage.displayName}
+              onChange={(e) => onUpdate(index, { displayName: e.target.value })}
+              placeholder={
+                stage.source === 'ga4' && stage.metricKey === 'eventCount' && stage.eventName
+                  ? stage.eventName
+                  : SOURCE_METRICS[stage.source].find(m => m.value === stage.metricKey)?.label || 'Stage name'
+              }
+            />
+          </div>
         </div>
 
         {/* Delete Button */}
@@ -364,11 +373,15 @@ function SortableStageRow({
 
 export function FunnelBuilderModal({
   isOpen,
+  open,
   onClose,
+  onOpenChange,
   onSave,
   initialConfig,
   availableChannels,
 }: FunnelBuilderModalProps) {
+  const modalOpen = open ?? isOpen;
+  const handleOpenChange = onOpenChange ?? ((open: boolean) => !open && onClose());
   console.log('[FunnelBuilderModal] Rendered with availableChannels:', availableChannels);
   
   const [funnelName, setFunnelName] = useState(initialConfig?.name || '');
@@ -395,6 +408,25 @@ export function FunnelBuilderModal({
       coordinateGetter: sortableKeyboardCoordinates,
     })
   );
+
+  // Update state when initialConfig changes (for editing mode)
+  useEffect(() => {
+    if (initialConfig) {
+      setFunnelName(initialConfig.name || '');
+      setSelectedChannelIds(initialConfig.channelIds || []);
+      setStartDate(initialConfig.dateRange?.startDate || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
+      setEndDate(initialConfig.dateRange?.endDate || new Date().toISOString().split('T')[0]);
+      setStages(initialConfig.stages || []);
+    } else {
+      // Reset to defaults when creating new funnel
+      setFunnelName('');
+      setSelectedChannelIds([]);
+      setStartDate(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
+      setEndDate(new Date().toISOString().split('T')[0]);
+      setStages([]);
+    }
+    setErrors([]);
+  }, [initialConfig, isOpen]);
 
   // Fetch GA4 events for autocomplete
   useEffect(() => {
@@ -494,9 +526,6 @@ export function FunnelBuilderModal({
     }
 
     stages.forEach((stage, i) => {
-      if (!stage.displayName.trim()) {
-        newErrors.push(`Stage ${i + 1}: Display name is required`);
-      }
       if (stage.source === 'ga4' && stage.metricKey === 'eventCount' && !stage.eventName) {
         newErrors.push(`Stage ${i + 1}: Event name is required for custom events`);
       }
@@ -528,11 +557,28 @@ export function FunnelBuilderModal({
 
     setIsSaving(true);
     try {
+      // Populate displayName with metric/event name if empty
+      const processedStages = stages.map(s => {
+        let displayName = s.displayName.trim();
+
+        // If displayName is empty, use event name or metric label
+        if (!displayName) {
+          if (s.source === 'ga4' && s.metricKey === 'eventCount' && s.eventName) {
+            displayName = s.eventName;
+          } else {
+            const metricLabel = SOURCE_METRICS[s.source].find(m => m.value === s.metricKey)?.label;
+            displayName = metricLabel || s.metricKey;
+          }
+        }
+
+        return { ...s, displayName, value: 0 };
+      });
+
       const config: FunnelConfig = {
         id: initialConfig?.id || `funnel-${Date.now()}`,
         name: funnelName,
         channelIds: selectedChannelIds,
-        stages: stages.map(s => ({ ...s, value: 0 })),
+        stages: processedStages,
         totalCost: 0,
         dateRange: { startDate, endDate },
       };
@@ -696,17 +742,8 @@ export function FunnelBuilderModal({
 
           {/* Stages */}
           <div>
-            <div className="flex justify-between items-center mb-3">
+            <div className="mb-3">
               <Label>Funnel Stages ({stages.length})</Label>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={addStage}
-              >
-                <Plus className="h-4 w-4 mr-1" />
-                Add Stage
-              </Button>
             </div>
 
             {stages.length === 0 ? (
@@ -737,6 +774,20 @@ export function FunnelBuilderModal({
                 </SortableContext>
               </DndContext>
             )}
+
+            {/* Add Stage Button at Bottom */}
+            <div className="mt-3">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={addStage}
+                className="w-full"
+              >
+                <Plus className="h-4 w-4 mr-1" />
+                Add Stage
+              </Button>
+            </div>
           </div>
         </div>
 

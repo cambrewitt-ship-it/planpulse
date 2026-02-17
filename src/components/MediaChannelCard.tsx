@@ -81,6 +81,12 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
   const [completedActions, setCompletedActions] = useState<Set<string>>(
     new Set(channel.actionPoints.filter(a => a.completed).map(a => a.id))
   );
+  
+  // Sync completedActions with channel.actionPoints when they change
+  useEffect(() => {
+    setCompletedActions(new Set(channel.actionPoints.filter(a => a.completed).map(a => a.id)));
+  }, [channel.actionPoints]);
+  
   // Initialize selectedMonth from channel prop (which comes from parent state)
   // The parent manages the selected month per channel
   const [selectedMonth, setSelectedMonth] = useState<Date>(() => {
@@ -317,6 +323,12 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
     }
   };
 
+  const ordinal = (n: number) => {
+    const s = ['th', 'st', 'nd', 'rd'];
+    const v = n % 100;
+    return n + (s[(v - 20) % 10] || s[v] || s[0]);
+  };
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'Active': return 'bg-[#22c55e] hover:bg-[#16a34a]';
@@ -435,7 +447,7 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
       startDate: format(monthStart, 'yyyy-MM-dd'),
       endDate: format(monthEnd, 'yyyy-MM-dd'),
     });
-    channel.onMonthChange?.(newMonth);
+    (channel as any).onMonthChange?.(newMonth);
   };
 
   // Handle custom date range changes
@@ -445,7 +457,7 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
     const startDate = parseISO(newRange.startDate);
     setSelectedMonth(startOfMonth(startDate));
     // Optionally fetch new data for this range
-    channel.onMonthChange?.(startDate);
+    (channel as any).onMonthChange?.(startDate);
   };
 
   // Calculate stats (reuse today and todayKey from above)
@@ -843,7 +855,29 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
     : 0;
 
   return (
-    <Card className="bg-white shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 ease-in-out">
+    <Card className="bg-white shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 ease-in-out relative">
+      {channel.onRefreshSpend && (
+        <div className="absolute top-4 right-4 z-10">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              console.log(`[MediaChannelCard] Refresh button clicked for channel:`, {
+                channelId: channel.id,
+                channelName: channel.name,
+                selectedMonth: selectedMonth,
+                hasRefreshHandler: !!channel.onRefreshSpend
+              });
+              channel.onRefreshSpend?.(selectedMonth);
+            }}
+            disabled={channel.isFetchingSpend}
+            className="h-7 text-xs"
+          >
+            <RefreshCw className={`h-3 w-3 mr-1 ${channel.isFetchingSpend ? 'animate-spin' : ''}`} />
+            {channel.isFetchingSpend ? 'Refreshing...' : 'Refresh Spend'}
+          </Button>
+        </div>
+      )}
       <CardContent className="p-6">
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
           {/* Left Section - Actions (40%) */}
@@ -1003,8 +1037,8 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
                               </Badge>
                             )}
                             {currentList === 'SET UP' && action.due_date && (
-                              <Badge 
-                                variant="outline" 
+                              <Badge
+                                variant="outline"
                                 className={`text-xs ${
                                   (() => {
                                     const today = new Date();
@@ -1012,7 +1046,7 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
                                     const dueDate = new Date(action.due_date);
                                     dueDate.setHours(0, 0, 0, 0);
                                     const daysUntil = Math.ceil((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-                                    return daysUntil < 0 ? 'text-red-600 border-red-600' : 
+                                    return daysUntil < 0 ? 'text-red-600 border-red-600' :
                                            daysUntil === 0 ? 'text-orange-600 border-orange-600' :
                                            daysUntil <= 3 ? 'text-yellow-600 border-yellow-600' : '';
                                   })()
@@ -1024,10 +1058,13 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
                                   const dueDate = new Date(action.due_date);
                                   dueDate.setHours(0, 0, 0, 0);
                                   const daysUntil = Math.ceil((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-                                  if (daysUntil < 0) return `${Math.abs(daysUntil)} days overdue`;
+                                  const parsed = parseISO(action.due_date);
+                                  const dayNum = parseInt(format(parsed, 'd'), 10);
+                                  const dateStr = `Due ${ordinal(dayNum)} ${format(parsed, 'MMM')}`;
+                                  if (daysUntil < 0) return 'Overdue';
                                   if (daysUntil === 0) return 'Due today';
-                                  if (daysUntil === 1) return '1 day';
-                                  return `${daysUntil} days`;
+                                  if (daysUntil <= 3) return `${dateStr} | ${daysUntil} Day${daysUntil === 1 ? '' : 's'}`;
+                                  return dateStr;
                                 })()}
                               </Badge>
                             )}
@@ -1177,26 +1214,6 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
                             ))}
                           </SelectContent>
                         </Select>
-                      )}
-                      {channel.onRefreshSpend && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => {
-                            console.log(`[MediaChannelCard] Refresh button clicked for channel:`, {
-                              channelId: channel.id,
-                              channelName: channel.name,
-                              selectedMonth: selectedMonth,
-                              hasRefreshHandler: !!channel.onRefreshSpend
-                            });
-                            channel.onRefreshSpend?.(selectedMonth);
-                          }}
-                          disabled={channel.isFetchingSpend}
-                          className="h-7 text-xs"
-                        >
-                          <RefreshCw className={`h-3 w-3 mr-1 ${channel.isFetchingSpend ? 'animate-spin' : ''}`} />
-                          {channel.isFetchingSpend ? 'Refreshing...' : 'Refresh Spend'}
-                        </Button>
                       )}
                     </div>
                   </div>

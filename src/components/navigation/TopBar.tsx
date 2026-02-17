@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { getClients } from '@/lib/db/plans';
 import { supabase } from '@/lib/supabase/client';
-import { ChevronDown, LayoutDashboard, Users, LogOut, User } from 'lucide-react';
+import { ChevronDown, LayoutDashboard, Users, LogOut, User, Library } from 'lucide-react';
 import type { User as SupabaseUser } from '@supabase/supabase-js';
 
 interface Client {
@@ -91,6 +91,12 @@ export default function TopBar() {
                 <Button variant={pathname === '/dashboard' ? 'default' : 'ghost'} size="sm">
                   <Users className="h-4 w-4 mr-2" />
                   Clients
+                </Button>
+              </Link>
+              <Link href="/library">
+                <Button variant={pathname === '/library' ? 'default' : 'ghost'} size="sm">
+                  <Library className="h-4 w-4 mr-2" />
+                  Library
                 </Button>
               </Link>
             </div>

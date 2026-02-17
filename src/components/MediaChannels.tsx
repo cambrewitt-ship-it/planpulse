@@ -33,9 +33,11 @@ interface MediaChannelsProps {
   clientId?: string;
   mediaPlanBuilderChannels?: MediaPlanChannel[];
   commission?: number;
+  actionPointsRefetchTrigger?: number;
+  onActionPointsChange?: () => void;
 }
 
-export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderChannels = [], commission = 0 }: MediaChannelsProps) {
+export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderChannels = [], commission = 0, actionPointsRefetchTrigger = 0, onActionPointsChange }: MediaChannelsProps) {
   const [liveSpendData, setLiveSpendData] = useState<Record<string, any[]>>({});
   const [fetchingSpend, setFetchingSpend] = useState<Record<string, boolean>>({});
   const [spendErrors, setSpendErrors] = useState<Record<string, string>>({});
@@ -475,6 +477,26 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activePlan?.id, clientId, mediaPlanBuilderChannels ? mediaPlanBuilderChannels.map(c => c.id).join(',') : '']); // Refetch when plan, client, or mediaPlanBuilderChannels changes
+
+  // Refetch action points when actionPointsRefetchTrigger changes (triggered by other components)
+  useEffect(() => {
+    if (actionPointsRefetchTrigger === 0) return; // Skip initial render
+    
+    console.log('MediaChannels: Refetching action points due to trigger change');
+    
+    // Refetch action points for all channels
+    if (mediaPlanBuilderChannels && mediaPlanBuilderChannels.length > 0) {
+      mediaPlanBuilderChannels.forEach((channel) => {
+        const channelType = getChannelDisplayName(channel.channelName, channel.format || '');
+        fetchActionPoints(channelType);
+      });
+    } else if (activePlan && activePlan.channels) {
+      activePlan.channels.forEach((channel) => {
+        const channelType = getChannelDisplayName(channel.channel, channel.detail);
+        fetchActionPoints(channelType);
+      });
+    }
+  }, [actionPointsRefetchTrigger]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Generate month data from weekly plans and live spend data
   const generateMonthDataFromWeeklyPlans = (
@@ -1065,13 +1087,13 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
           console.log(`[MediaChannels] Calling fetchLiveSpendData with month:`, currentMonth);
           fetchLiveSpendData(channel.id, channel.channel, currentMonth);
         },
-        onMonthChange: (month: Date) => {
+        onMonthChange: ((month: Date) => {
           // Update selected month and fetch data for the new month
           setSelectedMonths(prev => ({ ...prev, [channel.id]: month }));
           if (isMetaAdsChannel(channel.channel) || isGoogleAdsChannel(channel.channel)) {
             fetchLiveSpendData(channel.id, channel.channel, month);
           }
-        },
+        }) as any,
         onCampaignChange: (campaignId: string) => {
           // Update selected campaign for this channel
           setSelectedCampaigns(prev => ({ ...prev, [channel.id]: campaignId }));
@@ -1293,7 +1315,16 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
       </div>
       
       {groupedChannels.map((channel) => (
-        <MediaChannelCard key={channel.id} channel={channel} />
+        <MediaChannelCard 
+          key={channel.id} 
+          channel={{
+            ...channel,
+            onActionPointsChange: () => {
+              fetchActionPoints(channel.channelType);
+              onActionPointsChange?.();
+            }
+          }} 
+        />
       ))}
     </div>
   );

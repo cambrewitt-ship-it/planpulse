@@ -1,7 +1,6 @@
 import { NextRequest } from 'next/server';
-import { cookies } from 'next/headers';
+import { createClient } from '@/lib/supabase/server';
 import { Nango } from '@nangohq/node';
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import type { Database } from '@/types/database';
 import { toNangoPlatform } from '@/lib/platform-mapping';
 
@@ -66,8 +65,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Get authenticated user
-    const cookieStore = await cookies();
-    const supabase = createRouteHandlerClient<Database>({ cookies: () => cookieStore });
+    const supabase = await createClient();
     
     const { data: { session }, error: sessionError } = await supabase.auth.getSession();
 
@@ -226,7 +224,7 @@ export async function POST(request: NextRequest) {
           }, { status: 424 });
         }
         
-        const accessToken = nangoConnection.credentials?.access_token;
+        const accessToken = (nangoConnection.credentials as any)?.access_token;
 
         if (!accessToken) {
           return Response.json({

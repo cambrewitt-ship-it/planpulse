@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
+import { createClient } from '@/lib/supabase/server';
 import { Nango } from "@nangohq/node";
 import type { Database } from "@/types/database";
 import { toInternalPlatform, toNangoPlatform } from "@/lib/platform-mapping";
@@ -38,8 +37,7 @@ export async function POST(request: Request) {
 
   console.log('Platform mapping:', { raw: rawPlatform, internal: platform, nango: nangoPlatform });
 
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient<Database>({ cookies: () => cookieStore });
+  const supabase = await createClient();
 
   // Get authenticated user
   const {

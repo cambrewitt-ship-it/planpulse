@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+import { createClient } from '@/lib/supabase/server';
 import type { Database } from '@/types/database';
 import { Nango } from '@nangohq/node';
 import { toNangoPlatform } from '@/lib/platform-mapping';
@@ -22,8 +21,7 @@ export async function GET() {
     const nango = new Nango({ secretKey });
     // 1. Get authenticated user's ID
     console.log('Step 1: Authenticating user...');
-    const cookieStore = await cookies();
-    const supabase = createRouteHandlerClient<Database>({ cookies: () => cookieStore });
+    const supabase = await createClient();
     const { data: { session }, error: authError } = await supabase.auth.getSession();
 
     if (authError || !session?.user) {
@@ -62,7 +60,7 @@ export async function GET() {
     // 3. Get the OAuth access token from Nango
     console.log('Step 4: Getting access token from Nango...');
     const nangoConnection = await nango.getConnection(toNangoPlatform('google-ads'), connection.connection_id);
-    const accessToken = nangoConnection.credentials?.access_token;
+    const accessToken = (nangoConnection.credentials as any)?.access_token;
 
     if (!accessToken) {
       throw new Error('No access token found in Nango connection');

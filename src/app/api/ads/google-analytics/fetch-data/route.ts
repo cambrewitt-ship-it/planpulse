@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+import { createClient } from '@/lib/supabase/server';
 import type { Database } from '@/types/database';
 import { Nango } from '@nangohq/node';
 import { toNangoPlatform } from '@/lib/platform-mapping';
@@ -85,8 +84,7 @@ export async function POST(request: NextRequest) {
     ];
 
     // Get authenticated user
-    const cookieStore = await cookies();
-    const supabase = createRouteHandlerClient<Database>({ cookies: () => cookieStore });
+    const supabase = await createClient();
     
     const { data: { session }, error: sessionError } = await supabase.auth.getSession();
 
@@ -155,7 +153,7 @@ export async function POST(request: NextRequest) {
     try {
       console.log('Fetching Nango connection for:', { platform: toNangoPlatform('google-analytics'), connectionId: connection.connection_id });
       const nangoConnection = await nango.getConnection(toNangoPlatform('google-analytics'), connection.connection_id);
-      accessToken = nangoConnection.credentials?.access_token as string;
+      accessToken = (nangoConnection.credentials as any)?.access_token as string;
 
       if (!accessToken) {
         console.error('GA4 API Error: No access token in Nango connection', {
@@ -249,7 +247,7 @@ export async function POST(request: NextRequest) {
 
     // Convert requested metrics to GA4 API format
     const ga4Metrics = requestedMetrics
-      .map(m => metricMapping[m] || m)
+      .map((m: string) => metricMapping[m] || m)
       .filter(Boolean);
 
     // Determine query mode: event-specific or standard metrics
@@ -288,7 +286,7 @@ export async function POST(request: NextRequest) {
           dimensions: dimensions.map(d => ({ name: d })),
           metrics: isEventQuery 
             ? [{ name: 'eventCount' }, { name: 'totalUsers' }]
-            : ga4Metrics.map(m => ({ name: m })),
+            : ga4Metrics.map((m: string) => ({ name: m })),
         };
 
         // Handle event filtering
@@ -452,7 +450,7 @@ export async function POST(request: NextRequest) {
 
               // Map metric values using metricHeaders to ensure correct mapping
               if (row.metricValues && Array.isArray(row.metricValues)) {
-                ga4Metrics.forEach((metric) => {
+                ga4Metrics.forEach((metric: string) => {
                   // Find the index of this metric in the response headers
                   const metricIndex = metricHeaderMap.get(metric);
                   
@@ -481,7 +479,7 @@ export async function POST(request: NextRequest) {
               
               console.log(`Data point for ${formattedDate}:`, {
                 date: formattedDate,
-                metrics: ga4Metrics.map(m => ({ metric: m, value: dataPoint[m] })),
+                metrics: ga4Metrics.map((m: string) => ({ metric: m, value: dataPoint[m] })),
               });
 
               allData.push(dataPoint);
@@ -598,7 +596,7 @@ export async function POST(request: NextRequest) {
         }
 
         // Sum metrics across properties
-        ga4Metrics.forEach(metric => {
+        ga4Metrics.forEach((metric: string) => {
           const currentValue = aggregatedData[dateKey][metric] as number || 0;
           aggregatedData[dateKey][metric] = currentValue + (point[metric] as number || 0);
         });

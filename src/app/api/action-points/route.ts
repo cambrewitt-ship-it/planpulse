@@ -1,34 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
-import type { Database } from '@/types/database';
+import { createClient } from '@/lib/supabase/server';
 
-// GET - Fetch action points for a channel type
+// GET - Fetch action points, optionally filtered by channel_type and/or client_id
+// When client_id is provided, merges per-client completion state
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const channelType = searchParams.get('channel_type');
+    const clientId = searchParams.get('client_id');
 
-    if (!channelType) {
-      return NextResponse.json(
-        { error: 'channel_type is required' },
-        { status: 400 }
-      );
-    }
-
-    const cookieStore = await cookies();
-    const supabase = createRouteHandlerClient<Database>({ cookies: () => cookieStore });
+    const supabase = await createClient();
 
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { data, error } = await supabase
+    let query = supabase
       .from('action_points')
       .select('*')
-      .eq('channel_type', channelType)
       .order('created_at', { ascending: true });
+
+    if (channelType) {
+      query = query.eq('channel_type', channelType);
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       console.error('Error fetching action points:', error);
@@ -36,6 +33,29 @@ export async function GET(request: NextRequest) {
         { error: 'Failed to fetch action points' },
         { status: 500 }
       );
+    }
+
+    // If client_id provided, overlay per-client completion state
+    if (clientId && data && data.length > 0) {
+      const actionPointIds = data.map((ap: any) => ap.id);
+
+      const { data: completions } = await supabase
+        .from('client_action_point_completions')
+        .select('action_point_id, completed')
+        .eq('client_id', clientId)
+        .in('action_point_id', actionPointIds);
+
+      const completionMap = new Map(
+        (completions || []).map((c: any) => [c.action_point_id, c.completed])
+      );
+
+      const merged = data.map((ap: any) => ({
+        ...ap,
+        // Use per-client completion if it exists, otherwise default false
+        completed: completionMap.has(ap.id) ? completionMap.get(ap.id) : false,
+      }));
+
+      return NextResponse.json({ data: merged });
     }
 
     return NextResponse.json({ data: data || [] });
@@ -68,8 +88,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const cookieStore = await cookies();
-    const supabase = createRouteHandlerClient<Database>({ cookies: () => cookieStore });
+    const supabase = await createClient();
 
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user) {
@@ -80,15 +99,13 @@ export async function POST(request: NextRequest) {
       channel_type,
       text: text.trim(),
       category,
-      completed: false
+      completed: false,
     };
 
-    // Add frequency for HEALTH CHECK items
     if (category === 'HEALTH CHECK' && frequency) {
       insertData.frequency = frequency;
     }
 
-    // Add due_date for SET UP items
     if (category === 'SET UP' && due_date) {
       insertData.due_date = due_date;
     }
@@ -117,11 +134,12 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// PUT - Update an action point
+// PUT - Update an action point (template fields) and/or per-client completion
+// If client_id is provided, writes to client_action_point_completions for completed changes
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { id, text, completed, category, frequency, due_date } = body;
+    const { id, text, completed, category, frequency, due_date, client_id } = body;
 
     if (!id) {
       return NextResponse.json(
@@ -130,14 +148,46 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    const cookieStore = await cookies();
-    const supabase = createRouteHandlerClient<Database>({ cookies: () => cookieStore });
+    const supabase = await createClient();
 
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    // If client_id + completed: write to per-client completions table
+    if (client_id !== undefined && completed !== undefined) {
+      const { error: upsertError } = await supabase
+        .from('client_action_point_completions')
+        .upsert(
+          {
+            client_id,
+            action_point_id: id,
+            completed,
+            completed_at: completed ? new Date().toISOString() : null,
+          },
+          { onConflict: 'client_id,action_point_id' }
+        );
+
+      if (upsertError) {
+        console.error('Error upserting client completion:', upsertError);
+        return NextResponse.json(
+          { error: 'Failed to update completion' },
+          { status: 500 }
+        );
+      }
+
+      // Return the action point with the updated completion state
+      const { data: ap } = await supabase
+        .from('action_points')
+        .select('*')
+        .eq('id', id)
+        .single();
+
+      return NextResponse.json({ data: { ...ap, completed } });
+    }
+
+    // Otherwise update the template fields on action_points
     const updateData: any = {};
     if (text !== undefined) {
       if (!text.trim()) {
@@ -192,7 +242,7 @@ export async function PUT(request: NextRequest) {
   }
 }
 
-// DELETE - Delete an action point
+// DELETE - Delete an action point template
 export async function DELETE(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
@@ -205,8 +255,7 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    const cookieStore = await cookies();
-    const supabase = createRouteHandlerClient<Database>({ cookies: () => cookieStore });
+    const supabase = await createClient();
 
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user) {
@@ -235,4 +284,3 @@ export async function DELETE(request: NextRequest) {
     );
   }
 }
-
