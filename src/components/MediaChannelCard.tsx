@@ -65,6 +65,7 @@ interface MediaChannelCardProps {
     isFetchingSpend?: boolean;
     spendError?: string;
     onActionPointsChange?: () => void;
+    clientId?: string;
     channelType: string;
     connectedAccount?: string | null;
     liveSpendData?: LiveSpendItem[];
@@ -162,13 +163,12 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
     // Save to database
     try {
       setIsSaving(true);
+      const payload: any = { id: actionId, completed: newCompleted };
+      if (channel.clientId) payload.client_id = channel.clientId;
       const response = await fetch('/api/action-points', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: actionId,
-          completed: newCompleted
-        })
+        body: JSON.stringify(payload)
       });
 
       if (!response.ok) {

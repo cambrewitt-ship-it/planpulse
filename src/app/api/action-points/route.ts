@@ -157,7 +157,7 @@ export async function PUT(request: NextRequest) {
 
     // If client_id + completed: write to per-client completions table
     if (client_id !== undefined && completed !== undefined) {
-      const { error: upsertError } = await supabase
+      const { data: upsertData, error: upsertError } = await supabase
         .from('client_action_point_completions')
         .upsert(
           {
@@ -167,22 +167,48 @@ export async function PUT(request: NextRequest) {
             completed_at: completed ? new Date().toISOString() : null,
           },
           { onConflict: 'client_id,action_point_id' }
-        );
+        )
+        .select();
 
       if (upsertError) {
-        console.error('Error upserting client completion:', upsertError);
+        console.error('Error upserting client completion:', {
+          error: upsertError,
+          client_id,
+          action_point_id: id,
+          completed,
+          message: upsertError.message,
+          code: upsertError.code,
+          hint: upsertError.hint,
+          details: upsertError.details
+        });
         return NextResponse.json(
-          { error: 'Failed to update completion' },
+          { 
+            error: 'Failed to update completion',
+            details: upsertError.message || 'Unknown database error',
+            code: upsertError.code,
+            hint: upsertError.hint
+          },
           { status: 500 }
         );
       }
 
       // Return the action point with the updated completion state
-      const { data: ap } = await supabase
+      const { data: ap, error: fetchError } = await supabase
         .from('action_points')
         .select('*')
         .eq('id', id)
         .single();
+
+      if (fetchError) {
+        console.error('Error fetching action point after update:', fetchError);
+        return NextResponse.json(
+          { 
+            error: 'Failed to fetch updated action point',
+            details: fetchError.message
+          },
+          { status: 500 }
+        );
+      }
 
       return NextResponse.json({ data: { ...ap, completed } });
     }
@@ -236,7 +262,11 @@ export async function PUT(request: NextRequest) {
   } catch (error: any) {
     console.error('Error in PUT /api/action-points:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { 
+        error: 'Internal server error',
+        details: error.message || 'Unknown error',
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      },
       { status: 500 }
     );
   }

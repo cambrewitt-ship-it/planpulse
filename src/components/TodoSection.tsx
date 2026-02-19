@@ -3,7 +3,7 @@
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { MediaPlanChannel } from '@/components/media-plan-builder/media-plan-grid';
-import { ListTodo, CheckCircle2, Circle, ChevronDown, ChevronUp } from 'lucide-react';
+import { ListTodo, CheckCircle2, Circle, ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { format, parseISO } from 'date-fns';
 
@@ -83,15 +83,21 @@ const ActionRow = ({
   ap,
   activeTab,
   onToggle,
+  onDelete,
 }: {
   ap: ActionPoint;
   activeTab: TabType;
   onToggle: (id: string, completed: boolean) => void;
+  onDelete: (id: string) => void;
 }) => (
-  <li className="flex items-center gap-3 p-3 rounded-lg hover:bg-[#f8fafc] transition-colors border border-transparent hover:border-[#e2e8f0]">
+  <li className="group flex items-center gap-3 p-3 rounded-lg hover:bg-[#f8fafc] transition-colors border border-transparent hover:border-[#e2e8f0]">
     <button
-      onClick={() => onToggle(ap.id, ap.completed)}
-      className="flex-shrink-0"
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onToggle(ap.id, ap.completed);
+      }}
+      className="flex-shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
       aria-label={ap.completed ? 'Mark as incomplete' : 'Mark as complete'}
     >
       {ap.completed ? (
@@ -117,6 +123,17 @@ const ActionRow = ({
           {ap.frequency}
         </Badge>
       )}
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete(ap.id);
+        }}
+        className="opacity-0 group-hover:opacity-100 transition-opacity text-[#94a3b8] hover:text-red-500"
+        aria-label="Delete action point"
+      >
+        <Trash2 className="w-4 h-4" />
+      </button>
     </div>
   </li>
 );
@@ -133,9 +150,6 @@ export default function TodoSection({ mediaPlanBuilderChannels, clientId, embedd
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<TabType>('SET UP');
   const [showCompleted, setShowCompleted] = useState(false);
-  
-  // Use ref to track if we're currently updating to avoid refetching our own changes
-  const isUpdatingRef = useRef(false);
 
   const fetchAll = async () => {
     setLoading(true);
@@ -184,26 +198,31 @@ export default function TodoSection({ mediaPlanBuilderChannels, clientId, embedd
     }
   };
 
+  // Track the channel types we last fetched for, so we only re-fetch when channels genuinely change
+  const lastChannelKeyRef = useRef<string>('');
+  // Suppress refetch when this component itself triggered the actionPointsRefetchTrigger
+  const suppressNextRefetchRef = useRef(false);
+
   useEffect(() => {
+    const key = mediaPlanBuilderChannels.map(c => c.channelName).sort().join(',');
+    if (key === lastChannelKeyRef.current) return; // same channels, skip
+    lastChannelKeyRef.current = key;
     fetchAll();
   }, [mediaPlanBuilderChannels]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Refetch when actionPointsRefetchTrigger changes (triggered by other components)
+  // Refetch when actionPointsRefetchTrigger changes (triggered by other components e.g. MediaChannelCard add/delete)
   useEffect(() => {
-    if (actionPointsRefetchTrigger === 0) return; // Skip initial render
-    if (isUpdatingRef.current) {
-      // Don't refetch if we just made the change ourselves
-      console.log('TodoSection: Skipping refetch - we triggered this change');
-      isUpdatingRef.current = false;
+    if (actionPointsRefetchTrigger === 0) return;
+    if (suppressNextRefetchRef.current) {
+      suppressNextRefetchRef.current = false;
       return;
     }
-    console.log('TodoSection: Refetching action points due to trigger change from another component');
     fetchAll();
   }, [actionPointsRefetchTrigger]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleToggle = async (id: string, completed: boolean) => {
     const newCompleted = !completed;
-    
+
     // Optimistically update local state
     setAllActionPoints(prev =>
       prev.map(ap => ap.id === id ? { ...ap, completed: newCompleted } : ap)
@@ -218,14 +237,22 @@ export default function TodoSection({ mediaPlanBuilderChannels, clientId, embedd
         body: JSON.stringify(payload),
       });
       if (!response.ok) {
+        const errBody = await response.json().catch(() => ({}));
+        console.error('Failed to update action point:', {
+          status: response.status,
+          statusText: response.statusText,
+          error: errBody,
+          payload: { id, completed: newCompleted, client_id: clientId }
+        });
         // Revert on error
         setAllActionPoints(prev =>
           prev.map(ap => ap.id === id ? { ...ap, completed } : ap)
         );
+        // Show user-friendly error
+        alert(`Failed to update action point: ${errBody.error || errBody.details || 'Unknown error'}`);
       } else {
-        // Mark that we're making an update so we don't refetch on our own trigger
-        isUpdatingRef.current = true;
-        // Notify parent to trigger refetch in other components
+        // Notify MediaChannelCards to sync — suppress our own refetch since optimistic update already applied
+        suppressNextRefetchRef.current = true;
         onActionPointsChange?.();
       }
     } catch (error) {
@@ -234,6 +261,28 @@ export default function TodoSection({ mediaPlanBuilderChannels, clientId, embedd
       setAllActionPoints(prev =>
         prev.map(ap => ap.id === id ? { ...ap, completed } : ap)
       );
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this action point? This will remove it from all channels.')) return;
+
+    // Optimistically remove from local state
+    const previous = allActionPoints;
+    setAllActionPoints(prev => prev.filter(ap => ap.id !== id));
+
+    try {
+      const response = await fetch(`/api/action-points?id=${id}`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) {
+        setAllActionPoints(previous);
+      } else {
+        onActionPointsChange?.();
+      }
+    } catch (error) {
+      console.error('Error deleting action point:', error);
+      setAllActionPoints(previous);
     }
   };
 
@@ -381,6 +430,7 @@ export default function TodoSection({ mediaPlanBuilderChannels, clientId, embedd
                   ap={ap}
                   activeTab={activeTab}
                   onToggle={handleToggle}
+                  onDelete={handleDelete}
                 />
               ))}
             </ul>
@@ -409,6 +459,7 @@ export default function TodoSection({ mediaPlanBuilderChannels, clientId, embedd
                       ap={ap}
                       activeTab={activeTab}
                       onToggle={handleToggle}
+                      onDelete={handleDelete}
                     />
                   ))}
                 </ul>

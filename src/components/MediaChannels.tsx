@@ -398,7 +398,9 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
   // Fetch action points for a channel type
   const fetchActionPoints = async (channelType: string) => {
     try {
-      const response = await fetch(`/api/action-points?channel_type=${encodeURIComponent(channelType)}`);
+      const params = new URLSearchParams({ channel_type: channelType });
+      if (clientId) params.set('client_id', clientId);
+      const response = await fetch(`/api/action-points?${params.toString()}`);
       if (!response.ok) {
         console.error(`Failed to fetch action points for channel type ${channelType}`);
         return;
@@ -1100,7 +1102,8 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
         },
         isFetchingSpend: fetchingSpend[channel.id] || false,
         spendError: spendErrors[channel.id],
-        onActionPointsChange: () => fetchActionPoints(channelType),
+        onActionPointsChange: () => { fetchActionPoints(channelType); onActionPointsChange?.(); },
+        clientId: clientId,
         channelType: channelType,
         connectedAccount: connectedAccounts[channelType] ?? undefined,
         liveSpendData: liveSpendData[channel.id] || [],
@@ -1315,15 +1318,9 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
       </div>
       
       {groupedChannels.map((channel) => (
-        <MediaChannelCard 
-          key={channel.id} 
-          channel={{
-            ...channel,
-            onActionPointsChange: () => {
-              fetchActionPoints(channel.channelType);
-              onActionPointsChange?.();
-            }
-          }} 
+        <MediaChannelCard
+          key={channel.id}
+          channel={channel}
         />
       ))}
     </div>

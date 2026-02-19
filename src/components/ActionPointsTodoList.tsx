@@ -5,7 +5,7 @@ import { getClients, getMediaPlans, getClientMediaPlanBuilder } from '@/lib/db/p
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
-import { CheckSquare, Building2, Radio, Facebook, Search, Linkedin, Music, Instagram } from 'lucide-react';
+import { CheckSquare, Building2, Radio, Facebook, Search, Linkedin, Music, Instagram, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
@@ -200,6 +200,32 @@ export default function ActionPointsTodoList() {
     }
   };
 
+  const handleDeleteActionPoint = async (actionPointId: string) => {
+    if (!confirm('Are you sure you want to delete this action point? This will remove it from all channels.')) return;
+
+    // Optimistically remove from local state
+    setTodoItems((prevItems) =>
+      prevItems
+        .map((item) => ({
+          ...item,
+          actionPoints: item.actionPoints.filter((ap) => ap.id !== actionPointId),
+        }))
+        .filter((item) => item.actionPoints.length > 0)
+    );
+
+    try {
+      const response = await fetch(`/api/action-points?id=${actionPointId}`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) {
+        loadTodoItems();
+      }
+    } catch (error) {
+      console.error('Error deleting action point:', error);
+      loadTodoItems();
+    }
+  };
+
   const handleClientClick = (clientId: string) => {
     router.push(`/clients/${clientId}/dashboard`);
   };
@@ -290,7 +316,7 @@ export default function ActionPointsTodoList() {
                       {channel.actionPoints.map((actionPoint) => (
                         <div
                           key={actionPoint.id}
-                          className="flex items-start gap-2 p-2 rounded hover:bg-gray-50 transition-colors"
+                          className="group flex items-start gap-2 p-2 rounded hover:bg-gray-50 transition-colors"
                         >
                           <Checkbox
                             checked={actionPoint.completed}
@@ -313,6 +339,13 @@ export default function ActionPointsTodoList() {
                               </Badge>
                             </div>
                           </div>
+                          <button
+                            onClick={() => handleDeleteActionPoint(actionPoint.id)}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-red-500 flex-shrink-0 mt-0.5"
+                            aria-label="Delete action point"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       ))}
                     </div>
