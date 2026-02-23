@@ -17,6 +17,7 @@ import {
   TrendingDown,
   Minus,
   CheckSquare,
+  AlertTriangle,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -93,6 +94,16 @@ function ChannelLogo({ name, className = 'w-4 h-4' }: { name: string; className?
 
   // Generic fallback
   return <Radio className="w-4 h-4 text-muted-foreground" />;
+}
+
+/** Calculate month progress: days elapsed / days in month * 100 */
+function getMonthProgress(): number {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const daysElapsed = now.getDate();
+  return (daysElapsed / daysInMonth) * 100;
 }
 
 /** Spend variance config — positive pct = overspending, negative = underspending */
@@ -304,83 +315,131 @@ function ClientCard({ client }: { client: ClientCardData }) {
         {/* ── Spend vs plan ── */}
         <div className={cn(
           'rounded-lg px-3 py-2 border space-y-1.5',
-          client.spendVariancePct === null
+          client.spendVariancePct === null || client.plannedBudget === 0
             ? 'bg-muted/40 border-border'
             : severityClass[spend.severity]
         )}>
-          {/* Row 1: label + variance badge */}
-          <div className="flex items-center gap-2">
-            <spend.Icon className="w-3.5 h-3.5 flex-shrink-0" />
-            <span className="text-xs flex-1 font-medium">
-              {client.spendVariancePct === null ? 'No spend data this month' : spend.label}
-            </span>
-          </div>
-          {/* Row 2: actual vs planned figures */}
-          {client.plannedBudget > 0 && (
-            <div className="flex items-center justify-between text-[11px]">
-              <span className="text-current opacity-70">
+          {client.spendVariancePct === null || client.plannedBudget === 0 ? (
+            <>
+              {/* Row 1: label */}
+              <div className="flex items-center gap-2">
+                <spend.Icon className="w-3.5 h-3.5 flex-shrink-0" />
+                <span className="text-xs flex-1 font-medium">
+                  No spend data
+                </span>
+              </div>
+            </>
+          ) : (
+            <>
+              {/* Row 1: label + variance badge */}
+              <div className="flex items-center gap-2">
+                <spend.Icon className="w-3.5 h-3.5 flex-shrink-0" />
+                <span className="text-xs flex-1 font-medium">
+                  {spend.label}
+                </span>
+              </div>
+              {/* Row 2: progress bar */}
+              <div className="relative w-full h-2 bg-muted/60 rounded-full overflow-hidden">
+                {/* Blue fill: actual spend as % of planned budget */}
+                <div
+                  className="h-full bg-blue-500 rounded-full transition-all"
+                  style={{ width: `${Math.min(100, (client.actualSpend / client.plannedBudget) * 100)}%` }}
+                />
+                {/* Vertical tick mark: expected position based on month progress */}
+                <div
+                  className="absolute top-0 bottom-0 w-0.5 bg-foreground/40"
+                  style={{ left: `${Math.min(100, getMonthProgress())}%` }}
+                />
+              </div>
+              {/* Row 3: actual vs planned figures + month progress */}
+              <div className="text-[11px] text-current opacity-70">
                 Actual: <span className="font-semibold">${client.actualSpend.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span>
-              </span>
-              <span className="text-current opacity-70">
+                {' / '}
                 Planned: <span className="font-semibold">${client.plannedBudget.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span>
-              </span>
-            </div>
+                {' · '}
+                {Math.round(getMonthProgress())}% through month
+              </div>
+            </>
           )}
         </div>
 
         {/* ── Channels ── */}
-        <div className="space-y-2 pt-1 border-t border-border/50">
-          {/* Live */}
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">
-              Live
-            </p>
-            {liveChannels.length === 0 ? (
-              <p className="text-xs text-muted-foreground/60 italic">None</p>
-            ) : (
-              <div className="flex flex-wrap gap-1.5">
-                {liveChannels.map((ch) => (
-                  <span
-                    key={ch.channelName}
-                    className="inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-1 rounded-md bg-muted/60 border border-border/60"
-                    title={ch.channelName}
+        {liveChannels.length === 0 && upcomingChannels.length === 0 && (client.spendVariancePct === null || client.plannedBudget === 0) ? (
+          <div className="pt-1 border-t border-border/50">
+            <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-600 flex-shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-amber-700">
+                    Setup incomplete — no channels or spend data connected
+                  </p>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      router.push(`/clients/${client.id}/new-client-dashboard`);
+                    }}
+                    className="text-xs text-amber-700 hover:text-amber-800 hover:underline mt-1 inline-flex items-center gap-1"
                   >
-                    <ChannelLogo name={ch.channelName} className="w-3.5 h-3.5 flex-shrink-0" />
-                    {ch.channelName}
-                  </span>
-                ))}
+                    Go to client <ArrowUpRight className="w-3 h-3" />
+                  </button>
+                </div>
               </div>
-            )}
+            </div>
           </div>
+        ) : (
+          <div className="space-y-2 pt-1 border-t border-border/50">
+            {/* Live */}
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">
+                Live
+              </p>
+              {liveChannels.length === 0 ? (
+                <p className="text-xs text-muted-foreground/60 italic">None</p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {liveChannels.map((ch) => (
+                    <span
+                      key={ch.channelName}
+                      className="inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-1 rounded-md bg-muted/60 border border-border/60"
+                      title={ch.channelName}
+                    >
+                      <ChannelLogo name={ch.channelName} className="w-3.5 h-3.5 flex-shrink-0" />
+                      {ch.channelName}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
 
-          {/* Upcoming */}
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">
-              Upcoming
-            </p>
-            {upcomingChannels.length === 0 ? (
-              <p className="text-xs text-muted-foreground/60 italic">None</p>
-            ) : (
-              <div className="flex flex-wrap gap-1.5">
-                {upcomingChannels.map((ch) => (
-                  <span
-                    key={ch.channelName}
-                    className="inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-1 rounded-md bg-background border border-dashed border-border text-muted-foreground"
-                    title={ch.startDate ? `Starts ${new Date(ch.startDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : ch.channelName}
-                  >
-                    <ChannelLogo name={ch.channelName} className="w-3.5 h-3.5 flex-shrink-0" />
-                    {ch.channelName}
-                    {ch.startDate && (
-                      <span className="text-muted-foreground/60">
-                        · {new Date(ch.startDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
-                      </span>
-                    )}
-                  </span>
-                ))}
-              </div>
-            )}
+            {/* Upcoming */}
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">
+                Upcoming
+              </p>
+              {upcomingChannels.length === 0 ? (
+                <p className="text-xs text-muted-foreground/60 italic">None</p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {upcomingChannels.map((ch) => (
+                    <span
+                      key={ch.channelName}
+                      className="inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-1 rounded-md bg-background border border-dashed border-border text-muted-foreground"
+                      title={ch.startDate ? `Starts ${new Date(ch.startDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : ch.channelName}
+                    >
+                      <ChannelLogo name={ch.channelName} className="w-3.5 h-3.5 flex-shrink-0" />
+                      {ch.channelName}
+                      {ch.startDate && (
+                        <span className="text-muted-foreground/60">
+                          · {new Date(ch.startDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                        </span>
+                      )}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </CardContent>
     </Card>
   );

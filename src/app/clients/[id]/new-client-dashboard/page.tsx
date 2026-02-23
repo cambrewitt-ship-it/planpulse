@@ -125,6 +125,7 @@ export default function NewClientDashboard() {
   const [mediaChannels, setMediaChannels] = useState<any[]>([]);
   const [actionPointsStats, setActionPointsStats] = useState<{ totalAll: number; completedAll: number; trafficLightColor: string; loading: boolean }>({ totalAll: 0, completedAll: 0, trafficLightColor: 'bg-gray-400', loading: true });
   const [actionPointsRefetchTrigger, setActionPointsRefetchTrigger] = useState(0);
+  const [totalActualSpend, setTotalActualSpend] = useState<number>(0);
 
   // Handler to trigger refetch of action points across all components
   const handleActionPointsChange = () => {
@@ -1205,6 +1206,7 @@ export default function NewClientDashboard() {
                     onStatsUpdate={setActionPointsStats}
                     onActionPointsChange={handleActionPointsChange}
                     actionPointsRefetchTrigger={actionPointsRefetchTrigger}
+                    totalActualSpend={totalActualSpend}
                   />
                 </div>
               </div>
@@ -1235,13 +1237,14 @@ export default function NewClientDashboard() {
 
         {/* Media Channels Section */}
         <section className="mt-8" aria-label="Media channels budget pacing">
-          <MediaChannels 
-            activePlan={activePlan} 
+          <MediaChannels
+            activePlan={activePlan}
             clientId={clientId}
             mediaPlanBuilderChannels={mediaPlanBuilderChannels}
             commission={commission}
             actionPointsRefetchTrigger={actionPointsRefetchTrigger}
             onActionPointsChange={handleActionPointsChange}
+            onTotalActualSpendChange={setTotalActualSpend}
           />
         </section>
 

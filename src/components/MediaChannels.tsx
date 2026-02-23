@@ -35,9 +35,10 @@ interface MediaChannelsProps {
   commission?: number;
   actionPointsRefetchTrigger?: number;
   onActionPointsChange?: () => void;
+  onTotalActualSpendChange?: (totalActualSpend: number) => void;
 }
 
-export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderChannels = [], commission = 0, actionPointsRefetchTrigger = 0, onActionPointsChange }: MediaChannelsProps) {
+export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderChannels = [], commission = 0, actionPointsRefetchTrigger = 0, onActionPointsChange, onTotalActualSpendChange }: MediaChannelsProps) {
   const [liveSpendData, setLiveSpendData] = useState<Record<string, any[]>>({});
   const [fetchingSpend, setFetchingSpend] = useState<Record<string, boolean>>({});
   const [spendErrors, setSpendErrors] = useState<Record<string, string>>({});
@@ -46,6 +47,21 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
   const [connectedAccountIds, setConnectedAccountIds] = useState<Record<string, string | null>>({});
   const [selectedMonths, setSelectedMonths] = useState<Record<string, Date>>({});
   const [selectedCampaigns, setSelectedCampaigns] = useState<Record<string, string>>({}); // channelId -> campaignId ('all' means all campaigns)
+  const [channelActualSpend, setChannelActualSpend] = useState<Record<string, number>>({}); // channelId -> actualSpend
+
+  // Handle actual spend change from a channel card
+  const handleActualSpendChange = (channelId: string, actualSpend: number) => {
+    setChannelActualSpend(prev => ({
+      ...prev,
+      [channelId]: actualSpend,
+    }));
+  };
+
+  // Calculate total actual spend whenever channelActualSpend changes and notify parent
+  useEffect(() => {
+    const total = Object.values(channelActualSpend).reduce((sum, spend) => sum + (spend || 0), 0);
+    onTotalActualSpendChange?.(total);
+  }, [channelActualSpend, onTotalActualSpendChange]);
 
   // Helper function to find the earliest month with budget > 0 for a channel
   const findEarliestMonthWithBudget = (channelId: string): Date | null => {
@@ -1321,6 +1337,7 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
         <MediaChannelCard
           key={channel.id}
           channel={channel}
+          onActualSpendChange={handleActualSpendChange}
         />
       ))}
     </div>

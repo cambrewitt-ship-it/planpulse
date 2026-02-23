@@ -78,6 +78,25 @@ function buildCalendarGrid(year: number, month: number): (Date | null)[] {
   return grid;
 }
 
+/** Get the 7 days of the week starting from Monday */
+function getWeekDays(weekStart: Date): Date[] {
+  const days: Date[] = [];
+  for (let i = 0; i < 7; i++) {
+    const date = new Date(weekStart);
+    date.setDate(weekStart.getDate() + i);
+    days.push(date);
+  }
+  return days;
+}
+
+/** Get Monday of the week containing the given date */
+function getMondayOfWeek(date: Date): Date {
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Adjust when day is Sunday
+  return new Date(d.setDate(diff));
+}
+
 // ─── Event pill config ────────────────────────────────────────────────────────
 
 function eventConfig(type: CalendarEventType, category?: string) {
@@ -281,12 +300,173 @@ function Legend() {
   );
 }
 
+// ─── Week View ────────────────────────────────────────────────────────────────
+
+interface WeekViewProps {
+  weekDays: Date[];
+  eventsByDate: Map<string, CalendarEvent[]>;
+  todayStr: string;
+  onDayClick: (date: Date, events: CalendarEvent[]) => void;
+}
+
+function WeekView({ weekDays, eventsByDate, todayStr, onDayClick }: WeekViewProps) {
+  // Separate channel events (start/end) from action points
+  const channelEventsByDate = useMemo(() => {
+    const map = new Map<string, CalendarEvent[]>();
+    for (const day of weekDays) {
+      const dateStr = toDateStr(day);
+      const allEvents = eventsByDate.get(dateStr) || [];
+      const channelEvents = allEvents.filter(
+        (ev) => ev.type === 'channel-start' || ev.type === 'channel-end'
+      );
+      if (channelEvents.length > 0) {
+        map.set(dateStr, channelEvents);
+      }
+    }
+    return map;
+  }, [weekDays, eventsByDate]);
+
+  const actionPointEventsByDate = useMemo(() => {
+    const map = new Map<string, CalendarEvent[]>();
+    for (const day of weekDays) {
+      const dateStr = toDateStr(day);
+      const allEvents = eventsByDate.get(dateStr) || [];
+      const apEvents = allEvents.filter((ev) => ev.type === 'action-point');
+      if (apEvents.length > 0) {
+        map.set(dateStr, apEvents);
+      }
+    }
+    return map;
+  }, [weekDays, eventsByDate]);
+
+  return (
+    <div>
+      {/* Day headers */}
+      <div className="grid grid-cols-7 border-b border-t border-border">
+        {weekDays.map((day, idx) => {
+          const dateStr = toDateStr(day);
+          const isToday = dateStr === todayStr;
+          return (
+            <div
+              key={idx}
+              className={cn(
+                'text-center py-2 border-r border-border last:border-r-0',
+                isToday && 'bg-blue-50/60'
+              )}
+            >
+              <div className="text-xs font-medium text-muted-foreground mb-0.5">
+                {DAY_NAMES[idx]}
+              </div>
+              <div
+                className={cn(
+                  'text-sm font-semibold inline-flex items-center justify-center w-7 h-7 rounded-full',
+                  isToday ? 'bg-blue-600 text-white' : 'text-foreground'
+                )}
+              >
+                {day.getDate()}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* All day row for channel events */}
+      <div className="grid grid-cols-7 border-b border-border min-h-[60px]">
+        {weekDays.map((day, idx) => {
+          const dateStr = toDateStr(day);
+          const channelEvents = channelEventsByDate.get(dateStr) || [];
+          return (
+            <div
+              key={idx}
+              className="border-r border-border last:border-r-0 p-2 space-y-1"
+            >
+              {channelEvents.map((ev) => {
+                const cfg = eventConfig(ev.type, ev.category);
+                return (
+                  <div
+                    key={ev.id}
+                    className={cn(
+                      'flex items-center gap-1.5 text-xs px-2 py-1 rounded border',
+                      cfg.bg
+                    )}
+                    title={`${ev.clientName} · ${ev.channelName} · ${ev.label}`}
+                  >
+                    {cfg.icon}
+                    <span className="truncate font-medium">{ev.clientName}</span>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Action points rows */}
+      <div className="grid grid-cols-7 border-l border-border">
+        {weekDays.map((day, idx) => {
+          const dateStr = toDateStr(day);
+          const isToday = dateStr === todayStr;
+          const apEvents = actionPointEventsByDate.get(dateStr) || [];
+          return (
+            <div
+              key={idx}
+              className={cn(
+                'min-h-[120px] p-2 border-b border-r border-border last:border-r-0 space-y-1',
+                isToday && 'bg-blue-50/60'
+              )}
+            >
+              {apEvents.map((ev) => {
+                const cfg = eventConfig(ev.type, ev.category);
+                return (
+                  <div
+                    key={ev.id}
+                    className={cn(
+                      'flex items-start gap-1.5 text-xs px-2 py-1.5 rounded border cursor-pointer hover:opacity-80 transition-opacity',
+                      cfg.bg
+                    )}
+                    onClick={() => onDayClick(day, [ev])}
+                    title={`${ev.clientName} · ${ev.channelName} · ${ev.label}`}
+                  >
+                    <span className="mt-0.5 flex-shrink-0">{cfg.icon}</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium truncate">{ev.clientName}</p>
+                      <p className="text-[10px] leading-snug opacity-80 line-clamp-2">
+                        {ev.label}
+                      </p>
+                    </div>
+                    {ev.category && (
+                      <Badge
+                        variant="outline"
+                        className="text-[10px] py-0 h-4 px-1 flex-shrink-0 self-start"
+                      >
+                        {ev.category}
+                      </Badge>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export function AgencyCalendar() {
   const now = new Date();
+  const [view, setView] = useState<'month' | 'week'>('month');
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1); // 1-indexed
+  const [weekStart, setWeekStart] = useState<Date>(() => {
+    // Get Monday of current week
+    const d = new Date(now);
+    const day = d.getDay();
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Adjust when day is Sunday
+    return new Date(d.setDate(diff));
+  });
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -324,9 +504,39 @@ export function AgencyCalendar() {
     else setMonth(m => m + 1);
   };
 
+  const prevWeek = () => {
+    const newWeekStart = new Date(weekStart);
+    newWeekStart.setDate(weekStart.getDate() - 7);
+    setWeekStart(newWeekStart);
+    // Update month/year if needed to trigger reload
+    const newMonth = newWeekStart.getMonth() + 1;
+    const newYear = newWeekStart.getFullYear();
+    if (newMonth !== month || newYear !== year) {
+      setMonth(newMonth);
+      setYear(newYear);
+    }
+  };
+
+  const nextWeek = () => {
+    const newWeekStart = new Date(weekStart);
+    newWeekStart.setDate(weekStart.getDate() + 7);
+    setWeekStart(newWeekStart);
+    // Update month/year if needed to trigger reload
+    const newMonth = newWeekStart.getMonth() + 1;
+    const newYear = newWeekStart.getFullYear();
+    if (newMonth !== month || newYear !== year) {
+      setMonth(newMonth);
+      setYear(newYear);
+    }
+  };
+
   const goToday = () => {
-    setYear(now.getFullYear());
-    setMonth(now.getMonth() + 1);
+    if (view === 'month') {
+      setYear(now.getFullYear());
+      setMonth(now.getMonth() + 1);
+    } else {
+      setWeekStart(getMondayOfWeek(now));
+    }
   };
 
   // Build calendar grid
@@ -358,20 +568,60 @@ export function AgencyCalendar() {
             )}
           </CardTitle>
 
-          {/* Month navigation */}
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={prevMonth} className="h-8 w-8 p-0">
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <span className="text-sm font-semibold min-w-[130px] text-center">
-              {MONTH_NAMES[month - 1]} {year}
-            </span>
-            <Button variant="outline" size="sm" onClick={nextMonth} className="h-8 w-8 p-0">
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-            <Button variant="ghost" size="sm" onClick={goToday} className="h-8 text-xs">
-              Today
-            </Button>
+          {/* View toggle and navigation */}
+          <div className="flex items-center gap-3">
+            {/* View toggle */}
+            <div className="flex items-center gap-1 border rounded-md p-0.5">
+              <Button
+                variant={view === 'month' ? 'default' : 'ghost'}
+                size="sm"
+                onClick={() => setView('month')}
+                className="h-7 text-xs px-2"
+              >
+                Month
+              </Button>
+              <Button
+                variant={view === 'week' ? 'default' : 'ghost'}
+                size="sm"
+                onClick={() => setView('week')}
+                className="h-7 text-xs px-2"
+              >
+                Week
+              </Button>
+            </div>
+
+            {/* Navigation */}
+            <div className="flex items-center gap-2">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={view === 'month' ? prevMonth : prevWeek} 
+                className="h-8 w-8 p-0"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              {view === 'month' ? (
+                <span className="text-sm font-semibold min-w-[130px] text-center">
+                  {MONTH_NAMES[month - 1]} {year}
+                </span>
+              ) : (
+                <span className="text-sm font-semibold min-w-[180px] text-center">
+                  {weekStart.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} –{' '}
+                  {new Date(weekStart.getTime() + 6 * 24 * 60 * 60 * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                </span>
+              )}
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={view === 'month' ? nextMonth : nextWeek} 
+                className="h-8 w-8 p-0"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+              <Button variant="ghost" size="sm" onClick={goToday} className="h-8 text-xs">
+                {view === 'week' ? 'This week' : 'Today'}
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -385,6 +635,37 @@ export function AgencyCalendar() {
           </div>
         ) : error ? (
           <div className="h-32 flex items-center justify-center text-destructive text-sm">{error}</div>
+        ) : view === 'week' ? (
+          <div>
+            <WeekView
+              weekDays={getWeekDays(weekStart)}
+              eventsByDate={eventsByDate}
+              todayStr={todayStr}
+              onDayClick={(d, evs) =>
+                setSelectedDay((prev) =>
+                  prev && toDateStr(prev.date) === toDateStr(d) ? null : { date: d, events: evs }
+                )
+              }
+            />
+
+            {/* Day detail panel */}
+            {selectedDay && (
+              <div className="p-4 border-t border-border">
+                <DayDetail
+                  date={selectedDay.date}
+                  events={selectedDay.events}
+                  onClose={() => setSelectedDay(null)}
+                />
+              </div>
+            )}
+
+            {/* Empty state */}
+            {events.length === 0 && (
+              <div className="py-8 text-center text-muted-foreground text-sm border-t border-border">
+                No events this week
+              </div>
+            )}
+          </div>
         ) : (
           <div>
             {/* Day-of-week headers */}

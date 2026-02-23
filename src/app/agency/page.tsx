@@ -9,6 +9,7 @@ import type { ClientCardData } from '@/app/api/agency/clients/route';
 import { AgencyClientCards } from '@/components/agency/AgencyClientCards';
 import { AgencyActionPoints } from '@/components/agency/AgencyActionPoints';
 import { AgencyCalendar } from '@/components/agency/AgencyCalendar';
+import { AgencyBriefing } from '@/components/agency/AgencyBriefing';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 
@@ -204,14 +205,17 @@ export default function AgencyDashboard() {
         </div>
       </div>
 
-      {/* Client Cards */}
-      <AgencyClientCards clients={clients} />
+      {/* Briefing */}
+      <AgencyBriefing clients={clients} />
 
       {/* Calendar + Action Points side by side */}
       <div className="grid grid-cols-1 xl:grid-cols-[1fr_400px] gap-6 items-start">
         <AgencyCalendar />
         <AgencyActionPoints />
       </div>
+
+      {/* Client Cards */}
+      <AgencyClientCards clients={clients} />
     </div>
   );
 }

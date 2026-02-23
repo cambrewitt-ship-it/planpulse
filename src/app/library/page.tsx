@@ -17,7 +17,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
-import { Plus, Facebook, Search, Linkedin, Music, Instagram, Radio, Edit2, Trash2 } from 'lucide-react';
+import { Plus, Facebook, Search, Linkedin, Music, Instagram, Radio, Edit2, Trash2, Check } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 interface ActionPoint {
@@ -37,6 +37,14 @@ interface MediaChannelLibraryEntry {
   updated_at: string;
 }
 
+interface MediaChannelSpec {
+  id: string;
+  media_channel_library_id: string;
+  spec_text: string;
+  created_at: string;
+  updated_at: string;
+}
+
 const CHANNEL_OPTIONS = [
   { value: 'Google Ads', label: 'Google Ads', icon: Search },
   { value: 'Meta Ads', label: 'Meta Ads', icon: Facebook },
@@ -48,6 +56,7 @@ const CHANNEL_OPTIONS = [
 export default function LibraryPage() {
   const [libraryEntries, setLibraryEntries] = useState<MediaChannelLibraryEntry[]>([]);
   const [actionPoints, setActionPoints] = useState<Record<string, ActionPoint[]>>({});
+  const [specs, setSpecs] = useState<Record<string, MediaChannelSpec[]>>({});
   const [loading, setLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [newChannelTitle, setNewChannelTitle] = useState('');
@@ -62,17 +71,23 @@ export default function LibraryPage() {
   const [newActionPointCategory, setNewActionPointCategory] = useState<'SET UP' | 'HEALTH CHECK'>('SET UP');
   const [newActionPointFrequency, setNewActionPointFrequency] = useState<'daily' | 'weekly' | 'fortnightly' | 'monthly'>('weekly');
   const [actionPointFilter, setActionPointFilter] = useState<Record<string, 'SET UP' | 'HEALTH CHECK'>>({});
+  const [editingSpecId, setEditingSpecId] = useState<string | null>(null);
+  const [editingSpecText, setEditingSpecText] = useState('');
+  const [addingSpecChannelId, setAddingSpecChannelId] = useState<string | null>(null);
+  const [newSpecText, setNewSpecText] = useState('');
 
   useEffect(() => {
     loadLibraryEntries();
   }, []);
 
   useEffect(() => {
-    // Load action points for each channel type
-    const loadActionPoints = async () => {
+    // Load action points and specs for each library entry
+    const loadActionPointsAndSpecs = async () => {
       const channelTypes = new Set(libraryEntries.map(entry => entry.channel_type));
       const actionPointsMap: Record<string, ActionPoint[]> = {};
+      const specsMap: Record<string, MediaChannelSpec[]> = {};
 
+      // Load action points by channel type
       for (const channelType of channelTypes) {
         try {
           const response = await fetch(`/api/action-points?channel_type=${encodeURIComponent(channelType)}`);
@@ -86,11 +101,26 @@ export default function LibraryPage() {
         }
       }
 
+      // Load specs by library entry id
+      for (const entry of libraryEntries) {
+        try {
+          const response = await fetch(`/api/media-channel-specs?media_channel_library_id=${encodeURIComponent(entry.id)}`);
+          if (response.ok) {
+            const { data } = await response.json();
+            specsMap[entry.id] = data || [];
+          }
+        } catch (error) {
+          console.error(`Error fetching specs for ${entry.id}:`, error);
+          specsMap[entry.id] = [];
+        }
+      }
+
       setActionPoints(actionPointsMap);
+      setSpecs(specsMap);
     };
 
     if (libraryEntries.length > 0) {
-      loadActionPoints();
+      loadActionPointsAndSpecs();
     }
   }, [libraryEntries]);
 
@@ -310,6 +340,111 @@ export default function LibraryPage() {
     }
   };
 
+  const handleAddSpec = async (channelId: string) => {
+    if (!newSpecText.trim()) {
+      alert('Please enter a spec (e.g., 1920 x 1080 px)');
+      return;
+    }
+
+    try {
+      setIsSaving(true);
+      const response = await fetch('/api/media-channel-specs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          media_channel_library_id: channelId,
+          spec_text: newSpecText.trim(),
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to create spec');
+      }
+
+      const { data } = await response.json();
+      setSpecs((prev) => ({
+        ...prev,
+        [channelId]: [...(prev[channelId] || []), data],
+      }));
+
+      setNewSpecText('');
+      setAddingSpecChannelId(null);
+    } catch (error) {
+      console.error('Error creating spec:', error);
+      alert('Failed to create spec. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleStartEditSpec = (spec: MediaChannelSpec) => {
+    setEditingSpecId(spec.id);
+    setEditingSpecText(spec.spec_text);
+  };
+
+  const handleSaveEditSpec = async (channelId: string) => {
+    if (!editingSpecId || !editingSpecText.trim()) {
+      return;
+    }
+
+    try {
+      setIsSaving(true);
+      const response = await fetch('/api/media-channel-specs', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: editingSpecId,
+          spec_text: editingSpecText.trim(),
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to update spec');
+      }
+
+      const { data } = await response.json();
+      setSpecs((prev) => ({
+        ...prev,
+        [channelId]: (prev[channelId] || []).map((s) => (s.id === editingSpecId ? data : s)),
+      }));
+
+      setEditingSpecId(null);
+      setEditingSpecText('');
+    } catch (error) {
+      console.error('Error updating spec:', error);
+      alert('Failed to update spec. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDeleteSpec = async (specId: string, channelId: string) => {
+    if (!confirm('Are you sure you want to delete this spec?')) {
+      return;
+    }
+
+    try {
+      setIsSaving(true);
+      const response = await fetch(`/api/media-channel-specs?id=${specId}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to delete spec');
+      }
+
+      setSpecs((prev) => ({
+        ...prev,
+        [channelId]: (prev[channelId] || []).filter((s) => s.id !== specId),
+      }));
+    } catch (error) {
+      console.error('Error deleting spec:', error);
+      alert('Failed to delete spec. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const getChannelIcon = (channelType: string) => {
     const option = CHANNEL_OPTIONS.find(opt => opt.value === channelType);
     if (option) {
@@ -505,7 +640,7 @@ export default function LibraryPage() {
                     </div>
                   )}
                   
-                  <div className="space-y-2">
+                  <div className="space-y-2 mb-4">
                     <div className="flex items-center justify-between">
                       <h4 className="text-sm font-semibold text-gray-900">Action Points</h4>
                       {!isEditing && (
@@ -582,6 +717,95 @@ export default function LibraryPage() {
                       </div>
                     )}
                   </div>
+
+                  {/* Specs Section */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-sm font-semibold text-gray-900">Specs</h4>
+                      {!isEditing && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setAddingSpecChannelId(entry.id)}
+                          className="h-7 text-xs"
+                        >
+                          <Plus className="h-3 w-3 mr-1" />
+                          Add
+                        </Button>
+                      )}
+                    </div>
+                    {!isEditing && (
+                      <div className="space-y-1 max-h-32 overflow-y-auto">
+                        {(specs[entry.id] || []).length === 0 ? (
+                          <p className="text-xs text-gray-500">No specs for this channel</p>
+                        ) : (
+                          (specs[entry.id] || []).map((spec) => {
+                            const isEditingSpec = editingSpecId === spec.id;
+                            return (
+                              <div
+                                key={spec.id}
+                                className="flex items-center gap-2 p-2 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors"
+                              >
+                                {isEditingSpec ? (
+                                  <>
+                                    <Input
+                                      value={editingSpecText}
+                                      onChange={(e) => setEditingSpecText(e.target.value)}
+                                      className="h-7 text-xs flex-1"
+                                      autoFocus
+                                      placeholder="e.g., 1920 x 1080 px"
+                                    />
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={() => handleSaveEditSpec(entry.id)}
+                                      disabled={isSaving || !editingSpecText.trim()}
+                                      className="h-7 w-7 p-0 text-green-600 hover:text-green-700"
+                                    >
+                                      <Check className="h-3 w-3" />
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={() => {
+                                        setEditingSpecId(null);
+                                        setEditingSpecText('');
+                                      }}
+                                      className="h-7 w-7 p-0"
+                                    >
+                                      ×
+                                    </Button>
+                                  </>
+                                ) : (
+                                  <>
+                                    <span className="text-xs text-gray-900 flex-1">{spec.spec_text}</span>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={() => handleStartEditSpec(spec)}
+                                      disabled={isSaving}
+                                      className="h-7 w-7 p-0"
+                                    >
+                                      <Edit2 className="h-3 w-3" />
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={() => handleDeleteSpec(spec.id, entry.id)}
+                                      disabled={isSaving}
+                                      className="h-7 w-7 p-0 text-red-500 hover:text-red-700"
+                                    >
+                                      <Trash2 className="h-3 w-3" />
+                                    </Button>
+                                  </>
+                                )}
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </CardContent>
               </Card>
             );
@@ -652,6 +876,48 @@ export default function LibraryPage() {
               disabled={isSaving || !newActionPointText.trim() || !addingActionPointChannelType}
             >
               {isSaving ? 'Adding...' : 'Add Action Point'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Spec Dialog */}
+      <Dialog open={addingSpecChannelId !== null} onOpenChange={(open) => !open && setAddingSpecChannelId(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Spec</DialogTitle>
+            <DialogDescription>
+              Enter the spec dimensions (e.g., 1920 x 1080 px)
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="spec-text">Spec</Label>
+              <Input
+                id="spec-text"
+                placeholder="e.g., 1920 x 1080 px"
+                value={newSpecText}
+                onChange={(e) => setNewSpecText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && newSpecText.trim() && addingSpecChannelId) {
+                    handleAddSpec(addingSpecChannelId);
+                  }
+                }}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => {
+              setAddingSpecChannelId(null);
+              setNewSpecText('');
+            }}>
+              Cancel
+            </Button>
+            <Button 
+              onClick={() => addingSpecChannelId && handleAddSpec(addingSpecChannelId)} 
+              disabled={isSaving || !newSpecText.trim() || !addingSpecChannelId}
+            >
+              {isSaving ? 'Adding...' : 'Add Spec'}
             </Button>
           </DialogFooter>
         </DialogContent>

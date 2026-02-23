@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Progress } from '@/components/ui/progress';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Line, ComposedChart, Dot, LineChart } from 'recharts';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, parseISO, addMonths, subMonths, addDays } from 'date-fns';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { RefreshCw, Plus, X, Edit2, Check, Trash2, ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react';
 import { MediaChannelEnhancedView } from '@/components/ui/media-channel-enhanced-view';
 import { TimeFrame } from '@/lib/types/media-plan';
@@ -76,9 +76,10 @@ interface MediaChannelCardProps {
     onCampaignChange?: (campaignId: string) => void;
   };
   onToggleAction?: (channelId: string, actionId: string) => void;
+  onActualSpendChange?: (channelId: string, actualSpend: number) => void;
 }
 
-export default function MediaChannelCard({ channel, onToggleAction }: MediaChannelCardProps) {
+export default function MediaChannelCard({ channel, onToggleAction, onActualSpendChange }: MediaChannelCardProps) {
   const [completedActions, setCompletedActions] = useState<Set<string>>(
     new Set(channel.actionPoints.filter(a => a.completed).map(a => a.id))
   );
@@ -128,7 +129,7 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
       setSelectedCampaignId(channel.selectedCampaignId);
     }
   }, [channel.selectedCampaignId]);
-  
+
   // Handle campaign change
   const handleCampaignChange = (campaignId: string) => {
     setSelectedCampaignId(campaignId);
@@ -850,10 +851,21 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
     .slice(-1)[0];
   
   const totalActualSpend = lastActualSpendData?.actualSpendLineUpToToday ?? 0;
-  
-  const spendProgress = plannedMonthlySpendForChannel > 0 
-    ? (totalActualSpend / plannedMonthlySpendForChannel) * 100 
+
+  const spendProgress = plannedMonthlySpendForChannel > 0
+    ? (totalActualSpend / plannedMonthlySpendForChannel) * 100
     : 0;
+
+  // Notify parent when actual spend changes (from live API data)
+  // Use ref to track previous value and only notify on actual changes
+  const prevTotalActualSpendRef = useRef<number>(totalActualSpend);
+
+  useEffect(() => {
+    if (prevTotalActualSpendRef.current !== totalActualSpend) {
+      prevTotalActualSpendRef.current = totalActualSpend;
+      onActualSpendChange?.(channel.id, totalActualSpend);
+    }
+  }, [totalActualSpend, channel.id, onActualSpendChange]);
 
   return (
     <Card className="bg-white shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 ease-in-out relative">
@@ -1284,11 +1296,9 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
                       </p>
                     </div>
                     <div className="bg-[#f8fafc] rounded-lg p-3 border border-[#e2e8f0]">
-                      <p className="text-xs text-[#64748b] mb-1">Actual Spend</p>
+                      <p className="text-xs text-[#64748b] mb-1">Actual Spend (Net)</p>
                       <p className="text-lg font-semibold text-[#0f172a]">
-                        {hasConnectedAccount
-                          ? `$${totalActualSpend.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                          : '—'}
+                        ${totalActualSpend.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </p>
                     </div>
                     </div>

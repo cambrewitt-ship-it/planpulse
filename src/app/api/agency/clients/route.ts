@@ -118,16 +118,61 @@ export async function GET(request: NextRequest) {
 
     // ── Fetch actual spend per client for the current calendar month ─────────
     const currentMonthStart = toDateStr(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+    const todayStr = toDateStr(new Date()); // Get today's date, not month start
     const { data: spendRows } = await supabase
       .from('ad_performance_metrics')
-      .select('client_id, spend')
+      .select('client_id, spend, campaign_id, date')
       .gte('date', currentMonthStart)
-      .lte('date', today);
+      .lte('date', todayStr);
 
     const spendByClient = new Map<string, number>();
+    // Track manual overrides separately - these replace API data for that month
+    const manualOverrides = new Map<string, number>(); // "clientId-month" -> spend
+    
+    // First pass: collect manual overrides
+    // Sum all manual overrides per client per month (multiple channels can have overrides)
     for (const row of spendRows || []) {
       if (!row.client_id) continue;
+      if (row.campaign_id && row.campaign_id.startsWith('manual-override-')) {
+        const month = row.date ? row.date.substring(0, 7) : ''; // YYYY-MM
+        // Use a separator that won't conflict with UUIDs: "clientId|YYYY-MM"
+        const key = `${row.client_id}|${month}`;
+        // Sum multiple channels' overrides for the same client/month
+        manualOverrides.set(key, (manualOverrides.get(key) || 0) + Number(row.spend || 0));
+      }
+    }
+    
+    // Second pass: sum API data, but skip months that have manual overrides
+    for (const row of spendRows || []) {
+      if (!row.client_id) continue;
+      
+      // Skip manual overrides (already collected)
+      if (row.campaign_id && row.campaign_id.startsWith('manual-override-')) {
+        continue;
+      }
+      
+      // Skip API data if there's a manual override for this month
+      const month = row.date ? row.date.substring(0, 7) : '';
+      const key = `${row.client_id}|${month}`;
+      if (manualOverrides.has(key)) {
+        continue; // Manual override replaces API data for this month
+      }
+      
+      // Add API data
       spendByClient.set(row.client_id, (spendByClient.get(row.client_id) || 0) + Number(row.spend || 0));
+    }
+    
+    // Third pass: add manual overrides to totals
+    // Key format: "clientId|YYYY-MM" (using | separator to avoid UUID dash conflicts)
+    const currentMonth = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+    
+    for (const [key, spend] of manualOverrides.entries()) {
+      const [clientId, month] = key.split('|');
+      
+      // Only include manual overrides for the current month
+      if (month === currentMonth && clientId) {
+        spendByClient.set(clientId, (spendByClient.get(clientId) || 0) + spend);
+      }
     }
 
     // Current month key — must match the "YYYY-M" format used by media-plan-grid.tsx (no zero-padding)

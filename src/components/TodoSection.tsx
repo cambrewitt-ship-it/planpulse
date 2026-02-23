@@ -24,6 +24,7 @@ interface TodoSectionProps {
   onStatsUpdate?: (stats: { totalAll: number; completedAll: number; trafficLightColor: string; loading: boolean }) => void;
   onActionPointsChange?: () => void;
   actionPointsRefetchTrigger?: number;
+  totalActualSpend?: number;
 }
 
 type TabType = 'SET UP' | 'HEALTH CHECK';
@@ -145,7 +146,7 @@ const getTrafficLight = (total: number, completed: number) => {
   return { color: 'bg-red-500', label: 'red' };
 };
 
-export default function TodoSection({ mediaPlanBuilderChannels, clientId, embedded = false, onStatsUpdate, onActionPointsChange, actionPointsRefetchTrigger = 0 }: TodoSectionProps) {
+export default function TodoSection({ mediaPlanBuilderChannels, clientId, embedded = false, onStatsUpdate, onActionPointsChange, actionPointsRefetchTrigger = 0, totalActualSpend = 0 }: TodoSectionProps) {
   const [allActionPoints, setAllActionPoints] = useState<ActionPoint[]>([]);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<TabType>('SET UP');
@@ -380,6 +381,19 @@ export default function TodoSection({ mediaPlanBuilderChannels, clientId, embedd
           )}
         </div>
       )}
+
+      {/* Spend Pacing Section */}
+      <div className="mb-6 p-4 bg-[#f8fafc] rounded-lg border border-[#e2e8f0]">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-xs text-[#64748b] mb-1">Spend Pacing</p>
+            <p className="text-2xl font-bold text-[#0f172a]">
+              ${totalActualSpend.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </p>
+            <p className="text-xs text-[#64748b] mt-1">Total Actual Spend (sum of all media channels)</p>
+          </div>
+        </div>
+      </div>
 
       {/* Tabs */}
       <div className="flex gap-1 mb-6 border-b border-[#e2e8f0]">
