@@ -56,6 +56,12 @@ export async function GET(
     let googleImpressions = 0;
     let googleClicks = 0;
 
+    // GA4 metrics
+    let ga4ActiveUsers = 0;
+    let ga4Conversions = 0;
+    let ga4Sessions = 0;
+    let ga4Events: Array<{ name: string; count: number; users: number }> = [];
+
     let metaQuery = supabase
       .from('ad_performance_metrics')
       .select('spend, impressions, clicks')
@@ -80,7 +86,19 @@ export async function GET(
       googleQuery = googleQuery.eq('client_id', clientId);
     }
 
-    const [metaResult, googleResult] = await Promise.all([metaQuery, googleQuery]);
+    // Fetch Google Analytics 4 data
+    let ga4Query = supabase
+      .from('google_analytics_metrics')
+      .select('metric_name, metric_value, users_count')
+      .eq('user_id', userId)
+      .gte('date', startDate)
+      .lte('date', endDate);
+
+    if (clientId) {
+      ga4Query = ga4Query.eq('client_id', clientId);
+    }
+
+    const [metaResult, googleResult, ga4Result] = await Promise.all([metaQuery, googleQuery, ga4Query]);
 
     for (const row of metaResult.data || []) {
       metaSpend += Number(row.spend) || 0;
@@ -92,6 +110,30 @@ export async function GET(
       googleSpend += Number(row.spend) || 0;
       googleImpressions += Number(row.impressions) || 0;
       googleClicks += Number(row.clicks) || 0;
+    }
+
+    // Aggregate GA4 metrics
+    for (const row of ga4Result.data || []) {
+      const metricName = row.metric_name as string;
+      const metricValue = Number(row.metric_value) || 0;
+      const usersCount = Number(row.users_count) || 0;
+
+      if (metricName === 'activeUsers') {
+        ga4ActiveUsers += metricValue;
+      } else if (metricName === 'conversions') {
+        ga4Conversions += metricValue;
+      } else if (metricName === 'sessions') {
+        ga4Sessions += metricValue;
+      } else {
+        // Event-based metrics
+        const existingEvent = ga4Events.find(e => e.name === metricName);
+        if (existingEvent) {
+          existingEvent.count += metricValue;
+          existingEvent.users += usersCount;
+        } else {
+          ga4Events.push({ name: metricName, count: metricValue, users: usersCount });
+        }
+      }
     }
 
     const totalSpend = metaSpend + googleSpend;
@@ -107,7 +149,14 @@ export async function GET(
         clicks: googleClicks,
         spend: googleSpend,
       },
-      ga4Metrics: undefined,
+      ga4Metrics: {
+        standardMetrics: {
+          activeUsers: ga4ActiveUsers,
+          conversions: ga4Conversions,
+          sessions: ga4Sessions,
+        },
+        events: ga4Events,
+      },
       totalSpend,
     };
 
