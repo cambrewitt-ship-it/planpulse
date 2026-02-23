@@ -366,9 +366,36 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
       console.log(`[MediaChannels] API response status:`, response.status, response.statusText);
       
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-        console.error(`[MediaChannels] API error:`, { status: response.status, errorData });
-        throw new Error(errorData.error || `HTTP ${response.status}: Failed to fetch spend data`);
+        let errorData: any = {};
+        try {
+          const responseText = await response.text();
+          if (responseText) {
+            try {
+              errorData = JSON.parse(responseText);
+            } catch {
+              // Not JSON, use text as error message
+              errorData = { error: responseText.substring(0, 500) };
+            }
+          }
+        } catch (e) {
+          errorData = { error: 'Failed to read error response' };
+        }
+        
+        // Extract error message from various possible fields
+        const errorMessage = errorData.error || 
+                            errorData.details || 
+                            errorData.message || 
+                            (Array.isArray(errorData.errors) && errorData.errors.length > 0 
+                              ? errorData.errors.map((e: any) => e.message || e).join(', ')
+                              : null) ||
+                            `HTTP ${response.status}: Failed to fetch spend data`;
+        
+        console.error(`[MediaChannels] API error:`, { 
+          status: response.status, 
+          statusText: response.statusText,
+          errorData 
+        });
+        throw new Error(errorMessage);
       }
 
       const data = await response.json();

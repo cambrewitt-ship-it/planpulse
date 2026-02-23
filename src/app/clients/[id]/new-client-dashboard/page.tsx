@@ -127,6 +127,34 @@ export default function NewClientDashboard() {
   const [actionPointsRefetchTrigger, setActionPointsRefetchTrigger] = useState(0);
   const [totalActualSpend, setTotalActualSpend] = useState<number>(0);
 
+  // Calculate planned budget for current month from media plan
+  const plannedBudget = useMemo(() => {
+    if (!mediaPlanBuilderChannels || mediaPlanBuilderChannels.length === 0) {
+      return 0;
+    }
+
+    const now = new Date();
+    const currentMonth = `${now.getFullYear()}-${now.getMonth() + 1}`;
+    let totalBudget = 0;
+
+    mediaPlanBuilderChannels.forEach((channel) => {
+      if (channel.flights) {
+        channel.flights.forEach((flight) => {
+          if (flight.monthlySpend) {
+            // Try both padded and unpadded formats
+            const paddedMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+            const unpaddedMonthKey = `${now.getFullYear()}-${now.getMonth() + 1}`;
+
+            const spend = flight.monthlySpend[paddedMonthKey] || flight.monthlySpend[unpaddedMonthKey] || 0;
+            totalBudget += spend;
+          }
+        });
+      }
+    });
+
+    return totalBudget;
+  }, [mediaPlanBuilderChannels]);
+
   // Handler to trigger refetch of action points across all components
   const handleActionPointsChange = () => {
     setActionPointsRefetchTrigger(prev => prev + 1);
@@ -1207,6 +1235,7 @@ export default function NewClientDashboard() {
                     onActionPointsChange={handleActionPointsChange}
                     actionPointsRefetchTrigger={actionPointsRefetchTrigger}
                     totalActualSpend={totalActualSpend}
+                    plannedBudget={plannedBudget}
                   />
                 </div>
               </div>

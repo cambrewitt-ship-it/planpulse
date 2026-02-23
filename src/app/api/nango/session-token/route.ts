@@ -43,11 +43,6 @@ export async function POST(request: Request) {
   const nangoPlatform = rawPlatform ? toNangoPlatform(rawPlatform) : rawPlatform;
   console.log("Platform mapping:", { raw: rawPlatform, nango: nangoPlatform });
 
-  
-  // Debug: Check what cookies we have
-  const allCookies = cookieStore.getAll();
-  console.log("Available cookies:", allCookies.map(c => c.name));
-  
   const supabase = await createClient();
 
   const {

@@ -323,7 +323,7 @@ export async function POST(request: NextRequest) {
               metrics.average_cpc,
               metrics.conversions
             FROM campaign
-            WHERE segments.date BETWEEN '${startDate}' AND '${endDate}'
+            WHERE segments.date >= '${startDate}' AND segments.date <= '${endDate}'
             ORDER BY segments.date DESC
           `;
 
@@ -411,6 +411,39 @@ export async function POST(request: NextRequest) {
                   customerId: customerId,
                   accountName: account.account_name,
                   error: `404 - Customer ID ${customerId} not found or not accessible. Please verify: (1) This customer is linked to your MCC account ${mccId}, (2) The customer ID is correct, (3) Your Google Ads account has access to this customer.`
+                });
+              } else if (response.status === 400) {
+                // Extract detailed error information for 400 errors
+                const errorMessage = errorJson?.error?.message || 
+                                    errorJson?.error?.status || 
+                                    errorJson?.error || 
+                                    errorText.substring(0, 500);
+                const errorDetails = errorJson?.error?.errors || 
+                                    errorJson?.error?.details || 
+                                    [];
+                
+                console.error(`  🔴 400 Error Details:`, {
+                  customerId,
+                  cleanCustomerId,
+                  errorMessage,
+                  errorDetails,
+                  query: query.substring(0, 200),
+                  possibleCauses: [
+                    'Invalid query syntax',
+                    'Invalid date format',
+                    'Invalid field names',
+                    'Query contains unsupported operators'
+                  ]
+                });
+                
+                const detailedError = errorDetails.length > 0 
+                  ? `${errorMessage}: ${JSON.stringify(errorDetails)}`
+                  : errorMessage;
+                
+                errors.push({
+                  customerId: customerId,
+                  accountName: account.account_name,
+                  error: `Google Ads API error 400: ${detailedError}`
                 });
               } else {
                 errors.push({
