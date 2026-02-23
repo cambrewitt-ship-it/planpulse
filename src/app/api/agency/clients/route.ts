@@ -1,10 +1,42 @@
 // src/app/api/agency/clients/route.ts
-// API endpoint for fetching all clients with health status
+// API endpoint for fetching all clients with health status + enriched card data
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import type { Database, ClientWithHealth, HealthStatus } from '@/types/database';
-import { calculateClientHealth } from '@/lib/health/calculations';
+import { calculateClientHealth, getActionPointStatsForClient } from '@/lib/health/calculations';
+
+export interface ClientChannel {
+  channelName: string;
+  status: 'live' | 'upcoming' | 'ended';
+  startDate: string | null; // ISO date of earliest flight start
+  endDate: string | null;   // ISO date of latest flight end
+}
+
+export interface ClientCardData extends ClientWithHealth {
+  channels: ClientChannel[];
+  tasksDueSoon: number;                // incomplete tasks with due_date within next 3 days
+  plannedBudget: number;               // current-month planned spend across all channels ($)
+  actualSpend: number;                 // current-month actual spend ($)
+  spendVariancePct: number | null;     // ((actual - planned) / planned) * 100, positive = over
+  totalActionPoints: number;           // total action points for this client
+  completedActionPoints: number;       // completed action points for this client
+}
+
+// ─── helpers ──────────────────────────────────────────────────────────────────
+
+function toDateStr(date: Date): string {
+  return date.toISOString().split('T')[0];
+}
+
+/** Determine channel status relative to today */
+function channelStatus(startDate: string | null, endDate: string | null): 'live' | 'upcoming' | 'ended' {
+  const today = toDateStr(new Date());
+  if (!startDate) return 'upcoming';
+  if (endDate && endDate < today) return 'ended';
+  if (startDate <= today) return 'live';
+  return 'upcoming';
+}
 
 /**
  * GET /api/agency/clients
@@ -37,32 +69,149 @@ export async function GET(request: NextRequest) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: clientsData, error: clientsError } = await (supabase as any)
       .from('clients')
-      .select(`
-        *,
-        client_health_status (*)
-      `)
+      .select(`*, client_health_status (*)`)
       .order('name', { ascending: true });
 
     if (clientsError) {
       console.error('Error fetching clients:', clientsError);
-      return NextResponse.json(
-        { error: 'Failed to fetch clients' },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: 'Failed to fetch clients' }, { status: 500 });
     }
 
-    // Transform data and calculate health for clients without it
-    const clientsWithHealth: ClientWithHealth[] = await Promise.all(
-      (clientsData || []).map(async (client) => {
-        // Check if client_health_status exists (it's an array from the join)
+    // ── Fetch all media plans (channels + flights) in one query ───────────────
+    const { data: allMediaPlans } = await supabase
+      .from('client_media_plan_builder')
+      .select('client_id, channels');
+
+    const mediaPlanMap = new Map<string, any[]>();
+    for (const plan of allMediaPlans || []) {
+      if (plan.channels && Array.isArray(plan.channels)) {
+        mediaPlanMap.set(plan.client_id, plan.channels as any[]);
+      }
+    }
+
+    // ── Fetch all action points with due dates ────────────────────────────────
+    const today = toDateStr(new Date());
+    const in3Days = toDateStr(new Date(Date.now() + 3 * 24 * 60 * 60 * 1000));
+
+    const { data: allActionPoints } = await supabase
+      .from('action_points')
+      .select('id, channel_type, due_date')
+      .not('due_date', 'is', null)
+      .lte('due_date', in3Days); // only fetch those due within the next 3 days (+ overdue)
+
+    // ── Fetch all per-client completions for those APs ────────────────────────
+    const apIds = (allActionPoints || []).map((ap: any) => ap.id);
+    let completionsByClient = new Map<string, Map<string, boolean>>();
+    if (apIds.length > 0) {
+      const { data: completions } = await supabase
+        .from('client_action_point_completions')
+        .select('client_id, action_point_id, completed')
+        .in('action_point_id', apIds);
+
+      for (const c of completions || []) {
+        if (!completionsByClient.has(c.client_id)) {
+          completionsByClient.set(c.client_id, new Map());
+        }
+        completionsByClient.get(c.client_id)!.set(c.action_point_id, c.completed);
+      }
+    }
+
+    // ── Fetch actual spend per client for the current calendar month ─────────
+    const currentMonthStart = toDateStr(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+    const { data: spendRows } = await supabase
+      .from('ad_performance_metrics')
+      .select('client_id, spend')
+      .gte('date', currentMonthStart)
+      .lte('date', today);
+
+    const spendByClient = new Map<string, number>();
+    for (const row of spendRows || []) {
+      if (!row.client_id) continue;
+      spendByClient.set(row.client_id, (spendByClient.get(row.client_id) || 0) + Number(row.spend || 0));
+    }
+
+    // Current month key — must match the "YYYY-M" format used by media-plan-grid.tsx (no zero-padding)
+    const currentMonthKey = `${new Date().getFullYear()}-${new Date().getMonth() + 1}`;
+
+    // ── Build enriched client list ────────────────────────────────────────────
+    const enrichedClients: ClientCardData[] = await Promise.all(
+      (clientsData || []).map(async (client: any) => {
         const healthArray = client.client_health_status as any[];
         let health = healthArray && healthArray.length > 0 ? healthArray[0] : null;
 
-        // If no health status exists, calculate it on the fly
         if (!health) {
-          console.log(`No health status for client ${client.id}, calculating...`);
           health = await calculateClientHealth(supabase, client.id);
         }
+
+        // ── Channels with live/upcoming status ──
+        const rawChannels: any[] = mediaPlanMap.get(client.id) || [];
+        const channels: ClientChannel[] = rawChannels
+          .filter((ch: any) => ch.channelName)
+          .map((ch: any) => {
+            const flights: any[] = ch.flights || [];
+            const starts = flights.map((f: any) => f.startWeek as string).filter(Boolean);
+            const ends = flights.map((f: any) => f.endWeek as string).filter(Boolean);
+
+            // Normalise to YYYY-MM-DD
+            const toD = (s: string) => s.length > 10 ? s.split('T')[0] : s;
+            const startDates = starts.map(toD).sort();
+            const endDates = ends.map(toD).sort();
+
+            const earliestStart = startDates[0] || null;
+            const latestEnd = endDates[endDates.length - 1] || null;
+
+            return {
+              channelName: ch.channelName as string,
+              status: channelStatus(earliestStart, latestEnd),
+              startDate: earliestStart,
+              endDate: latestEnd,
+            };
+          })
+          // Only show live + upcoming (not ended)
+          .filter((ch: ClientChannel) => ch.status !== 'ended')
+          // Sort: live first, then upcoming
+          .sort((a: ClientChannel, b: ClientChannel) => {
+            if (a.status === 'live' && b.status !== 'live') return -1;
+            if (b.status === 'live' && a.status !== 'live') return 1;
+            return (a.startDate || '').localeCompare(b.startDate || '');
+          });
+
+        // ── Tasks due soon (within 3 days, not completed) ──
+        const clientCompletions = completionsByClient.get(client.id) || new Map<string, boolean>();
+        const clientChannelNames = new Set(
+          rawChannels.filter((ch: any) => ch.channelName).map((ch: any) => normalizeChannel(ch.channelName))
+        );
+
+        const tasksDueSoon = (allActionPoints || []).filter((ap: any) => {
+          if (!ap.due_date) return false;
+          if (ap.due_date < today) return false; // exclude already overdue
+          if (ap.due_date > in3Days) return false;
+          // Check this AP's channel belongs to the client
+          if (!clientChannelNames.has(normalizeChannel(ap.channel_type))) return false;
+          // Check not completed
+          return clientCompletions.get(ap.id) !== true;
+        }).length;
+
+        // ── Planned budget for the current month (from monthlySpend breakdown) ──
+        let plannedBudget = 0;
+        for (const ch of rawChannels) {
+          for (const f of ch.flights || []) {
+            if (f.monthlySpend && typeof f.monthlySpend === 'object') {
+              plannedBudget += Number(f.monthlySpend[currentMonthKey] || 0);
+            }
+          }
+        }
+
+        // ── Actual spend ──
+        const actualSpend = spendByClient.get(client.id) || 0;
+
+        // ── Spend variance % — positive means overspending ──
+        const spendVariancePct = plannedBudget > 0
+          ? ((actualSpend - plannedBudget) / plannedBudget) * 100
+          : null;
+
+        // ── Action point completion stats ──
+        const apStats = await getActionPointStatsForClient(supabase, client.id);
 
         return {
           id: client.id,
@@ -70,14 +219,21 @@ export async function GET(request: NextRequest) {
           created_at: client.created_at,
           updated_at: client.updated_at,
           health,
+          channels,
+          tasksDueSoon,
+          plannedBudget,
+          actualSpend,
+          spendVariancePct,
+          totalActionPoints: apStats.total,
+          completedActionPoints: apStats.completed,
         };
       })
     );
 
     // Apply status filter if provided
-    let filteredClients = clientsWithHealth;
+    let filteredClients = enrichedClients;
     if (statusFilter) {
-      filteredClients = clientsWithHealth.filter(
+      filteredClients = enrichedClients.filter(
         (client) => client.health?.status === statusFilter
       );
     }
@@ -87,8 +243,7 @@ export async function GET(request: NextRequest) {
     filteredClients.sort((a, b) => {
       const aStatus = a.health?.status || 'green';
       const bStatus = b.health?.status || 'green';
-      const statusDiff = statusOrder[aStatus] - statusOrder[bStatus];
-      
+      const statusDiff = statusOrder[aStatus as keyof typeof statusOrder] - statusOrder[bStatus as keyof typeof statusOrder];
       if (statusDiff !== 0) return statusDiff;
       return a.name.localeCompare(b.name);
     });
@@ -101,4 +256,13 @@ export async function GET(request: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+function normalizeChannel(name: string): string {
+  const lower = name.toLowerCase();
+  if (lower.includes('meta') || lower.includes('facebook')) return 'Meta Ads';
+  if (lower.includes('google')) return 'Google Ads';
+  if (lower.includes('linkedin')) return 'LinkedIn Ads';
+  if (lower.includes('tiktok')) return 'TikTok Ads';
+  return name;
 }

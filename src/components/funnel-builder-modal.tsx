@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { X, Plus, GripVertical, Trash2, Check, ChevronsUpDown } from 'lucide-react';
+import { X, Plus, GripVertical, Trash2, Check, ChevronsUpDown, Link2 } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -33,7 +33,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
-import { FunnelStage, FunnelConfig } from '@/lib/types/funnel';
+import { FunnelStage, FunnelConfig, CombinedMetric } from '@/lib/types/funnel';
 import {
   DndContext,
   closestCenter,
@@ -129,6 +129,22 @@ const SOURCE_METRICS = {
   ],
 };
 
+const getPlatformName = (source: 'meta' | 'google' | 'ga4', channelName?: string, availableChannels?: MediaChannel[]): string => {
+  if (channelName && availableChannels) {
+    // Try to find the channel in availableChannels to get the platform name
+    const channel = availableChannels.find(c => c.name === channelName);
+    if (channel) {
+      return channel.platform || channel.name;
+    }
+    return channelName;
+  }
+  // Default platform names
+  if (source === 'meta') return 'Meta';
+  if (source === 'google') return 'Google Search';
+  if (source === 'ga4') return 'GA4';
+  return source;
+};
+
 function SortableStageRow({
   stage,
   index,
@@ -136,6 +152,7 @@ function SortableStageRow({
   onDelete,
   ga4Events,
   isLoadingEvents,
+  availableChannels,
 }: {
   stage: StageConfig;
   index: number;
@@ -143,6 +160,7 @@ function SortableStageRow({
   onDelete: (index: number) => void;
   ga4Events: Array<{ name: string; count: number }>;
   isLoadingEvents: boolean;
+  availableChannels: MediaChannel[];
 }) {
   const {
     attributes,
@@ -160,12 +178,59 @@ function SortableStageRow({
 
   const [eventSearch, setEventSearch] = useState(stage.eventName || '');
   const [isEventPopoverOpen, setIsEventPopoverOpen] = useState(false);
+  const [isCombineDialogOpen, setIsCombineDialogOpen] = useState(false);
+  const [selectedMetricsForCombine, setSelectedMetricsForCombine] = useState<Array<{
+    source: 'meta' | 'google' | 'ga4';
+    metricKey: string;
+    eventName?: string;
+    platformName?: string;
+  }>>(stage.combinedMetrics || []);
   
   const filteredEvents = ga4Events.filter(e => 
     e.name.toLowerCase().includes(eventSearch.toLowerCase())
   );
 
   const selectedEvent = ga4Events.find(e => e.name === stage.eventName);
+
+
+  const handleCombineMetrics = () => {
+    if (selectedMetricsForCombine.length < 2) {
+      return;
+    }
+    const combinedMetrics: CombinedMetric[] = selectedMetricsForCombine.map(m => ({
+      source: m.source,
+      metricKey: m.metricKey,
+      eventName: m.eventName,
+      platformName: m.platformName,
+    }));
+    onUpdate(index, { combinedMetrics });
+    setIsCombineDialogOpen(false);
+  };
+
+  const handleRemoveCombinedMetrics = () => {
+    onUpdate(index, { combinedMetrics: undefined });
+    setSelectedMetricsForCombine([]);
+  };
+
+  const [newMetricSource, setNewMetricSource] = useState<'meta' | 'google' | 'ga4'>('meta');
+  const [newMetricKey, setNewMetricKey] = useState('impressions');
+  const [newMetricEventName, setNewMetricEventName] = useState('');
+
+  const addMetricToCombine = () => {
+    setSelectedMetricsForCombine([
+      ...selectedMetricsForCombine,
+      {
+        source: newMetricSource,
+        metricKey: newMetricKey,
+        eventName: newMetricKey === 'eventCount' ? newMetricEventName : undefined,
+        platformName: getPlatformName(newMetricSource, undefined, availableChannels),
+      }
+    ]);
+    // Reset to defaults
+    setNewMetricSource('meta');
+    setNewMetricKey('impressions');
+    setNewMetricEventName('');
+  };
 
   return (
     <Card
@@ -339,6 +404,66 @@ function SortableStageRow({
             </div>
           )}
 
+          {/* Combined Metrics Display */}
+          {stage.combinedMetrics && stage.combinedMetrics.length > 0 && (
+            <div className="p-3 bg-blue-50 border border-blue-300 rounded-md">
+              <div className="flex items-center justify-between mb-2">
+                <Label className="text-sm font-semibold text-blue-900">Combined Metrics:</Label>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleRemoveCombinedMetrics}
+                  className="h-6 px-2 text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
+                >
+                  Remove
+                </Button>
+              </div>
+              <div className="space-y-1">
+                {stage.combinedMetrics.map((cm, cmIndex) => {
+                  const metricLabel = SOURCE_METRICS[cm.source].find(m => m.value === cm.metricKey)?.label || cm.metricKey;
+                  const displayName = cm.platformName || getPlatformName(cm.source, undefined, availableChannels);
+                  return (
+                    <div key={cmIndex} className="text-sm text-blue-800">
+                      {cmIndex > 0 && <span className="mx-1">+</span>}
+                      <span className="font-medium">{displayName}</span> - {metricLabel}
+                      {cm.eventName && <span className="text-xs text-blue-600"> ({cm.eventName})</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Combine Metrics Button */}
+          {(!stage.combinedMetrics || stage.combinedMetrics.length === 0) && (
+            <div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  // Initialize with current stage's metric
+                  setSelectedMetricsForCombine([{
+                    source: stage.source,
+                    metricKey: stage.metricKey,
+                    eventName: stage.eventName,
+                    platformName: getPlatformName(stage.source, undefined, availableChannels),
+                  }]);
+                  // Initialize new metric fields
+                  setNewMetricSource('meta');
+                  setNewMetricKey('impressions');
+                  setNewMetricEventName('');
+                  setIsCombineDialogOpen(true);
+                }}
+                className="w-full"
+              >
+                <Link2 className="h-4 w-4 mr-2" />
+                Combine Metrics
+              </Button>
+            </div>
+          )}
+
           {/* Stage Name (Optional - at bottom) */}
           <div>
             <Label htmlFor={`stage-name-${index}`}>
@@ -367,6 +492,135 @@ function SortableStageRow({
           <Trash2 className="h-4 w-4" />
         </Button>
       </div>
+
+      {/* Combine Metrics Dialog */}
+      <Dialog open={isCombineDialogOpen} onOpenChange={setIsCombineDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Combine Metrics</DialogTitle>
+            <DialogDescription>
+              Select multiple metrics to combine into one stage. The values will be summed together.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            {/* Current Selected Metrics */}
+            <div>
+              <Label>Selected Metrics ({selectedMetricsForCombine.length})</Label>
+              <div className="mt-2 space-y-2 max-h-48 overflow-y-auto border rounded-md p-3">
+                {selectedMetricsForCombine.length === 0 ? (
+                  <p className="text-sm text-gray-500">No metrics selected yet. Add metrics below.</p>
+                ) : (
+                  selectedMetricsForCombine.map((metric, idx) => {
+                    const metricLabel = SOURCE_METRICS[metric.source].find(m => m.value === metric.metricKey)?.label || metric.metricKey;
+                    return (
+                      <div key={idx} className="flex items-center justify-between p-2 bg-gray-50 rounded">
+                        <div className="flex-1">
+                          <span className="font-medium">{metric.platformName}</span> - {metricLabel}
+                          {metric.eventName && <span className="text-xs text-gray-500"> ({metric.eventName})</span>}
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setSelectedMetricsForCombine(selectedMetricsForCombine.filter((_, i) => i !== idx));
+                          }}
+                          className="h-6 w-6 p-0 text-red-600"
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            {/* Add New Metric */}
+            <div className="border-t pt-4">
+              <Label>Add Metric to Combine</Label>
+              <div className="space-y-2 mt-2">
+                <div className="grid grid-cols-3 gap-2">
+                  <Select
+                    value={newMetricSource}
+                    onValueChange={(value: 'meta' | 'google' | 'ga4') => {
+                      setNewMetricSource(value);
+                      setNewMetricKey(SOURCE_METRICS[value][0].value);
+                      setNewMetricEventName('');
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Source" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="meta">Meta Ads</SelectItem>
+                      <SelectItem value="google">Google Ads</SelectItem>
+                      <SelectItem value="ga4">GA4</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  <Select
+                    value={newMetricKey}
+                    onValueChange={(value) => {
+                      setNewMetricKey(value);
+                      if (value !== 'eventCount') {
+                        setNewMetricEventName('');
+                      }
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Metric" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {SOURCE_METRICS[newMetricSource].map((metric) => (
+                        <SelectItem key={metric.value} value={metric.value}>
+                          {metric.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <Button
+                    type="button"
+                    onClick={addMetricToCombine}
+                    className="w-full"
+                  >
+                    <Plus className="h-4 w-4 mr-1" />
+                    Add
+                  </Button>
+                </div>
+                
+                {/* GA4 Event Name input when eventCount is selected */}
+                {newMetricSource === 'ga4' && newMetricKey === 'eventCount' && (
+                  <Input
+                    placeholder="Event name (e.g., purchase, sign_up)"
+                    value={newMetricEventName}
+                    onChange={(e) => setNewMetricEventName(e.target.value)}
+                  />
+                )}
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setIsCombineDialogOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={handleCombineMetrics}
+              disabled={selectedMetricsForCombine.length < 2}
+            >
+              Combine {selectedMetricsForCombine.length} Metric{selectedMetricsForCombine.length !== 1 ? 's' : ''}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }
@@ -526,21 +780,47 @@ export function FunnelBuilderModal({
     }
 
     stages.forEach((stage, i) => {
-      if (stage.source === 'ga4' && stage.metricKey === 'eventCount' && !stage.eventName) {
-        newErrors.push(`Stage ${i + 1}: Event name is required for custom events`);
-      }
-      
-      // Check if GA4 event exists in the fetched events list
-      if (stage.source === 'ga4' && stage.metricKey === 'eventCount' && stage.eventName) {
-        const eventExists = ga4Events.find(e => e.name === stage.eventName);
-        if (!eventExists && !isLoadingEvents) {
-          warnings.push(
-            `Stage ${i + 1}: Event "${stage.eventName}" not found in top 50 events (may have low/zero count)`
-          );
-        } else if (eventExists && eventExists.count === 0) {
-          warnings.push(
-            `Stage ${i + 1}: Event "${stage.eventName}" has 0 occurrences in last 30 days`
-          );
+      // Validate combined metrics if present
+      if (stage.combinedMetrics && stage.combinedMetrics.length > 0) {
+        if (stage.combinedMetrics.length < 2) {
+          newErrors.push(`Stage ${i + 1}: Combined metrics must have at least 2 metrics`);
+        }
+        stage.combinedMetrics.forEach((cm, cmIndex) => {
+          if (cm.source === 'ga4' && cm.metricKey === 'eventCount' && !cm.eventName) {
+            newErrors.push(`Stage ${i + 1}, Combined Metric ${cmIndex + 1}: Event name is required for custom events`);
+          }
+          // Check if GA4 event exists in the fetched events list
+          if (cm.source === 'ga4' && cm.metricKey === 'eventCount' && cm.eventName) {
+            const eventExists = ga4Events.find(e => e.name === cm.eventName);
+            if (!eventExists && !isLoadingEvents) {
+              warnings.push(
+                `Stage ${i + 1}, Combined Metric ${cmIndex + 1}: Event "${cm.eventName}" not found in top 50 events (may have low/zero count)`
+              );
+            } else if (eventExists && eventExists.count === 0) {
+              warnings.push(
+                `Stage ${i + 1}, Combined Metric ${cmIndex + 1}: Event "${cm.eventName}" has 0 occurrences in last 30 days`
+              );
+            }
+          }
+        });
+      } else {
+        // Validate single metric (original behavior)
+        if (stage.source === 'ga4' && stage.metricKey === 'eventCount' && !stage.eventName) {
+          newErrors.push(`Stage ${i + 1}: Event name is required for custom events`);
+        }
+        
+        // Check if GA4 event exists in the fetched events list
+        if (stage.source === 'ga4' && stage.metricKey === 'eventCount' && stage.eventName) {
+          const eventExists = ga4Events.find(e => e.name === stage.eventName);
+          if (!eventExists && !isLoadingEvents) {
+            warnings.push(
+              `Stage ${i + 1}: Event "${stage.eventName}" not found in top 50 events (may have low/zero count)`
+            );
+          } else if (eventExists && eventExists.count === 0) {
+            warnings.push(
+              `Stage ${i + 1}: Event "${stage.eventName}" has 0 occurrences in last 30 days`
+            );
+          }
         }
       }
     });
@@ -561,9 +841,16 @@ export function FunnelBuilderModal({
       const processedStages = stages.map(s => {
         let displayName = s.displayName.trim();
 
-        // If displayName is empty, use event name or metric label
+        // If displayName is empty, generate from combined metrics or single metric
         if (!displayName) {
-          if (s.source === 'ga4' && s.metricKey === 'eventCount' && s.eventName) {
+          if (s.combinedMetrics && s.combinedMetrics.length > 0) {
+            // Generate display name from combined metrics
+            displayName = s.combinedMetrics.map((cm, idx) => {
+              const metricLabel = SOURCE_METRICS[cm.source].find(m => m.value === cm.metricKey)?.label || cm.metricKey;
+              const platformName = cm.platformName || getPlatformName(cm.source, undefined, availableChannels);
+              return idx > 0 ? ` + ${platformName} - ${metricLabel}` : `${platformName} - ${metricLabel}`;
+            }).join('');
+          } else if (s.source === 'ga4' && s.metricKey === 'eventCount' && s.eventName) {
             displayName = s.eventName;
           } else {
             const metricLabel = SOURCE_METRICS[s.source].find(m => m.value === s.metricKey)?.label;
@@ -769,6 +1056,7 @@ export function FunnelBuilderModal({
                       onDelete={deleteStage}
                       ga4Events={ga4Events}
                       isLoadingEvents={isLoadingEvents}
+                      availableChannels={availableChannels}
                     />
                   ))}
                 </SortableContext>

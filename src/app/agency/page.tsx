@@ -5,9 +5,10 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { RefreshCw } from 'lucide-react';
-import type { ClientWithHealth } from '@/types/database';
-import { AgencyMetricsCards } from '@/components/agency/AgencyMetricsCards';
-import { ClientHealthTable } from '@/components/agency/ClientHealthTable';
+import type { ClientCardData } from '@/app/api/agency/clients/route';
+import { AgencyClientCards } from '@/components/agency/AgencyClientCards';
+import { AgencyActionPoints } from '@/components/agency/AgencyActionPoints';
+import { AgencyCalendar } from '@/components/agency/AgencyCalendar';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 
@@ -27,7 +28,7 @@ interface AgencyMetrics {
 }
 
 export default function AgencyDashboard() {
-  const [clients, setClients] = useState<ClientWithHealth[]>([]);
+  const [clients, setClients] = useState<ClientCardData[]>([]);
   const [metrics, setMetrics] = useState<AgencyMetrics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -92,12 +93,6 @@ export default function AgencyDashboard() {
     fetchData(true);
   };
 
-  // Client click handler
-  const handleClientClick = (clientId: string) => {
-    // The ClientHealthTable component handles navigation
-    console.log('Client clicked:', clientId);
-  };
-
   // Format last refreshed time
   const formatLastRefreshed = () => {
     if (!lastRefreshed) return '';
@@ -137,15 +132,24 @@ export default function AgencyDashboard() {
           ))}
         </div>
 
-        {/* Table Skeleton */}
-        <Card className="border shadow-sm rounded-lg p-6">
-          <div className="space-y-4">
-            <div className="h-10 w-full bg-muted animate-pulse rounded" />
-            <div className="h-10 w-full bg-muted animate-pulse rounded" />
-            <div className="h-10 w-full bg-muted animate-pulse rounded" />
-            <div className="h-10 w-full bg-muted animate-pulse rounded" />
-          </div>
-        </Card>
+        {/* Client card skeletons */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
+            <Card key={i} className="border shadow-sm rounded-lg p-4">
+              <div className="space-y-3">
+                <div className="flex gap-3 items-center">
+                  <div className="h-10 w-10 rounded-full bg-muted animate-pulse" />
+                  <div className="flex-1 space-y-1.5">
+                    <div className="h-4 w-28 bg-muted animate-pulse rounded" />
+                    <div className="h-3 w-20 bg-muted animate-pulse rounded" />
+                  </div>
+                </div>
+                <div className="h-8 w-full bg-muted animate-pulse rounded-lg" />
+                <div className="h-8 w-full bg-muted animate-pulse rounded-lg" />
+              </div>
+            </Card>
+          ))}
+        </div>
       </div>
     );
   }
@@ -200,26 +204,13 @@ export default function AgencyDashboard() {
         </div>
       </div>
 
-      {/* Summary Metrics */}
-      {metrics && (
-        <AgencyMetricsCards
-          metrics={{
-            totalClients: metrics.totalClients,
-            statusBreakdown: {
-              red: metrics.statusBreakdown.red,
-              amber: metrics.statusBreakdown.amber,
-              green: metrics.statusBreakdown.green,
-            },
-            totalBudgetCents: metrics.totalBudgetCents,
-            totalOverdueTasks: metrics.totalOverdueTasks,
-            totalAtRiskTasks: metrics.totalAtRiskTasks,
-          }}
-        />
-      )}
+      {/* Client Cards */}
+      <AgencyClientCards clients={clients} />
 
-      {/* Client Health Table */}
-      <div>
-        <ClientHealthTable clients={clients} onClientClick={handleClientClick} />
+      {/* Calendar + Action Points side by side */}
+      <div className="grid grid-cols-1 xl:grid-cols-[1fr_400px] gap-6 items-start">
+        <AgencyCalendar />
+        <AgencyActionPoints />
       </div>
     </div>
   );

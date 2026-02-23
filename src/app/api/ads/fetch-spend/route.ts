@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { Nango } from '@nangohq/node';
 import type { Database } from '@/types/database';
 import { toNangoPlatform } from '@/lib/platform-mapping';
+import { saveGoogleAdsMetrics, saveMetaAdsMetrics } from '@/lib/ad-metrics';
 
 // TypeScript interface for Google Ads performance metrics
 interface GoogleAdMetrics {
@@ -516,6 +517,17 @@ export async function POST(request: NextRequest) {
           }, { status: 404 });
         }
         
+        // Persist spend data so the agency dashboard can read it per-client
+        if (allSpendData.length > 0) {
+          try {
+            await saveGoogleAdsMetrics(user.id, clientId || null, allSpendData);
+            console.log(`✓ Saved ${allSpendData.length} Google Ads metrics to database (clientId: ${clientId || 'none'})`);
+          } catch (saveError) {
+            // Non-fatal — log but still return the data to the caller
+            console.error('Failed to persist Google Ads metrics:', saveError);
+          }
+        }
+
         return Response.json({
           success: true,
           platform: 'google-ads',
@@ -604,6 +616,33 @@ export async function POST(request: NextRequest) {
           null,
           2
         ));
+      }
+
+      // Persist Meta spend data (Google is handled above; this path is Meta via Nango proxy)
+      if (platform === 'meta-ads' && Array.isArray(transformedData) && transformedData.length > 0) {
+        try {
+          const metaMetrics = transformedData.map((item: any) => ({
+            accountId: item.account_id || item.accountId || '',
+            accountName: item.account_name || item.accountName || '',
+            campaignId: item.campaign_id || item.campaignId || '',
+            campaignName: item.campaign_name || item.campaignName || '',
+            dateStart: item.date_start || item.dateStart || startDate,
+            dateStop: item.date_stop || item.dateStop || endDate,
+            spend: parseFloat(item.spend || '0'),
+            impressions: parseInt(item.impressions || '0', 10),
+            reach: parseInt(item.reach || '0', 10),
+            clicks: parseInt(item.clicks || '0', 10),
+            ctr: parseFloat(item.ctr || '0'),
+            cpc: parseFloat(item.cpc || '0'),
+            cpm: parseFloat(item.cpm || '0'),
+            frequency: parseFloat(item.frequency || '0'),
+            currency: item.currency || 'USD',
+          }));
+          await saveMetaAdsMetrics(user.id, clientId || null, metaMetrics);
+          console.log(`✓ Saved ${metaMetrics.length} Meta Ads metrics to database (clientId: ${clientId || 'none'})`);
+        } catch (saveError) {
+          console.error('Failed to persist Meta Ads metrics:', saveError);
+        }
       }
 
       return Response.json({

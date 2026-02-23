@@ -10,7 +10,7 @@ import { Progress } from '@/components/ui/progress';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Line, ComposedChart, Dot, LineChart } from 'recharts';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, parseISO, addMonths, subMonths, addDays } from 'date-fns';
 import { useState, useEffect } from 'react';
-import { RefreshCw, Plus, X, Edit2, Check, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { RefreshCw, Plus, X, Edit2, Check, Trash2, ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react';
 import { MediaChannelEnhancedView } from '@/components/ui/media-channel-enhanced-view';
 import { TimeFrame } from '@/lib/types/media-plan';
 import { DateRangePicker } from '@/components/ui/date-range-picker';
@@ -139,6 +139,7 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
   const [newActionText, setNewActionText] = useState('');
   const [newActionFrequency, setNewActionFrequency] = useState<'daily' | 'weekly' | 'fortnightly' | 'monthly'>('weekly');
   const [newActionDueDate, setNewActionDueDate] = useState('');
+  const [completedOpen, setCompletedOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState('');
   const [editingFrequency, setEditingFrequency] = useState<'daily' | 'weekly' | 'fortnightly' | 'monthly'>('weekly');
@@ -932,15 +933,29 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
               </div>
 
               {/* Action points list */}
-              {channel.actionPoints.filter(a => a.category === currentList).length === 0 ? (
-                <p className="text-xs text-[#94a3b8] text-center py-4">
-                  No {currentList.toLowerCase()} items yet.
-                </p>
-              ) : (
-                channel.actionPoints.filter(a => a.category === currentList).map((action) => {
+              {(() => {
+                const sortByDueDate = (a: ActionPoint, b: ActionPoint) => {
+                  if (!a.due_date && !b.due_date) return 0;
+                  if (!a.due_date) return 1;
+                  if (!b.due_date) return -1;
+                  return a.due_date.localeCompare(b.due_date);
+                };
+
+                const listItems = channel.actionPoints.filter(ap => ap.category === currentList);
+                const incompleteItems = listItems.filter(a => !completedActions.has(a.id)).sort(sortByDueDate);
+                const completedItems = listItems.filter(a => completedActions.has(a.id)).sort(sortByDueDate);
+
+                if (listItems.length === 0) {
+                  return (
+                    <p className="text-xs text-[#94a3b8] text-center py-4">
+                      No {currentList.toLowerCase()} items yet.
+                    </p>
+                  );
+                }
+
+                const renderActionRow = (action: ActionPoint) => {
                   const isCompleted = completedActions.has(action.id);
                   const isEditing = editingId === action.id;
-
                   return (
                   <div
                     key={action.id}
@@ -1099,8 +1114,35 @@ export default function MediaChannelCard({ channel, onToggleAction }: MediaChann
                       )}
                     </div>
                   );
-                })
-              )}
+                };
+
+                return (
+                  <>
+                    {incompleteItems.length === 0 && completedItems.length === 0 ? null : (
+                      <>
+                        {incompleteItems.map(renderActionRow)}
+
+                        {completedItems.length > 0 && (
+                          <div className="mt-2">
+                            <button
+                              onClick={() => setCompletedOpen(v => !v)}
+                              className="flex items-center gap-1.5 text-xs text-[#94a3b8] hover:text-[#64748b] transition-colors py-1 w-full text-left"
+                            >
+                              <ChevronDown className={`h-3.5 w-3.5 transition-transform ${completedOpen ? '' : '-rotate-90'}`} />
+                              Completed Tasks ({completedItems.length})
+                            </button>
+                            {completedOpen && (
+                              <div className="mt-1 space-y-0.5">
+                                {completedItems.map(renderActionRow)}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </>
+                );
+              })()}
               
               {/* Add new action item - at bottom */}
               <div className="flex gap-2 mt-3 pt-3 border-t border-[#e2e8f0]">

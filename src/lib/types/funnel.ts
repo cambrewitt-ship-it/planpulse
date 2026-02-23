@@ -1,3 +1,10 @@
+export interface CombinedMetric {
+  source: 'meta' | 'google' | 'ga4';
+  metricKey: string;
+  eventName?: string;
+  platformName?: string; // Display name for the platform (e.g., "Meta", "Google Search")
+}
+
 export interface FunnelStage {
   id: string;
   name: string;
@@ -8,6 +15,7 @@ export interface FunnelStage {
   source: 'meta' | 'google' | 'ga4';
   metricKey: string;  // For ad platforms: 'impressions', 'clicks', etc.
   eventName?: string; // For GA4: specific event name like 'first_open'
+  combinedMetrics?: CombinedMetric[]; // When present, this stage combines multiple metrics
 }
 
 export interface FunnelConfig {

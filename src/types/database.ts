@@ -215,6 +215,34 @@ export interface Database {
             assigned_to?: string | null;
           };
         };
+        media_plan_funnels: {
+          Row: {
+            id: string;
+            client_id: string | null;
+            channel_ids: string[];
+            name: string;
+            config: Record<string, any>;
+            created_at: string;
+            updated_at: string;
+          };
+          Insert: {
+            id?: string;
+            client_id?: string | null;
+            channel_ids?: string[];
+            name: string;
+            config: Record<string, any>;
+            created_at?: string;
+            updated_at?: string;
+          };
+          Update: {
+            id?: string;
+            client_id?: string | null;
+            channel_ids?: string[];
+            name?: string;
+            config?: Record<string, any>;
+            updated_at?: string;
+          };
+        };
         ad_performance_metrics: {
           Row: {
             id: string;

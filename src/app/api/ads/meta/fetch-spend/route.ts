@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { Nango } from '@nangohq/node';
 import type { Database } from '@/types/database';
 import { toNangoPlatform } from '@/lib/platform-mapping';
+import { saveMetaAdsMetrics } from '@/lib/ad-metrics';
 
 // TypeScript interface for Meta Ads performance metrics
 interface MetaAdMetrics {
@@ -323,6 +324,17 @@ export async function POST(request: NextRequest) {
             accountName: account.account_name,
             error: error.message
           });
+        }
+      }
+
+      // Persist spend data so the agency dashboard can read it per-client
+      if (allSpendData.length > 0) {
+        try {
+          await saveMetaAdsMetrics(user.id, clientId || null, allSpendData);
+          console.log(`✓ Saved ${allSpendData.length} Meta Ads metrics to database (clientId: ${clientId || 'none'})`);
+        } catch (saveError) {
+          // Non-fatal — log but still return the data to the caller
+          console.error('Failed to persist Meta Ads metrics:', saveError);
         }
       }
 

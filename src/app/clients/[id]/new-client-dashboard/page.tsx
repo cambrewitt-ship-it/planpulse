@@ -1000,6 +1000,7 @@ export default function NewClientDashboard() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            clientId,
             channelIds: config.channelIds,
             name: config.name,
             config,

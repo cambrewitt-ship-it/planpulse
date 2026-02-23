@@ -1,4 +1,4 @@
-import { FunnelStage, FunnelConfig } from '@/lib/types/funnel';
+import { FunnelStage, FunnelConfig, CombinedMetric } from '@/lib/types/funnel';
 
 interface RawFunnelData {
   metaMetrics?: { impressions: number; clicks: number; spend: number };
@@ -18,20 +18,28 @@ export function calculateFunnelMetrics(
     // Get value from appropriate source
     let value = 0;
     
-    if (stage.source === 'meta' && rawData.metaMetrics) {
-      value = rawData.metaMetrics[stage.metricKey as keyof typeof rawData.metaMetrics] || 0;
-    } 
-    else if (stage.source === 'google' && rawData.googleMetrics) {
-      value = rawData.googleMetrics[stage.metricKey as keyof typeof rawData.googleMetrics] || 0;
-    }
-    else if (stage.source === 'ga4') {
-      if (stage.eventName && rawData.ga4Metrics?.events) {
-        // Event-based metric (e.g., first_open, purchase)
-        const event = rawData.ga4Metrics.events.find(e => e.name === stage.eventName);
-        value = event?.count || 0;
-      } else if (rawData.ga4Metrics?.standardMetrics) {
-        // Standard metric (e.g., activeUsers, conversions)
-        value = rawData.ga4Metrics.standardMetrics[stage.metricKey as keyof typeof rawData.ga4Metrics.standardMetrics] || 0;
+    // If stage has combined metrics, sum them all
+    if (stage.combinedMetrics && stage.combinedMetrics.length > 0) {
+      value = stage.combinedMetrics.reduce((sum, combinedMetric) => {
+        return sum + calculateCombinedMetricValue(combinedMetric, rawData);
+      }, 0);
+    } else {
+      // Single metric (original behavior)
+      if (stage.source === 'meta' && rawData.metaMetrics) {
+        value = rawData.metaMetrics[stage.metricKey as keyof typeof rawData.metaMetrics] || 0;
+      } 
+      else if (stage.source === 'google' && rawData.googleMetrics) {
+        value = rawData.googleMetrics[stage.metricKey as keyof typeof rawData.googleMetrics] || 0;
+      }
+      else if (stage.source === 'ga4') {
+        if (stage.eventName && rawData.ga4Metrics?.events) {
+          // Event-based metric (e.g., first_open, purchase)
+          const event = rawData.ga4Metrics.events.find(e => e.name === stage.eventName);
+          value = event?.count || 0;
+        } else if (rawData.ga4Metrics?.standardMetrics) {
+          // Standard metric (e.g., activeUsers, conversions)
+          value = rawData.ga4Metrics.standardMetrics[stage.metricKey as keyof typeof rawData.ga4Metrics.standardMetrics] || 0;
+        }
       }
     }
 
@@ -54,8 +62,36 @@ export function calculateFunnelMetrics(
   });
 }
 
+// Helper to calculate value for a single combined metric
+function calculateCombinedMetricValue(combinedMetric: CombinedMetric, rawData: RawFunnelData): number {
+  if (combinedMetric.source === 'meta' && rawData.metaMetrics) {
+    return rawData.metaMetrics[combinedMetric.metricKey as keyof typeof rawData.metaMetrics] || 0;
+  }
+  if (combinedMetric.source === 'google' && rawData.googleMetrics) {
+    return rawData.googleMetrics[combinedMetric.metricKey as keyof typeof rawData.googleMetrics] || 0;
+  }
+  if (combinedMetric.source === 'ga4') {
+    if (combinedMetric.eventName && rawData.ga4Metrics?.events) {
+      const event = rawData.ga4Metrics.events.find(e => e.name === combinedMetric.eventName);
+      return event?.count || 0;
+    }
+    if (rawData.ga4Metrics?.standardMetrics) {
+      return rawData.ga4Metrics.standardMetrics[combinedMetric.metricKey as keyof typeof rawData.ga4Metrics.standardMetrics] || 0;
+    }
+  }
+  return 0;
+}
+
 // Helper to get value without duplication
 function calculateValue(stage: FunnelStage, rawData: RawFunnelData): number {
+  // If stage has combined metrics, sum them all
+  if (stage.combinedMetrics && stage.combinedMetrics.length > 0) {
+    return stage.combinedMetrics.reduce((sum, combinedMetric) => {
+      return sum + calculateCombinedMetricValue(combinedMetric, rawData);
+    }, 0);
+  }
+  
+  // Single metric (original behavior)
   if (stage.source === 'meta' && rawData.metaMetrics) {
     return rawData.metaMetrics[stage.metricKey as keyof typeof rawData.metaMetrics] || 0;
   }

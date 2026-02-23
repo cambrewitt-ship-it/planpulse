@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { FunnelStage } from '@/lib/types/funnel';
+import { FunnelStage, CombinedMetric } from '@/lib/types/funnel';
 import { 
   formatConversionRate, 
   formatCostPerAction, 
@@ -68,6 +68,39 @@ export function FunnelChart({
     if (impressions === 0) return '-';
     const cpm = (spend / impressions) * 1000;
     return `$${cpm.toFixed(2)}`;
+  };
+
+  const SOURCE_METRICS = {
+    meta: [
+      { value: 'impressions', label: 'Impressions' },
+      { value: 'clicks', label: 'Clicks' },
+      { value: 'link_clicks', label: 'Link Clicks' },
+      { value: 'conversions', label: 'Conversions' },
+      { value: 'spend', label: 'Spend' },
+    ],
+    google: [
+      { value: 'impressions', label: 'Impressions' },
+      { value: 'clicks', label: 'Clicks' },
+      { value: 'conversions', label: 'Conversions' },
+      { value: 'spend', label: 'Spend' },
+    ],
+    ga4: [
+      { value: 'activeUsers', label: 'Active Users' },
+      { value: 'totalUsers', label: 'Total Users' },
+      { value: 'sessions', label: 'Sessions' },
+      { value: 'conversions', label: 'Conversions' },
+      { value: 'screenPageViews', label: 'Page Views' },
+      { value: 'eventCount', label: 'Custom Event' },
+    ],
+  };
+
+  const formatCombinedMetricsDisplay = (combinedMetrics: CombinedMetric[]): string => {
+    return combinedMetrics.map((cm, index) => {
+      const metricLabel = SOURCE_METRICS[cm.source].find(m => m.value === cm.metricKey)?.label || cm.metricKey;
+      const platformName = cm.platformName || (cm.source === 'meta' ? 'Meta' : cm.source === 'google' ? 'Google Search' : 'GA4');
+      const display = `${platformName} - ${metricLabel}`;
+      return index > 0 ? ` + ${display}` : display;
+    }).join('');
   };
 
   if (isLoading) {
@@ -213,7 +246,14 @@ export function FunnelChart({
                           <div className="text-lg font-semibold text-slate-900 mb-1">
                             {stage.displayName}
                           </div>
-                          {stage.eventName && (
+                          {/* Show combined metrics if present */}
+                          {stage.combinedMetrics && stage.combinedMetrics.length > 0 && (
+                            <div className="text-xs text-slate-600 mb-2 font-medium">
+                              {formatCombinedMetricsDisplay(stage.combinedMetrics)}
+                            </div>
+                          )}
+                          {/* Show single metric event name if not combined */}
+                          {!stage.combinedMetrics && stage.eventName && (
                             <div className="text-xs text-slate-500 mb-2">
                               ({stage.eventName})
                             </div>
@@ -249,12 +289,30 @@ export function FunnelChart({
                 <TooltipContent side="top" className="max-w-xs">
                   <div className="space-y-1">
                     <p className="font-semibold">{stage.displayName}</p>
-                    <p className="text-xs">
-                      <span className="text-slate-400">Source:</span> {stage.source.toUpperCase()}
-                    </p>
-                    <p className="text-xs">
-                      <span className="text-slate-400">Metric:</span> {stage.eventName || stage.metricKey}
-                    </p>
+                    {stage.combinedMetrics && stage.combinedMetrics.length > 0 ? (
+                      <>
+                        <p className="text-xs font-medium text-slate-600 mb-1">Combined Metrics:</p>
+                        {stage.combinedMetrics.map((cm, idx) => {
+                          const metricLabel = SOURCE_METRICS[cm.source].find(m => m.value === cm.metricKey)?.label || cm.metricKey;
+                          const platformName = cm.platformName || (cm.source === 'meta' ? 'Meta' : cm.source === 'google' ? 'Google Search' : 'GA4');
+                          return (
+                            <p key={idx} className="text-xs pl-2">
+                              {platformName} - {metricLabel}
+                              {cm.eventName && <span className="text-slate-500"> ({cm.eventName})</span>}
+                            </p>
+                          );
+                        })}
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-xs">
+                          <span className="text-slate-400">Source:</span> {stage.source.toUpperCase()}
+                        </p>
+                        <p className="text-xs">
+                          <span className="text-slate-400">Metric:</span> {stage.eventName || stage.metricKey}
+                        </p>
+                      </>
+                    )}
                     <p className="text-xs">
                       <span className="text-slate-400">Exact Value:</span> {stage.value.toLocaleString()}
                     </p>
