@@ -673,12 +673,12 @@ export default function LibraryPage() {
                           onClick={() => setActionPointFilter(prev => ({ ...prev, [entry.channel_type]: 'HEALTH CHECK' }))}
                           className="h-7 text-xs flex-1"
                         >
-                          Health Check
+                          ONGOING
                         </Button>
                       </div>
                     )}
                     {channelActionPoints.length === 0 ? (
-                      <p className="text-xs text-gray-500">No {currentFilter.toLowerCase()} action points for this channel</p>
+                      <p className="text-xs text-gray-500">No {currentFilter === 'HEALTH CHECK' ? 'ONGOING' : currentFilter.toLowerCase()} action points for this channel</p>
                     ) : (
                       <div className="space-y-2 max-h-64 overflow-y-auto">
                         {channelActionPoints.map((actionPoint) => (

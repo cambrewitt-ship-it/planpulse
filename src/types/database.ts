@@ -139,6 +139,8 @@ export interface Database {
             last_calculated_at: string;
             created_at: string;
             updated_at: string;
+            mtd_actual_spend: number | null;
+            mtd_actual_spend_updated_at: string | null;
           };
           Insert: {
             id?: string;
@@ -153,6 +155,8 @@ export interface Database {
             next_critical_date?: string | null;
             next_critical_task?: string | null;
             last_calculated_at?: string;
+            mtd_actual_spend?: number | null;
+            mtd_actual_spend_updated_at?: string | null;
           };
           Update: {
             id?: string;
@@ -167,6 +171,8 @@ export interface Database {
             next_critical_date?: string | null;
             next_critical_task?: string | null;
             last_calculated_at?: string;
+            mtd_actual_spend?: number | null;
+            mtd_actual_spend_updated_at?: string | null;
           };
         };
         client_tasks: {

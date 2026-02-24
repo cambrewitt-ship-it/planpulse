@@ -931,7 +931,7 @@ export default function MediaChannelCard({ channel, onToggleAction, onActualSpen
                     <ChevronLeft className="h-3 w-3" />
                   </Button>
                   <span className="text-xs font-semibold min-w-[100px] text-center">
-                    {currentList}
+                    {currentList === 'HEALTH CHECK' ? 'ONGOING' : currentList}
                   </span>
                   <Button
                     size="sm"
@@ -960,7 +960,7 @@ export default function MediaChannelCard({ channel, onToggleAction, onActualSpen
                 if (listItems.length === 0) {
                   return (
                     <p className="text-xs text-[#94a3b8] text-center py-4">
-                      No {currentList.toLowerCase()} items yet.
+                      No {currentList === 'HEALTH CHECK' ? 'ONGOING' : currentList.toLowerCase()} items yet.
                     </p>
                   );
                 }

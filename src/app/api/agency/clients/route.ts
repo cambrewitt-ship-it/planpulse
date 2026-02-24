@@ -129,54 +129,14 @@ export async function GET(request: NextRequest) {
       .lte('date', todayStr)
       .not('client_id', 'is', null); // Only include rows with client_id (matching new-client-dashboard which filters by client)
 
+    // Sum actual API spend per client — exclude manual-override rows to match
+    // new-client-dashboard behaviour (which uses live API data only, not stored overrides)
     const spendByClient = new Map<string, number>();
-    // Track manual overrides separately - these replace API data for that month
-    const manualOverrides = new Map<string, number>(); // "clientId-month" -> spend
-    
-    // First pass: collect manual overrides
-    // Sum all manual overrides per client per month (multiple channels can have overrides)
     for (const row of spendRows || []) {
       if (!row.client_id) continue;
-      if (row.campaign_id && row.campaign_id.startsWith('manual-override-')) {
-        const month = row.date ? row.date.substring(0, 7) : ''; // YYYY-MM
-        // Use a separator that won't conflict with UUIDs: "clientId|YYYY-MM"
-        const key = `${row.client_id}|${month}`;
-        // Sum multiple channels' overrides for the same client/month
-        manualOverrides.set(key, (manualOverrides.get(key) || 0) + Number(row.spend || 0));
-      }
-    }
-    
-    // Second pass: sum API data, but skip months that have manual overrides
-    for (const row of spendRows || []) {
-      if (!row.client_id) continue;
-      
-      // Skip manual overrides (already collected)
-      if (row.campaign_id && row.campaign_id.startsWith('manual-override-')) {
-        continue;
-      }
-      
-      // Skip API data if there's a manual override for this month
-      const month = row.date ? row.date.substring(0, 7) : '';
-      const key = `${row.client_id}|${month}`;
-      if (manualOverrides.has(key)) {
-        continue; // Manual override replaces API data for this month
-      }
-      
-      // Add API data
+      // Skip manual override rows — they are not part of the live API data
+      if (row.campaign_id && row.campaign_id.startsWith('manual-override-')) continue;
       spendByClient.set(row.client_id, (spendByClient.get(row.client_id) || 0) + Number(row.spend || 0));
-    }
-    
-    // Third pass: add manual overrides to totals
-    // Key format: "clientId|YYYY-MM" (using | separator to avoid UUID dash conflicts)
-    const currentMonth = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
-    
-    for (const [key, spend] of manualOverrides.entries()) {
-      const [clientId, month] = key.split('|');
-      
-      // Only include manual overrides for the current month
-      if (month === currentMonth && clientId) {
-        spendByClient.set(clientId, (spendByClient.get(clientId) || 0) + spend);
-      }
     }
 
     // Current month keys — check both padded and unpadded formats (matching new-client-dashboard logic)
@@ -263,8 +223,7 @@ export async function GET(request: NextRequest) {
         // The table should have the same data that new-client-dashboard uses
         const actualSpend = calculateActualSpendForClient(
           client.id,
-          spendRows || [],
-          manualOverrides
+          spendRows || []
         );
         
         // Debug logging for Content Manager client
@@ -347,45 +306,22 @@ function normalizeChannel(name: string): string {
 }
 
 /**
- * Calculate actual spend for a client - sum all spend from ad_performance_metrics
- * The table should already have the correct data saved from API calls
- * This matches the logic from MediaChannels which sums up channelActualSpend from each channel
+ * Calculate actual spend for a client by summing live API rows only.
+ * Matches new-client-dashboard behaviour: uses only real API data stored in
+ * ad_performance_metrics, excluding manual-override sentinel rows.
  */
 function calculateActualSpendForClient(
   clientId: string,
-  spendRows: any[],
-  manualOverrides: Map<string, number>
+  spendRows: any[]
 ): number {
   let totalSpend = 0;
-  
-  // Filter spend rows for this client
-  const clientSpendRows = spendRows.filter(row => row.client_id === clientId);
-  
-  // Sum all spend for this client (excluding manual overrides which are added separately)
-  // This should match what's in the table - all API data plus manual overrides
-  for (const row of clientSpendRows) {
-    // Skip manual overrides (handled separately)
-    if (row.campaign_id && row.campaign_id.startsWith('manual-override-')) {
-      continue;
-    }
-    
-    // Skip if there's a manual override for this month (manual override replaces API data)
-    const month = row.date ? row.date.substring(0, 7) : '';
-    const key = `${clientId}|${month}`;
-    if (!manualOverrides.has(key)) {
-      const spend = Number(row.spend || 0);
-      totalSpend += spend;
-    }
+
+  for (const row of spendRows) {
+    if (row.client_id !== clientId) continue;
+    // Exclude manual override sentinel rows — match new-client-dashboard (live API only)
+    if (row.campaign_id && row.campaign_id.startsWith('manual-override-')) continue;
+    totalSpend += Number(row.spend || 0);
   }
-  
-  // Add manual overrides for this client (these replace API data for that month)
-  const currentMonth = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
-  for (const [key, spend] of manualOverrides.entries()) {
-    const [keyClientId, month] = key.split('|');
-    if (keyClientId === clientId && month === currentMonth) {
-      totalSpend += spend;
-    }
-  }
-  
+
   return totalSpend;
 }

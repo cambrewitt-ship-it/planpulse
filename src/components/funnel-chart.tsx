@@ -98,7 +98,7 @@ export function FunnelChart({
     return combinedMetrics.map((cm, index) => {
       const metricLabel = SOURCE_METRICS[cm.source].find(m => m.value === cm.metricKey)?.label || cm.metricKey;
       const platformName = cm.platformName || (cm.source === 'meta' ? 'Meta' : cm.source === 'google' ? 'Google Search' : 'GA4');
-      const display = `${platformName} - ${metricLabel}`;
+      const display = `${platformName} | ${metricLabel}`;
       return index > 0 ? ` + ${display}` : display;
     }).join('');
   };
@@ -147,7 +147,7 @@ export function FunnelChart({
       </div>
 
       {/* Funnel Stages */}
-      <div className="space-y-0 relative">
+      <div className="space-y-0 relative" style={{ display: 'grid', gridTemplateRows: `repeat(${funnelStages.length}, 1fr)` }}>
         {/* SVG Funnel Outline */}
         <svg
           className="absolute inset-0 pointer-events-none z-20"
@@ -167,15 +167,39 @@ export function FunnelChart({
 
             return (
               <g key={`funnel-stage-${index}`}>
-                {/* Top horizontal line */}
-                <line
-                  x1={topLeftPercent}
-                  y1={y1}
-                  x2={topRightPercent}
-                  y2={y1}
-                  stroke="#1e293b"
-                  strokeWidth="0.6"
-                />
+                {/* Top horizontal line - inside funnel (skip for first stage) */}
+                {index > 0 && (
+                  <>
+                    <line
+                      x1={topLeftPercent}
+                      y1={y1}
+                      x2={topRightPercent}
+                      y2={y1}
+                      stroke="#1e293b"
+                      strokeWidth="0.6"
+                    />
+
+                    {/* Top horizontal line - left side (outside funnel) */}
+                    <line
+                      x1={0}
+                      y1={y1}
+                      x2={topLeftPercent}
+                      y2={y1}
+                      stroke="#cbd5e1"
+                      strokeWidth="0.6"
+                    />
+
+                    {/* Top horizontal line - right side (outside funnel) */}
+                    <line
+                      x1={topRightPercent}
+                      y1={y1}
+                      x2={100}
+                      y2={y1}
+                      stroke="#cbd5e1"
+                      strokeWidth="0.6"
+                    />
+                  </>
+                )}
 
                 {/* Left side line */}
                 <line
@@ -197,15 +221,39 @@ export function FunnelChart({
                   strokeWidth="0.6"
                 />
 
-                {/* Bottom horizontal line */}
-                <line
-                  x1={bottomLeftPercent}
-                  y1={y2}
-                  x2={bottomRightPercent}
-                  y2={y2}
-                  stroke="#1e293b"
-                  strokeWidth="0.6"
-                />
+                {/* Bottom horizontal line - inside funnel (skip for last stage) */}
+                {index < funnelStages.length - 1 && (
+                  <>
+                    <line
+                      x1={bottomLeftPercent}
+                      y1={y2}
+                      x2={bottomRightPercent}
+                      y2={y2}
+                      stroke="#1e293b"
+                      strokeWidth="0.6"
+                    />
+
+                    {/* Bottom horizontal line - left side (outside funnel) */}
+                    <line
+                      x1={0}
+                      y1={y2}
+                      x2={bottomLeftPercent}
+                      y2={y2}
+                      stroke="#cbd5e1"
+                      strokeWidth="0.6"
+                    />
+
+                    {/* Bottom horizontal line - right side (outside funnel) */}
+                    <line
+                      x1={bottomRightPercent}
+                      y1={y2}
+                      x2={100}
+                      y2={y2}
+                      stroke="#cbd5e1"
+                      strokeWidth="0.6"
+                    />
+                  </>
+                )}
               </g>
             );
           })}
@@ -220,13 +268,8 @@ export function FunnelChart({
               <Tooltip key={stage.id}>
                 <TooltipTrigger asChild>
                   <div className="relative z-10">
-                    {/* Horizontal dividing line (except after last stage) */}
-                    {index < funnelStages.length - 1 && (
-                      <div className="absolute left-0 right-0 bottom-0 h-px bg-slate-300 z-30" />
-                    )}
-
-                    <div className="funnel-stage-container relative group cursor-pointer transition-all duration-200 hover:shadow-lg hover:-translate-y-1 hover:z-10 bg-white py-6">
-                      <div className="flex items-center h-full">
+                    <div className="funnel-stage-container relative group cursor-pointer transition-all duration-200 hover:shadow-lg hover:-translate-y-1 hover:z-10 bg-white py-6 flex items-center h-full">
+                      <div className="flex items-center w-full h-full">
                         {/* LEFT: Conversion Rate - Outside funnel */}
                         <div className="flex-1 flex justify-center" style={{ maxWidth: '25%' }}>
                           {!isFirstStage && stage.conversionRate !== undefined ? (
@@ -267,16 +310,16 @@ export function FunnelChart({
                         <div className="flex-1 flex justify-center" style={{ maxWidth: '25%' }}>
                           {stage.costPerAction !== undefined ? (
                             <div className="text-center">
-                              <div className="text-sm text-slate-600 mb-1">
-                                {isImpressions
-                                  ? 'Cost per 1,000 Imps:'
-                                  : `Cost per ${stage.displayName.replace(/s$/, '')}:`
-                                }
-                              </div>
-                              <div className="text-xl font-bold text-slate-900">
+                              <div className="text-2xl font-bold text-slate-900 mb-1">
                                 {isImpressions
                                   ? calculateCPM(totalCost, stage.value)
                                   : formatCostPerAction(stage.costPerAction)
+                                }
+                              </div>
+                              <div className="text-sm text-slate-600">
+                                {isImpressions
+                                  ? 'Cost per 1,000 Imps:'
+                                  : `Cost per ${stage.displayName.replace(/s$/, '')}:`
                                 }
                               </div>
                             </div>
@@ -297,7 +340,7 @@ export function FunnelChart({
                           const platformName = cm.platformName || (cm.source === 'meta' ? 'Meta' : cm.source === 'google' ? 'Google Search' : 'GA4');
                           return (
                             <p key={idx} className="text-xs pl-2">
-                              {platformName} - {metricLabel}
+                              {platformName} | {metricLabel}
                               {cm.eventName && <span className="text-slate-500"> ({cm.eventName})</span>}
                             </p>
                           );
