@@ -89,9 +89,103 @@ export default function AgencyDashboard() {
     return () => clearInterval(interval);
   }, [fetchData]);
 
-  // Manual refresh
-  const handleRefresh = () => {
-    fetchData(true);
+  // Manual refresh - also fetch fresh spend data from ad platforms
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      // First, refresh spend data for all clients by calling the same APIs
+      // that the new-client-dashboard uses
+      const refreshPromises: Promise<any>[] = [];
+      
+      // Get all client IDs from current clients (or fetch them if not loaded yet)
+      const clientIds = clients.length > 0 
+        ? clients.map(c => c.id)
+        : [];
+      
+      // Calculate current month date range
+      const now = new Date();
+      const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const startDate = currentMonthStart.toISOString().split('T')[0];
+      const endDate = now.toISOString().split('T')[0];
+      
+      // For each client, trigger spend data refresh for Meta and Google Ads
+      // Note: These may fail if accounts aren't connected, which is okay
+      for (const clientId of clientIds) {
+        // Fetch Meta Ads spend data
+        refreshPromises.push(
+          fetch('/api/ads/meta/fetch-spend', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              startDate,
+              endDate,
+              clientId: clientId,
+            }),
+          })
+            .then(res => {
+              if (!res.ok) {
+                console.warn(`Meta Ads refresh failed for client ${clientId}: ${res.status} ${res.statusText}`);
+                return null;
+              }
+              return res.json();
+            })
+            .catch(err => {
+              console.warn(`Failed to refresh Meta Ads spend for client ${clientId}:`, err.message);
+              return null;
+            })
+        );
+        
+        // Fetch Google Ads spend data
+        refreshPromises.push(
+          fetch('/api/ads/fetch-spend', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              platform: 'google-ads',
+              startDate,
+              endDate,
+              clientId: clientId,
+            }),
+          })
+            .then(res => {
+              if (!res.ok) {
+                console.warn(`Google Ads refresh failed for client ${clientId}: ${res.status} ${res.statusText}`);
+                return null;
+              }
+              return res.json();
+            })
+            .catch(err => {
+              console.warn(`Failed to refresh Google Ads spend for client ${clientId}:`, err.message);
+              return null;
+            })
+        );
+      }
+      
+      // Wait for all spend data refreshes to complete (or fail gracefully)
+      // Don't wait for errors - just proceed with dashboard refresh
+      Promise.allSettled(refreshPromises).then(results => {
+        const successCount = results.filter(r => r.status === 'fulfilled' && r.value !== null).length;
+        const failCount = results.length - successCount;
+        if (successCount > 0) {
+          console.log(`Refreshed spend data for ${successCount} API calls`);
+        }
+        if (failCount > 0) {
+          console.warn(`${failCount} API calls failed (this is normal if accounts aren't connected)`);
+        }
+      });
+      
+      // Wait a moment for any successful database writes to complete
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      
+      // Always refresh the dashboard data (even if API calls failed)
+      await fetchData(false);
+    } catch (err) {
+      console.error('Error refreshing spend data:', err);
+      // Still refresh dashboard data even if spend refresh fails
+      await fetchData(false);
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   // Format last refreshed time

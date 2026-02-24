@@ -117,13 +117,17 @@ export async function GET(request: NextRequest) {
     }
 
     // ── Fetch actual spend per client for the current calendar month ─────────
+    // Match new-client-dashboard: get spend data up to today for current month
+    // This should match what MediaChannelCard calculates from liveSpendData
     const currentMonthStart = toDateStr(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
     const todayStr = toDateStr(new Date()); // Get today's date, not month start
     const { data: spendRows } = await supabase
       .from('ad_performance_metrics')
-      .select('client_id, spend, campaign_id, date')
+      .select('client_id, spend, campaign_id, date, platform, account_id')
+      .eq('user_id', session.user.id) // Filter by current user
       .gte('date', currentMonthStart)
-      .lte('date', todayStr);
+      .lte('date', todayStr)
+      .not('client_id', 'is', null); // Only include rows with client_id (matching new-client-dashboard which filters by client)
 
     const spendByClient = new Map<string, number>();
     // Track manual overrides separately - these replace API data for that month
@@ -175,8 +179,12 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Current month key — must match the "YYYY-M" format used by media-plan-grid.tsx (no zero-padding)
-    const currentMonthKey = `${new Date().getFullYear()}-${new Date().getMonth() + 1}`;
+    // Current month keys — check both padded and unpadded formats (matching new-client-dashboard logic)
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonthNum = now.getMonth() + 1;
+    const unpaddedMonthKey = `${currentYear}-${currentMonthNum}`;
+    const paddedMonthKey = `${currentYear}-${String(currentMonthNum).padStart(2, '0')}`;
 
     // ── Build enriched client list ────────────────────────────────────────────
     const enrichedClients: ClientCardData[] = await Promise.all(
@@ -238,17 +246,43 @@ export async function GET(request: NextRequest) {
         }).length;
 
         // ── Planned budget for the current month (from monthlySpend breakdown) ──
+        // Match new-client-dashboard logic: check both padded and unpadded month keys
         let plannedBudget = 0;
         for (const ch of rawChannels) {
           for (const f of ch.flights || []) {
             if (f.monthlySpend && typeof f.monthlySpend === 'object') {
-              plannedBudget += Number(f.monthlySpend[currentMonthKey] || 0);
+              // Try both padded and unpadded formats (matching new-client-dashboard)
+              const spend = f.monthlySpend[paddedMonthKey] || f.monthlySpend[unpaddedMonthKey] || 0;
+              plannedBudget += Number(spend);
             }
           }
         }
 
         // ── Actual spend ──
-        const actualSpend = spendByClient.get(client.id) || 0;
+        // Sum all spend from ad_performance_metrics for this client
+        // The table should have the same data that new-client-dashboard uses
+        const actualSpend = calculateActualSpendForClient(
+          client.id,
+          spendRows || [],
+          manualOverrides
+        );
+        
+        // Debug logging for Content Manager client
+        if (client.name === 'Content Manager') {
+          const clientSpendRows = (spendRows || []).filter(row => row.client_id === client.id);
+          console.log(`[Agency Dashboard] Content Manager actual spend calculation:`, {
+            clientId: client.id,
+            totalSpendRows: spendRows?.length || 0,
+            clientSpendRows: clientSpendRows.length,
+            calculatedActualSpend: actualSpend,
+            spendRowsSample: clientSpendRows.slice(0, 5).map(r => ({
+              date: r.date,
+              spend: r.spend,
+              campaign_id: r.campaign_id,
+              account_id: r.account_id
+            }))
+          });
+        }
 
         // ── Spend variance % — positive means overspending ──
         const spendVariancePct = plannedBudget > 0
@@ -310,4 +344,48 @@ function normalizeChannel(name: string): string {
   if (lower.includes('linkedin')) return 'LinkedIn Ads';
   if (lower.includes('tiktok')) return 'TikTok Ads';
   return name;
+}
+
+/**
+ * Calculate actual spend for a client - sum all spend from ad_performance_metrics
+ * The table should already have the correct data saved from API calls
+ * This matches the logic from MediaChannels which sums up channelActualSpend from each channel
+ */
+function calculateActualSpendForClient(
+  clientId: string,
+  spendRows: any[],
+  manualOverrides: Map<string, number>
+): number {
+  let totalSpend = 0;
+  
+  // Filter spend rows for this client
+  const clientSpendRows = spendRows.filter(row => row.client_id === clientId);
+  
+  // Sum all spend for this client (excluding manual overrides which are added separately)
+  // This should match what's in the table - all API data plus manual overrides
+  for (const row of clientSpendRows) {
+    // Skip manual overrides (handled separately)
+    if (row.campaign_id && row.campaign_id.startsWith('manual-override-')) {
+      continue;
+    }
+    
+    // Skip if there's a manual override for this month (manual override replaces API data)
+    const month = row.date ? row.date.substring(0, 7) : '';
+    const key = `${clientId}|${month}`;
+    if (!manualOverrides.has(key)) {
+      const spend = Number(row.spend || 0);
+      totalSpend += spend;
+    }
+  }
+  
+  // Add manual overrides for this client (these replace API data for that month)
+  const currentMonth = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+  for (const [key, spend] of manualOverrides.entries()) {
+    const [keyClientId, month] = key.split('|');
+    if (keyClientId === clientId && month === currentMonth) {
+      totalSpend += spend;
+    }
+  }
+  
+  return totalSpend;
 }

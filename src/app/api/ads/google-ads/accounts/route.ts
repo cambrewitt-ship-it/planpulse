@@ -82,7 +82,7 @@ export async function GET() {
 
     // 5. Call Google Ads API to list accessible customers
     // The listAccessibleCustomers endpoint returns all customers accessible to the authenticated user
-    const listCustomersUrl = 'https://googleads.googleapis.com/v19/customers:listAccessibleCustomers';
+    const listCustomersUrl = 'https://googleads.googleapis.com/v21/customers:listAccessibleCustomers';
 
     const listHeaders: HeadersInit = {
       'Authorization': `Bearer ${accessToken}`,
@@ -133,7 +133,7 @@ export async function GET() {
           LIMIT 1
         `;
 
-        const searchUrl = `https://googleads.googleapis.com/v19/customers/${customerId}/googleAds:search`;
+        const searchUrl = `https://googleads.googleapis.com/v21/customers/${customerId}/googleAds:search`;
         
         const searchResponse = await fetch(searchUrl, {
           method: 'POST',

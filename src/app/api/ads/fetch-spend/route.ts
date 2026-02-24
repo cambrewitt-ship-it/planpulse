@@ -261,7 +261,7 @@ export async function POST(request: NextRequest) {
               WHERE customer_client.level <= 1
             `;
 
-            const mccSearchUrl = `https://googleads.googleapis.com/v19/customers/${cleanMccId}/googleAds:search`;
+            const mccSearchUrl = `https://googleads.googleapis.com/v21/customers/${cleanMccId}/googleAds:search`;
             const mccResponse = await fetch(mccSearchUrl, {
               method: 'POST',
               headers: {
@@ -341,7 +341,7 @@ export async function POST(request: NextRequest) {
               throw new Error(`Invalid customer ID format: ${customerId} (cleaned: ${cleanCustomerId}). Customer IDs must be 10 digits.`);
             }
             
-            const apiUrl = `https://googleads.googleapis.com/v19/customers/${cleanCustomerId}/googleAds:search`;
+            const apiUrl = `https://googleads.googleapis.com/v21/customers/${cleanCustomerId}/googleAds:search`;
             console.log(`  API URL: ${apiUrl}`);
 
             // Build headers - only include login-customer-id if MCC is configured
@@ -388,7 +388,7 @@ export async function POST(request: NextRequest) {
                 statusText: response.statusText,
                 errorText: errorText.substring(0, 1000),
                 errorJson: errorJson,
-                url: `https://googleads.googleapis.com/v19/customers/${cleanCustomerId}/googleAds:search`
+                url: `https://googleads.googleapis.com/v21/customers/${cleanCustomerId}/googleAds:search`
               });
               
               // Provide more helpful error messages

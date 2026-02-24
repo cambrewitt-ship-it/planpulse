@@ -66,7 +66,7 @@ export async function GET() {
 
     // Test 1: List all accessible customers
     console.log('Test 1: Listing accessible customers...');
-    const listUrl = 'https://googleads.googleapis.com/v19/customers:listAccessibleCustomers';
+    const listUrl = 'https://googleads.googleapis.com/v21/customers:listAccessibleCustomers';
     
     const listResponse = await fetch(listUrl, {
       method: 'GET',
@@ -108,7 +108,7 @@ export async function GET() {
         
         // Try to query the account
         const query = `SELECT customer.id FROM customer LIMIT 1`;
-        const searchUrl = `https://googleads.googleapis.com/v19/customers/${account.customer_id}/googleAds:search`;
+        const searchUrl = `https://googleads.googleapis.com/v21/customers/${account.customer_id}/googleAds:search`;
         
         const testResponse = await fetch(searchUrl, {
           method: 'POST',

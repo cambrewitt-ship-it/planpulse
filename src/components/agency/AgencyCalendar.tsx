@@ -457,7 +457,7 @@ function WeekView({ weekDays, eventsByDate, todayStr, onDayClick }: WeekViewProp
 
 export function AgencyCalendar() {
   const now = new Date();
-  const [view, setView] = useState<'month' | 'week'>('month');
+  const [view, setView] = useState<'month' | 'week'>('week');
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1); // 1-indexed
   const [weekStart, setWeekStart] = useState<Date>(() => {
@@ -554,6 +554,31 @@ export function AgencyCalendar() {
 
   const totalEvents = events.length;
 
+  // Calculate view label for week and month views
+  const viewLabel = useMemo(() => {
+    if (view === 'week') {
+      const currentWeekStart = getMondayOfWeek(now);
+      const weekDiff = Math.round((weekStart.getTime() - currentWeekStart.getTime()) / (7 * 24 * 60 * 60 * 1000));
+      
+      if (weekDiff === 0) return 'This week';
+      if (weekDiff === 1) return 'Next week';
+      if (weekDiff === -1) return 'Last week';
+      if (weekDiff > 1) return `in ${weekDiff} weeks`;
+      return `${Math.abs(weekDiff)} weeks ago`;
+    } else {
+      // Month view
+      const currentYear = now.getFullYear();
+      const currentMonth = now.getMonth() + 1; // 1-indexed
+      const monthDiff = (year - currentYear) * 12 + (month - currentMonth);
+      
+      if (monthDiff === 0) return 'This month';
+      if (monthDiff === 1) return 'Next month';
+      if (monthDiff === -1) return 'Last month';
+      if (monthDiff > 1) return `in ${monthDiff} months`;
+      return `${Math.abs(monthDiff)} months ago`;
+    }
+  }, [view, weekStart, year, month, now]);
+
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -619,7 +644,7 @@ export function AgencyCalendar() {
                 <ChevronRight className="h-4 w-4" />
               </Button>
               <Button variant="ghost" size="sm" onClick={goToday} className="h-8 text-xs">
-                {view === 'week' ? 'This week' : 'Today'}
+                {viewLabel}
               </Button>
             </div>
           </div>

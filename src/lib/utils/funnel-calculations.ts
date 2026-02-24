@@ -3,8 +3,18 @@ import { FunnelStage, FunnelConfig, CombinedMetric } from '@/lib/types/funnel';
 interface RawFunnelData {
   metaMetrics?: { impressions: number; clicks: number; spend: number };
   googleMetrics?: { impressions: number; clicks: number; spend: number };
-  ga4Metrics?: { 
-    standardMetrics?: { activeUsers: number; conversions: number; sessions: number };
+  ga4Metrics?: {
+    standardMetrics?: {
+      activeUsers: number;
+      totalUsers?: number;
+      newUsers?: number;
+      sessions: number;
+      engagedSessions?: number;
+      conversions: number;
+      eventCount?: number;
+      bounceRate?: number;
+      screenPageViews?: number;
+    };
     events?: Array<{ name: string; count: number; users: number }>;
   };
   totalSpend: number;
@@ -37,8 +47,8 @@ export function calculateFunnelMetrics(
           const event = rawData.ga4Metrics.events.find(e => e.name === stage.eventName);
           value = event?.count || 0;
         } else if (rawData.ga4Metrics?.standardMetrics) {
-          // Standard metric (e.g., activeUsers, conversions)
-          value = rawData.ga4Metrics.standardMetrics[stage.metricKey as keyof typeof rawData.ga4Metrics.standardMetrics] || 0;
+          // Standard metric — use index signature to support all GA4 metrics
+          value = (rawData.ga4Metrics.standardMetrics as Record<string, number>)[stage.metricKey] || 0;
         }
       }
     }
@@ -76,7 +86,7 @@ function calculateCombinedMetricValue(combinedMetric: CombinedMetric, rawData: R
       return event?.count || 0;
     }
     if (rawData.ga4Metrics?.standardMetrics) {
-      return rawData.ga4Metrics.standardMetrics[combinedMetric.metricKey as keyof typeof rawData.ga4Metrics.standardMetrics] || 0;
+      return (rawData.ga4Metrics.standardMetrics as Record<string, number>)[combinedMetric.metricKey] || 0;
     }
   }
   return 0;
@@ -104,7 +114,7 @@ function calculateValue(stage: FunnelStage, rawData: RawFunnelData): number {
       return event?.count || 0;
     }
     if (rawData.ga4Metrics?.standardMetrics) {
-      return rawData.ga4Metrics.standardMetrics[stage.metricKey as keyof typeof rawData.ga4Metrics.standardMetrics] || 0;
+      return (rawData.ga4Metrics.standardMetrics as Record<string, number>)[stage.metricKey] || 0;
     }
   }
   return 0;

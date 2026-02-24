@@ -680,11 +680,11 @@ export function FunnelBuilderModal({
       setStages([]);
     }
     setErrors([]);
-  }, [initialConfig, isOpen]);
+  }, [initialConfig, modalOpen]);
 
   // Fetch GA4 events for autocomplete
   useEffect(() => {
-    if (isOpen) {
+    if (modalOpen) {
       fetchGA4Events();
     }
   }, [isOpen]);
@@ -881,7 +881,7 @@ export function FunnelBuilderModal({
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+    <Dialog open={modalOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
@@ -1083,7 +1083,7 @@ export function FunnelBuilderModal({
           <Button
             type="button"
             variant="outline"
-            onClick={() => onOpenChange(false)}
+            onClick={() => onClose()}
             disabled={isSaving}
           >
             Cancel

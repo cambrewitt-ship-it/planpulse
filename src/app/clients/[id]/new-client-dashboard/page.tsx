@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { User, Pencil, Check, X, DollarSign, TrendingUp, TrendingDown, Target, Minus, Download, CheckCircle, Filter, Plus, Eye, Edit } from 'lucide-react';
+import { User, Pencil, Check, X, DollarSign, TrendingUp, TrendingDown, Target, Minus, Download, CheckCircle, Filter, Plus, Eye, Edit, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import MediaChannels from '@/components/MediaChannels';
 import { MediaPlanGrid, MediaPlanChannel } from '@/components/media-plan-builder/media-plan-grid';
@@ -338,12 +338,26 @@ export default function NewClientDashboard() {
     }
   }, [clientId, selectedMetric]);
 
+  // When a funnel is selected, update the date range to match the funnel's config
+  useEffect(() => {
+    if (selectedFunnelId && funnels.length > 0) {
+      const selectedFunnel = funnels.find(f => f.id === selectedFunnelId);
+      if (selectedFunnel?.config?.dateRange) {
+        console.log('Setting analytics date range from funnel:', selectedFunnel.config.dateRange);
+        setAnalyticsDateRange({
+          startDate: selectedFunnel.config.dateRange.startDate,
+          endDate: selectedFunnel.config.dateRange.endDate,
+        });
+      }
+    }
+  }, [selectedFunnelId, funnels]);
+
   // Reload analytics when date range, selected metric, or event name changes
   useEffect(() => {
     if (clientId) {
       const eventName = selectedMetric === 'eventCount' ? selectedEventName : null;
       loadAnalyticsData(selectedMetric, eventName);
-      
+
       // Recalculate funnel if one is selected
       if (selectedFunnelId) {
         calculateFunnel(selectedFunnelId);
@@ -991,7 +1005,7 @@ export default function NewClientDashboard() {
         `/api/funnels/${funnelId}/calculate?startDate=${analyticsDateRange.startDate}&endDate=${analyticsDateRange.endDate}`
       );
       const data = await response.json();
-      
+
       if (data.success && data.stages) {
         setFunnelStages(data.stages);
       }
@@ -1044,19 +1058,58 @@ export default function NewClientDashboard() {
         }
       }
 
+      // Update analyticsDateRange to match the funnel's dateRange
+      if (config.dateRange) {
+        setAnalyticsDateRange({
+          startDate: config.dateRange.startDate,
+          endDate: config.dateRange.endDate,
+        });
+      }
+
       // Refresh funnels list
       await loadFunnels();
-      
+
       // Recalculate the currently selected funnel to show updated data
       if (selectedFunnelId) {
         await calculateFunnel(selectedFunnelId);
       }
-      
+
       setIsFunnelBuilderOpen(false);
       setEditingFunnel(null);
     } catch (error) {
       console.error('Failed to save funnel:', error);
       // TODO: Show error toast to user
+    }
+  };
+
+  const handleDeleteFunnel = async (funnelId: string) => {
+    if (!confirm('Are you sure you want to delete this funnel? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/funnels/${funnelId}`, {
+        method: 'DELETE',
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        // Remove funnel from state
+        setFunnels(prev => prev.filter(f => f.id !== funnelId));
+        
+        // If the deleted funnel was selected, clear selection and stages
+        if (selectedFunnelId === funnelId) {
+          setSelectedFunnelId(null);
+          setFunnelStages([]);
+        }
+      } else {
+        console.error('Failed to delete funnel:', data.error);
+        alert(data.error || 'Failed to delete funnel');
+      }
+    } catch (error) {
+      console.error('Error deleting funnel:', error);
+      alert('Failed to delete funnel. Please try again.');
     }
   };
 
@@ -1548,19 +1601,33 @@ export default function NewClientDashboard() {
                               <Eye className="w-4 h-4 text-gray-500" />
                               <span className="font-medium text-sm">{funnel.name}</span>
                             </button>
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setEditingFunnel(funnel);
-                                setIsFunnelBuilderOpen(true);
-                              }}
-                              className="h-7 w-7"
-                              title="Edit funnel"
-                            >
-                              <Pencil className="h-3 w-3" />
-                            </Button>
+                            <div className="flex items-center gap-1">
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingFunnel(funnel);
+                                  setIsFunnelBuilderOpen(true);
+                                }}
+                                className="h-7 w-7"
+                                title="Edit funnel"
+                              >
+                                <Pencil className="h-3 w-3" />
+                              </Button>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteFunnel(funnel.id);
+                                }}
+                                className="h-7 w-7 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                title="Delete funnel"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            </div>
                           </div>
                           <p className="text-xs text-gray-500 mt-1">
                             {(funnel.config as FunnelConfig).stages.length} stages

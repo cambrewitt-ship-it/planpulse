@@ -309,7 +309,7 @@ export async function GET() {
 
     // Log the exact request we're about to make (for debugging)
     addStep('Google Ads API: Request Details', 'pass', {
-      url: 'https://googleads.googleapis.com/v19/customers:listAccessibleCustomers',
+      url: 'https://googleads.googleapis.com/v21/customers:listAccessibleCustomers',
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${accessToken.substring(0, 20)}...`,
@@ -319,7 +319,7 @@ export async function GET() {
       note: 'This is the exact request being sent to Google Ads API'
     });
 
-    const listCustomersUrl = 'https://googleads.googleapis.com/v19/customers:listAccessibleCustomers';
+    const listCustomersUrl = 'https://googleads.googleapis.com/v21/customers:listAccessibleCustomers';
     const listHeaders: Record<string, string> = {
       'Authorization': `Bearer ${accessToken}`,
       'developer-token': developerToken,
@@ -407,7 +407,7 @@ export async function GET() {
           WHERE customer_client.level <= 1
         `;
 
-        const mccSearchUrl = `https://googleads.googleapis.com/v19/customers/${cleanMccId}/googleAds:search`;
+        const mccSearchUrl = `https://googleads.googleapis.com/v21/customers/${cleanMccId}/googleAds:search`;
         const mccResponse = await fetch(mccSearchUrl, {
           method: 'POST',
           headers: {
@@ -472,7 +472,7 @@ export async function GET() {
     if (accessibleCustomerIds.length > 0) {
       const testCustomerId = accessibleCustomerIds[0];
       const minimalQuery = `SELECT campaign.id, campaign.name FROM campaign LIMIT 1`;
-      const searchUrl = `https://googleads.googleapis.com/v19/customers/${testCustomerId}/googleAds:search`;
+      const searchUrl = `https://googleads.googleapis.com/v21/customers/${testCustomerId}/googleAds:search`;
 
       const queryHeaders: Record<string, string> = {
         'Authorization': `Bearer ${accessToken}`,
@@ -575,7 +575,7 @@ export async function GET() {
       } else {
         // Try to query this specific customer
         const testQuery = `SELECT customer.id, customer.descriptive_name FROM customer LIMIT 1`;
-        const testUrl = `https://googleads.googleapis.com/v19/customers/${cleanCustomerId}/googleAds:search`;
+        const testUrl = `https://googleads.googleapis.com/v21/customers/${cleanCustomerId}/googleAds:search`;
 
         const testHeaders: Record<string, string> = {
           'Authorization': `Bearer ${accessToken}`,
