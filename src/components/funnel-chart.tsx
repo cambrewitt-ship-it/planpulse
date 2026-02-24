@@ -103,6 +103,18 @@ export function FunnelChart({
     }).join('');
   };
 
+  const getClientInitials = (clientName: string): string => {
+    const words = clientName.trim().split(/\s+/);
+    if (words.length >= 2) {
+      return (words[0][0] + words[1][0]).toUpperCase();
+    } else if (words.length === 1 && words[0].length >= 2) {
+      return words[0].substring(0, 2).toUpperCase();
+    } else if (words.length === 1 && words[0].length === 1) {
+      return words[0].toUpperCase() + words[0].toUpperCase();
+    }
+    return '??';
+  };
+
   if (isLoading) {
     return (
       <Card className="p-6 w-full">
@@ -122,27 +134,40 @@ export function FunnelChart({
   return (
     <Card className="p-8 w-full">
       {/* Header */}
-      <div className="flex justify-between items-start mb-6">
-        <div className="text-base text-slate-900">
+      <div className="flex justify-between items-center mb-6">
+        {/* Left: Period */}
+        <div className="text-base text-slate-900 flex-1">
           <span className="font-normal">Period:</span>{' '}
           {formatDateRange(dateRange.startDate, dateRange.endDate)}
         </div>
-        <div className="flex items-center gap-8">
-          <div className="text-base font-normal text-slate-900">
-            Media Spend:{' '}
-            <span className="font-semibold text-lg">
-              ${totalCost.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-            </span>
-          </div>
-          {client?.logo_url && (
-            <div className="flex items-center">
-              <img
-                src={client.logo_url}
-                alt={`${client.name} logo`}
-                className="h-10 w-auto object-contain"
-              />
-            </div>
-          )}
+        
+        {/* Center: Media Spend */}
+        <div className="text-base font-normal text-slate-900 flex-1 text-center">
+          Media Spend:{' '}
+          <span className="font-semibold text-lg">
+            ${totalCost.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+          </span>
+        </div>
+        
+        {/* Right: Client Logo or Initials */}
+        <div className="flex-1 flex justify-end items-center">
+          {client ? (
+            client.logo_url ? (
+              <div className="flex items-center">
+                <img
+                  src={client.logo_url}
+                  alt={`${client.name} logo`}
+                  className="h-10 w-auto object-contain"
+                />
+              </div>
+            ) : (
+              <div className="flex items-center justify-center h-10 w-10 rounded bg-slate-200">
+                <span className="text-sm font-semibold text-slate-600">
+                  {getClientInitials(client.name)}
+                </span>
+              </div>
+            )
+          ) : null}
         </div>
       </div>
 

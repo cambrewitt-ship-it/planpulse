@@ -219,12 +219,13 @@ export async function GET(request: NextRequest) {
         }
 
         // ── Actual spend ──
-        // Sum all spend from ad_performance_metrics for this client
-        // The table should have the same data that new-client-dashboard uses
-        const actualSpend = calculateActualSpendForClient(
-          client.id,
-          spendRows || []
-        );
+        // Prefer the value cached by new-client-dashboard (exact mirror) so both
+        // views always show the same number. Fall back to DB calculation when the
+        // cache hasn't been populated yet (e.g. client hasn't been opened today).
+        const cachedActualSpend = health?.mtd_actual_spend ?? null;
+        const actualSpend = cachedActualSpend !== null
+          ? Number(cachedActualSpend)
+          : calculateActualSpendForClient(client.id, spendRows || []);
         
         // Debug logging for Content Manager client
         if (client.name === 'Content Manager') {

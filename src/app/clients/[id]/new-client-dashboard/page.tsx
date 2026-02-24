@@ -127,6 +127,20 @@ export default function NewClientDashboard() {
   const [actionPointsRefetchTrigger, setActionPointsRefetchTrigger] = useState(0);
   const [totalActualSpend, setTotalActualSpend] = useState<number>(0);
 
+  // Mirror the computed MTD actual spend to the DB so the agency dashboard can
+  // show the exact same number without recalculating.
+  useEffect(() => {
+    if (!clientId || totalActualSpend <= 0) return;
+    const timer = setTimeout(() => {
+      fetch(`/api/clients/${clientId}/actual-spend`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actualSpend: totalActualSpend }),
+      }).catch(() => {/* fire-and-forget */});
+    }, 2000); // debounce — wait 2s for spend to stabilise
+    return () => clearTimeout(timer);
+  }, [clientId, totalActualSpend]);
+
   // Calculate planned budget for current month from media plan
   const plannedBudget = useMemo(() => {
     if (!mediaPlanBuilderChannels || mediaPlanBuilderChannels.length === 0) {

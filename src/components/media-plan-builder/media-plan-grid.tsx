@@ -826,10 +826,10 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
           <thead className="bg-gray-100 sticky top-0 z-10">
             {/* Month header row */}
             <tr>
-              <th className="border border-gray-300 bg-gray-50 bg-opacity-100 text-center px-2 py-2 font-semibold sticky left-0 mr-[-1px] z-30 w-[64px] min-w-[64px] border-r-2 border-gray-400 shadow-[2px_0_4px_rgba(0,0,0,0.1)]"></th>
-              <th className="border border-gray-300 bg-gray-50 bg-opacity-100 text-left px-3 py-2 font-semibold sticky left-[64px] mr-[-1px] z-20 w-[200px] min-w-[200px] border-r-2 border-gray-400 shadow-[2px_0_4px_rgba(0,0,0,0.1)]"></th>
-              <th className="border border-gray-300 bg-gray-50 bg-opacity-100 text-left px-3 py-2 font-semibold sticky left-[264px] mr-[-1px] z-20 w-[150px] min-w-[150px] border-r-2 border-gray-400 shadow-[2px_0_4px_rgba(0,0,0,0.1)]"></th>
-              <th className="border-l-2 border-l-gray-400 border border-gray-300 bg-gray-50 bg-opacity-100 text-left px-3 py-2 font-semibold sticky left-[414px] mr-[-1px] z-20 w-[120px] min-w-[120px] border-r-2 border-gray-400 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)]"></th>
+              <th className="border border-gray-300 bg-gray-50 text-center px-2 py-2 font-semibold sticky left-0 mr-[-1px] z-30 w-[64px] min-w-[64px] border-r-2 border-gray-400 shadow-[2px_0_4px_rgba(0,0,0,0.1)]"></th>
+              <th className="border border-gray-300 bg-gray-50 text-left px-3 py-2 font-semibold sticky left-[64px] mr-[-1px] z-20 w-[200px] min-w-[200px] border-r-2 border-gray-400 shadow-[2px_0_4px_rgba(0,0,0,0.1)]"></th>
+              <th className="border border-gray-300 bg-gray-50 text-left px-3 py-2 font-semibold sticky left-[264px] mr-[-1px] z-20 w-[150px] min-w-[150px] border-r-2 border-gray-400 shadow-[2px_0_4px_rgba(0,0,0,0.1)]"></th>
+              <th className="border-l-2 border-l-gray-400 border border-gray-300 bg-gray-50 text-left px-3 py-2 font-semibold sticky left-[414px] mr-[-1px] z-20 w-[120px] min-w-[120px] border-r-2 border-gray-400 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)]"></th>
               
               {monthGroups.map((group, groupIdx) => (
                 <th
@@ -845,16 +845,16 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
             {/* Week date header row */}
             <tr>
               {/* Fixed left column headers */}
-              <th className="border border-gray-300 bg-gray-50 bg-opacity-100 text-center px-2 py-2 font-semibold sticky left-0 mr-[-1px] z-30 w-[64px] min-w-[64px] border-r-2 border-gray-400 shadow-[2px_0_4px_rgba(0,0,0,0.1)]">
+              <th className="border border-gray-300 bg-gray-50 text-center px-2 py-2 font-semibold sticky left-0 mr-[-1px] z-30 w-[64px] min-w-[64px] border-r-2 border-gray-400 shadow-[2px_0_4px_rgba(0,0,0,0.1)]">
                 {/* Delete column header */}
               </th>
-              <th className="border border-gray-300 bg-gray-50 bg-opacity-100 text-left px-3 py-2 font-semibold sticky left-[64px] mr-[-1px] z-20 w-[200px] min-w-[200px] border-r-2 border-gray-400 shadow-[2px_0_4px_rgba(0,0,0,0.1)]">
+              <th className="border border-gray-300 bg-gray-50 text-left px-3 py-2 font-semibold sticky left-[64px] mr-[-1px] z-20 w-[200px] min-w-[200px] border-r-2 border-gray-400 shadow-[2px_0_4px_rgba(0,0,0,0.1)]">
                 Channel Name
               </th>
-              <th className="border border-gray-300 bg-gray-50 bg-opacity-100 text-left px-3 py-2 font-semibold sticky left-[264px] mr-[-1px] z-20 w-[150px] min-w-[150px] border-r-2 border-gray-400 shadow-[2px_0_4px_rgba(0,0,0,0.1)]">
+              <th className="border border-gray-300 bg-gray-50 text-left px-3 py-2 font-semibold sticky left-[264px] mr-[-1px] z-20 w-[150px] min-w-[150px] border-r-2 border-gray-400 shadow-[2px_0_4px_rgba(0,0,0,0.1)]">
                 Detail
               </th>
-              <th className="border-l-2 border-l-gray-400 border border-gray-300 bg-gray-50 bg-opacity-100 text-left px-3 py-2 font-semibold sticky left-[414px] mr-[-1px] z-30 w-[120px] min-w-[120px] border-r-2 border-gray-400 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)]">
+              <th className="border-l-2 border-l-gray-400 border border-gray-300 bg-gray-50 text-left px-3 py-2 font-semibold sticky left-[414px] mr-[-1px] z-30 w-[120px] min-w-[120px] border-r-2 border-gray-400 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)]">
                 Total Budget
               </th>
               
@@ -908,7 +908,7 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                     className={`relative ${channelColors.bg}`}
                   >
                     {/* Delete button - Far left */}
-                    <td className="border border-gray-300 px-2 py-2 text-center sticky left-0 mr-[-1px] z-30 bg-gray-50 bg-opacity-100 w-[64px] min-w-[64px] border-r-2 border-gray-400 shadow-[2px_0_4px_rgba(0,0,0,0.1)]">
+                    <td className="border border-gray-300 px-2 py-2 text-center sticky left-0 mr-[-1px] z-30 bg-gray-50 w-[64px] min-w-[64px] border-r-2 border-gray-400 shadow-[2px_0_4px_rgba(0,0,0,0.1)]">
                       <Button
                         variant="ghost"
                         size="icon"
@@ -920,7 +920,7 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                     </td>
                     
                     {/* Channel Name */}
-                    <td className="border border-gray-300 px-3 py-2 sticky left-[64px] mr-[-1px] z-20 bg-gray-50 bg-opacity-100 w-[200px] min-w-[200px] border-r-2 border-gray-400 shadow-[2px_0_4px_rgba(0,0,0,0.1)]">
+                    <td className="border border-gray-300 px-3 py-2 sticky left-[64px] mr-[-1px] z-20 bg-gray-50 w-[200px] min-w-[200px] border-r-2 border-gray-400 shadow-[2px_0_4px_rgba(0,0,0,0.1)]">
                       <Select
                         value={channel.channelName || ""}
                         onValueChange={(value) =>
@@ -943,7 +943,7 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                     </td>
                     
                     {/* Format/Detail */}
-                    <td className="border border-gray-300 px-3 py-2 sticky left-[264px] mr-[-1px] z-20 bg-gray-50 bg-opacity-100 w-[150px] min-w-[150px] border-r-2 border-gray-400 shadow-[2px_0_4px_rgba(0,0,0,0.1)]">
+                    <td className="border border-gray-300 px-3 py-2 sticky left-[264px] mr-[-1px] z-20 bg-gray-50 w-[150px] min-w-[150px] border-r-2 border-gray-400 shadow-[2px_0_4px_rgba(0,0,0,0.1)]">
                       <input
                         type="text"
                         value={channel.format}
@@ -956,7 +956,7 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                     </td>
                     
                     {/* Total Budget */}
-                    <td className="border-l-2 border-l-gray-400 border border-gray-300 px-3 py-2 text-center font-mono sticky left-[414px] mr-[-1px] z-30 bg-gray-50 bg-opacity-100 w-[120px] min-w-[120px] border-r-2 border-gray-400 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)]">
+                    <td className="border-l-2 border-l-gray-400 border border-gray-300 px-3 py-2 text-center font-mono sticky left-[414px] mr-[-1px] z-30 bg-gray-50 w-[120px] min-w-[120px] border-r-2 border-gray-400 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)]">
                       <div className="w-full px-2 py-1 text-center">
                         {formatCurrency(calculateTotalBudgetFromFlights(channel.flights || []))}
                       </div>
@@ -1388,18 +1388,21 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
 
               return (
                 <tr className="bg-gray-50 font-semibold">
-                  {/* Left columns - Totals labels */}
-                  <td className="border border-gray-300 px-3 py-2 sticky left-0 mr-[-1px] z-20 bg-gray-50 bg-opacity-100 w-[200px] min-w-[200px] border-r-2 border-gray-400 shadow-[2px_0_4px_rgba(0,0,0,0.1)]">
+                  {/* Delete column - empty for totals row */}
+                  <td className="border border-gray-300 px-2 py-2 text-center sticky left-0 mr-[-1px] z-30 bg-gray-50 w-[64px] min-w-[64px] border-r-2 border-gray-400 shadow-[2px_0_4px_rgba(0,0,0,0.1)]">
+                    {/* Empty */}
+                  </td>
+                  {/* Channel Name column - TOTALS label */}
+                  <td className="border border-gray-300 px-3 py-2 sticky left-[64px] mr-[-1px] z-20 bg-gray-50 w-[200px] min-w-[200px] border-r-2 border-gray-400 shadow-[2px_0_4px_rgba(0,0,0,0.1)]">
                     TOTALS
                   </td>
-                  <td className="border border-gray-300 px-3 py-2 sticky left-[200px] mr-[-1px] z-20 bg-gray-50 bg-opacity-100 w-[150px] min-w-[150px] border-r-2 border-gray-400 shadow-[2px_0_4px_rgba(0,0,0,0.1)]">
+                  {/* Detail column - empty */}
+                  <td className="border border-gray-300 px-3 py-2 sticky left-[264px] mr-[-1px] z-20 bg-gray-50 w-[150px] min-w-[150px] border-r-2 border-gray-400 shadow-[2px_0_4px_rgba(0,0,0,0.1)]">
                     {/* Empty */}
                   </td>
-                  <td className="border-l-2 border-l-gray-400 border border-gray-300 px-3 py-2 text-right font-mono sticky left-[350px] mr-[-1px] z-30 bg-gray-50 bg-opacity-100 w-[120px] min-w-[120px] border-r-2 border-gray-400 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)]">
+                  {/* Total Budget column */}
+                  <td className="border-l-2 border-l-gray-400 border border-gray-300 px-3 py-2 text-right font-mono sticky left-[414px] mr-[-1px] z-30 bg-gray-50 w-[120px] min-w-[120px] border-r-2 border-gray-400 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)]">
                     {formatCurrency(totalBudget)}
-                  </td>
-                  <td className="border border-gray-300 px-3 py-2 text-center" style={{ width: '64px' }}>
-                    {/* Empty */}
                   </td>
                   
                   {/* Monthly totals in date columns */}

@@ -887,7 +887,7 @@ export default function MediaChannelCard({ channel, onToggleAction, onActualSpen
             className="h-7 text-xs"
           >
             <RefreshCw className={`h-3 w-3 mr-1 ${channel.isFetchingSpend ? 'animate-spin' : ''}`} />
-            {channel.isFetchingSpend ? 'Refreshing...' : 'Refresh Spend'}
+            {channel.isFetchingSpend ? 'Refreshing...' : 'Refresh'}
           </Button>
         </div>
       )}
@@ -1218,59 +1218,60 @@ export default function MediaChannelCard({ channel, onToggleAction, onActualSpen
               platformType={platformType}
               channelName={channel.name}
               selectedMonth={selectedMonth}
+              budgetPacingHeader={
+                <div className="flex items-center justify-between mb-3 gap-2">
+                  <div className="flex items-center gap-3">
+                    {/* Month Navigation */}
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleMonthChange(subMonths(selectedMonth, 1))}
+                        className="h-7 w-7 p-0"
+                      >
+                        <ChevronLeft className="h-3 w-3" />
+                      </Button>
+                      <span className="text-xs font-medium text-[#0f172a] min-w-[80px] text-center">
+                        {format(selectedMonth, 'MMM yyyy')}
+                      </span>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleMonthChange(addMonths(selectedMonth, 1))}
+                        className="h-7 w-7 p-0"
+                      >
+                        <ChevronRight className="h-3 w-3" />
+                      </Button>
+                    </div>
+                    {/* Date Range Picker */}
+                    <DateRangePicker
+                      value={dateRange}
+                      onChange={handleDateRangeChange}
+                      disabled={channel.isFetchingSpend}
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {/* Campaign Filter */}
+                    {channel.campaigns && channel.campaigns.length > 0 && (
+                      <Select value={selectedCampaignId} onValueChange={handleCampaignChange}>
+                        <SelectTrigger className="h-7 text-xs w-[180px]">
+                          <SelectValue placeholder="All Campaigns" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Campaigns</SelectItem>
+                          {channel.campaigns.map((campaign) => (
+                            <SelectItem key={campaign.id} value={campaign.id}>
+                              {campaign.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
+                </div>
+              }
               budgetView={
                 <>
-                  <div className="flex items-center justify-between mb-3 gap-2">
-                    <div className="flex items-center gap-3">
-                      <h4 className="text-sm font-semibold text-[#0f172a]">Budget Pacing</h4>
-                      {/* Month Navigation */}
-                      <div className="flex items-center gap-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleMonthChange(subMonths(selectedMonth, 1))}
-                          className="h-7 w-7 p-0"
-                        >
-                          <ChevronLeft className="h-3 w-3" />
-                        </Button>
-                        <span className="text-xs font-medium text-[#0f172a] min-w-[80px] text-center">
-                          {format(selectedMonth, 'MMM yyyy')}
-                        </span>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleMonthChange(addMonths(selectedMonth, 1))}
-                          className="h-7 w-7 p-0"
-                        >
-                          <ChevronRight className="h-3 w-3" />
-                        </Button>
-                      </div>
-                      {/* Date Range Picker */}
-                      <DateRangePicker
-                        value={dateRange}
-                        onChange={handleDateRangeChange}
-                        disabled={channel.isFetchingSpend}
-                      />
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {/* Campaign Filter */}
-                      {channel.campaigns && channel.campaigns.length > 0 && (
-                        <Select value={selectedCampaignId} onValueChange={handleCampaignChange}>
-                          <SelectTrigger className="h-7 text-xs w-[180px]">
-                            <SelectValue placeholder="All Campaigns" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="all">All Campaigns</SelectItem>
-                            {channel.campaigns.map((campaign) => (
-                              <SelectItem key={campaign.id} value={campaign.id}>
-                                {campaign.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      )}
-                    </div>
-                  </div>
                   {channel.spendError && (
                     <div className="mb-2 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">
                       {channel.spendError}

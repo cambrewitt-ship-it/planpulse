@@ -21,6 +21,7 @@ interface MediaChannelEnhancedViewProps {
   channelName: string;
   selectedMonth?: Date;
   budgetView: React.ReactNode; // The existing budget chart/progress view
+  budgetPacingHeader?: React.ReactNode; // Budget Pacing header section (title, date range, campaign filter)
 }
 
 type ViewMode = 'budget' | 'performance' | 'trends';
@@ -31,6 +32,7 @@ export function MediaChannelEnhancedView({
   channelName,
   selectedMonth,
   budgetView,
+  budgetPacingHeader,
 }: MediaChannelEnhancedViewProps) {
   const [viewMode, setViewMode] = useState<ViewMode>('budget');
   const [filters, setFilters] = useState<MetricFilters>({});
@@ -52,6 +54,13 @@ export function MediaChannelEnhancedView({
 
   return (
     <div className="space-y-4">
+      {/* Budget Pacing Header - shown above buttons when in budget view */}
+      {viewMode === 'budget' && budgetPacingHeader && (
+        <div className="mb-2">
+          {budgetPacingHeader}
+        </div>
+      )}
+
       {/* Header with View Toggle and Actions */}
       <div className="flex items-center justify-between flex-wrap gap-2">
         {/* View Toggle Buttons */}

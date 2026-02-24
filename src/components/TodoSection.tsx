@@ -3,7 +3,7 @@
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { MediaPlanChannel } from '@/components/media-plan-builder/media-plan-grid';
-import { ListTodo, CheckCircle2, Circle, ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
+import { ListTodo, CheckCircle2, Circle, ChevronDown, ChevronUp, Trash2, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { format, parseISO } from 'date-fns';
 
@@ -384,25 +384,61 @@ export default function TodoSection({ mediaPlanBuilderChannels, clientId, embedd
       )}
 
       {/* Spend Pacing Section */}
-      <div className="mb-6 p-4 bg-[#f8fafc] rounded-lg border border-[#e2e8f0]">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-xs text-[#64748b] mb-1">Spend Pacing</p>
-            <p className="text-2xl font-bold text-[#0f172a]">
-              ${totalActualSpend.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              {plannedBudget > 0 && (
-                <span className="text-[#94a3b8]">
-                  {' / '}
-                  ${plannedBudget.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                </span>
+      {(() => {
+        // Pace variance: how far spend % diverges from month-elapsed %
+        const now = new Date();
+        const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+        const monthElapsedPct = (now.getDate() / daysInMonth) * 100;
+        const spendThroughPct = plannedBudget > 0 ? (totalActualSpend / plannedBudget) * 100 : null;
+        const paceVariance = spendThroughPct !== null ? spendThroughPct - monthElapsedPct : null;
+
+        const abs = paceVariance !== null ? Math.abs(paceVariance) : 0;
+        const isAhead = paceVariance !== null && paceVariance > 0;
+        const PaceIcon = paceVariance === null ? Minus : isAhead ? TrendingUp : TrendingDown;
+        const paceLabel = paceVariance === null
+          ? null
+          : `${abs.toFixed(1)}% ${isAhead ? 'ahead of pace' : 'behind pace'}`;
+        const paceBg = paceVariance === null
+          ? 'bg-gray-100 text-gray-500'
+          : abs < 10
+          ? 'bg-green-100 text-green-700'
+          : abs < 20
+          ? 'bg-amber-100 text-amber-700'
+          : 'bg-red-100 text-red-700';
+
+        return (
+          <div className="mb-6 p-4 bg-[#f8fafc] rounded-lg border border-[#e2e8f0]">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-[#64748b] mb-1">Spend Pacing</p>
+                <p className="text-2xl font-bold text-[#0f172a]">
+                  ${totalActualSpend.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {plannedBudget > 0 && (
+                    <span className="text-[#94a3b8]">
+                      {' / '}
+                      ${plannedBudget.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                    </span>
+                  )}
+                </p>
+                <p className="text-xs text-[#64748b] mt-1">
+                  {plannedBudget > 0 ? 'Actual vs Planned Monthly Spend' : 'Total Actual Spend (sum of all media channels)'}
+                </p>
+              </div>
+              {paceLabel && (
+                <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold ${paceBg}`}>
+                  <PaceIcon className="w-3.5 h-3.5 flex-shrink-0" />
+                  {paceLabel}
+                </div>
               )}
-            </p>
-            <p className="text-xs text-[#64748b] mt-1">
-              {plannedBudget > 0 ? 'Actual vs Planned Monthly Spend' : 'Total Actual Spend (sum of all media channels)'}
-            </p>
+            </div>
+            {plannedBudget > 0 && (
+              <div className="mt-3 text-xs text-[#94a3b8]">
+                {Math.round(monthElapsedPct)}% through month · {spendThroughPct?.toFixed(1)}% of budget spent
+              </div>
+            )}
           </div>
-        </div>
-      </div>
+        );
+      })()}
 
       {/* Tabs */}
       <div className="flex gap-1 mb-6 border-b border-[#e2e8f0]">

@@ -23,7 +23,6 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { TrafficLight } from './TrafficLight';
 import { cn } from '@/lib/utils';
 import type { ClientWithHealth } from '@/types/database';
 
@@ -106,7 +105,20 @@ function getMonthProgress(): number {
   return (daysElapsed / daysInMonth) * 100;
 }
 
-/** Spend variance config — positive pct = overspending, negative = underspending */
+/**
+ * Calculate pace-based variance:
+ *   spendPct (actual / planned * 100) minus monthElapsedPct
+ * Positive = ahead of pace (overspending), negative = behind pace (underspending).
+ * Returns null when there's no planned budget.
+ */
+function getPaceVariancePct(actualSpend: number, plannedBudget: number): number | null {
+  if (plannedBudget <= 0) return null;
+  const monthElapsedPct = getMonthProgress();
+  const spendThroughPct = (actualSpend / plannedBudget) * 100;
+  return spendThroughPct - monthElapsedPct;
+}
+
+/** Spend variance config — positive pct = ahead of pace, negative = behind pace */
 function spendConfig(pct: number | null): {
   label: string;
   severity: 'green' | 'orange' | 'red' | 'neutral';
@@ -117,14 +129,15 @@ function spendConfig(pct: number | null): {
   const abs = Math.abs(pct);
   const over = pct > 0;
 
+  // Only flag as non-green when 10%+ pace variance
   let severity: 'green' | 'orange' | 'red';
-  if (abs <= 5) severity = 'green';
-  else if (abs <= 10) severity = 'orange';
+  if (abs < 10) severity = 'green';
+  else if (abs < 20) severity = 'orange';
   else severity = 'red';
 
   const label = over
-    ? `${abs.toFixed(1)}% overspending`
-    : `${abs.toFixed(1)}% underspending`;
+    ? `${abs.toFixed(1)}% ahead of pace`
+    : `${abs.toFixed(1)}% behind pace`;
 
   return { label, severity, Icon: over ? TrendingUp : TrendingDown };
 }
@@ -137,26 +150,26 @@ const severityClass: Record<'green' | 'orange' | 'red' | 'neutral', string> = {
 };
 
 /** Derive a computed health status label based on the card data */
-function healthLabel(client: ClientCardData): { label: string; sub: string } {
+function healthLabel(client: ClientCardData, paceVariancePct: number | null): { label: string; sub: string } {
   const overdue = client.health?.total_overdue_tasks ?? 0;
   const dueSoon = client.tasksDueSoon;
-  const variance = client.spendVariancePct;
+  const variance = paceVariancePct;
   const status = client.health?.status;
 
   if (status === 'red') {
     if (overdue >= 2) return { label: 'Critical', sub: `${overdue} overdue tasks` };
-    if (variance !== null && Math.abs(variance) > 10)
+    if (variance !== null && Math.abs(variance) >= 10)
       return {
         label: 'Critical',
-        sub: variance > 0 ? 'Significantly overspending' : 'Significantly underspending',
+        sub: variance > 0 ? 'Significantly ahead of pace' : 'Significantly behind pace',
       };
     return { label: 'Critical', sub: 'Needs immediate attention' };
   }
   if (status === 'amber') {
     if (overdue === 1) return { label: 'Warning', sub: '1 overdue task' };
     if (dueSoon > 0) return { label: 'Warning', sub: `${dueSoon} task${dueSoon > 1 ? 's' : ''} due soon` };
-    if (variance !== null && Math.abs(variance) > 5)
-      return { label: 'Warning', sub: variance > 0 ? 'Slightly overspending' : 'Slightly underspending' };
+    if (variance !== null && Math.abs(variance) >= 10)
+      return { label: 'Warning', sub: variance > 0 ? 'Slightly ahead of pace' : 'Slightly behind pace' };
     return { label: 'Warning', sub: 'Monitor closely' };
   }
   return { label: 'Healthy', sub: 'All metrics on track' };
@@ -206,8 +219,9 @@ function ClientCard({ client }: { client: ClientCardData }) {
   // We don't have completed count directly, so show incomplete / show overdue
   const totalIncomplete = atRisk;
 
-  const { label: hLabel, sub: hSub } = healthLabel(client);
-  const spend = spendConfig(client.spendVariancePct);
+  const paceVariancePct = getPaceVariancePct(client.actualSpend, client.plannedBudget);
+  const { label: hLabel, sub: hSub } = healthLabel(client, paceVariancePct);
+  const spend = spendConfig(paceVariancePct);
 
   const liveChannels = client.channels.filter((c) => c.status === 'live');
   const upcomingChannels = client.channels.filter((c) => c.status === 'upcoming');
@@ -235,28 +249,12 @@ function ClientCard({ client }: { client: ClientCardData }) {
       <CardContent className="p-4 flex flex-col gap-3 flex-1">
 
         {/* ── Header: avatar + name + health + navigate ── */}
-        <div className="flex items-start gap-3">
+        <div className="flex items-center gap-3">
           <ClientAvatar name={client.name} />
           <div className="flex-1 min-w-0">
             <p className="font-semibold text-sm leading-tight truncate">{client.name}</p>
-            <div className="flex items-center gap-1.5 mt-0.5">
-              <TrafficLight status={client.health?.status} size="small" />
-              <span
-                className={cn(
-                  'text-xs font-medium',
-                  client.health?.status === 'red'
-                    ? 'text-red-600'
-                    : client.health?.status === 'amber'
-                    ? 'text-amber-600'
-                    : 'text-green-600'
-                )}
-              >
-                {hLabel}
-              </span>
-              <span className="text-xs text-muted-foreground truncate">· {hSub}</span>
-            </div>
           </div>
-          <ArrowUpRight className="w-4 h-4 text-muted-foreground flex-shrink-0 mt-0.5" />
+          <ArrowUpRight className="w-4 h-4 text-muted-foreground flex-shrink-0" />
         </div>
 
         {/* ── Action points progress bar ── */}
@@ -315,11 +313,11 @@ function ClientCard({ client }: { client: ClientCardData }) {
         {/* ── Spend vs plan ── */}
         <div className={cn(
           'rounded-lg px-3 py-2 border space-y-1.5',
-          client.spendVariancePct === null || client.plannedBudget === 0
+          paceVariancePct === null || client.plannedBudget === 0
             ? 'bg-muted/40 border-border'
             : severityClass[spend.severity]
         )}>
-          {client.spendVariancePct === null || client.plannedBudget === 0 ? (
+          {paceVariancePct === null || client.plannedBudget === 0 ? (
             <>
               {/* Row 1: label */}
               <div className="flex items-center gap-2">
@@ -364,7 +362,7 @@ function ClientCard({ client }: { client: ClientCardData }) {
         </div>
 
         {/* ── Channels ── */}
-        {liveChannels.length === 0 && upcomingChannels.length === 0 && (client.spendVariancePct === null || client.plannedBudget === 0) ? (
+        {liveChannels.length === 0 && upcomingChannels.length === 0 && (paceVariancePct === null || client.plannedBudget === 0) ? (
           <div className="pt-1 border-t border-border/50">
             <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
               <div className="flex items-start gap-2">
