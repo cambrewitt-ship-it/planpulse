@@ -26,6 +26,7 @@ interface TodoSectionProps {
   actionPointsRefetchTrigger?: number;
   totalActualSpend?: number;
   plannedBudget?: number;
+  onActionPointsDataUpdate?: (actionPoints: ActionPoint[]) => void;
 }
 
 type TabType = 'SET UP' | 'HEALTH CHECK';
@@ -147,7 +148,7 @@ const getTrafficLight = (total: number, completed: number) => {
   return { color: 'bg-red-500', label: 'red' };
 };
 
-export default function TodoSection({ mediaPlanBuilderChannels, clientId, embedded = false, onStatsUpdate, onActionPointsChange, actionPointsRefetchTrigger = 0, totalActualSpend = 0, plannedBudget = 0 }: TodoSectionProps) {
+export default function TodoSection({ mediaPlanBuilderChannels, clientId, embedded = false, onStatsUpdate, onActionPointsChange, actionPointsRefetchTrigger = 0, totalActualSpend = 0, plannedBudget = 0, onActionPointsDataUpdate }: TodoSectionProps) {
   const [allActionPoints, setAllActionPoints] = useState<ActionPoint[]>([]);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<TabType>('SET UP');
@@ -330,6 +331,13 @@ export default function TodoSection({ mediaPlanBuilderChannels, clientId, embedd
       });
     }
   }, [totalAll, completedAll, trafficLight.color, loading, onStatsUpdate]);
+
+  // Propagate raw action points to parent (e.g. dashboard-v2)
+  useEffect(() => {
+    if (onActionPointsDataUpdate) {
+      onActionPointsDataUpdate(allActionPoints);
+    }
+  }, [allActionPoints, onActionPointsDataUpdate]);
 
   // Urgent label — incomplete tasks due within 3 days (including today & overdue)
   const urgentPoints = allActionPoints.filter(ap => {

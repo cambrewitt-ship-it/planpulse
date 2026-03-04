@@ -1140,6 +1140,14 @@ export default function NewClientDashboard() {
       <div className="container mx-auto max-w-7xl px-4 py-8">
         {/* Header Section */}
         <header role="banner" aria-label="Client dashboard header">
+          <div className="flex justify-end mb-2">
+            <Link
+              href={`/clients/${clientId}/dashboard-v2`}
+              className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              Preview New Dashboard →
+            </Link>
+          </div>
           <Card className="bg-white shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 ease-in-out">
             <CardContent className="py-6">
               {/* Top Row: Avatar + Client Name and Action Points Title aligned horizontally */}
