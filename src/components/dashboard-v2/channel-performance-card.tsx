@@ -126,13 +126,13 @@ function PacingBar({
   status: ChannelCardProps['channel']['status'];
 }) {
   const fillPct  = Math.min(100, pacingPercentage);
-  const barColor = STATUS_CONFIG[status].bar;
+  const barColor = pacingPercentage > 100 ? '#ef4444' : STATUS_CONFIG[status].bar;
 
   return (
     <div className="space-y-1">
       <div className="flex justify-between text-xs text-gray-500">
         <span>Pacing</span>
-        <span className={pacingPercentage < 85 ? 'text-amber-600 font-medium' : pacingPercentage > 115 ? 'text-blue-600 font-medium' : 'text-emerald-600 font-medium'}>
+        <span className={pacingPercentage > 100 ? 'text-red-600 font-medium' : pacingPercentage < 85 ? 'text-amber-600 font-medium' : 'text-emerald-600 font-medium'}>
           {fmt(pacingPercentage, 'percent', 0)} of target
         </span>
       </div>
@@ -420,6 +420,13 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                           tickFormatter={(value) => `$${value}`}
                           width={56}
                         />
+                        <defs>
+                          <linearGradient id="actualSpendGradient" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%"   stopColor="#10b981" stopOpacity={0.35} />
+                            <stop offset="50%"  stopColor="#10b981" stopOpacity={0.35} />
+                            <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
                         <Tooltip
                           formatter={(value: any) => [`$${Number(value).toFixed(2)}`, '']}
                           labelFormatter={(label) => new Date(label).toLocaleDateString()}
@@ -437,16 +444,18 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                         <Area
                           type="monotone"
                           dataKey="plannedSpend"
-                          fill="#93c5fd"
-                          stroke="#3b82f6"
-                          fillOpacity={0.2}
+                          fill="#d1d5db"
+                          stroke="#9ca3af"
+                          fillOpacity={0.4}
                           name="Planned Spend"
                         />
-                        <Line
+                        <Area
                           type="monotone"
                           dataKey="actualSpend"
                           stroke="#10b981"
                           strokeWidth={2}
+                          fill="url(#actualSpendGradient)"
+                          fillOpacity={1}
                           name="Actual Spend"
                           dot={{ r: visibleChartData.length > 35 ? 0 : 3 }}
                         />
@@ -480,7 +489,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                         Actual Spend
                       </span>
                       <span className="flex items-center gap-1.5">
-                        <span className="w-3 h-3 rounded-sm bg-blue-200 border border-blue-400 inline-block" />
+                        <span className="w-3 h-3 rounded-sm bg-gray-200 border border-gray-400 inline-block" />
                         Planned Spend
                       </span>
                     </div>

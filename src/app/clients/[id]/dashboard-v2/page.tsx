@@ -769,36 +769,47 @@ export default function DashboardV2() {
     return mediaPlanBuilderChannels.map(ch => {
       const platform = getPlatformForChannel(ch.channelName);
 
-      // ── Planned spend for the selected month (after commission) ──────────
-      const plannedSpend = ch.flights.reduce((sum, f) => {
-        const paddedKey   = format(selectedMonth, 'yyyy-MM');
-        const unpaddedKey = `${selectedMonth.getFullYear()}-${selectedMonth.getMonth() + 1}`;
-        const raw         = f.monthlySpend[paddedKey] ?? f.monthlySpend[unpaddedKey] ?? 0;
-        const afterComm   = commission > 0 ? raw * ((100 - commission) / 100) : raw;
-        return sum + afterComm;
-      }, 0);
+      const chPlatform = getPlatformForChannel(ch.channelName);
+      const keyword    = ch.channelName.toLowerCase().split(' ')[0];
 
-      // ── Actual spend for the selected month from channelMonthSpendData ──
-      // Filter to the selected month so the pacing bar isn't inflated by
-      // adjacent months that fall within the wider analytics date range.
-      const chPlatform   = getPlatformForChannel(ch.channelName);
-      const keyword      = ch.channelName.toLowerCase().split(' ')[0];
-      const monthStartStr = format(startOfMonth(selectedMonth), 'yyyy-MM-dd');
-      const monthEndStr   = format(endOfMonth(selectedMonth),   'yyyy-MM-dd');
-      const chSpendPoints = (channelMonthSpendData as any[]).filter(p => {
-        if (!p.date || p.date < monthStartStr || p.date > monthEndStr) return false;
-        if (p.platform && p.platform === chPlatform) return true;
-        if (p.channelName && p.channelName.toLowerCase().includes(keyword)) return true;
-        return false;
-      });
-      const currentSpend = chSpendPoints.reduce((s: number, p: any) => s + (p.spend ?? 0), 0);
-
-      const pacingPct = plannedSpend > 0 ? (currentSpend / plannedSpend) * 100 : 0;
-
-      // ── Chart data: cumulative planned vs actual via utility ─────────────
+      // ── Chart data: compute first so multi-month totals can be derived ────
       const chartData = isMultiMonth
         ? generateChannelChartDataForRange(ch, analyticsDateRange.startDate, analyticsDateRange.endDate, channelMonthSpendData as any[], commission)
         : generateChannelChartData(ch, selectedMonth, channelMonthSpendData as any[], commission);
+
+      // ── Spend totals ─────────────────────────────────────────────────────
+      // Multi-month: read cumulative totals from the final chart data point so
+      // the header figures match exactly what the chart is displaying.
+      // Single-month: compute as before, scoped to selectedMonth only.
+      let currentSpend: number;
+      let plannedSpend: number;
+
+      if (isMultiMonth && chartData.length > 0) {
+        const lastPoint       = chartData[chartData.length - 1];
+        const lastActualPoint = [...chartData].reverse().find(p => p.actualSpend !== null && typeof p.actualSpend === 'number');
+        currentSpend = lastActualPoint?.actualSpend ?? 0;
+        plannedSpend = lastPoint.plannedSpend;
+      } else {
+        plannedSpend = ch.flights.reduce((sum, f) => {
+          const paddedKey   = format(selectedMonth, 'yyyy-MM');
+          const unpaddedKey = `${selectedMonth.getFullYear()}-${selectedMonth.getMonth() + 1}`;
+          const raw         = f.monthlySpend[paddedKey] ?? f.monthlySpend[unpaddedKey] ?? 0;
+          const afterComm   = commission > 0 ? raw * ((100 - commission) / 100) : raw;
+          return sum + afterComm;
+        }, 0);
+
+        const monthStartStr = format(startOfMonth(selectedMonth), 'yyyy-MM-dd');
+        const monthEndStr   = format(endOfMonth(selectedMonth),   'yyyy-MM-dd');
+        const chSpendPoints = (channelMonthSpendData as any[]).filter(p => {
+          if (!p.date || p.date < monthStartStr || p.date > monthEndStr) return false;
+          if (p.platform && p.platform === chPlatform) return true;
+          if (p.channelName && p.channelName.toLowerCase().includes(keyword)) return true;
+          return false;
+        });
+        currentSpend = chSpendPoints.reduce((s: number, p: any) => s + (p.spend ?? 0), 0);
+      }
+
+      const pacingPct = plannedSpend > 0 ? (currentSpend / plannedSpend) * 100 : 0;
 
       return {
         name:             ch.channelName,
