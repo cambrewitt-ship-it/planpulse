@@ -41,6 +41,11 @@ export interface SpendDataPoint {
   spend: number;
   platform?: string;
   accountName?: string;
+  impressions?: number;
+  clicks?: number;
+  ctr?: number;
+  cpc?: number;
+  conversions?: number;
 }
 
 export interface FetchAnalyticsDataOptions {
@@ -245,6 +250,11 @@ export async function fetchSpendData(
             spend: item.spend || 0,
             platform: 'meta-ads',
             accountName: item.accountName,
+            impressions: item.impressions || 0,
+            clicks: item.clicks || 0,
+            ctr: item.ctr || 0,
+            cpc: item.cpc || 0,
+            conversions: item.conversions || 0,
           });
         });
       }
@@ -283,6 +293,11 @@ export async function fetchSpendData(
             spend: item.spend || 0,
             platform: 'google-ads',
             accountName: item.accountName,
+            impressions: item.impressions || 0,
+            clicks: item.clicks || 0,
+            ctr: item.ctr || 0,
+            cpc: item.cpc || 0,
+            conversions: item.conversions || 0,
           });
         });
       }

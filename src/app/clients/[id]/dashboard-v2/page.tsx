@@ -26,7 +26,7 @@ import { useParams } from 'next/navigation';
 import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { getClients, getMediaPlans, getPlanById, updateClient } from '@/lib/db/plans';
 import { fetchAnalyticsData, fetchSpendData, calculateCostPerMetric, SpendDataPoint, CostMetricPoint } from '@/lib/api/analytics-data-integration';
-import { subDays, format, differenceInDays, parseISO, startOfMonth, endOfMonth } from 'date-fns';
+import { subDays, addDays, format, differenceInDays, parseISO, startOfMonth, endOfMonth } from 'date-fns';
 import { FunnelStage, MediaPlanFunnel, FunnelConfig } from '@/lib/types/funnel';
 import { calculateHealthScore, type HealthScoreResult } from '@/lib/utils/health-score';
 import {
@@ -811,6 +811,61 @@ export default function DashboardV2() {
 
       const pacingPct = plannedSpend > 0 ? (currentSpend / plannedSpend) * 100 : 0;
 
+      // ── Aggregate performance metrics from spend data ─────────────────────
+      const rangeStartStr = analyticsDateRange.startDate;
+      const rangeEndStr   = analyticsDateRange.endDate;
+      const monthStartStr = format(startOfMonth(selectedMonth), 'yyyy-MM-dd');
+      const monthEndStr   = format(endOfMonth(selectedMonth),   'yyyy-MM-dd');
+
+      const chMetricPoints = (channelMonthSpendData as any[]).filter(p => {
+        if (!p.date) return false;
+        const dateInRange = isMultiMonth
+          ? p.date >= rangeStartStr && p.date <= rangeEndStr
+          : p.date >= monthStartStr && p.date <= monthEndStr;
+        if (!dateInRange) return false;
+        if (p.platform && p.platform === chPlatform) return true;
+        if (p.channelName && p.channelName.toLowerCase().includes(keyword)) return true;
+        return false;
+      });
+
+      const totalImpressions = chMetricPoints.reduce((s: number, p: any) => s + (p.impressions ?? 0), 0);
+      const totalClicks      = chMetricPoints.reduce((s: number, p: any) => s + (p.clicks ?? 0), 0);
+      const totalConversions = chMetricPoints.reduce((s: number, p: any) => s + (p.conversions ?? 0), 0);
+      const aggregatedCtr    = totalImpressions > 0 ? totalClicks / totalImpressions : 0;
+      const aggregatedCpc    = totalClicks > 0 ? currentSpend / totalClicks : 0;
+
+      // ── Per-day metrics chart data (full range, zero-filled) ─────────────────
+      const metricsByDate = new Map<string, { impressions: number; clicks: number; spend: number; conversions: number }>();
+      chMetricPoints.forEach((p: any) => {
+        const existing = metricsByDate.get(p.date) ?? { impressions: 0, clicks: 0, spend: 0, conversions: 0 };
+        metricsByDate.set(p.date, {
+          impressions: existing.impressions + (p.impressions ?? 0),
+          clicks:      existing.clicks      + (p.clicks      ?? 0),
+          spend:       existing.spend       + (p.spend        ?? 0),
+          conversions: existing.conversions + (p.conversions  ?? 0),
+        });
+      });
+      // Fill every day in the range so the X axis always spans the full period,
+      // even when the ad platform returns no rows for inactive days.
+      const chartRangeStart = isMultiMonth ? rangeStartStr : monthStartStr;
+      const chartRangeEnd   = isMultiMonth ? rangeEndStr   : monthEndStr;
+      const metricsChartData: Array<{ date: string; impressions: number; clicks: number; ctr: number; cpc: number; conversions: number }> = [];
+      let cursor = parseISO(chartRangeStart);
+      const rangeEndDate = parseISO(chartRangeEnd);
+      while (cursor <= rangeEndDate) {
+        const dateStr = format(cursor, 'yyyy-MM-dd');
+        const vals = metricsByDate.get(dateStr);
+        metricsChartData.push({
+          date:        dateStr,
+          impressions: vals?.impressions ?? 0,
+          clicks:      vals?.clicks      ?? 0,
+          ctr:         vals && vals.impressions > 0 ? vals.clicks / vals.impressions : 0,
+          cpc:         vals && vals.clicks > 0 ? vals.spend / vals.clicks : 0,
+          conversions: vals?.conversions ?? 0,
+        });
+        cursor = addDays(cursor, 1);
+      }
+
       return {
         name:             ch.channelName,
         platform,
@@ -819,15 +874,15 @@ export default function DashboardV2() {
         plannedSpend,
         pacingPercentage: pacingPct,
         metrics: {
-          impressions: 0,
-          clicks:      0,
-          ctr:         0,
-          cpc:         0,
-          conversions: 0,
+          impressions: totalImpressions,
+          clicks:      totalClicks,
+          ctr:         aggregatedCtr,
+          cpc:         aggregatedCpc,
+          conversions: totalConversions,
         },
         issues:          detectIssues(currentSpend, plannedSpend, selectedMonth),
         chartData:       chartData.length > 0 ? chartData : undefined,
-        metricsChartData: undefined,
+        metricsChartData: metricsChartData.length > 0 ? metricsChartData : undefined,
         isMultiMonth,
       };
     });

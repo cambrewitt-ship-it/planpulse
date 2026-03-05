@@ -9,16 +9,18 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  Legend,
   ResponsiveContainer,
   Area,
   ComposedChart,
   ReferenceLine,
 } from 'recharts';
+// Note: Area, ComposedChart used by the spend chart section below
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+
+type MetricKey = 'impressions' | 'clicks' | 'ctr' | 'cpc' | 'conversions';
 
 export interface ChannelCardProps {
   channel: {
@@ -44,6 +46,8 @@ export interface ChannelCardProps {
     }>;
     metricsChartData?: Array<{
       date: string;
+      impressions: number;
+      clicks: number;
       ctr: number;
       cpc: number;
       conversions: number;
@@ -80,6 +84,56 @@ const STATUS_CONFIG = {
 const PLATFORM_COLORS: Record<string, string> = {
   'meta-ads':   '#1877f2',
   'google-ads': '#34a853',
+};
+
+const METRIC_CONFIG: Record<MetricKey, {
+  label: string;
+  shortLabel: string;
+  color: string;
+  formatValue: (v: number) => string;
+  formatAxis: (v: number) => string;
+  formatTooltip: (v: number) => string;
+}> = {
+  impressions: {
+    label: 'Impressions',
+    shortLabel: 'Impr',
+    color: '#6366f1',
+    formatValue:   (v) => fmt(v, 'decimal', 0),
+    formatAxis:    (v) => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(Math.round(v)),
+    formatTooltip: (v) => fmt(v, 'decimal', 0),
+  },
+  clicks: {
+    label: 'Clicks',
+    shortLabel: 'Clicks',
+    color: '#3b82f6',
+    formatValue:   (v) => fmt(v, 'decimal', 0),
+    formatAxis:    (v) => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(Math.round(v)),
+    formatTooltip: (v) => fmt(v, 'decimal', 0),
+  },
+  ctr: {
+    label: 'CTR',
+    shortLabel: 'CTR',
+    color: '#8b5cf6',
+    formatValue:   (v) => fmt(v * 100, 'percent', 2),
+    formatAxis:    (v) => `${(v * 100).toFixed(1)}%`,
+    formatTooltip: (v) => fmt(v * 100, 'percent', 2),
+  },
+  cpc: {
+    label: 'CPC',
+    shortLabel: 'CPC',
+    color: '#f59e0b',
+    formatValue:   (v) => fmt(v, 'currency', 2),
+    formatAxis:    (v) => `$${v.toFixed(2)}`,
+    formatTooltip: (v) => fmt(v, 'currency', 2),
+  },
+  conversions: {
+    label: 'Conversions',
+    shortLabel: 'Conv',
+    color: '#10b981',
+    formatValue:   (v) => fmt(v, 'decimal', 0),
+    formatAxis:    (v) => String(Math.round(v)),
+    formatTooltip: (v) => fmt(v, 'decimal', 0),
+  },
 };
 
 /** Simple inline platform icon using the brand initial */
@@ -158,15 +212,59 @@ function PacingBar({
 }
 
 // ---------------------------------------------------------------------------
-// Metrics grid
+// Metric pill — clickable when in metrics view
 // ---------------------------------------------------------------------------
 
-function MetricPill({ label, value }: { label: string; value: string }) {
+function MetricPill({
+  metricKey,
+  label,
+  value,
+  isActive,
+  isClickable,
+  onClick,
+}: {
+  metricKey: MetricKey;
+  label: string;
+  value: string;
+  isActive: boolean;
+  isClickable: boolean;
+  onClick: (key: MetricKey) => void;
+}) {
+  const cfg = METRIC_CONFIG[metricKey];
+
+  if (!isClickable) {
+    return (
+      <div className="flex flex-col gap-0.5">
+        <span className="text-xs text-gray-400 uppercase tracking-wide leading-none">{label}</span>
+        <span className="text-sm font-semibold text-gray-800 leading-none">{value}</span>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex flex-col gap-0.5">
-      <span className="text-xs text-gray-400 uppercase tracking-wide leading-none">{label}</span>
-      <span className="text-sm font-semibold text-gray-800 leading-none">{value}</span>
-    </div>
+    <button
+      onClick={() => onClick(metricKey)}
+      className={`flex flex-col gap-0.5 rounded-lg px-1.5 py-1 text-left transition-all w-full ${
+        isActive
+          ? 'ring-2 ring-offset-1'
+          : 'hover:bg-gray-50'
+      }`}
+      style={isActive ? { ringColor: cfg.color, backgroundColor: `${cfg.color}10` } : undefined}
+      title={`View ${cfg.label} over time`}
+    >
+      <span
+        className="text-xs uppercase tracking-wide leading-none font-medium"
+        style={{ color: isActive ? cfg.color : undefined }}
+      >
+        {label}
+      </span>
+      <span
+        className="text-sm font-semibold leading-none"
+        style={{ color: isActive ? cfg.color : '#1f2937' }}
+      >
+        {value}
+      </span>
+    </button>
   );
 }
 
@@ -177,11 +275,33 @@ function MetricPill({ label, value }: { label: string; value: string }) {
 export default function ChannelPerformanceCard({ channel, selectedMonth, dateRange, onAdjust, onViewReport }: ChannelCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [chartType, setChartType] = useState<'spend' | 'metrics'>('spend');
+  const [selectedMetrics, setSelectedMetrics] = useState<Set<MetricKey>>(new Set(['impressions']));
 
   const hasIssues     = (channel.issues?.length ?? 0) > 0;
   const hasChartData  = (channel.chartData?.length ?? 0) > 0;
-  const hasMetrics    = (channel.metricsChartData?.length ?? 0) > 0;
+  // hasMetrics is true only when there's at least one day with real data (not all zeros)
+  const hasMetrics    = (channel.metricsChartData ?? []).some(
+    p => p.impressions > 0 || p.clicks > 0 || p.conversions > 0
+  );
   const canExpand     = hasChartData || hasMetrics;
+
+  const isMetricsView = isExpanded && chartType === 'metrics';
+
+  // Toggle a metric in/out of the selected set; always keep at least one selected.
+  // Also expands the card and switches to metrics view on first click.
+  const handleMetricClick = (key: MetricKey) => {
+    setIsExpanded(true);
+    setChartType('metrics');
+    setSelectedMetrics(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        if (next.size > 1) next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
 
   // Derive the visible window of chart data. For single-month mode, restrict
   // to the selectedMonth so the chart doesn't spill into adjacent months.
@@ -197,9 +317,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
     });
   }
 
-  // Then trim to the range where we actually have spend values. This makes the
-  // X-axis adjust to the active time period instead of always rendering the
-  // full month + padding range.
+  // Then trim to the range where we actually have spend values.
   const fullChartData = baseChartData;
   let visibleChartData = fullChartData;
 
@@ -231,12 +349,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
     }
   }
 
-  // Build month labels for the visible range. Each entry includes:
-  //  - key: "year-monthIndex" string (e.g. "2026-0")
-  //  - month: display name (e.g. "January")
-  //  - position: 0–1 centre position along the x-axis (legacy, kept for compat)
-  //  - widthPct: fraction of total days this month occupies (for flex layout)
-  //  - firstDate: ISO date of the first data point in this month (for ReferenceLine)
+  // Build month labels for the visible range.
   const monthLabels: { key: string; month: string; position: number; widthPct: number; firstDate: string }[] = [];
   if (visibleChartData.length > 0) {
     const spans: Record<string, { startIdx: number; endIdx: number; firstDate: string }> = {};
@@ -304,12 +417,27 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
       </div>
 
       {/* ── Metrics grid ── */}
-      <div className="px-4 pb-3 grid grid-cols-5 gap-3 border-t border-gray-50 pt-3">
-        <MetricPill label="Impr"  value={fmt(channel.metrics.impressions, 'decimal', 0)} />
-        <MetricPill label="Clicks" value={fmt(channel.metrics.clicks, 'decimal', 0)} />
-        <MetricPill label="CTR"   value={fmt(channel.metrics.ctr * 100, 'percent', 2)} />
-        <MetricPill label="CPC"   value={fmt(channel.metrics.cpc, 'currency', 2)} />
-        <MetricPill label="Conv"  value={fmt(channel.metrics.conversions, 'decimal', 0)} />
+      <div className="px-4 pb-3 grid grid-cols-5 gap-1 border-t border-gray-50 pt-3">
+        {(Object.keys(METRIC_CONFIG) as MetricKey[]).map((key) => {
+          const cfg = METRIC_CONFIG[key];
+          const rawValue = channel.metrics[key];
+          const displayValue = key === 'ctr'
+            ? fmt(rawValue * 100, 'percent', 2)
+            : key === 'cpc'
+              ? fmt(rawValue, 'currency', 2)
+              : fmt(rawValue, 'decimal', 0);
+          return (
+            <MetricPill
+              key={key}
+              metricKey={key}
+              label={cfg.shortLabel}
+              value={displayValue}
+              isActive={isMetricsView && selectedMetrics.has(key)}
+              isClickable={hasMetrics}
+              onClick={handleMetricClick}
+            />
+          );
+        })}
       </div>
 
       {/* ── Issues warning ── */}
@@ -324,27 +452,17 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
         </div>
       )}
 
-      {/* ── Action bar ── */}
-      <div className="flex items-center gap-2 px-4 pb-3 border-t border-gray-50 pt-2">
-        {/* View Details / Hide Chart — full-width flex-1 */}
-        <button
-          onClick={() => setIsExpanded(prev => !prev)}
-          disabled={!canExpand}
-          className={`flex-1 px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
-            canExpand
-              ? 'text-blue-600 bg-blue-50 hover:bg-blue-100'
-              : 'text-gray-400 bg-gray-50 cursor-not-allowed'
-          }`}
-        >
-          {isExpanded ? '▲ Hide Chart' : '▼ View Details'}
-        </button>
+      {/* ── Action bar: Spend/Metrics centred + Adjust/Report right ── */}
+      <div className="flex items-center px-4 py-2 border-t border-gray-50 gap-2">
+        {/* Left spacer */}
+        <div className="flex-1" />
 
-        {/* Chart type toggle — only shown when expanded */}
-        {isExpanded && (
-          <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+        {/* Spend / Metrics toggle — centred */}
+        {canExpand && (
+          <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
             <button
               onClick={() => setChartType('spend')}
-              className={`px-3 py-1 text-sm rounded transition-colors ${
+              className={`px-3 py-1 text-xs rounded transition-colors ${
                 chartType === 'spend'
                   ? 'bg-white font-medium shadow-sm text-gray-900'
                   : 'text-gray-600 hover:text-gray-800'
@@ -353,8 +471,8 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
               Spend
             </button>
             <button
-              onClick={() => setChartType('metrics')}
-              className={`px-3 py-1 text-sm rounded transition-colors ${
+              onClick={() => { setChartType('metrics'); if (hasMetrics) setIsExpanded(true); }}
+              className={`px-3 py-1 text-xs rounded transition-colors ${
                 chartType === 'metrics'
                   ? 'bg-white font-medium shadow-sm text-gray-900'
                   : 'text-gray-600 hover:text-gray-800'
@@ -365,171 +483,279 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
           </div>
         )}
 
-        {onAdjust && (
-          <button
-            onClick={onAdjust}
-            className="flex items-center gap-1 px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
-          >
-            <Settings className="w-3.5 h-3.5" />
-            Adjust
-          </button>
-        )}
-
-        {onViewReport && (
-          <button
-            onClick={onViewReport}
-            className="flex items-center gap-1 px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
-          >
-            <FileText className="w-3.5 h-3.5" />
-            Report
-          </button>
-        )}
+        {/* Right: Adjust + Report */}
+        <div className="flex-1 flex items-center justify-end gap-2">
+          {onAdjust && (
+            <button
+              onClick={onAdjust}
+              className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+            >
+              <Settings className="w-3 h-3" />
+              Adjust
+            </button>
+          )}
+          {onViewReport && (
+            <button
+              onClick={onViewReport}
+              className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+            >
+              <FileText className="w-3 h-3" />
+              Report
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* ── Expandable chart ── */}
-      {isExpanded && (
-        <div className="border-t border-gray-100 px-4 py-4 bg-gray-50">
-          {chartType === 'spend' && (
-            <>
-              <p className="text-xs font-medium text-gray-500 mb-3 uppercase tracking-wide">
-                Spend vs Planned — {channel.name}
-              </p>
-              {hasChartData ? (
+      {/* ── Chart section — always visible ── */}
+      {canExpand && (
+        <div className="border-t border-gray-100 bg-gray-50">
+          {/* (chart type toggle moved to action bar above) */}
+
+          {/* Clipped chart area */}
+          <div className={`relative${!isExpanded ? ' h-40 overflow-hidden' : ''}`}>
+            <div className="px-4 pt-4 pb-2">
+              {/* ── Spend chart ── */}
+              {chartType === 'spend' && (
                 <>
-                  {/* Chart — fixed height only for the Recharts canvas */}
-                  <div className="h-64">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <ComposedChart
-                        data={visibleChartData}
-                        margin={{ top: 10, right: 16, left: 0, bottom: 8 }}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                        <XAxis
-                          dataKey="date"
-                          tick={{ fontSize: 11 }}
-                          tickMargin={6}
-                          tickFormatter={(value) => new Date(value).getDate().toString()}
-                          interval={
-                            visibleChartData.length > 60 ? 6
-                            : visibleChartData.length > 35 ? 4
-                            : 0
-                          }
-                        />
-                        <YAxis
-                          tick={{ fontSize: 12 }}
-                          tickFormatter={(value) => `$${value}`}
-                          width={56}
-                        />
-                        <defs>
-                          <linearGradient id="actualSpendGradient" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%"   stopColor="#10b981" stopOpacity={0.35} />
-                            <stop offset="50%"  stopColor="#10b981" stopOpacity={0.35} />
-                            <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
-                          </linearGradient>
-                        </defs>
-                        <Tooltip
-                          formatter={(value: any) => [`$${Number(value).toFixed(2)}`, '']}
-                          labelFormatter={(label) => new Date(label).toLocaleDateString()}
-                        />
-                        {/* Month boundary lines for multi-month ranges */}
-                        {monthLabels.length > 1 && monthLabels.slice(1).map(ml => (
-                          <ReferenceLine
-                            key={ml.key}
-                            x={ml.firstDate}
-                            stroke="#d1d5db"
-                            strokeDasharray="4 2"
-                            strokeWidth={1.5}
-                          />
-                        ))}
-                        <Area
-                          type="monotone"
-                          dataKey="plannedSpend"
-                          fill="#d1d5db"
-                          stroke="#9ca3af"
-                          fillOpacity={0.4}
-                          name="Planned Spend"
-                        />
-                        <Area
-                          type="monotone"
-                          dataKey="actualSpend"
-                          stroke="#10b981"
-                          strokeWidth={2}
-                          fill="url(#actualSpendGradient)"
-                          fillOpacity={1}
-                          name="Actual Spend"
-                          dot={{ r: visibleChartData.length > 35 ? 0 : 3 }}
-                        />
-                      </ComposedChart>
-                    </ResponsiveContainer>
-                  </div>
+                  {hasChartData ? (
+                    <>
+                      <div className="h-64">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <ComposedChart
+                            data={visibleChartData}
+                            margin={{ top: 10, right: 16, left: 0, bottom: 8 }}
+                          >
+                            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                            <XAxis
+                              dataKey="date"
+                              tick={{ fontSize: 11 }}
+                              tickMargin={6}
+                              tickFormatter={(value) => new Date(value).getDate().toString()}
+                              interval={
+                                visibleChartData.length > 60 ? 6
+                                : visibleChartData.length > 35 ? 4
+                                : 0
+                              }
+                            />
+                            <YAxis
+                              tick={{ fontSize: 12 }}
+                              tickFormatter={(value) => `$${value}`}
+                              width={56}
+                            />
+                            <defs>
+                              <linearGradient id="actualSpendGradient" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%"   stopColor="#10b981" stopOpacity={0.35} />
+                                <stop offset="50%"  stopColor="#10b981" stopOpacity={0.35} />
+                                <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
+                              </linearGradient>
+                            </defs>
+                            <Tooltip
+                              formatter={(value: any) => [`$${Number(value).toFixed(2)}`, '']}
+                              labelFormatter={(label) => new Date(label).toLocaleDateString()}
+                            />
+                            {monthLabels.length > 1 && monthLabels.slice(1).map(ml => (
+                              <ReferenceLine
+                                key={ml.key}
+                                x={ml.firstDate}
+                                stroke="#d1d5db"
+                                strokeDasharray="4 2"
+                                strokeWidth={1.5}
+                              />
+                            ))}
+                            <Area
+                              type="monotone"
+                              dataKey="plannedSpend"
+                              fill="#d1d5db"
+                              stroke="#9ca3af"
+                              fillOpacity={0.4}
+                              name="Planned Spend"
+                            />
+                            <Area
+                              type="monotone"
+                              dataKey="actualSpend"
+                              stroke="#10b981"
+                              strokeWidth={2}
+                              fill="url(#actualSpendGradient)"
+                              fillOpacity={1}
+                              name="Actual Spend"
+                              dot={{ r: visibleChartData.length > 35 ? 0 : 3 }}
+                            />
+                          </ComposedChart>
+                        </ResponsiveContainer>
+                      </div>
 
-                  {/* Month labels row — proportional flex under the chart plot area */}
-                  {monthLabels.length > 0 && (
-                    <div
-                      className="flex mt-1"
-                      style={{ paddingLeft: 56, paddingRight: 16 }}
-                    >
-                      {monthLabels.map(ml => (
-                        <span
-                          key={ml.key}
-                          className="text-xs font-semibold text-gray-600 text-center truncate"
-                          style={{ width: `${ml.widthPct}%` }}
+                      {isExpanded && monthLabels.length > 0 && (
+                        <div
+                          className="flex mt-1"
+                          style={{ paddingLeft: 56, paddingRight: 16 }}
                         >
-                          {ml.month}
-                        </span>
-                      ))}
-                    </div>
+                          {monthLabels.map(ml => (
+                            <span
+                              key={ml.key}
+                              className="text-xs font-semibold text-gray-600 text-center truncate"
+                              style={{ width: `${ml.widthPct}%` }}
+                            >
+                              {ml.month}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      {isExpanded && (
+                        <div className="mt-2 flex items-center justify-end">
+                          <div className="flex items-center gap-4 text-xs text-gray-500">
+                            <span className="flex items-center gap-1.5">
+                              <span className="w-3 h-0.5 rounded-full bg-emerald-500 inline-block" />
+                              Actual Spend
+                            </span>
+                            <span className="flex items-center gap-1.5">
+                              <span className="w-3 h-3 rounded-sm bg-gray-200 border border-gray-400 inline-block" />
+                              Planned Spend
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-xs text-gray-400 text-center py-8">No spend data available for this period.</p>
                   )}
-
-                  {/* Footer: legend key */}
-                  <div className="mt-2 flex items-center justify-end">
-                    <div className="flex items-center gap-4 text-xs text-gray-500">
-                      <span className="flex items-center gap-1.5">
-                        <span className="w-3 h-0.5 rounded-full bg-emerald-500 inline-block" />
-                        Actual Spend
-                      </span>
-                      <span className="flex items-center gap-1.5">
-                        <span className="w-3 h-3 rounded-sm bg-gray-200 border border-gray-400 inline-block" />
-                        Planned Spend
-                      </span>
-                    </div>
-                  </div>
                 </>
-              ) : (
-                <p className="text-xs text-gray-400 text-center py-8">No spend data available for this period.</p>
               )}
-            </>
-          )}
 
-          {chartType === 'metrics' && (
-            <>
-              <p className="text-xs font-medium text-gray-500 mb-3 uppercase tracking-wide">
-                Performance Metrics — {channel.name}
-              </p>
-              {hasMetrics ? (
-                <div className="h-64">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={channel.metricsChartData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                      <XAxis
-                        dataKey="date"
-                        tick={{ fontSize: 12 }}
-                        tickFormatter={(value) => new Date(value).getDate().toString()}
-                      />
-                      <YAxis tick={{ fontSize: 12 }} />
-                      <Tooltip labelFormatter={(label) => new Date(label).toLocaleDateString()} />
-                      <Legend />
-                      <Line type="monotone" dataKey="ctr" stroke="#8b5cf6" name="CTR %" strokeWidth={2} dot={{ r: 2 }} />
-                      <Line type="monotone" dataKey="cpc" stroke="#f59e0b" name="CPC $" strokeWidth={2} dot={{ r: 2 }} />
-                      <Line type="monotone" dataKey="conversions" stroke="#10b981" name="Conversions" strokeWidth={2} dot={{ r: 2 }} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              ) : (
-                <p className="text-xs text-gray-400 text-center py-8">No metrics data available for this period.</p>
+              {/* ── Metrics chart (only in expanded state) ── */}
+              {chartType === 'metrics' && isExpanded && (
+                <>
+                  <div className="flex items-center gap-1.5 mb-4 flex-wrap">
+                    {(Object.keys(METRIC_CONFIG) as MetricKey[]).map((key) => {
+                      const cfg = METRIC_CONFIG[key];
+                      const isActive = selectedMetrics.has(key);
+                      return (
+                        <button
+                          key={key}
+                          onClick={() => handleMetricClick(key)}
+                          className={`px-2 py-0.5 rounded-full text-xs font-medium border transition-all ${
+                            isActive
+                              ? 'text-white border-transparent'
+                              : 'text-gray-600 bg-white border-gray-200 hover:border-gray-300'
+                          }`}
+                          style={isActive ? { backgroundColor: cfg.color, borderColor: cfg.color } : undefined}
+                        >
+                          {cfg.shortLabel}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {hasMetrics ? (() => {
+                    const selectedKeys = (Object.keys(METRIC_CONFIG) as MetricKey[]).filter(k => selectedMetrics.has(k));
+                    const axisMode: 'single' | 'dual' | 'hidden' =
+                      selectedKeys.length === 1 ? 'single'
+                      : selectedKeys.length === 2 ? 'dual'
+                      : 'hidden';
+                    const dataLen = channel.metricsChartData?.length ?? 0;
+
+                    return (
+                      <>
+                        {axisMode === 'hidden' && (
+                          <p className="text-xs text-gray-400 mb-2 text-right">
+                            Relative scale — each line scaled independently
+                          </p>
+                        )}
+                        <div className="h-64">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <LineChart
+                              data={channel.metricsChartData}
+                              margin={{ top: 10, right: axisMode === 'dual' ? 64 : 16, left: 0, bottom: 8 }}
+                            >
+                              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                              <XAxis
+                                dataKey="date"
+                                tick={{ fontSize: 11 }}
+                                tickMargin={6}
+                                tickFormatter={(value: string) => {
+                                  const parts = value.split('-');
+                                  if (parts.length !== 3) return value;
+                                  const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+                                  const month = monthNames[parseInt(parts[1], 10) - 1] ?? '';
+                                  const day   = parseInt(parts[2], 10);
+                                  return `${month} ${day}`;
+                                }}
+                                interval={
+                                  dataLen > 60 ? 9
+                                  : dataLen > 35 ? 5
+                                  : dataLen > 14 ? 2
+                                  : 0
+                                }
+                              />
+                              {selectedKeys.map((key, i) => (
+                                <YAxis
+                                  key={key}
+                                  yAxisId={key}
+                                  orientation={i === 0 ? 'left' : 'right'}
+                                  hide={axisMode === 'hidden'}
+                                  tick={{ fontSize: 11 }}
+                                  tickFormatter={METRIC_CONFIG[key].formatAxis}
+                                  width={axisMode !== 'hidden' ? 60 : 0}
+                                  stroke={axisMode === 'dual' ? METRIC_CONFIG[key].color : '#6b7280'}
+                                />
+                              ))}
+                              <Tooltip
+                                formatter={(value: any, name: any) => {
+                                  const cfg = METRIC_CONFIG[name as MetricKey];
+                                  return cfg ? [cfg.formatTooltip(Number(value)), cfg.label] : [value, name];
+                                }}
+                                labelFormatter={(label: string) => {
+                                  const parts = label.split('-');
+                                  if (parts.length !== 3) return label;
+                                  const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+                                  const month = monthNames[parseInt(parts[1], 10) - 1] ?? '';
+                                  const day   = parseInt(parts[2], 10);
+                                  return `${month} ${day}, ${parts[0]}`;
+                                }}
+                              />
+                              {selectedKeys.map(key => (
+                                <Line
+                                  key={key}
+                                  yAxisId={key}
+                                  type="monotone"
+                                  dataKey={key}
+                                  stroke={METRIC_CONFIG[key].color}
+                                  strokeWidth={2}
+                                  dot={{ r: dataLen > 35 ? 0 : 3, fill: METRIC_CONFIG[key].color }}
+                                  activeDot={{ r: 5 }}
+                                  name={key}
+                                />
+                              ))}
+                            </LineChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </>
+                    );
+                  })() : (
+                    <p className="text-xs text-gray-400 text-center py-8">No metrics data available for this period.</p>
+                  )}
+                </>
               )}
-            </>
-          )}
+            </div>
+
+            {/* Gradient fade — only when collapsed */}
+            {!isExpanded && (
+              <div
+                className="absolute inset-x-0 bottom-0 h-20 pointer-events-none"
+                style={{ background: 'linear-gradient(to top, #f9fafb 10%, transparent)' }}
+              />
+            )}
+          </div>
+
+          {/* See More / See Less button */}
+          <div className="flex justify-center pb-3 pt-1">
+            <button
+              onClick={() => setIsExpanded(prev => !prev)}
+              className="px-4 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-full transition-colors"
+            >
+              {isExpanded ? '▲ See Less' : '▼ See More'}
+            </button>
+          </div>
         </div>
       )}
     </div>
