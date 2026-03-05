@@ -25,13 +25,14 @@ import { MediaPlanGrid, MediaPlanChannel } from '@/components/media-plan-builder
 import { useParams } from 'next/navigation';
 import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { getClients, getMediaPlans, getPlanById, updateClient } from '@/lib/db/plans';
-import { fetchAnalyticsData, calculateCostPerMetric, SpendDataPoint, CostMetricPoint } from '@/lib/api/analytics-data-integration';
+import { fetchAnalyticsData, fetchSpendData, calculateCostPerMetric, SpendDataPoint, CostMetricPoint } from '@/lib/api/analytics-data-integration';
 import { subDays, format, differenceInDays, parseISO, startOfMonth, endOfMonth } from 'date-fns';
 import { FunnelStage, MediaPlanFunnel, FunnelConfig } from '@/lib/types/funnel';
 import { calculateHealthScore, type HealthScoreResult } from '@/lib/utils/health-score';
 import {
   getPlatformForChannel,
   generateChannelChartData,
+  generateChannelChartDataForRange,
 } from '@/lib/utils/channel-pacing';
 import { CACChart } from '@/components/ui/cac-chart';
 import { DateRangePicker } from '@/components/ui/date-range-picker';
@@ -142,11 +143,22 @@ export default function DashboardV2() {
   const [actionPointsStats, setActionPointsStats] = useState<{ totalAll: number; completedAll: number; trafficLightColor: string; loading: boolean }>({ totalAll: 0, completedAll: 0, trafficLightColor: 'bg-gray-400', loading: true });
   const [allActionPoints, setAllActionPoints] = useState<any[]>([]);
   const [actionPointsRefetchTrigger, setActionPointsRefetchTrigger] = useState(0);
-  const [totalActualSpend, setTotalActualSpend] = useState<number>(0);
   const [healthScore, setHealthScore] = useState<HealthScoreResult | null>(null);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
-  // Spend data scoped to the visible analytics period — fetched independently for channel cards
+  // Spend data scoped to the visible analytics period — fetched independently for channel cards.
+  // Must be declared before totalActualSpend so the useMemo below can reference it.
   const [channelMonthSpendData, setChannelMonthSpendData] = useState<SpendDataPoint[]>([]);
+  // Derived from channelMonthSpendData — sum of current-month spend across all platforms.
+  // Mirrors how new-client-dashboard derives this from MediaChannels' onTotalActualSpendChange.
+  const totalActualSpend = useMemo(() => {
+    if (!channelMonthSpendData.length) return 0;
+    const now = new Date();
+    const monthStart = format(startOfMonth(now), 'yyyy-MM-dd');
+    const monthEnd   = format(endOfMonth(now),   'yyyy-MM-dd');
+    return (channelMonthSpendData as any[])
+      .filter((p: any) => p.date >= monthStart && p.date <= monthEnd)
+      .reduce((sum: number, p: any) => sum + (p.spend ?? 0), 0);
+  }, [channelMonthSpendData]);
   const [analyticsDateRange, setAnalyticsDateRange] = useState(() => {
     const today = new Date();
     const thirtyDaysAgo = subDays(today, 30);
@@ -223,17 +235,14 @@ export default function DashboardV2() {
         const rangeStart = analyticsDateRange.startDate;
         const rangeEnd   = analyticsDateRange.endDate;
 
-        const result = await fetchAnalyticsData({
-          startDate: rangeStart,
-          endDate:   rangeEnd,
-          clientId,
-          includeSpendData: true,
-          metrics: ['activeUsers'], // minimal — just need spend rows
-        });
+        // Call the spend APIs directly — same approach as MediaChannels.
+        // Avoids going through fetchAnalyticsData which also fetches GA4 data;
+        // a GA4 failure there would silently swallow the spend result.
+        const spendResult = await fetchSpendData(rangeStart, rangeEnd, clientId);
 
         if (cancelled) return;
 
-        const enhanced = (result.spendData || []).map((point: any) => ({
+        const enhanced = (spendResult.data || []).map((point: any) => ({
           ...point,
           channelId:   point.platform && point.accountName
             ? `${point.platform}_${point.accountName}`
@@ -729,6 +738,13 @@ export default function DashboardV2() {
 
     const now = new Date();
 
+    // Detect whether the analytics range spans more than one calendar month.
+    const rangeStart   = parseISO(analyticsDateRange.startDate);
+    const rangeEnd     = parseISO(analyticsDateRange.endDate);
+    const isMultiMonth =
+      rangeStart.getMonth() !== rangeEnd.getMonth() ||
+      rangeStart.getFullYear() !== rangeEnd.getFullYear();
+
     const determineStatus = (current: number, planned: number): 'excellent' | 'healthy' | 'attention' => {
       if (planned === 0) return 'attention';
       const ratio = current / planned;
@@ -763,9 +779,14 @@ export default function DashboardV2() {
       }, 0);
 
       // ── Actual spend for the selected month from channelMonthSpendData ──
-      const chPlatform = getPlatformForChannel(ch.channelName);
-      const keyword    = ch.channelName.toLowerCase().split(' ')[0];
+      // Filter to the selected month so the pacing bar isn't inflated by
+      // adjacent months that fall within the wider analytics date range.
+      const chPlatform   = getPlatformForChannel(ch.channelName);
+      const keyword      = ch.channelName.toLowerCase().split(' ')[0];
+      const monthStartStr = format(startOfMonth(selectedMonth), 'yyyy-MM-dd');
+      const monthEndStr   = format(endOfMonth(selectedMonth),   'yyyy-MM-dd');
       const chSpendPoints = (channelMonthSpendData as any[]).filter(p => {
+        if (!p.date || p.date < monthStartStr || p.date > monthEndStr) return false;
         if (p.platform && p.platform === chPlatform) return true;
         if (p.channelName && p.channelName.toLowerCase().includes(keyword)) return true;
         return false;
@@ -775,7 +796,9 @@ export default function DashboardV2() {
       const pacingPct = plannedSpend > 0 ? (currentSpend / plannedSpend) * 100 : 0;
 
       // ── Chart data: cumulative planned vs actual via utility ─────────────
-      const chartData = generateChannelChartData(ch, selectedMonth, channelMonthSpendData as any[], commission);
+      const chartData = isMultiMonth
+        ? generateChannelChartDataForRange(ch, analyticsDateRange.startDate, analyticsDateRange.endDate, channelMonthSpendData as any[], commission)
+        : generateChannelChartData(ch, selectedMonth, channelMonthSpendData as any[], commission);
 
       return {
         name:             ch.channelName,
@@ -794,9 +817,10 @@ export default function DashboardV2() {
         issues:          detectIssues(currentSpend, plannedSpend, selectedMonth),
         chartData:       chartData.length > 0 ? chartData : undefined,
         metricsChartData: undefined,
+        isMultiMonth,
       };
     });
-  }, [mediaPlanBuilderChannels, channelMonthSpendData, selectedMonth, commission]);
+  }, [mediaPlanBuilderChannels, channelMonthSpendData, selectedMonth, commission, analyticsDateRange.startDate, analyticsDateRange.endDate]);
 
   // ── Calculate health score whenever the relevant inputs change ────────────
   useEffect(() => {
@@ -1132,6 +1156,7 @@ export default function DashboardV2() {
                           key={ch.name}
                           channel={ch}
                           selectedMonth={selectedMonth}
+                          dateRange={ch.isMultiMonth ? analyticsDateRange : undefined}
                           onAdjust={() => handleAdjustChannel(ch.platform)}
                           onViewReport={() => handleViewReport(ch.platform)}
                         />

@@ -13,6 +13,7 @@ import {
   ResponsiveContainer,
   Area,
   ComposedChart,
+  ReferenceLine,
 } from 'recharts';
 
 // ---------------------------------------------------------------------------
@@ -47,8 +48,11 @@ export interface ChannelCardProps {
       cpc: number;
       conversions: number;
     }>;
+    isMultiMonth?: boolean;
   };
   selectedMonth?: Date;
+  /** When provided (multi-month ranges), skips the single-month filter and enables multi-month axis labels. */
+  dateRange?: { startDate: string; endDate: string };
   onAdjust?: () => void;
   onViewReport?: () => void;
 }
@@ -170,7 +174,7 @@ function MetricPill({ label, value }: { label: string; value: string }) {
 // Main component
 // ---------------------------------------------------------------------------
 
-export default function ChannelPerformanceCard({ channel, selectedMonth, onAdjust, onViewReport }: ChannelCardProps) {
+export default function ChannelPerformanceCard({ channel, selectedMonth, dateRange, onAdjust, onViewReport }: ChannelCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [chartType, setChartType] = useState<'spend' | 'metrics'>('spend');
 
@@ -178,6 +182,91 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, onAdjus
   const hasChartData  = (channel.chartData?.length ?? 0) > 0;
   const hasMetrics    = (channel.metricsChartData?.length ?? 0) > 0;
   const canExpand     = hasChartData || hasMetrics;
+
+  // Derive the visible window of chart data. For single-month mode, restrict
+  // to the selectedMonth so the chart doesn't spill into adjacent months.
+  // For multi-month mode (dateRange provided), trust the pre-scoped chart data.
+  let baseChartData = channel.chartData ?? [];
+  if (!dateRange && selectedMonth instanceof Date) {
+    const targetMonth = selectedMonth.getMonth();
+    const targetYear  = selectedMonth.getFullYear();
+    baseChartData = baseChartData.filter((point) => {
+      const d = new Date(point.date);
+      if (isNaN(d.getTime())) return false;
+      return d.getMonth() === targetMonth && d.getFullYear() === targetYear;
+    });
+  }
+
+  // Then trim to the range where we actually have spend values. This makes the
+  // X-axis adjust to the active time period instead of always rendering the
+  // full month + padding range.
+  const fullChartData = baseChartData;
+  let visibleChartData = fullChartData;
+
+  if (fullChartData.length > 0) {
+    let firstIdx = 0;
+    let lastIdx = fullChartData.length - 1;
+
+    const firstWithActual = fullChartData.findIndex(
+      (p) => p.actualSpend !== null && typeof p.actualSpend === 'number'
+    );
+    const lastWithActual = (() => {
+      for (let i = fullChartData.length - 1; i >= 0; i--) {
+        const p = fullChartData[i];
+        if (p.actualSpend !== null && typeof p.actualSpend === 'number') {
+          return i;
+        }
+      }
+      return -1;
+    })();
+
+    if (firstWithActual !== -1 && lastWithActual !== -1 && firstWithActual <= lastWithActual) {
+      firstIdx = firstWithActual;
+      lastIdx = lastWithActual;
+    }
+
+    visibleChartData = fullChartData.slice(firstIdx, lastIdx + 1);
+    if (visibleChartData.length === 0) {
+      visibleChartData = fullChartData;
+    }
+  }
+
+  // Build month labels for the visible range. Each entry includes:
+  //  - key: "year-monthIndex" string (e.g. "2026-0")
+  //  - month: display name (e.g. "January")
+  //  - position: 0–1 centre position along the x-axis (legacy, kept for compat)
+  //  - widthPct: fraction of total days this month occupies (for flex layout)
+  //  - firstDate: ISO date of the first data point in this month (for ReferenceLine)
+  const monthLabels: { key: string; month: string; position: number; widthPct: number; firstDate: string }[] = [];
+  if (visibleChartData.length > 0) {
+    const spans: Record<string, { startIdx: number; endIdx: number; firstDate: string }> = {};
+
+    visibleChartData.forEach((point, idx) => {
+      const d = new Date(point.date);
+      if (isNaN(d.getTime())) return;
+      const key = `${d.getFullYear()}-${d.getMonth()}`;
+      if (!spans[key]) {
+        spans[key] = { startIdx: idx, endIdx: idx, firstDate: point.date };
+      } else {
+        spans[key].endIdx = idx;
+      }
+    });
+
+    const total     = Math.max(1, visibleChartData.length - 1);
+    const totalDays = visibleChartData.length;
+
+    Object.entries(spans).forEach(([key, span]) => {
+      const [yearStr, monthIndexStr] = key.split('-');
+      const year       = Number(yearStr);
+      const monthIndex = Number(monthIndexStr);
+      const midIdx     = span.startIdx + (span.endIdx - span.startIdx) / 2;
+      const position   = total === 0 ? 0.5 : midIdx / total;
+      const dayCount   = span.endIdx - span.startIdx + 1;
+      const widthPct   = totalDays > 0 ? (dayCount / totalDays) * 100 : 100 / Object.keys(spans).length;
+      const monthName  = new Date(year, monthIndex, 1).toLocaleString('en-US', { month: 'long' });
+      monthLabels.push({ key, month: monthName, position, widthPct, firstDate: span.firstDate });
+    });
+  }
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden hover:shadow-md transition-shadow duration-200">
@@ -306,43 +395,97 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, onAdjus
                 Spend vs Planned — {channel.name}
               </p>
               {hasChartData ? (
-                <div className="h-64">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={channel.chartData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                      <XAxis
-                        dataKey="date"
-                        tick={{ fontSize: 12 }}
-                        tickFormatter={(value) => new Date(value).getDate().toString()}
-                      />
-                      <YAxis
-                        tick={{ fontSize: 12 }}
-                        tickFormatter={(value) => `$${value}`}
-                      />
-                      <Tooltip
-                        formatter={(value: any) => [`$${Number(value).toFixed(2)}`, '']}
-                        labelFormatter={(label) => new Date(label).toLocaleDateString()}
-                      />
-                      <Legend />
-                      <Area
-                        type="monotone"
-                        dataKey="plannedSpend"
-                        fill="#93c5fd"
-                        stroke="#3b82f6"
-                        fillOpacity={0.2}
-                        name="Planned Spend"
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="actualSpend"
-                        stroke="#10b981"
-                        strokeWidth={2}
-                        name="Actual Spend"
-                        dot={{ r: 3 }}
-                      />
-                    </ComposedChart>
-                  </ResponsiveContainer>
-                </div>
+                <>
+                  {/* Chart — fixed height only for the Recharts canvas */}
+                  <div className="h-64">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <ComposedChart
+                        data={visibleChartData}
+                        margin={{ top: 10, right: 16, left: 0, bottom: 8 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                        <XAxis
+                          dataKey="date"
+                          tick={{ fontSize: 11 }}
+                          tickMargin={6}
+                          tickFormatter={(value) => new Date(value).getDate().toString()}
+                          interval={
+                            visibleChartData.length > 60 ? 6
+                            : visibleChartData.length > 35 ? 4
+                            : 0
+                          }
+                        />
+                        <YAxis
+                          tick={{ fontSize: 12 }}
+                          tickFormatter={(value) => `$${value}`}
+                          width={56}
+                        />
+                        <Tooltip
+                          formatter={(value: any) => [`$${Number(value).toFixed(2)}`, '']}
+                          labelFormatter={(label) => new Date(label).toLocaleDateString()}
+                        />
+                        {/* Month boundary lines for multi-month ranges */}
+                        {monthLabels.length > 1 && monthLabels.slice(1).map(ml => (
+                          <ReferenceLine
+                            key={ml.key}
+                            x={ml.firstDate}
+                            stroke="#d1d5db"
+                            strokeDasharray="4 2"
+                            strokeWidth={1.5}
+                          />
+                        ))}
+                        <Area
+                          type="monotone"
+                          dataKey="plannedSpend"
+                          fill="#93c5fd"
+                          stroke="#3b82f6"
+                          fillOpacity={0.2}
+                          name="Planned Spend"
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="actualSpend"
+                          stroke="#10b981"
+                          strokeWidth={2}
+                          name="Actual Spend"
+                          dot={{ r: visibleChartData.length > 35 ? 0 : 3 }}
+                        />
+                      </ComposedChart>
+                    </ResponsiveContainer>
+                  </div>
+
+                  {/* Month labels row — proportional flex under the chart plot area */}
+                  {monthLabels.length > 0 && (
+                    <div
+                      className="flex mt-1"
+                      style={{ paddingLeft: 56, paddingRight: 16 }}
+                    >
+                      {monthLabels.map(ml => (
+                        <span
+                          key={ml.key}
+                          className="text-xs font-semibold text-gray-600 text-center truncate"
+                          style={{ width: `${ml.widthPct}%` }}
+                        >
+                          {ml.month}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Footer: legend key */}
+                  <div className="mt-2 flex items-center justify-end">
+                    <div className="flex items-center gap-4 text-xs text-gray-500">
+                      <span className="flex items-center gap-1.5">
+                        <span className="w-3 h-0.5 rounded-full bg-emerald-500 inline-block" />
+                        Actual Spend
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        <span className="w-3 h-3 rounded-sm bg-blue-200 border border-blue-400 inline-block" />
+                        Planned Spend
+                      </span>
+                    </div>
+                  </div>
+                </>
               ) : (
                 <p className="text-xs text-gray-400 text-center py-8">No spend data available for this period.</p>
               )}

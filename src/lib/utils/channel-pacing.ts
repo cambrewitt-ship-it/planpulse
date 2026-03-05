@@ -286,6 +286,111 @@ export function generateMonthDataFromWeeklyPlans(
 }
 
 // ---------------------------------------------------------------------------
+// Multi-month range chart data generator
+// ---------------------------------------------------------------------------
+
+/**
+ * Generates cumulative planned vs actual spend for an arbitrary date range
+ * (may span multiple months). The cumulative values reset at the start of
+ * the range (not at each month boundary), so the chart shows total progress
+ * across the full period.
+ */
+export function generateChannelChartDataForRange(
+  channel: MediaPlanChannel,
+  startDate: string,
+  endDate: string,
+  spendData: any[],
+  commission: number,
+): ChannelChartPoint[] {
+  const weeklyPlans     = buildWeeklyPlansFromFlights(channel, commission);
+  const channelPlatform = getPlatformForChannel(channel.channelName);
+  const channelKeyword  = channel.channelName.toLowerCase().split(' ')[0];
+  const useLinear       = isGoogleAdsChannel(channel.channelName) || isMetaAdsChannel(channel.channelName);
+
+  const channelLiveData = spendData.filter((p: any) => {
+    if (p.platform && p.platform === channelPlatform) return true;
+    if (p.channelName && p.channelName.toLowerCase().includes(channelKeyword)) return true;
+    return false;
+  });
+
+  const start   = parseISO(startDate);
+  const end     = parseISO(endDate);
+  const allDays = eachDayOfInterval({ start, end });
+
+  // Live spend by date (dollars)
+  const liveSpendByDate = new Map<string, number>();
+  channelLiveData.forEach((item: any) => {
+    const dateKey = item.dateStart ?? item.date ?? null;
+    if (dateKey && item.spend !== undefined) {
+      liveSpendByDate.set(dateKey, (liveSpendByDate.get(dateKey) ?? 0) + (item.spend ?? 0));
+    }
+  });
+
+  // Daily planned spend (dollars per day) across the full range
+  const dailyPlannedByDate = new Map<string, number>();
+
+  if (useLinear) {
+    // Group days by calendar month, distribute each month's budget evenly
+    const monthGroups = new Map<string, { monthStart: Date; days: Date[] }>();
+    allDays.forEach(day => {
+      const ms  = startOfMonth(day);
+      const key = format(ms, 'yyyy-MM-dd');
+      if (!monthGroups.has(key)) monthGroups.set(key, { monthStart: ms, days: [] });
+      monthGroups.get(key)!.days.push(day);
+    });
+    monthGroups.forEach(({ monthStart: ms, days }) => {
+      const budgetCents    = getChannelMonthlyBudgetCents(weeklyPlans, ms);
+      const daysInMonth    = eachDayOfInterval({ start: ms, end: endOfMonth(ms) }).length;
+      const dailyRate      = (budgetCents / 100) / daysInMonth;
+      days.forEach(day => {
+        dailyPlannedByDate.set(format(day, 'yyyy-MM-dd'), dailyRate);
+      });
+    });
+  } else {
+    // Weekly plan: distribute each week's budget evenly across its 7 days
+    const allDaysSet = new Set(allDays.map(d => format(d, 'yyyy-MM-dd')));
+    weeklyPlans.forEach(wp => {
+      const weekStart  = parseISO(wp.week_commencing);
+      const dailyRate  = (wp.budget_planned ?? 0) / 7 / 100; // cents → dollars
+      for (let i = 0; i < 7; i++) {
+        const day     = new Date(weekStart);
+        day.setDate(day.getDate() + i);
+        const dateKey = format(day, 'yyyy-MM-dd');
+        if (allDaysSet.has(dateKey)) {
+          dailyPlannedByDate.set(dateKey, (dailyPlannedByDate.get(dateKey) ?? 0) + dailyRate);
+        }
+      }
+    });
+  }
+
+  // Accumulate into chart points
+  const hasLiveData       = channelLiveData.length > 0;
+  let cumulativeActual    = 0;
+  let cumulativePlanned   = 0;
+
+  const points = allDays.map(day => {
+    const dateKey         = format(day, 'yyyy-MM-dd');
+    cumulativePlanned    += dailyPlannedByDate.get(dateKey) ?? 0;
+    cumulativeActual     += liveSpendByDate.get(dateKey) ?? 0;
+    return {
+      date:          dateKey,
+      actualSpend:   hasLiveData ? cumulativeActual : null,
+      plannedSpend:  cumulativePlanned,
+      projectedSpend: null as null,
+      projected:     false,
+    };
+  });
+
+  // No live data → show 0 baseline for past/today dates
+  if (!hasLiveData) {
+    const todayStr = format(new Date(), 'yyyy-MM-dd');
+    return points.map(p => ({ ...p, actualSpend: p.date <= todayStr ? 0 : null }));
+  }
+
+  return points;
+}
+
+// ---------------------------------------------------------------------------
 // Convenience wrapper for dashboard-v2
 // ---------------------------------------------------------------------------
 
