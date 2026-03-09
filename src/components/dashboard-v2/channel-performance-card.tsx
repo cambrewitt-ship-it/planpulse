@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { AlertTriangle, Settings, FileText } from 'lucide-react';
+import InlineActionPoints from './inline-action-points';
 import {
   LineChart,
   Line,
@@ -59,6 +60,7 @@ export interface ChannelCardProps {
   dateRange?: { startDate: string; endDate: string };
   onAdjust?: () => void;
   onViewReport?: () => void;
+  clientId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -272,7 +274,17 @@ function MetricPill({
 // Main component
 // ---------------------------------------------------------------------------
 
-export default function ChannelPerformanceCard({ channel, selectedMonth, dateRange, onAdjust, onViewReport }: ChannelCardProps) {
+// Helper to normalize channel name to channel_type format
+function normalizeChannelType(channelName: string): string {
+  // Convert to title case: "META ADS" -> "Meta Ads"
+  return channelName
+    .toLowerCase()
+    .split(' ')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+export default function ChannelPerformanceCard({ channel, selectedMonth, dateRange, onAdjust, onViewReport, clientId }: ChannelCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [chartType, setChartType] = useState<'spend' | 'metrics'>('spend');
   const [selectedMetrics, setSelectedMetrics] = useState<Set<MetricKey>>(new Set(['impressions']));
@@ -757,6 +769,15 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
             </button>
           </div>
         </div>
+      )}
+
+      {/* Action Points */}
+      {clientId && (
+        <InlineActionPoints
+          channelType={normalizeChannelType(channel.name)}
+          clientId={clientId}
+          maxVisible={3}
+        />
       )}
     </div>
   );

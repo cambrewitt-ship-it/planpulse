@@ -21,4 +21,6 @@ VALUES
   
   ('Instagram Ads', 'Instagram Ads', 'Visual advertising platform focused on photos and short videos. Strong engagement rates for lifestyle, fashion, food, and creative industries. Part of Meta advertising ecosystem.', NOW(), NOW()),
   
-  ('Display Network', 'Google Display Network', 'Visual banner and video ads across 2+ million websites and apps. Build brand awareness and reach users as they browse the web. Supports remarketing and contextual targeting.', NOW(), NOW());
+  ('Display Network', 'Google Display Network', 'Visual banner and video ads across 2+ million websites and apps. Build brand awareness and reach users as they browse the web. Supports remarketing and contextual targeting.', NOW(), NOW()),
+  
+  ('Organic Social Media', 'Organic Social Media', 'Non-paid social media content across platforms like Facebook, Instagram, LinkedIn, Twitter, TikTok, and others. Build brand awareness, engage with audiences, and drive organic traffic through content marketing.', NOW(), NOW());

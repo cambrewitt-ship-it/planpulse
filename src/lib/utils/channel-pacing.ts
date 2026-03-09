@@ -38,11 +38,24 @@ export function isGoogleAdsChannel(channelName: string): boolean {
 
 export function getPlatformForChannel(channelName: string): string {
   const lower = channelName.toLowerCase();
+  if (lower.includes('organic')) return 'organic-social';
+  if (lower.includes('edm') || lower.includes('email')) return 'edm';
+  if (lower.includes('ooh') || lower.includes('out of home')) return 'ooh';
   if (lower.includes('meta') || lower.includes('facebook') || lower.includes('instagram')) return 'meta-ads';
   if (lower.includes('google')) return 'google-ads';
   if (lower.includes('linkedin')) return 'linkedin-ads';
   if (lower.includes('tiktok')) return 'tiktok-ads';
   return lower.replace(/\s+/g, '-');
+}
+
+// Determine channel category from channelName
+export function getChannelCategory(channelName: string): 'paid_digital' | 'organic_social' | 'edm' | 'ooh' {
+  if (!channelName) return 'paid_digital';
+  const lower = channelName.toLowerCase();
+  if (lower.includes('(organic)')) return 'organic_social';
+  if (lower.includes('edm') || lower.includes('email')) return 'edm';
+  if (lower.includes('ooh')) return 'ooh';
+  return 'paid_digital';
 }
 
 // ---------------------------------------------------------------------------

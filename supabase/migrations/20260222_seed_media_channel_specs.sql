@@ -103,3 +103,17 @@ FROM media_channel_library,
   ('336 x 280 px')
 ) AS specs(spec_text)
 WHERE channel_type = 'Display Network';
+
+-- Organic Social Media specs
+INSERT INTO media_channel_specs (media_channel_library_id, spec_text, created_at, updated_at)
+SELECT id, spec_text, NOW(), NOW()
+FROM media_channel_library,
+(VALUES
+  ('1080 x 1080 px'),
+  ('1080 x 1350 px'),
+  ('1080 x 1920 px'),
+  ('1200 x 628 px'),
+  ('1920 x 1080 px'),
+  ('1200 x 1200 px')
+) AS specs(spec_text)
+WHERE channel_type = 'Organic Social Media';

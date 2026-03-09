@@ -322,6 +322,68 @@ export interface Database {
             updated_at?: string;
           };
         };
+        organic_social_actuals: {
+          Row: {
+            id: string;
+            client_id: string;
+            channel_name: string;
+            week_commencing: string;
+            posts_published: number;
+            posts_automatic: number;
+            notes: string | null;
+            created_at: string;
+            updated_at: string;
+          };
+          Insert: {
+            id?: string;
+            client_id: string;
+            channel_name: string;
+            week_commencing: string;
+            posts_published?: number;
+            posts_automatic?: number;
+            notes?: string | null;
+            created_at?: string;
+            updated_at?: string;
+          };
+          Update: {
+            id?: string;
+            client_id?: string;
+            channel_name?: string;
+            week_commencing?: string;
+            posts_published?: number;
+            posts_automatic?: number;
+            notes?: string | null;
+            updated_at?: string;
+          };
+        };
+        edm_actuals: {
+          Row: {
+            id: string;
+            client_id: string;
+            channel_name: string;
+            send_date: string;
+            subject: string | null;
+            notes: string | null;
+            created_at: string;
+          };
+          Insert: {
+            id?: string;
+            client_id: string;
+            channel_name: string;
+            send_date: string;
+            subject?: string | null;
+            notes?: string | null;
+            created_at?: string;
+          };
+          Update: {
+            id?: string;
+            client_id?: string;
+            channel_name?: string;
+            send_date?: string;
+            subject?: string | null;
+            notes?: string | null;
+          };
+        };
       };
     };
   }
@@ -341,6 +403,15 @@ export type ClientTask = Database['public']['Tables']['client_tasks']['Row'];
 export type AdPerformanceMetric = Database['public']['Tables']['ad_performance_metrics']['Row'];
 export type AdPerformanceMetricInsert = Database['public']['Tables']['ad_performance_metrics']['Insert'];
 export type AdPerformanceMetricUpdate = Database['public']['Tables']['ad_performance_metrics']['Update'];
+
+// Non-digital channel actuals types
+export type OrganicSocialActual = Database['public']['Tables']['organic_social_actuals']['Row'];
+export type OrganicSocialActualInsert = Database['public']['Tables']['organic_social_actuals']['Insert'];
+export type OrganicSocialActualUpdate = Database['public']['Tables']['organic_social_actuals']['Update'];
+
+export type EdmActual = Database['public']['Tables']['edm_actuals']['Row'];
+export type EdmActualInsert = Database['public']['Tables']['edm_actuals']['Insert'];
+export type EdmActualUpdate = Database['public']['Tables']['edm_actuals']['Update'];
 
 // Composite types for API responses
 export type ClientWithHealth = Client & { health: ClientHealthStatus | null };

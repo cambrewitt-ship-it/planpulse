@@ -33,7 +33,13 @@ import {
   getPlatformForChannel,
   generateChannelChartData,
   generateChannelChartDataForRange,
+  getChannelCategory,
 } from '@/lib/utils/channel-pacing';
+import OrganicSocialCard from '@/components/dashboard-v2/organic-social-card';
+import EdmCard from '@/components/dashboard-v2/edm-card';
+import OohCard from '@/components/dashboard-v2/ooh-card';
+import type { OrganicSocialActual, EdmActual } from '@/types/database';
+import { startOfWeek } from 'date-fns';
 import { CACChart } from '@/components/ui/cac-chart';
 import { DateRangePicker } from '@/components/ui/date-range-picker';
 import { FunnelChart } from '@/components/funnel-chart';
@@ -148,6 +154,9 @@ export default function DashboardV2() {
   // Spend data scoped to the visible analytics period — fetched independently for channel cards.
   // Must be declared before totalActualSpend so the useMemo below can reference it.
   const [channelMonthSpendData, setChannelMonthSpendData] = useState<SpendDataPoint[]>([]);
+  // Non-digital channel actuals
+  const [organicSocialActuals, setOrganicSocialActuals] = useState<OrganicSocialActual[]>([]);
+  const [edmActuals, setEdmActuals] = useState<EdmActual[]>([]);
   // Derived from channelMonthSpendData — sum of current-month spend across all platforms.
   // Mirrors how new-client-dashboard derives this from MediaChannels' onTotalActualSpendChange.
   const totalActualSpend = useMemo(() => {
@@ -292,12 +301,36 @@ export default function DashboardV2() {
     setActionPointsRefetchTrigger(prev => prev + 1);
   };
 
+  // Fetch non-digital channel actuals
+  const loadNonDigitalActuals = async () => {
+    if (!clientId) return;
+    
+    try {
+      // Fetch organic social actuals
+      const organicResponse = await fetch(`/api/clients/${clientId}/organic-social-actuals`);
+      if (organicResponse.ok) {
+        const organicData = await organicResponse.json();
+        setOrganicSocialActuals(organicData.data || []);
+      }
+      
+      // Fetch EDM actuals
+      const edmResponse = await fetch(`/api/clients/${clientId}/edm-actuals`);
+      if (edmResponse.ok) {
+        const edmData = await edmResponse.json();
+        setEdmActuals(edmData.data || []);
+      }
+    } catch (error) {
+      console.error('Error loading non-digital actuals:', error);
+    }
+  };
+
   useEffect(() => {
     if (clientId) {
       loadData();
       loadMediaPlanBuilderData();
       loadAnalyticsData(selectedMetric, selectedMetric === 'eventCount' ? selectedEventName : null);
       loadFunnels();
+      loadNonDigitalActuals();
     }
   }, [clientId]);
 
@@ -732,6 +765,13 @@ export default function DashboardV2() {
     };
   }, [client, healthScore, campaignDates, totalActualSpend, actionPointsStats]);
 
+  // Calculate current week commencing (Monday of current week)
+  const currentWeekCommencing = useMemo(() => {
+    const today = new Date();
+    const monday = startOfWeek(today, { weekStartsOn: 1 });
+    return format(monday, 'yyyy-MM-dd');
+  }, []);
+
   // ── Props for ChannelPerformanceCard list ────────────────────────────────
   const channelCards = useMemo(() => {
     if (!mediaPlanBuilderChannels.length) return [];
@@ -767,6 +807,32 @@ export default function DashboardV2() {
     };
 
     return mediaPlanBuilderChannels.map(ch => {
+      // Detect channel category
+      const category = ch.channelCategory || getChannelCategory(ch.channelName);
+      
+      // Return special card data for non-digital channels
+      if (category === 'organic_social') {
+        return {
+          type: 'organic_social' as const,
+          channel: ch,
+        };
+      }
+      
+      if (category === 'edm') {
+        return {
+          type: 'edm' as const,
+          channel: ch,
+        };
+      }
+      
+      if (category === 'ooh') {
+        return {
+          type: 'ooh' as const,
+          channel: ch,
+        };
+      }
+      
+      // Paid digital - existing logic
       const platform = getPlatformForChannel(ch.channelName);
 
       const chPlatform = getPlatformForChannel(ch.channelName);
@@ -867,6 +933,7 @@ export default function DashboardV2() {
       }
 
       return {
+        type: 'paid_digital' as const,
         name:             ch.channelName,
         platform,
         status:           determineStatus(currentSpend, plannedSpend),
@@ -1217,16 +1284,54 @@ export default function DashboardV2() {
                   <div className="bg-white rounded-xl border border-gray-200 p-6">
                     <h3 className="text-base font-semibold text-gray-900 mb-4">Channel Performance</h3>
                     <div className="space-y-4">
-                      {channelCards.map(ch => (
-                        <ChannelPerformanceCard
-                          key={ch.name}
-                          channel={ch}
-                          selectedMonth={selectedMonth}
-                          dateRange={ch.isMultiMonth ? analyticsDateRange : undefined}
-                          onAdjust={() => handleAdjustChannel(ch.platform)}
-                          onViewReport={() => handleViewReport(ch.platform)}
-                        />
-                      ))}
+                      {channelCards.map((ch, idx) => {
+                        if (ch.type === 'organic_social') {
+                          return (
+                            <OrganicSocialCard
+                              key={`organic-${ch.channel.id}`}
+                              channel={ch.channel}
+                              clientId={clientId}
+                              weekCommencing={currentWeekCommencing}
+                              actuals={organicSocialActuals}
+                              onRefresh={loadNonDigitalActuals}
+                            />
+                          );
+                        }
+                        
+                        if (ch.type === 'edm') {
+                          return (
+                            <EdmCard
+                              key={`edm-${ch.channel.id}`}
+                              channel={ch.channel}
+                              clientId={clientId}
+                              actuals={edmActuals}
+                            />
+                          );
+                        }
+                        
+                        if (ch.type === 'ooh') {
+                          return (
+                            <OohCard
+                              key={`ooh-${ch.channel.id}`}
+                              channel={ch.channel}
+                              clientId={clientId}
+                            />
+                          );
+                        }
+                        
+                        // Paid digital - existing card
+                        return (
+                          <ChannelPerformanceCard
+                            key={`paid-${ch.name || idx}`}
+                            channel={ch}
+                            selectedMonth={selectedMonth}
+                            dateRange={ch.isMultiMonth ? analyticsDateRange : undefined}
+                            onAdjust={() => handleAdjustChannel(ch.platform)}
+                            onViewReport={() => handleViewReport(ch.platform)}
+                            clientId={clientId}
+                          />
+                        );
+                      })}
                     </div>
                   </div>
                 ) : (

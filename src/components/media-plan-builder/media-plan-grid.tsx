@@ -5,6 +5,7 @@ import { Plus, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -35,6 +36,13 @@ export interface MediaPlanChannel {
   percentOfInvestment: number;
   totalBudget: number;
   flights: MediaFlight[];
+  channelCategory?: 'paid_digital' | 'organic_social' | 'edm' | 'ooh';
+  channelSubType?: string; // e.g. "Instagram", "Facebook", "LinkedIn"
+  postsPerWeek?: number;
+  sendFrequency?: string; // e.g. "weekly", "fortnightly", "monthly"
+  oohConfirmed?: boolean;
+  totalUpfrontSpend?: number;
+  isAlwaysOn?: boolean;
 }
 
 const generateChannelId = (): string => {
@@ -60,6 +68,12 @@ const MEDIA_CHANNELS = [
   { name: "Twitter Ads", color: "bg-sky-50", textColor: "text-sky-900" },
   { name: "YouTube Ads", color: "bg-red-100", textColor: "text-red-950" },
   { name: "Snapchat Ads", color: "bg-yellow-50", textColor: "text-yellow-900" },
+  { name: "Organic Social Media", color: "bg-green-50", textColor: "text-green-900" },
+  { name: "Instagram (Organic)", color: "bg-pink-50", textColor: "text-pink-900" },
+  { name: "Facebook (Organic)", color: "bg-blue-50", textColor: "text-blue-900" },
+  { name: "LinkedIn (Organic)", color: "bg-cyan-50", textColor: "text-cyan-900" },
+  { name: "EDM / Email", color: "bg-purple-50", textColor: "text-purple-900" },
+  { name: "OOH", color: "bg-orange-50", textColor: "text-orange-900" },
 ];
 
 // Get channel color classes
@@ -89,8 +103,19 @@ const getChannelBudgetColor = (channelName: string): string => {
     "twitter ads": "bg-sky-500",
     "youtube ads": "bg-red-600",
     "snapchat ads": "bg-yellow-500",
+    "organic social media": "bg-green-500",
   };
   return channelMap[channelName.toLowerCase()] || "bg-gray-500";
+};
+
+// Determine channel category from channelName
+const getChannelCategory = (channelName: string): 'paid_digital' | 'organic_social' | 'edm' | 'ooh' => {
+  if (!channelName) return 'paid_digital';
+  const lower = channelName.toLowerCase();
+  if (lower.includes('(organic)')) return 'organic_social';
+  if (lower.includes('edm') || lower.includes('email')) return 'edm';
+  if (lower.includes('ooh')) return 'ooh';
+  return 'paid_digital';
 };
 
 /**
@@ -392,6 +417,15 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
     // Don't start drag if clicking on resize handles
     if (target.classList.contains('cursor-ew-resize')) {
       return;
+    }
+    
+    // Prevent interaction for organic_social channels
+    const channel = channels.find(c => c.id === channelId);
+    if (channel) {
+      const category = channel.channelCategory || getChannelCategory(channel.channelName);
+      if (category === 'organic_social') {
+        return;
+      }
     }
     
     e.preventDefault();
@@ -923,9 +957,51 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                     <td className="border border-gray-300 px-3 py-2 sticky left-[64px] mr-[-1px] z-20 bg-gray-50 w-[200px] min-w-[200px] border-r-2 border-gray-400 shadow-[2px_0_4px_rgba(0,0,0,0.1)]">
                       <Select
                         value={channel.channelName || ""}
-                        onValueChange={(value) =>
-                          handleUpdateChannel(channel.id, { channelName: value.toUpperCase() })
-                        }
+                        onValueChange={(value) => {
+                          const category = getChannelCategory(value);
+                          const updates: Partial<MediaPlanChannel> = {
+                            channelName: value.toUpperCase(),
+                            channelCategory: category,
+                          };
+                          
+                          // For organic_social, auto-fill all weeks
+                          if (category === 'organic_social') {
+                            const firstWeek = weeks[0];
+                            const lastWeek = weeks[weeks.length - 1];
+                            if (firstWeek && lastWeek) {
+                              // Create monthly spend entries for all months in the year
+                              const monthlySpend: { [monthKey: string]: number } = {};
+                              const monthGroups: { [monthKey: string]: WeekRange[] } = {};
+                              
+                              weeks.forEach(week => {
+                                const monthKey = getMonthKey(week.weekStart);
+                                if (!monthGroups[monthKey]) {
+                                  monthGroups[monthKey] = [];
+                                }
+                                monthGroups[monthKey].push(week);
+                                monthlySpend[monthKey] = 0; // No spend, just marking as active
+                              });
+                              
+                              const newFlight: MediaFlight = {
+                                id: generateFlightId(),
+                                startWeek: firstWeek.weekStart,
+                                endWeek: lastWeek.weekEnd,
+                                monthlySpend: monthlySpend,
+                                color: "#10b981", // Green for organic
+                              };
+                              updates.flights = [newFlight];
+                              updates.isAlwaysOn = true;
+                            }
+                          } else {
+                            // Clear flights for other types if switching from organic
+                            if (channel.channelCategory === 'organic_social') {
+                              updates.flights = [];
+                              updates.isAlwaysOn = false;
+                            }
+                          }
+                          
+                          handleUpdateChannel(channel.id, updates);
+                        }}
                       >
                         <SelectTrigger className={`w-full border-none outline-none bg-transparent h-auto p-0 shadow-none focus:ring-0 ${channelColors.text}`}>
                           <SelectValue placeholder="Select Channel" className="uppercase font-semibold">
@@ -944,26 +1020,245 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                     
                     {/* Format/Detail */}
                     <td className="border border-gray-300 px-3 py-2 sticky left-[264px] mr-[-1px] z-20 bg-gray-50 w-[150px] min-w-[150px] border-r-2 border-gray-400 shadow-[2px_0_4px_rgba(0,0,0,0.1)]">
-                      <input
-                        type="text"
-                        value={channel.format}
-                        onChange={(e) =>
-                          handleUpdateChannel(channel.id, { format: e.target.value })
+                      {(() => {
+                        const category = channel.channelCategory || getChannelCategory(channel.channelName);
+                        
+                        // Organic Social: Show Posts per week
+                        if (category === 'organic_social') {
+                          return (
+                            <div className="flex flex-col gap-1">
+                              <Label className="text-xs text-gray-600">Posts per week</Label>
+                              <Input
+                                type="number"
+                                min="0"
+                                step="1"
+                                value={channel.postsPerWeek || ''}
+                                onChange={(e) => {
+                                  const value = parseInt(e.target.value) || 0;
+                                  handleUpdateChannel(channel.id, { postsPerWeek: value });
+                                }}
+                                placeholder="0"
+                                className="h-7 text-sm"
+                              />
+                            </div>
+                          );
                         }
-                        placeholder="Detail"
-                        className={`w-full border-none outline-none bg-transparent text-sm ${channelColors.text}`}
-                      />
+                        
+                        // EDM: Show frequency selector and date pickers
+                        if (category === 'edm') {
+                          const edmFlight = channel.flights.length > 0 ? channel.flights[0] : null;
+                          const normalizeDate = (date: Date) => {
+                            const normalized = new Date(date);
+                            normalized.setHours(0, 0, 0, 0);
+                            return normalized.getTime();
+                          };
+                          const startWeekIdx = edmFlight ? weeks.findIndex(w => {
+                            const flightStart = edmFlight.startWeek instanceof Date ? edmFlight.startWeek : new Date(edmFlight.startWeek);
+                            return normalizeDate(w.weekStart) === normalizeDate(flightStart);
+                          }) : -1;
+                          const endWeekIdx = edmFlight ? weeks.findIndex(w => {
+                            const flightEnd = edmFlight.endWeek instanceof Date ? edmFlight.endWeek : new Date(edmFlight.endWeek);
+                            return normalizeDate(w.weekEnd) === normalizeDate(flightEnd);
+                          }) : -1;
+                          
+                          return (
+                            <div className="flex flex-col gap-2">
+                              <div>
+                                <Label className="text-xs text-gray-600">Frequency</Label>
+                                <Select
+                                  value={channel.sendFrequency || 'weekly'}
+                                  onValueChange={(value) =>
+                                    handleUpdateChannel(channel.id, { sendFrequency: value })
+                                  }
+                                >
+                                  <SelectTrigger className="h-7 text-xs">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="weekly">Weekly</SelectItem>
+                                    <SelectItem value="fortnightly">Fortnightly</SelectItem>
+                                    <SelectItem value="monthly">Monthly</SelectItem>
+                                    <SelectItem value="custom">Custom</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                                {channel.sendFrequency === 'custom' && (
+                                  <Input
+                                    type="number"
+                                    min="1"
+                                    step="1"
+                                    placeholder="Sends per month"
+                                    className="h-7 text-xs mt-1"
+                                    onChange={(e) => {
+                                      const value = parseInt(e.target.value) || 0;
+                                      handleUpdateChannel(channel.id, { sendFrequency: `custom:${value}` });
+                                    }}
+                                  />
+                                )}
+                              </div>
+                              <div>
+                                <Label className="text-xs text-gray-600">Start Week</Label>
+                                <Select
+                                  value={startWeekIdx >= 0 ? startWeekIdx.toString() : ''}
+                                  onValueChange={(value) => {
+                                    const idx = parseInt(value);
+                                    if (idx >= 0 && idx < weeks.length) {
+                                      const week = weeks[idx];
+                                      const existingFlight = channel.flights[0];
+                                      const endWeek = existingFlight?.endWeek || week.weekEnd;
+                                      const monthKey = getMonthKey(week.weekStart);
+                                      const newFlight: MediaFlight = {
+                                        id: existingFlight?.id || generateFlightId(),
+                                        startWeek: week.weekStart,
+                                        endWeek: endWeek instanceof Date ? endWeek : new Date(endWeek),
+                                        monthlySpend: existingFlight?.monthlySpend || { [monthKey]: 0 },
+                                        color: existingFlight?.color || "#3b82f6",
+                                      };
+                                      handleUpdateChannel(channel.id, { flights: [newFlight] });
+                                    }
+                                  }}
+                                >
+                                  <SelectTrigger className="h-7 text-xs">
+                                    <SelectValue placeholder="Select start week" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {weeks.map((week, idx) => (
+                                      <SelectItem key={idx} value={idx.toString()}>
+                                        {formatWeekDate(week.weekStart)}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div>
+                                <Label className="text-xs text-gray-600">End Week</Label>
+                                <Select
+                                  value={endWeekIdx >= 0 ? endWeekIdx.toString() : ''}
+                                  onValueChange={(value) => {
+                                    const idx = parseInt(value);
+                                    if (idx >= 0 && idx < weeks.length) {
+                                      const week = weeks[idx];
+                                      const existingFlight = channel.flights[0];
+                                      const startWeek = existingFlight?.startWeek || week.weekStart;
+                                      const monthKey = getMonthKey(week.weekStart);
+                                      const newFlight: MediaFlight = {
+                                        id: existingFlight?.id || generateFlightId(),
+                                        startWeek: startWeek instanceof Date ? startWeek : new Date(startWeek),
+                                        endWeek: week.weekEnd,
+                                        monthlySpend: existingFlight?.monthlySpend || { [monthKey]: 0 },
+                                        color: existingFlight?.color || "#3b82f6",
+                                      };
+                                      handleUpdateChannel(channel.id, { flights: [newFlight] });
+                                    }
+                                  }}
+                                >
+                                  <SelectTrigger className="h-7 text-xs">
+                                    <SelectValue placeholder="Select end week" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {weeks.map((week, idx) => (
+                                      <SelectItem key={idx} value={idx.toString()}>
+                                        {formatWeekDate(week.weekEnd)}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+                          );
+                        }
+                        
+                        // OOH: Show Total Upfront Spend and checkbox
+                        if (category === 'ooh') {
+                          return (
+                            <div className="flex flex-col gap-2">
+                              <div>
+                                <Label className="text-xs text-gray-600">Total Upfront Spend</Label>
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  value={channel.totalUpfrontSpend || ''}
+                                  onChange={(e) => {
+                                    const value = parseFloat(e.target.value) || 0;
+                                    handleUpdateChannel(channel.id, { totalUpfrontSpend: value });
+                                  }}
+                                  placeholder="0.00"
+                                  className="h-7 text-sm"
+                                />
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Checkbox
+                                  id={`ooh-confirmed-${channel.id}`}
+                                  checked={channel.oohConfirmed || false}
+                                  onCheckedChange={(checked) =>
+                                    handleUpdateChannel(channel.id, { oohConfirmed: checked === true })
+                                  }
+                                />
+                                <Label htmlFor={`ooh-confirmed-${channel.id}`} className="text-xs cursor-pointer">
+                                  Booking Confirmed
+                                </Label>
+                              </div>
+                              <p className="text-xs text-gray-500 italic mt-1">
+                                OOH spend is entered as a total and is not tracked live
+                              </p>
+                            </div>
+                          );
+                        }
+                        
+                        // Default: Show format input
+                        return (
+                          <input
+                            type="text"
+                            value={channel.format}
+                            onChange={(e) =>
+                              handleUpdateChannel(channel.id, { format: e.target.value })
+                            }
+                            placeholder="Detail"
+                            className={`w-full border-none outline-none bg-transparent text-sm ${channelColors.text}`}
+                          />
+                        );
+                      })()}
                     </td>
                     
                     {/* Total Budget */}
                     <td className="border-l-2 border-l-gray-400 border border-gray-300 px-3 py-2 text-center font-mono sticky left-[414px] mr-[-1px] z-30 bg-gray-50 w-[120px] min-w-[120px] border-r-2 border-gray-400 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)]">
                       <div className="w-full px-2 py-1 text-center">
-                        {formatCurrency(calculateTotalBudgetFromFlights(channel.flights || []))}
+                        {(() => {
+                          const category = channel.channelCategory || getChannelCategory(channel.channelName);
+                          if (category === 'ooh') {
+                            return formatCurrency(channel.totalUpfrontSpend || 0);
+                          }
+                          if (category === 'organic_social') {
+                            return `${channel.postsPerWeek || 0} posts/week`;
+                          }
+                          if (category === 'edm') {
+                            return channel.sendFrequency || 'N/A';
+                          }
+                          return formatCurrency(calculateTotalBudgetFromFlights(channel.flights || []));
+                        })()}
                       </div>
                     </td>
                   
                   {/* Week data cells with flight blocks */}
                   {(() => {
+                    const category = channel.channelCategory || getChannelCategory(channel.channelName);
+                    
+                    // EDM: Hide week grid, show date pickers instead
+                    if (category === 'edm') {
+                      return weeks.map((week, weekIdx) => (
+                        <td
+                          key={`week-${weekIdx}`}
+                          className="border-l-2 border-l-gray-400 border border-gray-300 px-2 py-2 text-center text-xs bg-gray-50 cursor-default"
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                          }}
+                        >
+                          {/* EDM channels don't show week grid - dates selected via pickers in Detail column */}
+                        </td>
+                      ));
+                    }
+                    
                     // Calculate flight ranges
                     const flightRanges = channel.flights.map((flight) => {
                       let startIdx = -1;
@@ -1019,6 +1314,15 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                     
                     const cells: React.ReactNode[] = [];
                     
+                    // For organic_social, check if week is in the always-on flight range
+                    const isOrganicSocial = category === 'organic_social';
+                    const organicFlight = isOrganicSocial && channel.flights.length > 0 ? channel.flights[0] : null;
+                    const isWeekInOrganicRange = (weekIdx: number): boolean => {
+                      if (!organicFlight) return false;
+                      const week = weeks[weekIdx];
+                      return weekOverlapsFlight(week, organicFlight);
+                    };
+                    
                     weeks.forEach((week, weekIdx) => {
                       const isCellSelected = isWeekInDragSelection(weekIdx, channel.id);
                       const isFirstSelectedCell = activeSelection && 
@@ -1030,6 +1334,9 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                         activeSelection.channelId === channel.id &&
                         weekIdx >= activeSelection.startWeekIdx &&
                         weekIdx <= activeSelection.endWeekIdx;
+                      
+                      // For organic_social, check if week is in range
+                      const isOrganicWeek = isOrganicSocial && isWeekInOrganicRange(weekIdx);
                       
                       if (weekToStartFlights.has(weekIdx)) {
                         // This week starts one or more flights - use colspan for the longest
@@ -1050,10 +1357,20 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                             data-week-index={weekIdx}
                             data-channel-id={channel.id}
                             colSpan={isInActiveSelection && isFirstSelectedCell ? selectionSpan : maxSpan}
-                            className={`border-l-2 border-l-gray-400 border border-gray-300 px-0 py-0 relative h-12 cursor-crosshair z-0 w-[40px] min-w-[40px] max-w-[40px] overflow-hidden ${
-                              isCellSelected || isInActiveSelection ? 'bg-blue-200 border-2 border-blue-500 rounded-none' : channelColors.bg
+                            className={`border-l-2 border-l-gray-400 border border-gray-300 px-0 py-0 relative h-12 z-0 w-[40px] min-w-[40px] max-w-[40px] overflow-hidden ${
+                              isOrganicWeek 
+                                ? 'bg-green-100 border-green-300 cursor-default' 
+                                : isCellSelected || isInActiveSelection 
+                                  ? 'bg-blue-200 border-2 border-blue-500 rounded-none cursor-crosshair' 
+                                  : `${channelColors.bg} cursor-crosshair`
                             }`}
                             onMouseDown={(e) => {
+                              // Prevent interaction for organic_social weeks
+                              if (isOrganicWeek) {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                return;
+                              }
                               handleWeekCellMouseDown(channel.id, weekIdx, e);
                             }}
                           >
@@ -1069,8 +1386,9 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                               />
                             )}
                             {/* Inline budget input spanning across selected cells */}
-                            {isFirstSelectedCell && activeSelection && (() => {
+                            {isFirstSelectedCell && activeSelection && !isOrganicWeek && (() => {
                               const channelBudgetColor = getChannelBudgetColor(channel.channelName);
+                              const isOoh = category === 'ooh';
                               return (
                                 <div className={`absolute inset-0 z-50 flex items-center justify-center ${channelBudgetColor}`} style={{ overflow: 'hidden' }}>
                                   <Input
@@ -1088,7 +1406,13 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                                       if (e.key === 'Enter') {
                                         const budget = parseFloat(activeSelection.budget);
                                         if (budget > 0) {
-                                          handleSaveBudgetFromInput(budget);
+                                          if (isOoh) {
+                                            // For OOH, save to totalUpfrontSpend instead of flights
+                                            handleUpdateChannel(channel.id, { totalUpfrontSpend: budget });
+                                            setActiveSelection(null);
+                                          } else {
+                                            handleSaveBudgetFromInput(budget);
+                                          }
                                         } else {
                                           setActiveSelection(null);
                                         }
@@ -1099,12 +1423,18 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                                     onBlur={() => {
                                       const budget = parseFloat(activeSelection.budget);
                                       if (budget > 0) {
-                                        handleSaveBudgetFromInput(budget);
+                                        if (isOoh) {
+                                          // For OOH, save to totalUpfrontSpend instead of flights
+                                          handleUpdateChannel(channel.id, { totalUpfrontSpend: budget });
+                                          setActiveSelection(null);
+                                        } else {
+                                          handleSaveBudgetFromInput(budget);
+                                        }
                                       } else {
                                         setActiveSelection(null);
                                       }
                                     }}
-                                    placeholder=""
+                                    placeholder={isOoh ? "Total Upfront Spend" : ""}
                                     className="w-full h-full text-center text-xs font-semibold border-0 px-2 py-1 focus:ring-0 focus-visible:ring-0 shadow-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none text-white bg-transparent placeholder:text-white/70"
                                     style={{ 
                                       textShadow: 'none !important', 
@@ -1170,7 +1500,7 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                               return null;
                             })}
                             {/* Render all flights that overlap this week, stacked */}
-                            {flightRanges
+                            {!isOrganicSocial && flightRanges
                               .filter(({ startIdx, endIdx }) => weekIdx >= startIdx && weekIdx <= endIdx)
                               .map(({ flight, startIdx, endIdx }, flightLayerIdx) => {
                                 const isFirstWeek = weekIdx === startIdx;
@@ -1253,8 +1583,11 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                           weekIdx >= activeSelection.startWeekIdx &&
                           weekIdx <= activeSelection.endWeekIdx;
                         
+                        // For organic_social, check if week is in range
+                        const isOrganicWeek = isOrganicSocial && isWeekInOrganicRange(weekIdx);
+                        
                         // If this is the first cell of an active selection, calculate the span
-                        const shouldShowInput = isFirstSelectedCell && activeSelection;
+                        const shouldShowInput = isFirstSelectedCell && activeSelection && !isOrganicSocial;
                         const selectionSpan = shouldShowInput
                           ? activeSelection.endWeekIdx - activeSelection.startWeekIdx + 1
                           : 1;
@@ -1266,10 +1599,20 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                             data-week-index={weekIdx}
                             data-channel-id={channel.id}
                             colSpan={shouldShowInput ? selectionSpan : 1}
-                            className={`border-l-2 border-l-gray-400 border border-gray-300 px-0 py-0 relative h-12 cursor-crosshair z-0 w-[40px] min-w-[40px] max-w-[40px] overflow-hidden ${
-                              isCellSelected || isInActiveSelection ? 'bg-blue-200 border-2 border-blue-500 rounded-none' : channelColors.bg
+                            className={`border-l-2 border-l-gray-400 border border-gray-300 px-0 py-0 relative h-12 z-0 w-[40px] min-w-[40px] max-w-[40px] overflow-hidden ${
+                              isOrganicWeek 
+                                ? 'bg-green-100 border-green-300 cursor-default' 
+                                : isCellSelected || isInActiveSelection 
+                                  ? 'bg-blue-200 border-2 border-blue-500 rounded-none cursor-crosshair' 
+                                  : `${channelColors.bg} cursor-crosshair`
                             }`}
                             onMouseDown={(e) => {
+                              // Prevent interaction for organic_social weeks
+                              if (isOrganicWeek) {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                return;
+                              }
                               handleWeekCellMouseDown(channel.id, weekIdx, e);
                             }}
                           >
@@ -1285,8 +1628,9 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                               />
                             )}
                             {/* Inline budget input spanning across selected cells */}
-                            {shouldShowInput && (() => {
+                            {shouldShowInput && !isOrganicWeek && (() => {
                               const channelBudgetColor = getChannelBudgetColor(channel.channelName);
+                              const isOoh = category === 'ooh';
                               return (
                                 <div className={`absolute inset-0 z-50 flex items-center justify-center ${channelBudgetColor}`} style={{ overflow: 'hidden' }}>
                                   <Input
@@ -1304,7 +1648,13 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                                       if (e.key === 'Enter') {
                                         const budget = parseFloat(activeSelection.budget);
                                         if (budget > 0) {
-                                          handleSaveBudgetFromInput(budget);
+                                          if (isOoh) {
+                                            // For OOH, save to totalUpfrontSpend instead of flights
+                                            handleUpdateChannel(channel.id, { totalUpfrontSpend: budget });
+                                            setActiveSelection(null);
+                                          } else {
+                                            handleSaveBudgetFromInput(budget);
+                                          }
                                         } else {
                                           setActiveSelection(null);
                                         }
@@ -1315,12 +1665,18 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                                     onBlur={() => {
                                       const budget = parseFloat(activeSelection.budget);
                                       if (budget > 0) {
-                                        handleSaveBudgetFromInput(budget);
+                                        if (isOoh) {
+                                          // For OOH, save to totalUpfrontSpend instead of flights
+                                          handleUpdateChannel(channel.id, { totalUpfrontSpend: budget });
+                                          setActiveSelection(null);
+                                        } else {
+                                          handleSaveBudgetFromInput(budget);
+                                        }
                                       } else {
                                         setActiveSelection(null);
                                       }
                                     }}
-                                    placeholder=""
+                                    placeholder={isOoh ? "Total Upfront Spend" : ""}
                                     className="w-full h-full text-center text-xs font-semibold border-0 px-2 py-1 focus:ring-0 focus-visible:ring-0 shadow-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none text-white bg-transparent placeholder:text-white/70"
                                     style={{ 
                                       textShadow: 'none !important', 
@@ -1336,7 +1692,7 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                               );
                             })()}
                             {/* Render overlapping flights */}
-                            {overlappingFlights.map(({ flight, startIdx, endIdx }, flightLayerIdx) => {
+                            {!isOrganicWeek && overlappingFlights.map(({ flight, startIdx, endIdx }, flightLayerIdx) => {
                               const flightSpan = endIdx - startIdx + 1;
                               const blockWidth = flightSpan * cellWidth;
                               const leftOffset = (weekIdx - startIdx) * cellWidth;
