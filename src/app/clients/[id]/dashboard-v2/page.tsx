@@ -1320,6 +1320,16 @@ export default function DashboardV2() {
                         }
                         
                         // Paid digital - existing card
+                        // Find the earliest start date from mediaPlanBuilderChannels
+                        // Normalize channel names for comparison (same logic as normalizeChannelType)
+                        const normalizeChannelName = (name: string) => name.toLowerCase().trim();
+                        const channelData = mediaPlanBuilderChannels.find(
+                          (mbCh: any) => normalizeChannelName(mbCh.channelName) === normalizeChannelName(ch.name)
+                        );
+                        const earliestStartDate = channelData?.flights?.length > 0
+                          ? new Date(Math.min(...channelData.flights.map((f: any) => new Date(f.startWeek).getTime())))
+                          : null;
+
                         return (
                           <ChannelPerformanceCard
                             key={`paid-${ch.name || idx}`}
@@ -1329,6 +1339,7 @@ export default function DashboardV2() {
                             onAdjust={() => handleAdjustChannel(ch.platform)}
                             onViewReport={() => handleViewReport(ch.platform)}
                             clientId={clientId}
+                            channelStartDate={earliestStartDate}
                           />
                         );
                       })}

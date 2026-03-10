@@ -61,6 +61,7 @@ export interface ChannelCardProps {
   onAdjust?: () => void;
   onViewReport?: () => void;
   clientId?: string;
+  channelStartDate?: Date | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -181,8 +182,10 @@ function PacingBar({
   plannedSpend: number;
   status: ChannelCardProps['channel']['status'];
 }) {
-  const fillPct  = Math.min(100, pacingPercentage);
-  const barColor = pacingPercentage > 100 ? '#ef4444' : STATUS_CONFIG[status].bar;
+  // Calculate fill percentage based on actual spend vs planned spend
+  const spendRatio = plannedSpend > 0 ? (currentSpend / plannedSpend) * 100 : 0;
+  const fillPct  = Math.min(100, spendRatio);
+  const barColor = spendRatio > 100 ? '#ef4444' : STATUS_CONFIG[status].bar;
 
   return (
     <div className="space-y-1">
@@ -284,7 +287,7 @@ function normalizeChannelType(channelName: string): string {
     .join(' ');
 }
 
-export default function ChannelPerformanceCard({ channel, selectedMonth, dateRange, onAdjust, onViewReport, clientId }: ChannelCardProps) {
+export default function ChannelPerformanceCard({ channel, selectedMonth, dateRange, onAdjust, onViewReport, clientId, channelStartDate }: ChannelCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [chartType, setChartType] = useState<'spend' | 'metrics'>('spend');
   const [selectedMetrics, setSelectedMetrics] = useState<Set<MetricKey>>(new Set(['impressions']));
@@ -395,138 +398,148 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden hover:shadow-md transition-shadow duration-200">
-      {/* ── Header ── */}
-      <div className="px-4 pt-4 pb-3">
-        <div className="flex items-start gap-3">
-          <PlatformIcon platform={channel.platform} />
+      {/* ── Main layout: Left (Spend/Metrics) + Right (Action Points) ── */}
+      <div className="flex">
+        {/* ── Left Section: Spend & Metrics ── */}
+        <div className={`flex-1 ${clientId ? 'border-r border-gray-200' : ''}`}>
+          {/* ── Header + Pacing (aligned under logo → spend) ── */}
+          <div className="px-4 pt-4 pb-3">
+            <div className="grid grid-cols-[auto,1fr,auto] gap-x-3 gap-y-3 items-start">
+              {/* Logo */}
+              <div className="row-start-1 col-start-1">
+                <PlatformIcon platform={channel.platform} />
+              </div>
 
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="text-sm font-semibold text-gray-900 truncate">{channel.name}</h3>
-              <StatusBadge status={channel.status} />
+              {/* Channel name + status */}
+              <div className="row-start-1 col-start-2 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-sm font-semibold text-gray-900 truncate">{channel.name}</h3>
+                  <StatusBadge status={channel.status} />
+                </div>
+                <p className="text-xs text-gray-400 mt-0.5 capitalize">
+                  {channel.platform.replace('-', ' ')}
+                </p>
+              </div>
+
+              {/* Spend summary */}
+              <div className="row-start-1 col-start-3 text-right flex-shrink-0">
+                <p className="text-sm font-bold text-gray-900">
+                  {fmt(channel.currentSpend, 'currency', 0)}
+                </p>
+                <p className="text-xs text-gray-400">
+                  of {fmt(channel.plannedSpend, 'currency', 0)}
+                </p>
+              </div>
+
+              {/* Pacing bar spans from under logo to under spend */}
+              <div className="row-start-2 col-start-1 col-end-4">
+                <PacingBar
+                  pacingPercentage={channel.pacingPercentage}
+                  currentSpend={channel.currentSpend}
+                  plannedSpend={channel.plannedSpend}
+                  status={channel.status}
+                />
+              </div>
             </div>
-            <p className="text-xs text-gray-400 mt-0.5 capitalize">
-              {channel.platform.replace('-', ' ')}
-            </p>
           </div>
 
-          {/* Spend summary */}
-          <div className="text-right flex-shrink-0">
-            <p className="text-sm font-bold text-gray-900">{fmt(channel.currentSpend, 'currency', 0)}</p>
-            <p className="text-xs text-gray-400">of {fmt(channel.plannedSpend, 'currency', 0)}</p>
+          {/* ── Metrics grid ── */}
+          <div className="px-4 pb-3 grid grid-cols-5 gap-1 border-t border-gray-50 pt-3">
+            {(Object.keys(METRIC_CONFIG) as MetricKey[]).map((key) => {
+              const cfg = METRIC_CONFIG[key];
+              const rawValue = channel.metrics[key];
+              const displayValue = key === 'ctr'
+                ? fmt(rawValue * 100, 'percent', 2)
+                : key === 'cpc'
+                  ? fmt(rawValue, 'currency', 2)
+                  : fmt(rawValue, 'decimal', 0);
+              return (
+                <MetricPill
+                  key={key}
+                  metricKey={key}
+                  label={cfg.shortLabel}
+                  value={displayValue}
+                  isActive={isMetricsView && selectedMetrics.has(key)}
+                  isClickable={hasMetrics}
+                  onClick={handleMetricClick}
+                />
+              );
+            })}
           </div>
-        </div>
 
-        {/* Pacing bar */}
-        <div className="mt-3">
-          <PacingBar
-            pacingPercentage={channel.pacingPercentage}
-            currentSpend={channel.currentSpend}
-            plannedSpend={channel.plannedSpend}
-            status={channel.status}
-          />
-        </div>
-      </div>
-
-      {/* ── Metrics grid ── */}
-      <div className="px-4 pb-3 grid grid-cols-5 gap-1 border-t border-gray-50 pt-3">
-        {(Object.keys(METRIC_CONFIG) as MetricKey[]).map((key) => {
-          const cfg = METRIC_CONFIG[key];
-          const rawValue = channel.metrics[key];
-          const displayValue = key === 'ctr'
-            ? fmt(rawValue * 100, 'percent', 2)
-            : key === 'cpc'
-              ? fmt(rawValue, 'currency', 2)
-              : fmt(rawValue, 'decimal', 0);
-          return (
-            <MetricPill
-              key={key}
-              metricKey={key}
-              label={cfg.shortLabel}
-              value={displayValue}
-              isActive={isMetricsView && selectedMetrics.has(key)}
-              isClickable={hasMetrics}
-              onClick={handleMetricClick}
-            />
-          );
-        })}
-      </div>
-
-      {/* ── Issues warning ── */}
-      {hasIssues && (
-        <div className="mx-4 mb-3 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 flex gap-2">
-          <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
-          <ul className="space-y-0.5">
-            {channel.issues!.map((issue, i) => (
-              <li key={i} className="text-xs text-amber-700">{issue}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {/* ── Action bar: Spend/Metrics centred + Adjust/Report right ── */}
-      <div className="flex items-center px-4 py-2 border-t border-gray-50 gap-2">
-        {/* Left spacer */}
-        <div className="flex-1" />
-
-        {/* Spend / Metrics toggle — centred */}
-        {canExpand && (
-          <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
-            <button
-              onClick={() => setChartType('spend')}
-              className={`px-3 py-1 text-xs rounded transition-colors ${
-                chartType === 'spend'
-                  ? 'bg-white font-medium shadow-sm text-gray-900'
-                  : 'text-gray-600 hover:text-gray-800'
-              }`}
-            >
-              Spend
-            </button>
-            <button
-              onClick={() => { setChartType('metrics'); if (hasMetrics) setIsExpanded(true); }}
-              className={`px-3 py-1 text-xs rounded transition-colors ${
-                chartType === 'metrics'
-                  ? 'bg-white font-medium shadow-sm text-gray-900'
-                  : 'text-gray-600 hover:text-gray-800'
-              }`}
-            >
-              Metrics
-            </button>
-          </div>
-        )}
-
-        {/* Right: Adjust + Report */}
-        <div className="flex-1 flex items-center justify-end gap-2">
-          {onAdjust && (
-            <button
-              onClick={onAdjust}
-              className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
-            >
-              <Settings className="w-3 h-3" />
-              Adjust
-            </button>
+          {/* ── Issues warning ── */}
+          {hasIssues && (
+            <div className="mx-4 mb-3 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 flex gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
+              <ul className="space-y-0.5">
+                {channel.issues!.map((issue, i) => (
+                  <li key={i} className="text-xs text-amber-700">{issue}</li>
+                ))}
+              </ul>
+            </div>
           )}
-          {onViewReport && (
-            <button
-              onClick={onViewReport}
-              className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
-            >
-              <FileText className="w-3 h-3" />
-              Report
-            </button>
-          )}
-        </div>
-      </div>
 
-      {/* ── Chart section — always visible ── */}
-      {canExpand && (
-        <div className="border-t border-gray-100 bg-gray-50">
-          {/* (chart type toggle moved to action bar above) */}
+          {/* ── Action bar: Spend/Metrics centred + Adjust/Report right ── */}
+          <div className="flex items-center px-4 py-2 border-t border-gray-50 gap-2">
+            {/* Left spacer */}
+            <div className="flex-1" />
 
-          {/* Clipped chart area */}
-          <div className={`relative${!isExpanded ? ' h-40 overflow-hidden' : ''}`}>
-            <div className="px-4 pt-4 pb-2">
-              {/* ── Spend chart ── */}
+            {/* Spend / Metrics toggle — centred */}
+            {canExpand && (
+              <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
+                <button
+                  onClick={() => setChartType('spend')}
+                  className={`px-3 py-1 text-xs rounded transition-colors ${
+                    chartType === 'spend'
+                      ? 'bg-white font-medium shadow-sm text-gray-900'
+                      : 'text-gray-600 hover:text-gray-800'
+                  }`}
+                >
+                  Spend
+                </button>
+                <button
+                  onClick={() => { setChartType('metrics'); if (hasMetrics) setIsExpanded(true); }}
+                  className={`px-3 py-1 text-xs rounded transition-colors ${
+                    chartType === 'metrics'
+                      ? 'bg-white font-medium shadow-sm text-gray-900'
+                      : 'text-gray-600 hover:text-gray-800'
+                  }`}
+                >
+                  Metrics
+                </button>
+              </div>
+            )}
+
+            {/* Right: Adjust + Report */}
+            <div className="flex-1 flex items-center justify-end gap-2">
+              {onAdjust && (
+                <button
+                  onClick={onAdjust}
+                  className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                >
+                  <Settings className="w-3 h-3" />
+                  Adjust
+                </button>
+              )}
+              {onViewReport && (
+                <button
+                  onClick={onViewReport}
+                  className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                >
+                  <FileText className="w-3 h-3" />
+                  Report
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* ── Chart section ── */}
+          {canExpand && (
+            <div className="border-t border-gray-100">
+              <div className="bg-gray-50">
+                <div className={`relative${!isExpanded ? ' h-40 overflow-hidden' : ''}`}>
+                  <div className="px-4 pt-4 pb-2">
+                    {/* ── Spend chart ── */}
               {chartType === 'spend' && (
                 <>
                   {hasChartData ? (
@@ -748,37 +761,48 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                   )}
                 </>
               )}
+                  </div>
+
+                  {/* Gradient fade — only when collapsed */}
+                  {!isExpanded && (
+                    <div
+                      className="absolute inset-x-0 bottom-0 h-20 pointer-events-none"
+                      style={{ background: 'linear-gradient(to top, #f9fafb 10%, transparent)' }}
+                    />
+                  )}
+                </div>
+
+                {/* See More / See Less button */}
+                <div className="flex justify-center pb-3 pt-1">
+                  <button
+                    onClick={() => setIsExpanded(prev => !prev)}
+                    className="px-4 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-full transition-colors"
+                  >
+                    {isExpanded ? '▲ See Less' : '▼ See More'}
+                  </button>
+                </div>
+              </div>
             </div>
-
-            {/* Gradient fade — only when collapsed */}
-            {!isExpanded && (
-              <div
-                className="absolute inset-x-0 bottom-0 h-20 pointer-events-none"
-                style={{ background: 'linear-gradient(to top, #f9fafb 10%, transparent)' }}
-              />
-            )}
-          </div>
-
-          {/* See More / See Less button */}
-          <div className="flex justify-center pb-3 pt-1">
-            <button
-              onClick={() => setIsExpanded(prev => !prev)}
-              className="px-4 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-full transition-colors"
-            >
-              {isExpanded ? '▲ See Less' : '▼ See More'}
-            </button>
-          </div>
+          )}
         </div>
-      )}
 
-      {/* Action Points */}
-      {clientId && (
-        <InlineActionPoints
-          channelType={normalizeChannelType(channel.name)}
-          clientId={clientId}
-          maxVisible={3}
-        />
-      )}
+        {/* ── Right Section: Action Points ── */}
+        {clientId && (
+          <div className="flex-shrink-0 w-64 bg-white">
+            <div className="px-4 pt-4 pb-4">
+              <h3 className="text-sm font-semibold text-gray-900 mb-3">Action Points</h3>
+              <InlineActionPoints
+                channelType={normalizeChannelType(channel.name)}
+                clientId={clientId}
+                channelStartDate={channelStartDate}
+                maxVisible={3}
+                showBorder={false}
+                showTitle={false}
+              />
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

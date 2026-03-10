@@ -466,7 +466,7 @@ export default function TodoSection({ mediaPlanBuilderChannels, clientId, embedd
                   : 'border-transparent text-[#64748b] hover:text-[#0f172a]'
               }`}
             >
-              {tab === 'HEALTH CHECK' ? 'ONGOING' : tab}
+              {tab}
               {count > 0 && (
                 <span className={`ml-2 text-xs font-normal ${tallyColor}`}>
                   {completed}/{count}
@@ -482,7 +482,7 @@ export default function TodoSection({ mediaPlanBuilderChannels, clientId, embedd
         <p className="text-sm text-[#64748b] text-center py-8">Loading action points...</p>
       ) : allActivePoints.length === 0 ? (
         <p className="text-sm text-[#64748b] text-center py-8">
-          No {activeTab === 'HEALTH CHECK' ? 'ONGOING' : activeTab.toLowerCase()} action points yet.
+          No {activeTab.toLowerCase()} action points yet.
         </p>
       ) : (
         <div className="space-y-4">

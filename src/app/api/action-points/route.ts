@@ -72,7 +72,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { channel_type, text, category, frequency, due_date } = body;
+    const { channel_type, text, category, frequency, due_date, days_before_live_due } = body;
 
     if (!channel_type || !text || !text.trim()) {
       return NextResponse.json(
@@ -106,8 +106,13 @@ export async function POST(request: NextRequest) {
       insertData.frequency = frequency;
     }
 
-    if (category === 'SET UP' && due_date) {
-      insertData.due_date = due_date;
+    // Prefer days_before_live_due for SET UP templates; due_date is legacy
+    if (category === 'SET UP') {
+      if (days_before_live_due !== undefined && days_before_live_due !== null) {
+        insertData.days_before_live_due = days_before_live_due;
+      } else if (due_date) {
+        insertData.due_date = due_date;
+      }
     }
 
     const { data, error } = await supabase
@@ -139,7 +144,7 @@ export async function POST(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { id, text, completed, category, frequency, due_date, client_id } = body;
+    const { id, text, completed, category, frequency, due_date, days_before_live_due, client_id } = body;
 
     if (!id) {
       return NextResponse.json(
@@ -241,6 +246,9 @@ export async function PUT(request: NextRequest) {
     }
     if (due_date !== undefined) {
       updateData.due_date = due_date;
+    }
+    if (days_before_live_due !== undefined) {
+      updateData.days_before_live_due = days_before_live_due;
     }
 
     const { data, error } = await supabase

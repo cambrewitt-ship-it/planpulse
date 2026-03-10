@@ -17,7 +17,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
-import { Plus, Facebook, Search, Linkedin, Music, Instagram, Radio, Edit2, Trash2, Check } from 'lucide-react';
+import { Plus, Facebook, Search, Linkedin, Music, Instagram, Radio, Edit2, Trash2, Check, X } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 interface ActionPoint {
@@ -26,6 +26,8 @@ interface ActionPoint {
   completed: boolean;
   category: 'SET UP' | 'HEALTH CHECK';
   channel_type: string;
+  frequency?: 'daily' | 'weekly' | 'fortnightly' | 'monthly' | null;
+  days_before_live_due?: number | null;
 }
 
 interface MediaChannelLibraryEntry {
@@ -66,10 +68,15 @@ export default function LibraryPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
   const [editingNotes, setEditingNotes] = useState('');
+  const [editingActionPointId, setEditingActionPointId] = useState<string | null>(null);
+  const [editingActionPointText, setEditingActionPointText] = useState('');
+  const [editingActionPointDaysBefore, setEditingActionPointDaysBefore] = useState<number | ''>('');
+  const [editingActionPointFrequency, setEditingActionPointFrequency] = useState<'daily' | 'weekly' | 'fortnightly' | 'monthly'>('weekly');
   const [addingActionPointChannelType, setAddingActionPointChannelType] = useState<string | null>(null);
   const [newActionPointText, setNewActionPointText] = useState('');
   const [newActionPointCategory, setNewActionPointCategory] = useState<'SET UP' | 'HEALTH CHECK'>('SET UP');
   const [newActionPointFrequency, setNewActionPointFrequency] = useState<'daily' | 'weekly' | 'fortnightly' | 'monthly'>('weekly');
+  const [newActionPointDaysBefore, setNewActionPointDaysBefore] = useState<number | ''>('');
   const [actionPointFilter, setActionPointFilter] = useState<Record<string, 'SET UP' | 'HEALTH CHECK'>>({});
   const [editingSpecId, setEditingSpecId] = useState<string | null>(null);
   const [editingSpecText, setEditingSpecText] = useState('');
@@ -243,6 +250,11 @@ export default function LibraryPage() {
       return;
     }
 
+    if (newActionPointCategory === 'SET UP' && (newActionPointDaysBefore === '' || newActionPointDaysBefore < 0)) {
+      alert('Please enter a non-negative number of days before go-live for SET UP action points');
+      return;
+    }
+
     if (newActionPointCategory === 'HEALTH CHECK' && !newActionPointFrequency) {
       alert('Please select a frequency for HEALTH CHECK action points');
       return;
@@ -258,6 +270,10 @@ export default function LibraryPage() {
           text: newActionPointText.trim(),
           category: newActionPointCategory,
           frequency: newActionPointCategory === 'HEALTH CHECK' ? newActionPointFrequency : null,
+          days_before_live_due:
+            newActionPointCategory === 'SET UP' && newActionPointDaysBefore !== ''
+              ? Number(newActionPointDaysBefore)
+              : null,
         }),
       });
 
@@ -270,6 +286,7 @@ export default function LibraryPage() {
       setNewActionPointText('');
       setNewActionPointCategory('SET UP');
       setNewActionPointFrequency('weekly');
+      setNewActionPointDaysBefore('');
       setAddingActionPointChannelType(null);
 
       // Reload action points for this channel type
@@ -337,6 +354,101 @@ export default function LibraryPage() {
           [channelType]: data || [],
         }));
       }
+    }
+  };
+
+  const handleStartEditActionPoint = (ap: ActionPoint) => {
+    setEditingActionPointId(ap.id);
+    setEditingActionPointText(ap.text);
+    setEditingActionPointDaysBefore(ap.days_before_live_due ?? '');
+    setEditingActionPointFrequency(ap.frequency || 'weekly');
+  };
+
+  const handleCancelEditActionPoint = () => {
+    setEditingActionPointId(null);
+    setEditingActionPointText('');
+    setEditingActionPointDaysBefore('');
+    setEditingActionPointFrequency('weekly');
+  };
+
+  const handleSaveEditActionPoint = async (ap: ActionPoint) => {
+    if (!editingActionPointId || !editingActionPointText.trim()) return;
+
+    try {
+      setIsSaving(true);
+      const updateBody: any = {
+        id: editingActionPointId,
+        text: editingActionPointText.trim(),
+      };
+
+      if (ap.category === 'SET UP') {
+        updateBody.days_before_live_due =
+          editingActionPointDaysBefore !== '' ? Number(editingActionPointDaysBefore) : null;
+      }
+
+      if (ap.category === 'HEALTH CHECK') {
+        updateBody.frequency = editingActionPointFrequency;
+      }
+
+      const response = await fetch('/api/action-points', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updateBody),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to update action point');
+      }
+
+      // Reload action points for this channel type
+      const actionPointsResponse = await fetch(
+        `/api/action-points?channel_type=${encodeURIComponent(ap.channel_type)}`
+      );
+      if (actionPointsResponse.ok) {
+        const { data } = await actionPointsResponse.json();
+        setActionPoints((prev) => ({
+          ...prev,
+          [ap.channel_type]: data || [],
+        }));
+      }
+
+      handleCancelEditActionPoint();
+    } catch (error) {
+      console.error('Error updating action point:', error);
+      alert('Failed to update action point. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDeleteActionPoint = async (ap: ActionPoint) => {
+    if (!confirm('Delete this action point template? This will remove it from all clients.')) return;
+
+    try {
+      setIsSaving(true);
+      const response = await fetch(`/api/action-points?id=${encodeURIComponent(ap.id)}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to delete action point');
+      }
+
+      const actionPointsResponse = await fetch(
+        `/api/action-points?channel_type=${encodeURIComponent(ap.channel_type)}`
+      );
+      if (actionPointsResponse.ok) {
+        const { data } = await actionPointsResponse.json();
+        setActionPoints((prev) => ({
+          ...prev,
+          [ap.channel_type]: data || [],
+        }));
+      }
+    } catch (error) {
+      console.error('Error deleting action point:', error);
+      alert('Failed to delete action point. Please try again.');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -673,18 +785,18 @@ export default function LibraryPage() {
                           onClick={() => setActionPointFilter(prev => ({ ...prev, [entry.channel_type]: 'HEALTH CHECK' }))}
                           className="h-7 text-xs flex-1"
                         >
-                          ONGOING
+                          HEALTH CHECK
                         </Button>
                       </div>
                     )}
                     {channelActionPoints.length === 0 ? (
-                      <p className="text-xs text-gray-500">No {currentFilter === 'HEALTH CHECK' ? 'ONGOING' : currentFilter.toLowerCase()} action points for this channel</p>
+                      <p className="text-xs text-gray-500">No {currentFilter.toLowerCase()} action points for this channel</p>
                     ) : (
                       <div className="space-y-2 max-h-64 overflow-y-auto">
                         {channelActionPoints.map((actionPoint) => (
                           <div
                             key={actionPoint.id}
-                            className="flex items-start gap-2 p-2 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors"
+                            className="flex items-start gap-2 p-2 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors group"
                           >
                             <Checkbox
                               checked={actionPoint.completed}
@@ -694,23 +806,129 @@ export default function LibraryPage() {
                               className="mt-0.5"
                             />
                             <div className="flex-1 min-w-0">
-                              <p
-                                className={`text-xs ${
-                                  actionPoint.completed
-                                    ? 'line-through text-gray-400'
-                                    : 'text-gray-900'
-                                }`}
-                              >
-                                {actionPoint.text}
-                              </p>
-                              <div className="flex items-center gap-2 mt-1">
-                                <Badge
-                                  variant={actionPoint.category === 'SET UP' ? 'secondary' : 'default'}
-                                  className="text-xs"
-                                >
-                                  {actionPoint.category}
-                                </Badge>
-                              </div>
+                              {editingActionPointId === actionPoint.id ? (
+                                <div className="space-y-2">
+                                  <Input
+                                    value={editingActionPointText}
+                                    onChange={(e) => setEditingActionPointText(e.target.value)}
+                                    className="text-xs h-7"
+                                    placeholder="Action point text"
+                                  />
+                                  {actionPoint.category === 'SET UP' && (
+                                    <div className="flex items-center gap-2">
+                                      <Label className="text-xs text-gray-600 whitespace-nowrap">
+                                        Days before:
+                                      </Label>
+                                      <Input
+                                        type="number"
+                                        min={0}
+                                        value={editingActionPointDaysBefore}
+                                        onChange={(e) =>
+                                          setEditingActionPointDaysBefore(
+                                            e.target.value === '' ? '' : Number(e.target.value)
+                                          )
+                                        }
+                                        className="text-xs h-7 w-20"
+                                      />
+                                    </div>
+                                  )}
+                                  {actionPoint.category === 'HEALTH CHECK' && (
+                                    <div className="flex items-center gap-2">
+                                      <Label className="text-xs text-gray-600 whitespace-nowrap">
+                                        Frequency:
+                                      </Label>
+                                      <Select
+                                        value={editingActionPointFrequency}
+                                        onValueChange={(
+                                          value: 'daily' | 'weekly' | 'fortnightly' | 'monthly'
+                                        ) => setEditingActionPointFrequency(value)}
+                                      >
+                                        <SelectTrigger className="text-xs h-7 w-28">
+                                          <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          <SelectItem value="daily">Daily</SelectItem>
+                                          <SelectItem value="weekly">Weekly</SelectItem>
+                                          <SelectItem value="fortnightly">Fortnightly</SelectItem>
+                                          <SelectItem value="monthly">Monthly</SelectItem>
+                                        </SelectContent>
+                                      </Select>
+                                    </div>
+                                  )}
+                                  <div className="flex items-center gap-1">
+                                    <Button
+                                      size="icon"
+                                      variant="ghost"
+                                      className="h-6 w-6 text-emerald-600 hover:text-emerald-700"
+                                      disabled={isSaving || !editingActionPointText.trim()}
+                                      onClick={() => handleSaveEditActionPoint(actionPoint)}
+                                    >
+                                      <Check className="h-3 w-3" />
+                                    </Button>
+                                    <Button
+                                      size="icon"
+                                      variant="ghost"
+                                      className="h-6 w-6 text-gray-500 hover:text-gray-700"
+                                      disabled={isSaving}
+                                      onClick={handleCancelEditActionPoint}
+                                    >
+                                      <X className="h-3 w-3" />
+                                    </Button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <>
+                                  <div className="flex items-start justify-between gap-2">
+                                    <p
+                                      className={`text-xs ${
+                                        actionPoint.completed
+                                          ? 'line-through text-gray-400'
+                                          : 'text-gray-900'
+                                      }`}
+                                    >
+                                      {actionPoint.text}
+                                    </p>
+                                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                      <Button
+                                        size="icon"
+                                        variant="ghost"
+                                        className="h-6 w-6 text-gray-400 hover:text-gray-700"
+                                        onClick={() => handleStartEditActionPoint(actionPoint)}
+                                      >
+                                        <Edit2 className="h-3 w-3" />
+                                      </Button>
+                                      <Button
+                                        size="icon"
+                                        variant="ghost"
+                                        className="h-6 w-6 text-red-500 hover:text-red-700"
+                                        onClick={() => handleDeleteActionPoint(actionPoint)}
+                                      >
+                                        <Trash2 className="h-3 w-3" />
+                                      </Button>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-2 mt-1">
+                                    <Badge
+                                      variant={actionPoint.category === 'SET UP' ? 'secondary' : 'default'}
+                                      className="text-xs"
+                                    >
+                                      {actionPoint.category}
+                                    </Badge>
+                                    {actionPoint.category === 'SET UP' &&
+                                      actionPoint.days_before_live_due != null && (
+                                        <span className="text-xs text-gray-500">
+                                          {actionPoint.days_before_live_due} days before go-live
+                                        </span>
+                                      )}
+                                    {actionPoint.category === 'HEALTH CHECK' &&
+                                      actionPoint.frequency && (
+                                        <span className="text-xs text-gray-500">
+                                          {actionPoint.frequency}
+                                        </span>
+                                      )}
+                                  </div>
+                                </>
+                              )}
                             </div>
                           </div>
                         ))}
@@ -835,7 +1053,18 @@ export default function LibraryPage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="action-point-category">Category</Label>
-              <Select value={newActionPointCategory} onValueChange={(value: 'SET UP' | 'HEALTH CHECK') => setNewActionPointCategory(value)}>
+              <Select
+                value={newActionPointCategory}
+                onValueChange={(value: 'SET UP' | 'HEALTH CHECK') => {
+                  setNewActionPointCategory(value);
+                  // Reset category-specific fields when switching
+                  if (value === 'SET UP') {
+                    setNewActionPointFrequency('weekly');
+                  } else {
+                    setNewActionPointDaysBefore('');
+                  }
+                }}
+              >
                 <SelectTrigger id="action-point-category">
                   <SelectValue />
                 </SelectTrigger>
@@ -845,6 +1074,26 @@ export default function LibraryPage() {
                 </SelectContent>
               </Select>
             </div>
+            {newActionPointCategory === 'SET UP' && (
+              <div className="space-y-2">
+                <Label htmlFor="action-point-days-before">Days before go-live</Label>
+                <Input
+                  id="action-point-days-before"
+                  type="number"
+                  min={0}
+                  value={newActionPointDaysBefore}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setNewActionPointDaysBefore(val === '' ? '' : Number(val));
+                  }}
+                  className="text-sm"
+                  placeholder="e.g. 2"
+                />
+                <p className="text-xs text-gray-500">
+                  Used to calculate when this setup task is due relative to the channel start date.
+                </p>
+              </div>
+            )}
             {newActionPointCategory === 'HEALTH CHECK' && (
               <div className="space-y-2">
                 <Label htmlFor="action-point-frequency">Frequency</Label>
