@@ -73,7 +73,14 @@ export async function POST(
     }
 
     const body = await request.json();
-    const { channel_name, week_commencing, posts_published, posts_automatic, notes } = body;
+    const {
+      channel_name,
+      week_commencing,
+      posts_published,
+      posts_automatic,
+      manual_stamp_count,
+      notes,
+    } = body;
 
     if (!channel_name || !week_commencing) {
       return NextResponse.json(
@@ -96,6 +103,13 @@ export async function POST(
       );
     }
 
+    if (manual_stamp_count !== undefined && typeof manual_stamp_count !== 'number') {
+      return NextResponse.json(
+        { error: 'manual_stamp_count must be a number' },
+        { status: 400 }
+      );
+    }
+
     // Upsert the record
     const upsertData = {
       client_id: clientId,
@@ -103,6 +117,7 @@ export async function POST(
       week_commencing,
       posts_published: posts_published ?? 0,
       posts_automatic: posts_automatic ?? 0,
+      manual_stamp_count: manual_stamp_count ?? 0,
       notes: notes || null,
     };
     

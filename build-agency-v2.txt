@@ -1,0 +1,399 @@
+#!/bin/bash
+
+# ============================================================
+# Plan Check — Agency V2 Autonomous Build Script
+# Run with: bash build-agency-v2.sh
+# Requires: Claude Code installed (claude command available)
+# ============================================================
+
+set -e  # Stop immediately if any step fails
+
+# Colours for terminal output
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m' # No colour
+
+log() { echo -e "${GREEN}[$(date +%H:%M:%S)] ✓ $1${NC}"; }
+warn() { echo -e "${YELLOW}[$(date +%H:%M:%S)] ⚠ $1${NC}"; }
+fail() { echo -e "${RED}[$(date +%H:%M:%S)] ✗ $1${NC}"; exit 1; }
+
+# ------------------------------------------------------------
+# Pre-flight check
+# ------------------------------------------------------------
+
+log "Starting Agency V2 build..."
+log "Checking claude command is available..."
+command -v claude >/dev/null 2>&1 || fail "Claude Code not found. Install from: https://claude.ai/code"
+
+log "Checking we are in the right directory..."
+[ -f "package.json" ] || fail "No package.json found. Run this script from the root of your Plan Check project."
+
+log "Checking git status is clean..."
+if [ -n "$(git status --porcelain)" ]; then
+  warn "You have uncommitted changes. Committing them before we start..."
+  git add -A
+  git commit -m "chore: save work before agency-v2 build"
+fi
+
+log "All pre-flight checks passed. Starting build phases..."
+echo ""
+
+# ============================================================
+# PHASE 1 — Scaffold parallel route
+# ============================================================
+
+log "PHASE 1 — Scaffolding /agency-v2 parallel route..."
+
+claude --dangerously-skip-permissions -p "
+We are building a new version of the Agency Dashboard for a Next.js app called Plan Check.
+The tech stack is Next.js (App Router), Supabase, TypeScript, Tailwind, Shadcn.
+
+TASK: Create a new parallel route at app/agency-v2/page.tsx.
+
+Instructions:
+1. Find the existing agency dashboard page (likely app/agency/page.tsx or similar — search for it).
+2. Copy it exactly to app/agency-v2/page.tsx — all imports, data fetching, hooks, and rendering.
+3. Add a small badge in the top-left corner of the page that reads 'V2 Preview' in indigo, so we can visually distinguish the two routes.
+4. Do not change any logic, data fetching, or layout yet.
+5. Make sure the new route compiles without errors — check for any import path issues caused by the new location and fix them.
+
+This is purely a safe duplication step. No functional changes.
+"
+
+git add -A && git commit -m "phase 1: scaffold /agency-v2 parallel route" || warn "Nothing to commit for phase 1"
+log "Phase 1 complete."
+echo ""
+
+# ============================================================
+# PHASE 2 — Nav + subheader
+# ============================================================
+
+log "PHASE 2 — Updating nav and subheader..."
+
+claude --dangerously-skip-permissions -p "
+We are working on app/agency-v2/page.tsx in a Next.js / Supabase / Tailwind project called Plan Check.
+
+TASK: Update the navigation bar and page header. Make two changes:
+
+CHANGE 1 — Slim nav with AM filter pills:
+- Reduce the nav bar height to 44px
+- After the existing Agency/Clients/Library tab buttons, add a group of filter pills
+- The pills should be: 'All' plus one pill per unique account_manager (or assigned_to) value from the clients data
+- If the account manager field does not exist on clients yet, use hardcoded values: All, Cam, Lockie, James, Sarah — we will wire to real data later
+- Store the selected filter in a useState called amFilter, defaulting to 'All'
+- Selected pill style: white background, #111 text, subtle box-shadow
+- Unselected pill style: transparent background, #9ca3af text
+- Add a small ↻ refresh icon button on the right side of the nav before the user email
+
+CHANGE 2 — Merge title + briefing into single subheader bar:
+- Remove the existing separate page title block ('Agency Dashboard / Monitor all clients') and the separate briefing strip below it
+- Replace both with a single slim bar (~36px tall) directly below the nav
+- This bar contains left-to-right:
+  - 'Agency Dashboard' in bold 14px #111
+  - Current month + year label in 11px #9ca3af
+  - A 1px vertical divider
+  - The existing briefing alert chips (keep pulling from whatever data source they currently use)
+  - Right-aligned: 'Updated just now' in 10px #9ca3af
+- Background: white, bottom border: 1px solid #ebebeb
+"
+
+git add -A && git commit -m "phase 2: slim nav with AM filter + merged subheader" || warn "Nothing to commit for phase 2"
+log "Phase 2 complete."
+echo ""
+
+# ============================================================
+# PHASE 3 — Two-column layout shell
+# ============================================================
+
+log "PHASE 3 — Restructuring page into two-column layout..."
+
+claude --dangerously-skip-permissions -p "
+We are working on app/agency-v2/page.tsx in a Next.js / Supabase / Tailwind project called Plan Check.
+
+TASK: Restructure the main page body into a two-column grid layout shell.
+
+Instructions:
+1. Replace the current page body layout with a CSS grid:
+   - gridTemplateColumns: '1fr 264px'
+   - gap: 12px
+   - padding: 12px 16px
+   - maxWidth: 1440px, margin: 0 auto
+2. Left column (1fr): add a placeholder div with a light grey border and the text 'Left column — main content coming soon'
+3. Right column (264px): add a placeholder div with a light grey border and the text 'Right column — client cards coming soon'
+4. IMPORTANT: Do not delete any existing data fetching hooks, useEffects, or Supabase queries — keep them all, just stop rendering their output for now
+5. Set the page background to #f4f5f7
+
+This is purely a layout restructure. No data changes.
+"
+
+git add -A && git commit -m "phase 3: two-column layout shell" || warn "Nothing to commit for phase 3"
+log "Phase 3 complete."
+echo ""
+
+# ============================================================
+# PHASE 4 — Client cards (right sidebar)
+# ============================================================
+
+log "PHASE 4 — Building compact client cards..."
+
+claude --dangerously-skip-permissions -p "
+We are working on a Next.js / Supabase / Tailwind project called Plan Check.
+
+TASK: Build a compact ClientCardCompact component and wire it into the right sidebar.
+
+STEP 1 — Create components/agency/ClientCardCompact.tsx:
+This component takes one client and renders a compact card. Props:
+- client: object with name, initials, color, health (number|null), healthLabel,
+  healthColor, pacing, actions, perf, timeline, actionPointsOutstanding,
+  actionPointsTotal, spend (string|null), budget (string|null), budgetPct, am
+- selected: boolean
+- onClick: () => void
+
+Layout (compact, no wasted space):
+ROW 1: 
+  - 30x30px colored square avatar (borderRadius 8px) with white bold initials (10px)
+  - Client name bold 11px, truncated
+  - Health score ring on the far right — reuse the same HealthRing component from 
+    dashboard-v2 if it exists, otherwise build a simple SVG ring (32px size): 
+    grey track circle, colored progress arc, score number in center
+
+ROW 2 (below row 1):
+  - Health label badge (colored text on light colored bg, 8px bold, borderRadius 3px)
+  - If actionPointsOutstanding > 0: red badge '⚡N' 
+  - AM name right-aligned (8px #9ca3af)
+
+ROW 3 — Score strip:
+  Four items side by side: P (pacing), A (actions), Pf (perf), T (timeline)
+  Each item: 10px label + 28px wide × 3px tall bar
+  Bar color: #ef4444 if <40, #f59e0b if <70, #10b981 if >=70
+
+ROW 4 (only if spend is not null):
+  - Spend amount bold 9px + '/' + budget (8px grey)
+  - Flex:1 progress bar (3px tall, healthColor fill)
+  - Percentage right-aligned (8px grey)
+
+Card styles:
+- background #fff
+- selected: border 1.5px solid client.color, box-shadow 0 0 0 3px {client.color}1a
+- unselected: border 1.5px solid #efefef, no shadow
+- borderRadius 10px, padding 9px 11px, marginBottom 5px, cursor pointer
+
+STEP 2 — Wire into app/agency-v2/page.tsx right column:
+- Replace the right column placeholder with:
+  - Header row: 'Clients (N)' label + three colored dots (● count in red/amber/green)
+  - Scrollable list of ClientCardCompact, one per client, using real fetched data
+  - Apply amFilter: if amFilter === 'All' show all, else show only clients where
+    account_manager (or equivalent field) matches amFilter
+  - Track selectedClient in useState (default to first client id)
+  - '+ Add Client' dashed button at the bottom (no action needed)
+"
+
+git add -A && git commit -m "phase 4: compact client cards in right sidebar" || warn "Nothing to commit for phase 4"
+log "Phase 4 complete."
+echo ""
+
+# ============================================================
+# PHASE 5 — Today card
+# ============================================================
+
+log "PHASE 5 — Building Today card..."
+
+claude --dangerously-skip-permissions -p "
+We are working on a Next.js / Supabase / Tailwind project called Plan Check.
+
+TASK: Build the TodayCard component.
+
+Create components/agency/TodayCard.tsx.
+
+This is a tall narrow card (176px wide) with an indigo gradient background:
+  background: linear-gradient(145deg, #4f46e5 0%, #6366f1 55%, #818cf8 100%)
+  borderRadius: 12px
+  padding: 12px 14px
+  boxShadow: 0 4px 18px rgba(99,102,241,0.24)
+
+Content top to bottom:
+1. 'TODAY' label: 8px, white 50% opacity, uppercase, letterSpacing 0.1em
+2. 'Mar {day}' date: 22px bold white, letterSpacing -0.04em, lineHeight 1
+3. Day of week: 8px white 50% opacity
+4. Divider: 1px white 12% opacity, marginTop 10px
+5. 'LIVE CHANNELS' label: 8px uppercase white 45% opacity, marginBottom 6px
+6. For each client that has at least one active channel today:
+   - Client row: 12x12px rounded avatar (white 18% opacity bg, white bold 6px initials)
+     + client name (9px bold white 85%)
+   - Below each client: their active channels listed, each with a 3px dot prefix
+     (white 40% opacity) + channel name (8px white 55%), paddingLeft 16px
+   'Active today' means: channel.start_date <= today AND channel.end_date >= today
+
+Props: clients (array), channels (array), today (Date)
+
+After creating the component, add it to the left column of app/agency-v2/page.tsx
+as the top section, sitting alone for now (we will add the Kanban next to it in
+the next step).
+"
+
+git add -A && git commit -m "phase 5: TodayCard component with live channels" || warn "Nothing to commit for phase 5"
+log "Phase 5 complete."
+echo ""
+
+# ============================================================
+# PHASE 6 — Kanban action points
+# ============================================================
+
+log "PHASE 6 — Building Kanban action points board..."
+
+claude --dangerously-skip-permissions -p "
+We are working on a Next.js / Supabase / Tailwind project called Plan Check.
+
+TASK: Build the KanbanBoard component and place it next to the TodayCard.
+
+STEP 1 — Create components/agency/KanbanBoard.tsx:
+
+Four-column CSS grid (repeat(4, 1fr), gap 7px).
+Columns: Overdue (#ef4444), This Week (#f59e0b), Upcoming (#6366f1), Done (#10b981)
+
+Each column:
+- Header: 7px colored dot + column label (9px bold uppercase #374151) + count pill
+  (9px bold, colored text on light colored bg, borderRadius 8px)
+- List of action point cards (gap 4px between cards)
+- '+ Add' dashed button at bottom (no action yet)
+
+Each action point card:
+- background: column color at 6% opacity
+- border: 1px solid column color at 20% opacity
+- borderRadius 7px, padding 6px 8px
+- Top row: task text (10px bold #111, lineHeight 1.3) + URGENT badge (7px bold red
+  on #fef2f2, only if urgent === true)
+- Bottom row: 5px colored dot + client name (8px #9ca3af) | tag badge right-aligned
+  (7px bold, column color text on column color 15% opacity bg)
+
+Props:
+- actionPoints: array with fields: id, text, status ('overdue'|'thisweek'|'upcoming'|'done'),
+  clientName, clientColor, tag, urgent (boolean), assignedTo (string)
+- amFilter: string — if not 'All', only show cards where assignedTo === amFilter
+
+Look for existing action points data in the codebase. The action points likely already
+exist in Supabase. Find how they are fetched and pass them through.
+If the 'status' field does not exist and action points only have a due date, map them:
+- Overdue: dueDate < today
+- This Week: dueDate >= today AND dueDate <= today + 7 days
+- Upcoming: dueDate > today + 7 days
+- Done: completed === true
+
+STEP 2 — Update app/agency-v2/page.tsx:
+Replace the current top section of the left column with a two-cell row:
+- Left cell: 176px fixed width — render <TodayCard />
+- Right cell: 1fr — white card (border 1px solid #ebebeb, borderRadius 12px,
+  padding 11px 13px) containing:
+  - Header row: '⚡ Action Points' (11px bold #374151) + '{N} total' right-aligned (9px #9ca3af)
+  - <KanbanBoard /> below the header
+- Gap between the two cells: 10px
+"
+
+git add -A && git commit -m "phase 6: KanbanBoard + Today+Kanban side-by-side row" || warn "Nothing to commit for phase 6"
+log "Phase 6 complete."
+echo ""
+
+# ============================================================
+# PHASE 7 — My Notes
+# ============================================================
+
+log "PHASE 7 — Building My Notes checklist..."
+
+claude --dangerously-skip-permissions -p "
+We are working on a Next.js / Supabase / Tailwind project called Plan Check.
+
+TASK: Build the NotesChecklist component and add it to the bottom of the left column.
+
+STEP 1 — Create components/agency/NotesChecklist.tsx:
+
+Personal checklist for the logged-in account manager.
+
+Storage: Try to save notes to a Supabase table called 'agency_notes' with columns:
+  id (uuid), user_id (uuid, references auth.users), text (text), done (boolean),
+  created_at (timestamptz)
+If the table doesn't exist or you get an error querying it, fall back to localStorage
+with key 'agency_notes_{userId}'.
+
+UI layout — horizontal, everything in one row band:
+- Left side (flex:1): list of note items
+  Each item: 12px checkbox (green border+fill when done, grey when not)
+  + note text (10px, #374151, strikethrough + #9ca3af color when done)
+  + click anywhere on row to toggle done
+  Items separated by a 1px #f9fafb bottom border
+- Right side (fixed ~185px): text input + '+' button
+  Input: 10px font, border 1px solid #e5e7eb, borderRadius 6px, padding 4px 8px
+  Press Enter or click '+' to add
+  Button: indigo background, white text, borderRadius 6px
+
+STEP 2 — Add to app/agency-v2/page.tsx:
+Add a section at the bottom of the left column:
+- White card container (border 1px solid #ebebeb, borderRadius 12px, padding 10px 14px)
+- Header row: 📝 icon + 'My Notes' (11px bold #374151) + 'Personal · only visible to you' (8px #bbb)
+- <NotesChecklist /> below
+"
+
+git add -A && git commit -m "phase 7: NotesChecklist component" || warn "Nothing to commit for phase 7"
+log "Phase 7 complete."
+echo ""
+
+# ============================================================
+# PHASE 8 — Polish pass
+# ============================================================
+
+log "PHASE 8 — Visual polish pass..."
+
+claude --dangerously-skip-permissions -p "
+We are working on app/agency-v2/page.tsx in a Next.js / Supabase / Tailwind project called Plan Check.
+
+TASK: Final polish pass — do all of the following:
+
+1. BACKGROUND: Confirm the page background is #f4f5f7. If it is still white or any
+   other color, fix it.
+
+2. CARD CONSISTENCY: Every white card section in the left column should have:
+   - background: #fff
+   - border: 1px solid #ebebeb
+   - borderRadius: 12px
+   - boxShadow: 0 1px 2px rgba(0,0,0,0.03)
+   Check each section (Today+Kanban container, Calendar, Notes) and apply if missing.
+
+3. SPACING: The gap between each section in the left column should be 10px. Confirm and fix.
+
+4. REMOVE STAT BOXES: Check if there are any summary stat boxes anywhere on the page
+   showing 'Total Clients', 'Outstanding Actions', 'Critical / Warning', or 'Healthy'
+   counts in large numbers. Remove them entirely if they exist.
+
+5. RIGHT SIDEBAR CARDS: Confirm client cards in the right column have 5px bottom margin
+   between them and the sidebar has no extra padding at the top.
+
+6. NAV PILLS: The AM filter pills in the nav should read 'All' then individual AM names.
+   If any are missing or the filter is not actually filtering the client cards, fix the
+   filter logic so selecting an AM name shows only that AM's clients in the right sidebar
+   AND filters the Kanban cards to only show that AM's action points.
+
+Do not change any data fetching or component logic — this is visual polish only.
+"
+
+git add -A && git commit -m "phase 8: visual polish pass" || warn "Nothing to commit for phase 8"
+log "Phase 8 complete."
+echo ""
+
+# ============================================================
+# Done
+# ============================================================
+
+echo ""
+echo "=============================================="
+log "ALL PHASES COMPLETE 🎉"
+echo "=============================================="
+echo ""
+echo "Next steps when you get back:"
+echo ""
+echo "  1. Open http://localhost:3000/agency-v2 and review"
+echo "  2. Check the Gantt calendar still needs to be built (Phase 7 of the plan)"
+echo "  3. Compare against the v5 mockup"
+echo "  4. When happy, run the swap (Phase 9.4 of the plan — do this manually)"
+echo ""
+warn "DO NOT run the /agency swap unattended — do that manually when you're back."
+echo ""

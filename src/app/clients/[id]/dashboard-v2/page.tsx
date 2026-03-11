@@ -45,6 +45,13 @@ import { DateRangePicker } from '@/components/ui/date-range-picker';
 import { FunnelChart } from '@/components/funnel-chart';
 import { FunnelBuilderModal } from '@/components/funnel-builder-modal';
 import TodoSection from '@/components/TodoSection';
+import {
+  Select,
+  SelectTrigger,
+  SelectContent,
+  SelectItem,
+  SelectValue,
+} from '@/components/ui/select';
 import HeroHealthSection from '@/components/dashboard-v2/hero-health-section';
 import ActionItemsSection, { type ActionItem } from '@/components/dashboard-v2/action-items-section';
 import ChannelPerformanceCard from '@/components/dashboard-v2/channel-performance-card';
@@ -152,22 +159,10 @@ export default function DashboardV2() {
   const [healthScore, setHealthScore] = useState<HealthScoreResult | null>(null);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
   // Spend data scoped to the visible analytics period — fetched independently for channel cards.
-  // Must be declared before totalActualSpend so the useMemo below can reference it.
   const [channelMonthSpendData, setChannelMonthSpendData] = useState<SpendDataPoint[]>([]);
   // Non-digital channel actuals
   const [organicSocialActuals, setOrganicSocialActuals] = useState<OrganicSocialActual[]>([]);
   const [edmActuals, setEdmActuals] = useState<EdmActual[]>([]);
-  // Derived from channelMonthSpendData — sum of current-month spend across all platforms.
-  // Mirrors how new-client-dashboard derives this from MediaChannels' onTotalActualSpendChange.
-  const totalActualSpend = useMemo(() => {
-    if (!channelMonthSpendData.length) return 0;
-    const now = new Date();
-    const monthStart = format(startOfMonth(now), 'yyyy-MM-dd');
-    const monthEnd   = format(endOfMonth(now),   'yyyy-MM-dd');
-    return (channelMonthSpendData as any[])
-      .filter((p: any) => p.date >= monthStart && p.date <= monthEnd)
-      .reduce((sum: number, p: any) => sum + (p.spend ?? 0), 0);
-  }, [channelMonthSpendData]);
   const [analyticsDateRange, setAnalyticsDateRange] = useState(() => {
     const today = new Date();
     const thirtyDaysAgo = subDays(today, 30);
@@ -185,6 +180,19 @@ export default function DashboardV2() {
     } catch {}
     return defaultRange;
   });
+  // Derived from channelMonthSpendData — sum of spend across all platforms for
+  // the currently selected analytics period.
+  const totalActualSpend = useMemo(() => {
+    if (!channelMonthSpendData.length || !analyticsDateRange?.startDate || !analyticsDateRange?.endDate) {
+      return 0;
+    }
+    const rangeStart = analyticsDateRange.startDate;
+    const rangeEnd   = analyticsDateRange.endDate;
+
+    return (channelMonthSpendData as any[])
+      .filter((p: any) => p.date >= rangeStart && p.date <= rangeEnd)
+      .reduce((sum: number, p: any) => sum + (p.spend ?? 0), 0);
+  }, [channelMonthSpendData, analyticsDateRange.startDate, analyticsDateRange.endDate]);
 
   // Mirror the computed MTD actual spend to the DB so the agency dashboard can
   // show the exact same number without recalculating.
@@ -1207,70 +1215,6 @@ export default function DashboardV2() {
               </div>
             )}
 
-            {/* ── View Mode & Date Controls ── */}
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
-              <div className="flex items-center justify-between">
-                {/* Left: View Mode Tabs */}
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setViewMode('overview')}
-                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                      viewMode === 'overview'
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
-                    Overview
-                  </button>
-                  <button
-                    onClick={() => setViewMode('funnels')}
-                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                      viewMode === 'funnels'
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
-                    Funnels
-                  </button>
-                  <button
-                    onClick={() => setViewMode('media-plan')}
-                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                      viewMode === 'media-plan'
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
-                    Media Plan
-                  </button>
-                </div>
-                {/* Right: Date Controls */}
-                <div className="flex items-center gap-4">
-                  {/* Month Selector for Channel Cards */}
-                  {viewMode === 'overview' && (
-                    <div className="flex items-center gap-2">
-                      <label className="text-sm text-gray-600">Channel View:</label>
-                      <input
-                        type="month"
-                        value={format(selectedMonth, 'yyyy-MM')}
-                        onChange={(e) => setSelectedMonth(new Date(e.target.value))}
-                        className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
-                      />
-                    </div>
-                  )}
-
-                  {/* Analytics Date Range */}
-                  <div className="flex items-center gap-2">
-                    <label className="text-sm text-gray-600">Analytics Period:</label>
-                    <DateRangePicker
-                      value={analyticsDateRange}
-                      onChange={setAnalyticsDateRange}
-                      disabled={loadingAnalytics}
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-
             {/* ── Overview: Action Items + Channels + CACChart ── */}
             {viewMode === 'overview' && (
               <>
@@ -1279,6 +1223,70 @@ export default function DashboardV2() {
                   onToggleComplete={handleToggleActionPoint}
                   onActionClick={handleActionItemAction}
                 />
+
+                {/* ── View Mode & Date Controls ── */}
+                <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
+                  <div className="flex items-center justify-between">
+                    {/* Left: View Mode Tabs */}
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setViewMode('overview')}
+                        className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                          viewMode === 'overview'
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                      >
+                        Overview
+                      </button>
+                      <button
+                        onClick={() => setViewMode('funnels')}
+                        className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                          viewMode === 'funnels'
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                      >
+                        Results
+                      </button>
+                      <button
+                        onClick={() => setViewMode('media-plan')}
+                        className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                          viewMode === 'media-plan'
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                      >
+                        Media Plan
+                      </button>
+                    </div>
+                    {/* Right: Date Controls */}
+                    <div className="flex items-center gap-4">
+                      {/* Month Selector for Channel Cards */}
+                      {viewMode === 'overview' && (
+                        <div className="flex items-center gap-2">
+                          <label className="text-sm text-gray-600">Channel View:</label>
+                          <input
+                            type="month"
+                            value={format(selectedMonth, 'yyyy-MM')}
+                            onChange={(e) => setSelectedMonth(new Date(e.target.value))}
+                            className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
+                          />
+                        </div>
+                      )}
+
+                      {/* Analytics Date Range */}
+                      <div className="flex items-center gap-2">
+                        <label className="text-sm text-gray-600">Analytics Period:</label>
+                        <DateRangePicker
+                          value={analyticsDateRange}
+                          onChange={setAnalyticsDateRange}
+                          disabled={loadingAnalytics}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
 
                 {channelCards.length > 0 ? (
                   <div className="bg-white rounded-xl border border-gray-200 p-6">
@@ -1352,14 +1360,126 @@ export default function DashboardV2() {
                     </div>
                   )
                 )}
+              </>
+            )}
 
-                <div id="cost-per-metric-section" className="bg-white rounded-xl border border-gray-200 p-6">
-                  <h3 className="text-base font-semibold text-gray-900 mb-4">Cost Per Metric</h3>
-                  {cacMetrics.length === 0 && !loadingAnalytics && !cacError ? (
-                    <p className="text-gray-400 text-sm text-center py-8">
-                      No cost-per-metric data available. Ensure your GA4 and ad platform connections are active.
-                    </p>
-                  ) : (
+            {/* ── Funnels view ── */}
+            {viewMode === 'funnels' && (
+              <>
+                {/* ── View Mode & Date Controls ── */}
+                <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
+                  <div className="flex items-center justify-between">
+                    {/* Left: View Mode Tabs */}
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setViewMode('overview')}
+                        className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                          viewMode === 'overview'
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                      >
+                        Overview
+                      </button>
+                      <button
+                        onClick={() => setViewMode('funnels')}
+                        className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                          viewMode === 'funnels'
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                      >
+                        Results
+                      </button>
+                      <button
+                        onClick={() => setViewMode('media-plan')}
+                        className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                          viewMode === 'media-plan'
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                      >
+                        Media Plan
+                      </button>
+                    </div>
+                    {/* Right: Metric & Date Controls */}
+                    <div className="flex items-center gap-4">
+                      {/* Metric Selector for Cost Per chart */}
+                      <div className="flex items-center gap-2">
+                        <label className="text-sm text-gray-600">Cost Per:</label>
+                        <Select
+                          value={selectedMetric}
+                          onValueChange={(value) => {
+                            setSelectedMetric(value);
+                            if (value !== 'eventCount') {
+                              setSelectedEventName(null);
+                            }
+                          }}
+                        >
+                          <SelectTrigger className="w-[180px] h-9 text-sm">
+                            <SelectValue placeholder="Select metric" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {METRIC_OPTIONS.map((option: any) => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {/* Event Name Selector - shown when eventCount is selected */}
+                      {selectedMetric === 'eventCount' && (
+                        <Select
+                          value={selectedEventName || ''}
+                          onValueChange={(value) => setSelectedEventName(value)}
+                          disabled={loadingEventNames}
+                        >
+                          <SelectTrigger className="w-[200px] h-9 text-sm">
+                            <SelectValue placeholder={loadingEventNames ? 'Loading events...' : 'Select event'} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {availableEventNames.length === 0 && !loadingEventNames ? (
+                              <SelectItem value="_none" disabled>
+                                No events found
+                              </SelectItem>
+                            ) : (
+                              availableEventNames.map((event) => (
+                                <SelectItem key={event.name} value={event.name}>
+                                  {event.name}
+                                </SelectItem>
+                              ))
+                            )}
+                          </SelectContent>
+                        </Select>
+                      )}
+
+                      {/* Analytics Date Range */}
+                      <div className="flex items-center gap-2">
+                        <label className="text-sm text-gray-600">Analytics Period:</label>
+                        <DateRangePicker
+                          value={analyticsDateRange}
+                          onChange={setAnalyticsDateRange}
+                          disabled={loadingAnalytics}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 space-y-8">
+                  {selectedFunnelId && (
+                    <FunnelChart
+                      funnelStages={funnelStages}
+                      totalCost={totalActualSpend}
+                      dateRange={analyticsDateRange}
+                      isLoading={loadingFunnels}
+                      client={client}
+                    />
+                  )}
+
+                  {/* Cost Per chart under the funnel visual */}
+                  <div id="cost-per-metric-section">
                     <CACChart
                       cacMetrics={cacMetrics}
                       previousPeriodMetrics={previousPeriodMetrics}
@@ -1374,39 +1494,76 @@ export default function DashboardV2() {
                       selectedChannels={selectedChannels}
                       onChannelsChange={setSelectedChannels}
                     />
-                  )}
+                  </div>
+
+                  <FunnelBuilderModal
+                    isOpen={isFunnelBuilderOpen}
+                    onClose={() => {
+                      setIsFunnelBuilderOpen(false);
+                      setEditingFunnel(null);
+                    }}
+                    onSave={handleFunnelSaved}
+                    initialConfig={editingFunnel?.config as FunnelConfig | undefined}
+                    availableChannels={mediaChannels}
+                  />
                 </div>
               </>
             )}
 
-            {/* ── Funnels view ── */}
-            {viewMode === 'funnels' && (
-              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-                {selectedFunnelId && (
-                  <FunnelChart
-                    funnelStages={funnelStages}
-                    totalCost={totalActualSpend}
-                    dateRange={analyticsDateRange}
-                    isLoading={loadingFunnels}
-                    client={client}
-                  />
-                )}
-                <FunnelBuilderModal
-                  isOpen={isFunnelBuilderOpen}
-                  onClose={() => {
-                    setIsFunnelBuilderOpen(false);
-                    setEditingFunnel(null);
-                  }}
-                  onSave={handleFunnelSaved}
-                  initialConfig={editingFunnel?.config as FunnelConfig | undefined}
-                  availableChannels={mediaChannels}
-                />
-              </div>
-            )}
-
             {/* ── Media Plan view ── */}
             {viewMode === 'media-plan' && (
-              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+              <>
+                {/* ── View Mode & Date Controls ── */}
+                <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
+                  <div className="flex items-center justify-between">
+                    {/* Left: View Mode Tabs */}
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setViewMode('overview')}
+                        className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                          viewMode === 'overview'
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                      >
+                        Overview
+                      </button>
+                      <button
+                        onClick={() => setViewMode('funnels')}
+                        className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                          viewMode === 'funnels'
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                      >
+                        Results
+                      </button>
+                      <button
+                        onClick={() => setViewMode('media-plan')}
+                        className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                          viewMode === 'media-plan'
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                      >
+                        Media Plan
+                      </button>
+                    </div>
+                    {/* Right: Date Controls */}
+                    <div className="flex items-center gap-4">
+                      {/* Analytics Date Range */}
+                      <div className="flex items-center gap-2">
+                        <label className="text-sm text-gray-600">Analytics Period:</label>
+                        <DateRangePicker
+                          value={analyticsDateRange}
+                          onChange={setAnalyticsDateRange}
+                          disabled={loadingAnalytics}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
                 <MediaPlanGrid
                   channels={mediaPlanBuilderChannels}
                   onChannelsChange={handleChannelsChange}
@@ -1414,6 +1571,7 @@ export default function DashboardV2() {
                   onCommissionChange={handleCommissionChange}
                 />
               </div>
+              </>
             )}
           </>
         )}

@@ -330,6 +330,7 @@ export interface Database {
             week_commencing: string;
             posts_published: number;
             posts_automatic: number;
+            manual_stamp_count: number;
             notes: string | null;
             created_at: string;
             updated_at: string;
@@ -341,6 +342,7 @@ export interface Database {
             week_commencing: string;
             posts_published?: number;
             posts_automatic?: number;
+            manual_stamp_count?: number;
             notes?: string | null;
             created_at?: string;
             updated_at?: string;
@@ -352,6 +354,7 @@ export interface Database {
             week_commencing?: string;
             posts_published?: number;
             posts_automatic?: number;
+            manual_stamp_count?: number;
             notes?: string | null;
             updated_at?: string;
           };
