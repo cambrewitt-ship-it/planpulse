@@ -26,7 +26,7 @@ export async function DELETE(
       .from('account_managers')
       .select('name')
       .eq('id', id)
-      .single();
+      .single<{ name: string }>();
 
     if (accountManager) {
       const { data: assignedClients } = await supabase
