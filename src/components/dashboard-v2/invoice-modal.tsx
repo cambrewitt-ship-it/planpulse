@@ -223,7 +223,7 @@ export function InvoiceModal({ isOpen, onClose, clientId, clientName }: InvoiceM
   const generatePDF = async () => {
     try {
       // Dynamic import to avoid SSR issues
-      const { jsPDF } = await import('jspdf');
+      const jsPDF = (await import('jspdf')).default;
       
       const doc = new jsPDF();
       const pageWidth = doc.internal.pageSize.getWidth();

@@ -14,8 +14,13 @@ import { CalendarPanel } from '@/components/agency/CalendarPanel';
 import { DateRangePicker } from '@/components/ui/date-range-picker';
 
 // ── Constants ────────────────────────────────────────────────────────────────
-const AM_FILTERS = ['All', 'Cam', 'Lockie', 'James', 'Sarah'];
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+interface AccountManager {
+  id: string;
+  name: string;
+  email: string | null;
+}
 
 // ── Briefing helpers ─────────────────────────────────────────────────────────
 interface BriefingItem {
@@ -77,6 +82,7 @@ const CHIP_STYLES: Record<string, React.CSSProperties> = {
 export default function AgencyDashboard() {
   const [clients, setClients] = useState<ClientCardData[]>([]);
   const [actionPointClients, setActionPointClients] = useState<AgencyClientActionPoints[]>([]);
+  const [accountManagers, setAccountManagers] = useState<AccountManager[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
@@ -96,6 +102,18 @@ export default function AgencyDashboard() {
 
   const today = useMemo(() => new Date(), []);
   const monthLabel = `${MONTH_NAMES[today.getMonth()]} ${today.getFullYear()}`;
+
+  const fetchAccountManagers = useCallback(async () => {
+    try {
+      const response = await fetch('/api/account-managers');
+      if (response.ok) {
+        const data = await response.json();
+        setAccountManagers(data.accountManagers || []);
+      }
+    } catch (err) {
+      console.error('Error fetching account managers:', err);
+    }
+  }, []);
 
   const fetchData = useCallback(async (showRefreshing = false) => {
     try {
@@ -130,6 +148,10 @@ export default function AgencyDashboard() {
       setRefreshing(false);
     }
   }, [dateRange]);
+
+  useEffect(() => {
+    fetchAccountManagers();
+  }, [fetchAccountManagers]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -206,19 +228,33 @@ export default function AgencyDashboard() {
         display: 'flex', alignItems: 'center', paddingLeft: 16, paddingRight: 16, gap: 5,
       }}>
         {/* AM filter pills */}
-        {AM_FILTERS.map(am => (
+        <button
+          key="All"
+          onClick={() => setAmFilter('All')}
+          style={{
+            height: 28, padding: '0 11px', borderRadius: 4,
+            border: amFilter === 'All' ? '0.5px solid #D5D0C5' : 'none',
+            background: 'transparent',
+            color: amFilter === 'All' ? '#1C1917' : '#8A8578',
+            fontSize: 13, fontWeight: amFilter === 'All' ? 500 : 400,
+            cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif",
+          }}
+        >
+          All
+        </button>
+        {accountManagers.map(am => (
           <button
-            key={am}
-            onClick={() => setAmFilter(am)}
+            key={am.id}
+            onClick={() => setAmFilter(am.name)}
             style={{
               height: 28, padding: '0 11px', borderRadius: 4,
-              border: amFilter === am ? '0.5px solid #D5D0C5' : 'none',
+              border: amFilter === am.name ? '0.5px solid #D5D0C5' : 'none',
               background: 'transparent',
-              color: amFilter === am ? '#1C1917' : '#8A8578',
-              fontSize: 13, fontWeight: amFilter === am ? 500 : 400,
+              color: amFilter === am.name ? '#1C1917' : '#8A8578',
+              fontSize: 13, fontWeight: amFilter === am.name ? 500 : 400,
               cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif",
             }}
-          >{am}</button>
+          >{am.name}</button>
         ))}
 
         <div style={{ flex: 1 }} />
@@ -286,7 +322,7 @@ export default function AgencyDashboard() {
 
           {/* Today + Notes + Kanban row */}
           <div style={{ display: 'flex', gap: 12, alignItems: 'stretch' }}>
-            <TodayCard clients={clients} today={today} />
+            <TodayCard clients={filteredClients} today={today} />
 
             {/* Notes — personal notes, made wider so content isn't cut off */}
             <div
@@ -329,6 +365,7 @@ export default function AgencyDashboard() {
                   actionPointClients={filteredActionPointClients}
                   amFilter={amFilter}
                   onActionPointCompleted={() => fetchData(true)}
+                  accountManagers={accountManagers}
                 />
               </div>
             </div>
@@ -383,6 +420,7 @@ export default function AgencyDashboard() {
                 client={client}
                 selected={selectedClientId === client.id}
                 onClick={() => setSelectedClientId(client.id)}
+                accountManagers={accountManagers}
               />
             ))}
           </div>

@@ -18,6 +18,28 @@ export interface Database {
             name?: string;
           };
         };
+        account_managers: {
+          Row: {
+            id: string;
+            name: string;
+            email: string | null;
+            created_at: string;
+            updated_at: string;
+          };
+          Insert: {
+            id?: string;
+            name: string;
+            email?: string | null;
+            created_at?: string;
+            updated_at?: string;
+          };
+          Update: {
+            id?: string;
+            name?: string;
+            email?: string | null;
+            updated_at?: string;
+          };
+        };
         media_plans: {
           Row: {
             id: string;

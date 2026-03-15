@@ -5,7 +5,11 @@ import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import type { ClientCardData } from '@/app/api/agency/clients/route';
 
-const AM_OPTIONS = ['Cam', 'Lockie', 'James', 'Sarah'];
+interface AccountManager {
+  id: string;
+  name: string;
+  email: string | null;
+}
 
 const COLORS = ['#4A6580', '#B07030', '#4A7C59', '#A0442A', '#4A6580', '#8A8578', '#4A7C59', '#A0442A'];
 
@@ -63,9 +67,10 @@ interface ClientCardCompactProps {
   selected: boolean;
   onClick: () => void;
   onAccountManagerChange?: (clientId: string, am: string | null) => void;
+  accountManagers?: AccountManager[];
 }
 
-export function ClientCardCompact({ client, selected, onClick, onAccountManagerChange }: ClientCardCompactProps) {
+export function ClientCardCompact({ client, selected, onClick, onAccountManagerChange, accountManagers = [] }: ClientCardCompactProps) {
   const router = useRouter();
   const color = clientColor(client.id);
   const initials = clientInitials(client.name);
@@ -227,24 +232,24 @@ export function ClientCardCompact({ client, selected, onClick, onAccountManagerC
               minWidth: 90,
               overflow: 'hidden',
             }}>
-              {AM_OPTIONS.map(am => (
+              {accountManagers.map(am => (
                 <button
-                  key={am}
-                  onClick={(e) => { e.stopPropagation(); void assignAm(am); }}
+                  key={am.id}
+                  onClick={(e) => { e.stopPropagation(); void assignAm(am.name); }}
                   style={{
                     display: 'block',
                     width: '100%',
                     textAlign: 'left',
                     padding: '7px 12px',
                     fontSize: 12,
-                    color: currentAm === am ? '#4A6580' : '#1C1917',
-                    fontWeight: currentAm === am ? 600 : 400,
-                    background: currentAm === am ? 'rgba(74,101,128,0.06)' : 'transparent',
+                    color: currentAm === am.name ? '#4A6580' : '#1C1917',
+                    fontWeight: currentAm === am.name ? 600 : 400,
+                    background: currentAm === am.name ? 'rgba(74,101,128,0.06)' : 'transparent',
                     border: 'none',
                     cursor: 'pointer',
                     fontFamily: "'DM Sans', system-ui, sans-serif",
                   }}
-                >{am}</button>
+                >{am.name}</button>
               ))}
               {currentAm && (
                 <button

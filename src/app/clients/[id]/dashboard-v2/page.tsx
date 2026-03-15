@@ -140,6 +140,7 @@ export default function DashboardV2() {
   const [editingClientNotes, setEditingClientNotes] = useState('');
   const [isSavingClientNotes, setIsSavingClientNotes] = useState(false);
   const [isSavingAccountManager, setIsSavingAccountManager] = useState(false);
+  const [accountManagers, setAccountManagers] = useState<Array<{ id: string; name: string; email: string | null }>>([]);
   const [spendData, setSpendData] = useState<SpendDataPoint[]>([]);
   const [ga4Data, setGa4Data] = useState<any[]>([]);
   const [cacMetrics, setCacMetrics] = useState<CostMetricPoint[]>([]);
@@ -207,6 +208,22 @@ export default function DashboardV2() {
       .filter((p: any) => p.date >= rangeStart && p.date <= rangeEnd)
       .reduce((sum: number, p: any) => sum + (p.spend ?? 0), 0);
   }, [channelMonthSpendData, analyticsDateRange.startDate, analyticsDateRange.endDate]);
+
+  // Fetch account managers
+  useEffect(() => {
+    const fetchAccountManagers = async () => {
+      try {
+        const response = await fetch('/api/account-managers');
+        if (response.ok) {
+          const data = await response.json();
+          setAccountManagers(data.accountManagers || []);
+        }
+      } catch (err) {
+        console.error('Error fetching account managers:', err);
+      }
+    };
+    fetchAccountManagers();
+  }, []);
 
   // Mirror the computed MTD actual spend to the DB so the agency dashboard can
   // show the exact same number without recalculating.
@@ -895,8 +912,9 @@ export default function DashboardV2() {
       onAccountManagerChange: handleAccountManagerChange,
       isSavingAccountManager,
       onInvoiceClick: () => setIsInvoiceModalOpen(true),
+      accountManagers,
     };
-  }, [client, clientId, healthScore, campaignDates, totalActualSpend, plannedBudget, actionPointsStats, ganttClients, ganttChannels, selectedMonth, ganttSelectedDay, setGanttSelectedDay, handleAccountManagerChange, isSavingAccountManager]);
+  }, [client, clientId, healthScore, campaignDates, totalActualSpend, plannedBudget, actionPointsStats, ganttClients, ganttChannels, selectedMonth, ganttSelectedDay, setGanttSelectedDay, handleAccountManagerChange, isSavingAccountManager, accountManagers]);
 
   // Calculate current week commencing (Monday of current week)
   const currentWeekCommencing = useMemo(() => {

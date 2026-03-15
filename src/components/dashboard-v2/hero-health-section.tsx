@@ -10,7 +10,11 @@ import {
   type GanttChannel,
 } from '@/components/agency/GanttCalendar';
 
-const AM_OPTIONS = ['Cam', 'Lockie', 'James', 'Sarah'];
+interface AccountManager {
+  id: string;
+  name: string;
+  email: string | null;
+}
 
 // ---------------------------------------------------------------------------
 // Props
@@ -56,6 +60,7 @@ export interface HeroHealthSectionProps {
   onAccountManagerChange?: (accountManager: string | null) => void;
   isSavingAccountManager?: boolean;
   onInvoiceClick?: () => void;
+  accountManagers?: AccountManager[];
 }
 
 // ---------------------------------------------------------------------------
@@ -208,6 +213,7 @@ export default function HeroHealthSection({
   onAccountManagerChange,
   isSavingAccountManager = false,
   onInvoiceClick,
+  accountManagers = [],
 }: HeroHealthSectionProps) {
   const [showAmMenu, setShowAmMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -257,34 +263,34 @@ export default function HeroHealthSection({
       <div className="bg-white rounded-xl border border-gray-200 px-7 py-6 flex flex-col gap-7 xl:grid xl:grid-cols-[minmax(0,1.6fr)_minmax(0,2.2fr)_minmax(0,1.1fr)] xl:items-start">
         {/* Left: avatar + name/notes + Spend pacing */}
         <div className="flex items-start gap-4 min-w-0 order-1">
-          {client.logo_url ? (
-            <img
-              src={client.logo_url}
-              alt={`${client.name} logo`}
-              className="w-14 h-14 rounded-full object-cover flex-shrink-0 border border-gray-200"
-            />
-          ) : (
-            <div className="w-14 h-14 rounded-full bg-gray-100 flex-shrink-0 flex items-center justify-center border border-gray-200">
-              <span className="text-xl font-bold text-gray-400 select-none">
-                {client.name.charAt(0).toUpperCase()}
-              </span>
-            </div>
-          )}
+          <div className="flex flex-col items-center gap-3 flex-shrink-0">
+            {client.logo_url ? (
+              <img
+                src={client.logo_url}
+                alt={`${client.name} logo`}
+                className="w-14 h-14 rounded-full object-cover flex-shrink-0 border border-gray-200"
+              />
+            ) : (
+              <div className="w-14 h-14 rounded-full bg-gray-100 flex-shrink-0 flex items-center justify-center border border-gray-200">
+                <span className="text-xl font-bold text-gray-400 select-none">
+                  {client.name.charAt(0).toUpperCase()}
+                </span>
+              </div>
+            )}
+            {onInvoiceClick && (
+              <Button
+                onClick={onInvoiceClick}
+                variant="outline"
+                size="sm"
+                className="w-12 h-12 flex flex-col items-center justify-center gap-0.5 text-[10px] p-0"
+              >
+                <FileText className="w-3 h-3" />
+                <span>Invoice</span>
+              </Button>
+            )}
+          </div>
           <div className="min-w-0 flex-1">
-            <div className="flex items-center justify-between gap-3 mb-1">
-              <h1 className="text-3xl font-bold truncate" style={{ color: '#1C1917', fontFamily: "'Inter', system-ui, sans-serif" }}>{client.name}</h1>
-              {onInvoiceClick && (
-                <Button
-                  onClick={onInvoiceClick}
-                  variant="outline"
-                  size="sm"
-                  className="flex items-center gap-2 shrink-0"
-                >
-                  <FileText className="w-4 h-4" />
-                  Invoice
-                </Button>
-              )}
-            </div>
+            <h1 className="text-3xl font-bold truncate mb-1" style={{ color: '#1C1917', fontFamily: "'Inter', system-ui, sans-serif" }}>{client.name}</h1>
             {client.notes && (
               <p className="text-base text-gray-500 line-clamp-1">{client.notes}</p>
             )}
@@ -311,17 +317,17 @@ export default function HeroHealthSection({
                   </button>
                   {showAmMenu && (
                     <div className="absolute left-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 min-w-[100px] overflow-hidden">
-                      {AM_OPTIONS.map(am => (
+                      {accountManagers.map(am => (
                         <button
-                          key={am}
-                          onClick={() => handleAssignAm(am)}
+                          key={am.id}
+                          onClick={() => handleAssignAm(am.name)}
                           className={`block w-full text-left px-3 py-2 text-sm transition-colors ${
-                            client.account_manager === am
+                            client.account_manager === am.name
                               ? 'bg-blue-50 text-blue-700 font-semibold'
                               : 'text-gray-700 hover:bg-gray-50'
                           }`}
                         >
-                          {am}
+                          {am.name}
                         </button>
                       ))}
                       {client.account_manager && (

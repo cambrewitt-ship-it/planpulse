@@ -11,9 +11,16 @@ import { Button } from '@/components/ui/button';
 import { DateRangePicker } from '@/components/ui/date-range-picker';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
+interface AccountManager {
+  id: string;
+  name: string;
+  email: string | null;
+}
+
 export default function ClientsPage() {
   const [clients, setClients] = useState<ClientCardData[]>([]);
   const [actionPointClients, setActionPointClients] = useState<AgencyClientActionPoints[]>([]);
+  const [accountManagers, setAccountManagers] = useState<AccountManager[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,6 +37,18 @@ export default function ClientsPage() {
       endDate: format(today, 'yyyy-MM-dd'),
     };
   });
+
+  const fetchAccountManagers = useCallback(async () => {
+    try {
+      const response = await fetch('/api/account-managers');
+      if (response.ok) {
+        const data = await response.json();
+        setAccountManagers(data.accountManagers || []);
+      }
+    } catch (err) {
+      console.error('Error fetching account managers:', err);
+    }
+  }, []);
 
   const fetchData = useCallback(async (showRefreshing = false) => {
     try {
@@ -70,6 +89,10 @@ export default function ClientsPage() {
       setRefreshing(false);
     }
   }, [dateRange, accountManagerFilter]);
+
+  useEffect(() => {
+    fetchAccountManagers();
+  }, [fetchAccountManagers]);
 
   useEffect(() => {
     fetchData();
@@ -131,10 +154,11 @@ export default function ClientsPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="All">All Account Managers</SelectItem>
-              <SelectItem value="Cam">Cam</SelectItem>
-              <SelectItem value="Lockie">Lockie</SelectItem>
-              <SelectItem value="James">James</SelectItem>
-              <SelectItem value="Sarah">Sarah</SelectItem>
+              {accountManagers.map((am) => (
+                <SelectItem key={am.id} value={am.name}>
+                  {am.name}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
           
@@ -192,6 +216,7 @@ export default function ClientsPage() {
               client={client}
               selected={selectedClientId === client.id}
               onClick={() => setSelectedClientId(client.id)}
+              accountManagers={accountManagers}
             />
           ))}
         </div>

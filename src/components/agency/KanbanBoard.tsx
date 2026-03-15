@@ -7,7 +7,11 @@ import { Facebook, Search, Linkedin, Music, Radio } from 'lucide-react';
 import type { AgencyClientActionPoints } from '@/app/api/agency/action-points/route';
 import { getChannelLogo } from '@/lib/utils/channel-icons';
 
-const AM_OPTIONS = ['Cam', 'Lockie', 'James', 'Sarah'];
+interface AccountManager {
+  id: string;
+  name: string;
+  email: string | null;
+}
 
 const COLORS = ['#4A6580', '#B07030', '#4A7C59', '#A0442A', '#4A6580', '#8A8578', '#4A7C59', '#A0442A'];
 
@@ -45,9 +49,10 @@ const COLUMNS: { key: KanbanStatus; label: string; color: string }[] = [
 interface AssignMenuProps {
   card: KanbanCard;
   onAssign: (card: KanbanCard, am: string | null) => void;
+  accountManagers?: AccountManager[];
 }
 
-function AssignMenu({ card, onAssign }: AssignMenuProps) {
+function AssignMenu({ card, onAssign, accountManagers = [] }: AssignMenuProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -78,12 +83,12 @@ function AssignMenu({ card, onAssign }: AssignMenuProps) {
     }
   }, [open]);
 
-  // Debug: Log AM_OPTIONS when menu opens
+  // Debug: Log accountManagers when menu opens
   useEffect(() => {
     if (open) {
-      console.log('[AssignMenu] AM_OPTIONS:', AM_OPTIONS);
+      console.log('[AssignMenu] accountManagers:', accountManagers);
     }
-  }, [open]);
+  }, [open, accountManagers]);
 
   return (
     <>
@@ -127,16 +132,16 @@ function AssignMenu({ card, onAssign }: AssignMenuProps) {
             display: 'flex',
             flexDirection: 'column',
           }}>
-          {AM_OPTIONS.map((am, index) => {
+          {accountManagers.map((am, index) => {
             console.log(`[AssignMenu] Rendering option ${index}:`, am);
             return (
               <button
-                key={am}
+                key={am.id}
                 onClick={(e) => { 
                   e.stopPropagation(); 
-                  console.log(`[AssignMenu] Clicked on:`, am);
+                  console.log(`[AssignMenu] Clicked on:`, am.name);
                   setOpen(false); 
-                  onAssign(card, am); 
+                  onAssign(card, am.name); 
                 }}
                 style={{
                   display: 'block',
@@ -144,9 +149,9 @@ function AssignMenu({ card, onAssign }: AssignMenuProps) {
                   textAlign: 'left',
                   padding: '6px 10px',
                   fontSize: 11,
-                  color: card.assignedTo === am ? '#4A6580' : '#1C1917',
-                  fontWeight: card.assignedTo === am ? 600 : 400,
-                  background: card.assignedTo === am ? 'rgba(74,101,128,0.06)' : 'transparent',
+                  color: card.assignedTo === am.name ? '#4A6580' : '#1C1917',
+                  fontWeight: card.assignedTo === am.name ? 600 : 400,
+                  background: card.assignedTo === am.name ? 'rgba(74,101,128,0.06)' : 'transparent',
                   border: 'none',
                   cursor: 'pointer',
                   fontFamily: "'DM Sans', system-ui, sans-serif",
@@ -155,7 +160,7 @@ function AssignMenu({ card, onAssign }: AssignMenuProps) {
                   height: 'auto',
                   minHeight: '24px',
                 }}
-              >{am}</button>
+              >{am.name}</button>
             );
           })}
           {card.assignedTo && (
@@ -187,9 +192,10 @@ interface KanbanBoardProps {
   actionPointClients: AgencyClientActionPoints[];
   amFilter: string;
   onActionPointCompleted?: () => void;
+  accountManagers?: AccountManager[];
 }
 
-export function KanbanBoard({ actionPointClients, amFilter, onActionPointCompleted }: KanbanBoardProps) {
+export function KanbanBoard({ actionPointClients, amFilter, onActionPointCompleted, accountManagers = [] }: KanbanBoardProps) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
@@ -428,7 +434,7 @@ export function KanbanBoard({ actionPointClients, amFilter, onActionPointComplet
                               ? 'today'
                               : `${card.daysUntilDue}d`}
                       </span>
-                      <AssignMenu card={card} onAssign={handleAssign} />
+                      <AssignMenu card={card} onAssign={handleAssign} accountManagers={accountManagers} />
                     </div>
                   </div>
                 </div>

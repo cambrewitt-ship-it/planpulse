@@ -12,27 +12,18 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { getClients } from '@/lib/db/plans';
 import { supabase } from '@/lib/supabase/client';
-import { ChevronDown, LayoutDashboard, Users, LogOut, User, Library } from 'lucide-react';
+import { ChevronDown, LayoutDashboard, Users, LogOut, User, Library, Settings } from 'lucide-react';
 import type { User as SupabaseUser } from '@supabase/supabase-js';
-
-interface Client {
-  id: string;
-  name: string;
-}
 
 export default function TopBar() {
   const router = useRouter();
   const pathname = usePathname();
-  const [clients, setClients] = useState<Client[]>([]);
-  const [loading, setLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
   const [user, setUser] = useState<SupabaseUser | null>(null);
 
   useEffect(() => {
     setMounted(true);
-    loadClients();
     checkUser();
 
     // Listen for auth changes
@@ -48,21 +39,6 @@ export default function TopBar() {
   const checkUser = async () => {
     const { data: { session } } = await supabase.auth.getSession();
     setUser(session?.user ?? null);
-  };
-
-  const loadClients = async () => {
-    try {
-      const data = await getClients();
-      setClients(data || []);
-    } catch (error) {
-      console.error('Error loading clients:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleClientSelect = (clientId: string) => {
-    router.push(`/clients/${clientId}/dashboard-v2`);
   };
 
   const handleLogout = async () => {
@@ -107,54 +83,32 @@ export default function TopBar() {
           <div className="flex items-center gap-4">
             {mounted && (
               <>
-                {user && (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="outline" size="sm" disabled={loading || clients.length === 0}>
-                        <LayoutDashboard className="h-4 w-4 mr-2" />
-                        Client Dashboard
-                        <ChevronDown className="h-4 w-4 ml-2" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-56">
-                      <DropdownMenuLabel>Select Client</DropdownMenuLabel>
-                      <DropdownMenuSeparator />
-                      {loading ? (
-                        <DropdownMenuItem disabled>Loading...</DropdownMenuItem>
-                      ) : clients.length === 0 ? (
-                        <DropdownMenuItem disabled>No clients found</DropdownMenuItem>
-                      ) : (
-                        clients.map((client) => (
-                          <DropdownMenuItem
-                            key={client.id}
-                            onClick={() => handleClientSelect(client.id)}
-                          >
-                            {client.name}
-                          </DropdownMenuItem>
-                        ))
-                      )}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                )}
-
                 {user ? (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="sm">
-                        <User className="h-4 w-4 mr-2" />
-                        {user.email}
-                        <ChevronDown className="h-4 w-4 ml-2" />
+                  <>
+                    <Link href="/settings">
+                      <Button variant={pathname === '/settings' ? 'default' : 'ghost'} size="sm">
+                        <Settings className="h-4 w-4 mr-2" />
+                        Settings
                       </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-56">
-                      <DropdownMenuLabel>Account</DropdownMenuLabel>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem onClick={handleLogout}>
-                        <LogOut className="h-4 w-4 mr-2" />
-                        Sign out
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                    </Link>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="sm">
+                          <User className="h-4 w-4 mr-2" />
+                          {user.email}
+                          <ChevronDown className="h-4 w-4 ml-2" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-56">
+                        <DropdownMenuLabel>Account</DropdownMenuLabel>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem onClick={handleLogout}>
+                          <LogOut className="h-4 w-4 mr-2" />
+                          Sign out
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </>
                 ) : (
                   <Link href="/auth/login">
                     <Button size="sm">
