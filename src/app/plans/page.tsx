@@ -28,49 +28,57 @@ export default function PlansPage() {
     }
   };
 
+  const pageFont: React.CSSProperties = { fontFamily: "'DM Sans', system-ui, sans-serif" };
+  const serifFont: React.CSSProperties = { fontFamily: "'DM Serif Display', Georgia, serif" };
+
   if (loading) {
-    return <div className="flex justify-center p-8">Loading...</div>;
+    return (
+      <div style={{ minHeight: '100vh', background: '#F5F3EF', display: 'flex', alignItems: 'center', justifyContent: 'center', ...pageFont }}>
+        <div style={{ textAlign: 'center', color: '#8A8578', fontSize: 15 }}>Loading...</div>
+      </div>
+    );
   }
 
   return (
-    <div className="container mx-auto p-8">
-      <div className="flex justify-between items-center mb-8">
-        <h1 className="text-3xl font-bold">Media Plans</h1>
-      </div>
+    <div style={{ minHeight: '100vh', background: '#F5F3EF', ...pageFont }}>
+      <div className="container mx-auto p-8">
+        <div className="flex justify-between items-center mb-8">
+          <h1 className="text-3xl font-bold" style={{ color: '#1C1917', ...serifFont }}>Media Plans</h1>
+        </div>
 
       {plans.length === 0 ? (
-        <Card>
+        <Card style={{ background: '#FDFCF8', border: '0.5px solid #E8E4DC' }}>
           <CardContent className="text-center py-12">
-            <p className="text-gray-500 mb-4">No media plans yet</p>
-            <p className="text-sm text-gray-400">Plans can be created from the client dashboard</p>
+            <p style={{ color: '#8A8578', marginBottom: 16 }}>No media plans yet</p>
+            <p className="text-sm" style={{ color: '#B5B0A5' }}>Plans can be created from the client dashboard</p>
           </CardContent>
         </Card>
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {plans.map(plan => (
-            <Card key={plan.id} className="hover:shadow-lg transition-shadow">
+            <Card key={plan.id} className="transition-shadow" style={{ background: '#FDFCF8', border: '0.5px solid #E8E4DC', borderRadius: 6 }}>
               <CardHeader>
-                <CardTitle className="text-lg">
+                <CardTitle className="text-lg" style={{ color: '#1C1917' }}>
                   {plan.clients?.name || 'Unknown Client'}
                 </CardTitle>
-                <p className="text-sm text-gray-500">{plan.name}</p>
+                <p className="text-sm" style={{ color: '#8A8578' }}>{plan.name}</p>
               </CardHeader>
               <CardContent>
                 <div className="space-y-2 text-sm">
                   <div className="flex items-center gap-2">
-                    <Calendar className="h-4 w-4 text-gray-400" />
-                    <span>
+                    <Calendar className="h-4 w-4" style={{ color: '#B5B0A5' }} />
+                    <span style={{ color: '#1C1917' }}>
                       {format(new Date(plan.start_date), 'MMM d')} - 
                       {format(new Date(plan.end_date), 'MMM d, yyyy')}
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <DollarSign className="h-4 w-4 text-gray-400" />
-                    <span>${(plan.total_budget / 100).toLocaleString()}</span>
+                    <DollarSign className="h-4 w-4" style={{ color: '#B5B0A5' }} />
+                    <span style={{ color: '#1C1917' }}>${(plan.total_budget / 100).toLocaleString()}</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-gray-500">Channels:</span>
-                    <span>{plan.channels?.length || 0}</span>
+                    <span style={{ color: '#8A8578' }}>Channels:</span>
+                    <span style={{ color: '#1C1917' }}>{plan.channels?.length || 0}</span>
                   </div>
                 </div>
                 <div className="mt-4">
@@ -85,6 +93,7 @@ export default function PlansPage() {
           ))}
         </div>
       )}
+      </div>
     </div>
   );
 }

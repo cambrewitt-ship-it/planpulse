@@ -41,19 +41,23 @@ export async function GET(request: NextRequest) {
 
       const { data: completions } = await supabase
         .from('client_action_point_completions')
-        .select('action_point_id, completed')
+        .select('action_point_id, completed, completed_at, assigned_to')
         .eq('client_id', clientId)
         .in('action_point_id', actionPointIds);
 
       const completionMap = new Map(
-        (completions || []).map((c: any) => [c.action_point_id, c.completed])
+        (completions || []).map((c: any) => [c.action_point_id, { completed: c.completed, completedAt: c.completed_at || null, assignedTo: c.assigned_to || null }])
       );
 
-      const merged = data.map((ap: any) => ({
-        ...ap,
-        // Use per-client completion if it exists, otherwise default false
-        completed: completionMap.has(ap.id) ? completionMap.get(ap.id) : false,
-      }));
+      const merged = data.map((ap: any) => {
+        const comp = completionMap.get(ap.id);
+        return {
+          ...ap,
+          completed: comp ? comp.completed : false,
+          completed_at: comp ? comp.completedAt : null,
+          assigned_to: comp ? comp.assignedTo : null,
+        };
+      });
 
       return NextResponse.json({ data: merged });
     }
@@ -144,7 +148,7 @@ export async function POST(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { id, text, completed, category, frequency, due_date, days_before_live_due, client_id } = body;
+    const { id, text, completed, category, frequency, due_date, days_before_live_due, client_id, assigned_to } = body;
 
     if (!id) {
       return NextResponse.json(
@@ -160,19 +164,24 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // If client_id + completed: write to per-client completions table
-    if (client_id !== undefined && completed !== undefined) {
-      const { data: upsertData, error: upsertError } = await supabase
+    // If client_id provided: write to per-client completions table (supports completed and/or assigned_to)
+    if (client_id !== undefined && (completed !== undefined || assigned_to !== undefined)) {
+      const upsertPayload: Record<string, unknown> = {
+        client_id,
+        action_point_id: id,
+      };
+      if (completed !== undefined) {
+        upsertPayload.completed = completed;
+        upsertPayload.completed_at = completed ? new Date().toISOString() : null;
+      }
+      if (assigned_to !== undefined) {
+        upsertPayload.assigned_to = assigned_to;
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: upsertData, error: upsertError } = await (supabase as any)
         .from('client_action_point_completions')
-        .upsert(
-          {
-            client_id,
-            action_point_id: id,
-            completed,
-            completed_at: completed ? new Date().toISOString() : null,
-          },
-          { onConflict: 'client_id,action_point_id' }
-        )
+        .upsert(upsertPayload, { onConflict: 'client_id,action_point_id' })
         .select();
 
       if (upsertError) {
@@ -215,7 +224,8 @@ export async function PUT(request: NextRequest) {
         );
       }
 
-      return NextResponse.json({ data: { ...ap, completed } });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return NextResponse.json({ data: { ...(ap as any), completed } });
     }
 
     // Otherwise update the template fields on action_points
@@ -251,7 +261,8 @@ export async function PUT(request: NextRequest) {
       updateData.days_before_live_due = days_before_live_due;
     }
 
-    const { data, error } = await supabase
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any)
       .from('action_points')
       .update(updateData)
       .eq('id', id)

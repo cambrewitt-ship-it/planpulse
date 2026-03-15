@@ -26,7 +26,7 @@ import { useParams } from 'next/navigation';
 import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { getClients, getMediaPlans, getPlanById, updateClient } from '@/lib/db/plans';
 import { fetchAnalyticsData, fetchSpendData, calculateCostPerMetric, SpendDataPoint, CostMetricPoint } from '@/lib/api/analytics-data-integration';
-import { subDays, addDays, format, differenceInDays, parseISO, startOfMonth, endOfMonth } from 'date-fns';
+import { subDays, addDays, format, differenceInDays, parseISO, startOfMonth, endOfMonth, startOfYear } from 'date-fns';
 import { FunnelStage, MediaPlanFunnel, FunnelConfig } from '@/lib/types/funnel';
 import { calculateHealthScore, type HealthScoreResult } from '@/lib/utils/health-score';
 import {
@@ -45,22 +45,19 @@ import { DateRangePicker } from '@/components/ui/date-range-picker';
 import { FunnelChart } from '@/components/funnel-chart';
 import { FunnelBuilderModal } from '@/components/funnel-builder-modal';
 import TodoSection from '@/components/TodoSection';
-import {
-  Select,
-  SelectTrigger,
-  SelectContent,
-  SelectItem,
-  SelectValue,
-} from '@/components/ui/select';
 import HeroHealthSection from '@/components/dashboard-v2/hero-health-section';
+import { ClientKanbanCard } from '@/components/dashboard-v2/client-kanban-card';
 import ActionItemsSection, { type ActionItem } from '@/components/dashboard-v2/action-items-section';
 import ChannelPerformanceCard from '@/components/dashboard-v2/channel-performance-card';
+import { InvoiceModal } from '@/components/dashboard-v2/invoice-modal';
+import type { GanttClient, GanttChannel } from '@/components/agency/GanttCalendar';
 
 interface Client {
   id: string;
   name: string;
   notes?: string | null;
   logo_url?: string | null;
+  account_manager?: string | null;
 }
 
 interface MediaPlan {
@@ -82,6 +79,30 @@ const METRIC_OPTIONS: any = [
   { value: 'eventCount', label: 'Events' },
   { value: 'bounceRate', label: 'Bounces (inverted)' },
 ];
+
+const GANTT_COLORS = ['#6366f1', '#f59e0b', '#10b981', '#ef4444', '#3b82f6', '#8b5cf6', '#ec4899', '#14b8a6'];
+
+function ganttClientColor(id: string): string {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) & 0xffffffff;
+  return GANTT_COLORS[Math.abs(hash) % GANTT_COLORS.length];
+}
+
+function ganttClientInitials(name: string): string {
+  return name
+    .split(' ')
+    .map(w => w[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join('')
+    .toUpperCase();
+}
+
+function inferGanttChannelType(channelName: string): 'paid' | 'organic' {
+  const lower = channelName.toLowerCase();
+  if (/organic|social|seo|email|edm|content/.test(lower)) return 'organic';
+  return 'paid';
+}
 
 // ---------------------------------------------------------------------------
 // Module-level helpers
@@ -118,6 +139,7 @@ export default function DashboardV2() {
   const [isEditingClientNotes, setIsEditingClientNotes] = useState(false);
   const [editingClientNotes, setEditingClientNotes] = useState('');
   const [isSavingClientNotes, setIsSavingClientNotes] = useState(false);
+  const [isSavingAccountManager, setIsSavingAccountManager] = useState(false);
   const [spendData, setSpendData] = useState<SpendDataPoint[]>([]);
   const [ga4Data, setGa4Data] = useState<any[]>([]);
   const [cacMetrics, setCacMetrics] = useState<CostMetricPoint[]>([]);
@@ -135,6 +157,7 @@ export default function DashboardV2() {
   const [selectedChannels, setSelectedChannels] = useState<Set<string>>(new Set());
   const [availableChannels, setAvailableChannels] = useState<Array<{ id: string; name: string }>>([]);
   const [viewMode, setViewMode] = useState<'overview' | 'funnels' | 'media-plan'>('overview');
+  const [ganttSelectedDay, setGanttSelectedDay] = useState<number | null>(null);
   const [selectedMonth, setSelectedMonth] = useState<Date>(() => {
     if (typeof window === 'undefined') return new Date();
     try {
@@ -163,22 +186,13 @@ export default function DashboardV2() {
   // Non-digital channel actuals
   const [organicSocialActuals, setOrganicSocialActuals] = useState<OrganicSocialActual[]>([]);
   const [edmActuals, setEdmActuals] = useState<EdmActual[]>([]);
+  const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
   const [analyticsDateRange, setAnalyticsDateRange] = useState(() => {
     const today = new Date();
-    const thirtyDaysAgo = subDays(today, 30);
-    const defaultRange = {
-      startDate: format(thirtyDaysAgo, 'yyyy-MM-dd'),
+    return {
+      startDate: format(startOfYear(today), 'yyyy-MM-dd'),
       endDate: format(today, 'yyyy-MM-dd'),
     };
-    if (typeof window === 'undefined') return defaultRange;
-    try {
-      const saved = localStorage.getItem(`dashboard-v2-analytics-range-${params.id}`);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed.startDate && parsed.endDate) return parsed;
-      }
-    } catch {}
-    return defaultRange;
   });
   // Derived from channelMonthSpendData — sum of spend across all platforms for
   // the currently selected analytics period.
@@ -208,13 +222,7 @@ export default function DashboardV2() {
     return () => clearTimeout(timer);
   }, [clientId, totalActualSpend]);
 
-  // Persist analyticsDateRange across refreshes
-  useEffect(() => {
-    if (typeof window === 'undefined' || !clientId) return;
-    try {
-      localStorage.setItem(`dashboard-v2-analytics-range-${clientId}`, JSON.stringify(analyticsDateRange));
-    } catch {}
-  }, [analyticsDateRange, clientId]);
+  // Note: analyticsDateRange defaults to YTD (Jan 1 – today) on each load
 
   // Persist selectedMonth across refreshes
   useEffect(() => {
@@ -280,30 +288,43 @@ export default function DashboardV2() {
     return () => { cancelled = true; };
   }, [clientId, analyticsDateRange.startDate, analyticsDateRange.endDate]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Calculate planned budget for current month from media plan
+  // Calculate planned budget prorated to the selected date range
   const plannedBudget = useMemo(() => {
-    if (!mediaPlanBuilderChannels || mediaPlanBuilderChannels.length === 0) {
-      return 0;
-    }
+    if (!mediaPlanBuilderChannels || mediaPlanBuilderChannels.length === 0) return 0;
+    if (!analyticsDateRange?.startDate || !analyticsDateRange?.endDate) return 0;
 
-    const now = new Date();
+    // Parse date parts to avoid UTC timezone offset issues
+    const [startY, startM, startD] = analyticsDateRange.startDate.split('-').map(Number);
+    const [endY, endM, endD] = analyticsDateRange.endDate.split('-').map(Number);
+
     let totalBudget = 0;
+    let year = startY;
+    let month = startM; // 1-based
 
-    mediaPlanBuilderChannels.forEach((channel) => {
-      if (channel.flights) {
-        channel.flights.forEach((flight) => {
+    while (year < endY || (year === endY && month <= endM)) {
+      const daysInMonth = new Date(year, month, 0).getDate();
+      const monthStart = (year === startY && month === startM) ? startD : 1;
+      const monthEnd   = (year === endY   && month === endM)   ? endD   : daysInMonth;
+      const fraction   = (monthEnd - monthStart + 1) / daysInMonth;
+
+      const paddedKey   = `${year}-${String(month).padStart(2, '0')}`;
+      const unpaddedKey = `${year}-${month}`;
+
+      mediaPlanBuilderChannels.forEach((channel) => {
+        channel.flights?.forEach((flight) => {
           if (flight.monthlySpend) {
-            const paddedMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-            const unpaddedMonthKey = `${now.getFullYear()}-${now.getMonth() + 1}`;
-            const spend = flight.monthlySpend[paddedMonthKey] || flight.monthlySpend[unpaddedMonthKey] || 0;
-            totalBudget += spend;
+            const spend = flight.monthlySpend[paddedKey] ?? flight.monthlySpend[unpaddedKey] ?? 0;
+            totalBudget += Number(spend) * fraction;
           }
         });
-      }
-    });
+      });
+
+      month++;
+      if (month > 12) { month = 1; year++; }
+    }
 
     return totalBudget;
-  }, [mediaPlanBuilderChannels]);
+  }, [mediaPlanBuilderChannels, analyticsDateRange.startDate, analyticsDateRange.endDate]);
 
   const handleActionPointsChange = () => {
     setActionPointsRefetchTrigger(prev => prev + 1);
@@ -349,18 +370,20 @@ export default function DashboardV2() {
     }
   }, [clientId, selectedMetric]);
 
-  // When a funnel is selected, update the date range to match the funnel's config
+  // When a funnel is selected, update the date range to match the funnel's config,
+  // but only while in the "Results" (funnels) view so the dashboard's initial
+  // load still defaults to the current month.
   useEffect(() => {
-    if (selectedFunnelId && funnels.length > 0) {
-      const selectedFunnel = funnels.find(f => f.id === selectedFunnelId);
-      if (selectedFunnel?.config?.dateRange) {
-        setAnalyticsDateRange({
-          startDate: selectedFunnel.config.dateRange.startDate,
-          endDate: selectedFunnel.config.dateRange.endDate,
-        });
-      }
+    if (!selectedFunnelId || funnels.length === 0 || viewMode !== 'funnels') return;
+
+    const selectedFunnel = funnels.find(f => f.id === selectedFunnelId);
+    if (selectedFunnel?.config?.dateRange) {
+      setAnalyticsDateRange({
+        startDate: selectedFunnel.config.dateRange.startDate,
+        endDate: selectedFunnel.config.dateRange.endDate,
+      });
     }
-  }, [selectedFunnelId, funnels]);
+  }, [selectedFunnelId, funnels, viewMode]);
 
   // Reload analytics when date range, selected metric, or event name changes
   useEffect(() => {
@@ -726,12 +749,97 @@ export default function DashboardV2() {
     return { start, end, totalDays, daysElapsed, daysRemaining, totalBudget, plannedSpend };
   }, [mediaPlanBuilderChannels]);
 
+  // ── Gantt data for hero card (single client, all channels) ──────────────
+  const ganttClients = useMemo<GanttClient[]>(() => {
+    if (!client) return [];
+    return [
+      {
+        id: client.id,
+        name: client.name,
+        initials: ganttClientInitials(client.name),
+        color: ganttClientColor(client.id),
+      },
+    ];
+  }, [client]);
+
+  const ganttChannels = useMemo<GanttChannel[]>(() => {
+    if (!clientId || !mediaPlanBuilderChannels.length) return [];
+
+    const toDateStr = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+    const result: GanttChannel[] = [];
+
+    for (const ch of mediaPlanBuilderChannels) {
+      const flights = ch.flights || [];
+      if (!flights.length) continue;
+
+      const startMs = Math.min(
+        ...flights
+          .map((f: any) => (f.startWeek ? new Date(f.startWeek).getTime() : NaN))
+          .filter((v: number) => !Number.isNaN(v)),
+      );
+      const endMs = Math.max(
+        ...flights
+          .map((f: any) => (f.endWeek ? new Date(f.endWeek).getTime() : NaN))
+          .filter((v: number) => !Number.isNaN(v)),
+      );
+
+      if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) continue;
+
+      const start = new Date(startMs);
+      const end = new Date(endMs);
+
+      result.push({
+        id: String(ch.id ?? ch.channelName),
+        client_id: clientId,
+        label: ch.channelName,
+        start_date: toDateStr(start),
+        end_date: toDateStr(end),
+        type: inferGanttChannelType(ch.channelName),
+      });
+    }
+
+    return result;
+  }, [clientId, mediaPlanBuilderChannels]);
+
+  // ── Account Manager handler ──────────────────────────────────────────────
+  const handleAccountManagerChange = useCallback(async (accountManager: string | null) => {
+    if (!clientId) return;
+    setIsSavingAccountManager(true);
+    try {
+      const response = await fetch(`/api/agency/clients/${clientId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ account_manager: accountManager }),
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        console.error('Failed to update account manager:', {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorData,
+        });
+        throw new Error(errorData.error || `Failed to update account manager: ${response.statusText}`);
+      }
+      const data = await response.json();
+      if (data.data && client) {
+        setClient({ ...client, account_manager: data.data.account_manager });
+      }
+    } catch (error) {
+      console.error('Error updating account manager:', error);
+      // Optionally show a toast/notification to the user
+    } finally {
+      setIsSavingAccountManager(false);
+    }
+  }, [clientId, client]);
+
   // ── Props for HeroHealthSection ─────────────────────────────────────────
   const heroProps = useMemo(() => {
     if (!client || !healthScore || !campaignDates) return null;
 
-    const pacingRatio = campaignDates.plannedSpend > 0
-      ? totalActualSpend / campaignDates.plannedSpend
+    const pacingRatio = plannedBudget > 0
+      ? totalActualSpend / plannedBudget
       : 0;
     const pacingPct = pacingRatio * 100;
     const pacingStatus: { percentage: number; variance: number; status: 'ahead' | 'on-track' | 'behind' } = {
@@ -756,13 +864,19 @@ export default function DashboardV2() {
     return {
       client: {
         name: client.name,
-        notes: client.notes ?? undefined,
+        // Intentionally omit notes from V2 hero so the legacy "Master Client Notes"
+        // area is visually replaced by the new Kanban action points card.
         logo_url: client.logo_url ?? undefined,
+        account_manager: client.account_manager ?? undefined,
       },
       healthScore,
       currentSpend: totalActualSpend,
-      totalBudget: campaignDates.totalBudget,
+      totalBudget: plannedBudget,
       daysRemaining: campaignDates.daysRemaining,
+      completionPercentage: Math.max(
+        0,
+        Math.min(100, (campaignDates.daysElapsed / campaignDates.totalDays) * 100),
+      ),
       actionItemsCount: {
         urgent,
         thisWeek,
@@ -770,8 +884,19 @@ export default function DashboardV2() {
       },
       pacingStatus,
       performanceStatus,
+      gantt: {
+        clients: ganttClients,
+        channels: ganttChannels,
+        currentMonth: selectedMonth,
+        selectedDay: ganttSelectedDay,
+        onDaySelect: setGanttSelectedDay,
+        filteredClientIds: clientId ? [clientId] : [],
+      },
+      onAccountManagerChange: handleAccountManagerChange,
+      isSavingAccountManager,
+      onInvoiceClick: () => setIsInvoiceModalOpen(true),
     };
-  }, [client, healthScore, campaignDates, totalActualSpend, actionPointsStats]);
+  }, [client, clientId, healthScore, campaignDates, totalActualSpend, plannedBudget, actionPointsStats, ganttClients, ganttChannels, selectedMonth, ganttSelectedDay, setGanttSelectedDay, handleAccountManagerChange, isSavingAccountManager]);
 
   // Calculate current week commencing (Monday of current week)
   const currentWeekCommencing = useMemo(() => {
@@ -1123,20 +1248,24 @@ export default function DashboardV2() {
     }
   };
 
+  const pageFont: React.CSSProperties = { fontFamily: "'DM Sans', system-ui, sans-serif" };
+  const serifFont: React.CSSProperties = { fontFamily: "'DM Serif Display', Georgia, serif" };
+
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen" style={{ background: '#F5F3EF', ...pageFont }}>
       {/* ── Top nav bar ── */}
-      <header className="bg-white border-b px-6 py-3 sticky top-0 z-10">
+      <header className="sticky top-0 z-10 px-6 py-3" style={{ background: '#FDFCF8', borderBottom: '0.5px solid #E8E4DC' }}>
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div>
-            <span className="text-xs font-medium text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-100">
+            <span className="text-xs font-medium px-2 py-0.5 rounded-full" style={{ color: '#4A6580', background: '#E8EDF2', border: '0.5px solid rgba(74,101,128,0.25)', borderRadius: 4 }}>
               V2 Preview
             </span>
-            <span className="ml-2 text-sm text-gray-500">{client?.name ?? 'Loading…'}</span>
+            <span className="ml-2 text-sm" style={{ color: '#8A8578' }}>{client?.name ?? 'Loading…'}</span>
           </div>
           <Link
             href={`/clients/${clientId}/new-client-dashboard`}
-            className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+            className="text-sm font-medium"
+            style={{ color: '#4A6580' }}
           >
             ← Back to Current Dashboard
           </Link>
@@ -1161,8 +1290,8 @@ export default function DashboardV2() {
 
         {/* ── Error banner ── */}
         {dashboardError && (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 flex items-start gap-2">
-            <span className="text-amber-500 mt-0.5">⚠</span>
+          <div className="rounded-lg px-4 py-3 text-sm flex items-start gap-2" style={{ background: '#F5EDE0', border: '0.5px solid rgba(176,112,48,0.25)', color: '#B07030', borderRadius: 6 }}>
+            <span className="mt-0.5">⚠</span>
             {dashboardError}
           </div>
         )}
@@ -1171,7 +1300,7 @@ export default function DashboardV2() {
           /* ── Loading skeletons ── */
           <div className="space-y-6">
             {/* Hero skeleton */}
-            <div className="bg-white rounded-xl border border-gray-200 p-6 animate-pulse">
+            <div className="rounded-lg p-6 animate-pulse" style={{ background: '#FDFCF8', border: '0.5px solid #E8E4DC', borderRadius: 6 }}>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">
                   <div className="w-14 h-14 rounded-full bg-gray-200" />
@@ -1215,82 +1344,81 @@ export default function DashboardV2() {
               </div>
             )}
 
-            {/* ── Overview: Action Items + Channels + CACChart ── */}
-            {viewMode === 'overview' && (
-              <>
-                <ActionItemsSection
-                  actionItems={actionItemsForSection}
-                  onToggleComplete={handleToggleActionPoint}
-                  onActionClick={handleActionItemAction}
-                />
-
-                {/* ── View Mode & Date Controls ── */}
-                <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
-                  <div className="flex items-center justify-between">
-                    {/* Left: View Mode Tabs */}
+            {/* ── Global View Mode & Date Controls (under hero) ── */}
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
+              <div className="flex items-center justify-between">
+                {/* Left: View Mode Tabs */}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setViewMode('overview')}
+                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                      viewMode === 'overview'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    Overview
+                  </button>
+                  <button
+                    onClick={() => setViewMode('funnels')}
+                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                      viewMode === 'funnels'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    Results
+                  </button>
+                  <button
+                    onClick={() => setViewMode('media-plan')}
+                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                      viewMode === 'media-plan'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    Media Plan
+                  </button>
+                </div>
+                {/* Right: Date Controls */}
+                <div className="flex items-center gap-4">
+                  {/* Month Selector for Channel Cards (overview only) */}
+                  {viewMode === 'overview' && (
                     <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => setViewMode('overview')}
-                        className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                          viewMode === 'overview'
-                            ? 'bg-blue-600 text-white'
-                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                        }`}
-                      >
-                        Overview
-                      </button>
-                      <button
-                        onClick={() => setViewMode('funnels')}
-                        className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                          viewMode === 'funnels'
-                            ? 'bg-blue-600 text-white'
-                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                        }`}
-                      >
-                        Results
-                      </button>
-                      <button
-                        onClick={() => setViewMode('media-plan')}
-                        className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                          viewMode === 'media-plan'
-                            ? 'bg-blue-600 text-white'
-                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                        }`}
-                      >
-                        Media Plan
-                      </button>
+                      <label className="text-sm text-gray-600">Channel View:</label>
+                      <input
+                        type="month"
+                        value={format(selectedMonth, 'yyyy-MM')}
+                        onChange={(e) => setSelectedMonth(new Date(e.target.value))}
+                        className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
+                      />
                     </div>
-                    {/* Right: Date Controls */}
-                    <div className="flex items-center gap-4">
-                      {/* Month Selector for Channel Cards */}
-                      {viewMode === 'overview' && (
-                        <div className="flex items-center gap-2">
-                          <label className="text-sm text-gray-600">Channel View:</label>
-                          <input
-                            type="month"
-                            value={format(selectedMonth, 'yyyy-MM')}
-                            onChange={(e) => setSelectedMonth(new Date(e.target.value))}
-                            className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
-                          />
-                        </div>
-                      )}
+                  )}
 
-                      {/* Analytics Date Range */}
-                      <div className="flex items-center gap-2">
-                        <label className="text-sm text-gray-600">Analytics Period:</label>
-                        <DateRangePicker
-                          value={analyticsDateRange}
-                          onChange={setAnalyticsDateRange}
-                          disabled={loadingAnalytics}
-                        />
-                      </div>
-                    </div>
+                  {/* Analytics Date Range */}
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm text-gray-600">Analytics Period:</label>
+                    <DateRangePicker
+                      value={analyticsDateRange}
+                      onChange={setAnalyticsDateRange}
+                      disabled={loadingAnalytics}
+                    />
                   </div>
                 </div>
+              </div>
+            </div>
+
+            {/* ── Overview: Client Kanban + Channels ── */}
+            {viewMode === 'overview' && (
+              <>
+                <ClientKanbanCard
+                  clientId={clientId}
+                  onActionPointCompleted={handleActionPointsChange}
+                />
 
                 {channelCards.length > 0 ? (
                   <div className="bg-white rounded-xl border border-gray-200 p-6">
-                    <h3 className="text-base font-semibold text-gray-900 mb-4">Channel Performance</h3>
+                    <h3 className="text-base font-bold mb-4" style={{ color: '#1C1917', fontFamily: "'Inter', system-ui, sans-serif" }}>Channel Performance</h3>
                     <div className="space-y-4">
                       {channelCards.map((ch, idx) => {
                         if (ch.type === 'organic_social') {
@@ -1339,7 +1467,7 @@ export default function DashboardV2() {
                           : null;
 
                         return (
-                          <ChannelPerformanceCard
+                            <ChannelPerformanceCard
                             key={`paid-${ch.name || idx}`}
                             channel={ch}
                             selectedMonth={selectedMonth}
@@ -1348,6 +1476,7 @@ export default function DashboardV2() {
                             onViewReport={() => handleViewReport(ch.platform)}
                             clientId={clientId}
                             channelStartDate={earliestStartDate}
+                            refetchTrigger={actionPointsRefetchTrigger}
                           />
                         );
                       })}
@@ -1366,107 +1495,6 @@ export default function DashboardV2() {
             {/* ── Funnels view ── */}
             {viewMode === 'funnels' && (
               <>
-                {/* ── View Mode & Date Controls ── */}
-                <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
-                  <div className="flex items-center justify-between">
-                    {/* Left: View Mode Tabs */}
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => setViewMode('overview')}
-                        className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                          viewMode === 'overview'
-                            ? 'bg-blue-600 text-white'
-                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                        }`}
-                      >
-                        Overview
-                      </button>
-                      <button
-                        onClick={() => setViewMode('funnels')}
-                        className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                          viewMode === 'funnels'
-                            ? 'bg-blue-600 text-white'
-                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                        }`}
-                      >
-                        Results
-                      </button>
-                      <button
-                        onClick={() => setViewMode('media-plan')}
-                        className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                          viewMode === 'media-plan'
-                            ? 'bg-blue-600 text-white'
-                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                        }`}
-                      >
-                        Media Plan
-                      </button>
-                    </div>
-                    {/* Right: Metric & Date Controls */}
-                    <div className="flex items-center gap-4">
-                      {/* Metric Selector for Cost Per chart */}
-                      <div className="flex items-center gap-2">
-                        <label className="text-sm text-gray-600">Cost Per:</label>
-                        <Select
-                          value={selectedMetric}
-                          onValueChange={(value) => {
-                            setSelectedMetric(value);
-                            if (value !== 'eventCount') {
-                              setSelectedEventName(null);
-                            }
-                          }}
-                        >
-                          <SelectTrigger className="w-[180px] h-9 text-sm">
-                            <SelectValue placeholder="Select metric" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {METRIC_OPTIONS.map((option: any) => (
-                              <SelectItem key={option.value} value={option.value}>
-                                {option.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      {/* Event Name Selector - shown when eventCount is selected */}
-                      {selectedMetric === 'eventCount' && (
-                        <Select
-                          value={selectedEventName || ''}
-                          onValueChange={(value) => setSelectedEventName(value)}
-                          disabled={loadingEventNames}
-                        >
-                          <SelectTrigger className="w-[200px] h-9 text-sm">
-                            <SelectValue placeholder={loadingEventNames ? 'Loading events...' : 'Select event'} />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {availableEventNames.length === 0 && !loadingEventNames ? (
-                              <SelectItem value="_none" disabled>
-                                No events found
-                              </SelectItem>
-                            ) : (
-                              availableEventNames.map((event) => (
-                                <SelectItem key={event.name} value={event.name}>
-                                  {event.name}
-                                </SelectItem>
-                              ))
-                            )}
-                          </SelectContent>
-                        </Select>
-                      )}
-
-                      {/* Analytics Date Range */}
-                      <div className="flex items-center gap-2">
-                        <label className="text-sm text-gray-600">Analytics Period:</label>
-                        <DateRangePicker
-                          value={analyticsDateRange}
-                          onChange={setAnalyticsDateRange}
-                          disabled={loadingAnalytics}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
                 <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 space-y-8">
                   {selectedFunnelId && (
                     <FunnelChart
@@ -1493,10 +1521,16 @@ export default function DashboardV2() {
                       availableChannels={availableChannels}
                       selectedChannels={selectedChannels}
                       onChannelsChange={setSelectedChannels}
+                      onMetricChange={setSelectedMetric}
+                      availableMetrics={availableMetrics}
+                      availableEventNames={availableEventNames}
+                      selectedEventName={selectedEventName}
+                      onEventNameChange={setSelectedEventName}
+                      loadingEventNames={loadingEventNames}
                     />
                   </div>
 
-                  <FunnelBuilderModal
+              <FunnelBuilderModal
                     isOpen={isFunnelBuilderOpen}
                     onClose={() => {
                       setIsFunnelBuilderOpen(false);
@@ -1513,57 +1547,7 @@ export default function DashboardV2() {
             {/* ── Media Plan view ── */}
             {viewMode === 'media-plan' && (
               <>
-                {/* ── View Mode & Date Controls ── */}
-                <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
-                  <div className="flex items-center justify-between">
-                    {/* Left: View Mode Tabs */}
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => setViewMode('overview')}
-                        className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                          viewMode === 'overview'
-                            ? 'bg-blue-600 text-white'
-                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                        }`}
-                      >
-                        Overview
-                      </button>
-                      <button
-                        onClick={() => setViewMode('funnels')}
-                        className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                          viewMode === 'funnels'
-                            ? 'bg-blue-600 text-white'
-                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                        }`}
-                      >
-                        Results
-                      </button>
-                      <button
-                        onClick={() => setViewMode('media-plan')}
-                        className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                          viewMode === 'media-plan'
-                            ? 'bg-blue-600 text-white'
-                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                        }`}
-                      >
-                        Media Plan
-                      </button>
-                    </div>
-                    {/* Right: Date Controls */}
-                    <div className="flex items-center gap-4">
-                      {/* Analytics Date Range */}
-                      <div className="flex items-center gap-2">
-                        <label className="text-sm text-gray-600">Analytics Period:</label>
-                        <DateRangePicker
-                          value={analyticsDateRange}
-                          onChange={setAnalyticsDateRange}
-                          disabled={loadingAnalytics}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                <div className="rounded-lg p-6" style={{ background: '#FDFCF8', border: '0.5px solid #E8E4DC', borderRadius: 6 }}>
                 <MediaPlanGrid
                   channels={mediaPlanBuilderChannels}
                   onChannelsChange={handleChannelsChange}
@@ -1576,6 +1560,16 @@ export default function DashboardV2() {
           </>
         )}
       </main>
+
+      {/* Invoice Modal */}
+      {client && (
+        <InvoiceModal
+          isOpen={isInvoiceModalOpen}
+          onClose={() => setIsInvoiceModalOpen(false)}
+          clientId={clientId}
+          clientName={client.name}
+        />
+      )}
     </div>
   );
 }

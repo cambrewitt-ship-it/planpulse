@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { AlertTriangle, Settings, FileText } from 'lucide-react';
 import InlineActionPoints from './inline-action-points';
+import { getChannelLogo } from '@/lib/utils/channel-icons';
 import {
   LineChart,
   Line,
@@ -62,6 +63,7 @@ export interface ChannelCardProps {
   onViewReport?: () => void;
   clientId?: string;
   channelStartDate?: Date | null;
+  refetchTrigger?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -141,18 +143,17 @@ const METRIC_CONFIG: Record<MetricKey, {
 
 /** Simple inline platform icon using the brand initial */
 function PlatformIcon({ platform }: { platform: string }) {
-  const color = PLATFORM_COLORS[platform] ?? '#6b7280';
-  const initial =
-    platform === 'meta-ads' ? 'M'
-    : platform === 'google-ads' ? 'G'
-    : platform.charAt(0).toUpperCase();
-
+  // Convert platform to channel name format for logo lookup
+  const channelName = platform === 'meta-ads' ? 'Meta Ads'
+    : platform === 'google-ads' ? 'Google Ads'
+    : platform === 'linkedin-ads' ? 'LinkedIn Ads'
+    : platform === 'tiktok-ads' ? 'TikTok Ads'
+    : platform === 'instagram-ads' ? 'Instagram Ads'
+    : platform;
+  
   return (
-    <div
-      className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-white text-sm font-bold"
-      style={{ backgroundColor: color }}
-    >
-      {initial}
+    <div className="w-8 h-8 flex items-center justify-center flex-shrink-0">
+      {getChannelLogo(channelName, "w-8 h-8")}
     </div>
   );
 }
@@ -287,7 +288,7 @@ function normalizeChannelType(channelName: string): string {
     .join(' ');
 }
 
-export default function ChannelPerformanceCard({ channel, selectedMonth, dateRange, onAdjust, onViewReport, clientId, channelStartDate }: ChannelCardProps) {
+export default function ChannelPerformanceCard({ channel, selectedMonth, dateRange, onAdjust, onViewReport, clientId, channelStartDate, refetchTrigger }: ChannelCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [chartType, setChartType] = useState<'spend' | 'metrics'>('spend');
   const [selectedMetrics, setSelectedMetrics] = useState<Set<MetricKey>>(new Set(['impressions']));
@@ -413,7 +414,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
               {/* Channel name + status */}
               <div className="row-start-1 col-start-2 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <h3 className="text-sm font-semibold text-gray-900 truncate">{channel.name}</h3>
+                  <h3 className="text-sm font-bold truncate" style={{ color: '#1C1917', fontFamily: "'Inter', system-ui, sans-serif" }}>{channel.name}</h3>
                   <StatusBadge status={channel.status} />
                 </div>
                 <p className="text-xs text-gray-400 mt-0.5 capitalize">
@@ -790,7 +791,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
         {clientId && (
           <div className="flex-shrink-0 w-64 bg-white">
             <div className="px-4 pt-4 pb-4">
-              <h3 className="text-sm font-semibold text-gray-900 mb-3">Action Points</h3>
+              <h3 className="text-sm font-semibold text-gray-900 mb-3" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>Action Points</h3>
               <InlineActionPoints
                 channelType={normalizeChannelType(channel.name)}
                 clientId={clientId}
@@ -798,6 +799,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                 maxVisible={3}
                 showBorder={false}
                 showTitle={false}
+                refetchTrigger={refetchTrigger}
               />
             </div>
           </div>

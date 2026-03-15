@@ -64,18 +64,21 @@ export default function SignupPage() {
     }
   };
 
+  const pageFont: React.CSSProperties = { fontFamily: "'DM Sans', system-ui, sans-serif" };
+  const serifFont: React.CSSProperties = { fontFamily: "'DM Serif Display', Georgia, serif" };
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <Card className="w-full max-w-md">
+    <div className="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8" style={{ background: '#F5F3EF', ...pageFont }}>
+      <Card className="w-full max-w-md" style={{ background: '#FDFCF8', border: '0.5px solid #E8E4DC', borderRadius: 6 }}>
         <CardHeader>
-          <CardTitle className="text-2xl font-bold text-center">
+          <CardTitle className="text-2xl font-bold text-center" style={{ color: '#1C1917', ...serifFont }}>
             Create your account
           </CardTitle>
         </CardHeader>
         <CardContent>
           {success ? (
             <div className="text-center space-y-4">
-              <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded">
+              <div className="px-4 py-3 rounded" style={{ background: '#EAF0EB', border: '0.5px solid rgba(74,124,89,0.25)', color: '#4A7C59', borderRadius: 4 }}>
                 Account created successfully! Please check your email to confirm your account.
               </div>
               <Link href="/auth/login">
@@ -87,11 +90,12 @@ export default function SignupPage() {
           ) : (
             <form onSubmit={handleSignup} className="space-y-6">
               {error && (
-                <div className={`border px-4 py-3 rounded ${
-                  error.includes('check your email') 
-                    ? 'bg-blue-50 border-blue-200 text-blue-700' 
-                    : 'bg-red-50 border-red-200 text-red-700'
-                }`}>
+                <div className="px-4 py-3 rounded" style={{
+                  background: error.includes('check your email') ? '#E8EDF2' : '#F5EDE9',
+                  border: error.includes('check your email') ? '0.5px solid rgba(74,101,128,0.25)' : '0.5px solid rgba(160,68,42,0.25)',
+                  color: error.includes('check your email') ? '#4A6580' : '#A0442A',
+                  borderRadius: 4
+                }}>
                   {error}
                 </div>
               )}
@@ -134,7 +138,7 @@ export default function SignupPage() {
                     )}
                   </button>
                 </div>
-                <p className="text-xs text-gray-500 mt-1">
+                <p className="text-xs mt-1" style={{ color: '#B5B0A5' }}>
                   Must be at least 6 characters
                 </p>
               </div>
@@ -175,8 +179,8 @@ export default function SignupPage() {
               </Button>
 
               <div className="text-center text-sm">
-                <span className="text-gray-600">Already have an account? </span>
-                <Link href="/auth/login" className="text-blue-600 hover:text-blue-700 font-medium">
+                <span style={{ color: '#8A8578' }}>Already have an account? </span>
+                <Link href="/auth/login" style={{ color: '#4A6580', fontWeight: 500 }}>
                   Sign in
                 </Link>
               </div>

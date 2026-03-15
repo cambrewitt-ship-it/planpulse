@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { format, subDays, subMonths, startOfMonth, endOfMonth, isValid } from 'date-fns';
+import { format, subDays, subMonths, startOfMonth, endOfMonth, startOfYear, isValid } from 'date-fns';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Calendar, ChevronDown } from 'lucide-react';
@@ -74,6 +74,13 @@ const PRESETS: PresetOption[] = [
         endDate: format(endOfMonth(lastMonth), 'yyyy-MM-dd'),
       };
     },
+  },
+  {
+    label: 'YTD',
+    getValue: () => ({
+      startDate: format(startOfYear(new Date()), 'yyyy-MM-dd'),
+      endDate: format(new Date(), 'yyyy-MM-dd'),
+    }),
   },
 ];
 

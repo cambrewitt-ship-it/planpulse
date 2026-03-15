@@ -62,7 +62,7 @@ export default function TopBar() {
   };
 
   const handleClientSelect = (clientId: string) => {
-    router.push(`/clients/${clientId}/dashboard`);
+    router.push(`/clients/${clientId}/dashboard-v2`);
   };
 
   const handleLogout = async () => {
@@ -71,18 +71,20 @@ export default function TopBar() {
     router.refresh();
   };
 
+  const serifFont: React.CSSProperties = { fontFamily: "'DM Serif Display', Georgia, serif" };
+
   return (
-    <nav className="border-b bg-white">
+    <nav className="border-b" style={{ background: '#FDFCF8', borderBottom: '0.5px solid #E8E4DC' }}>
       <div className="container mx-auto px-4">
         <div className="flex h-16 items-center justify-between">
           <div className="flex items-center gap-6">
-            <Link href="/" className="text-xl font-bold">
-              Marketing Dashboard
+            <Link href="/" className="text-xl font-bold" style={{ color: '#1C1917', fontFamily: "'DM Serif Display', Georgia, serif", letterSpacing: '-0.02em' }}>
+              PlanPulse
             </Link>
             
             <div className="flex items-center gap-4">
-              <Link href="/agency">
-                <Button variant={pathname === '/agency' ? 'default' : 'ghost'} size="sm">
+              <Link href="/agency-v2">
+                <Button variant={pathname === '/agency-v2' ? 'default' : 'ghost'} size="sm">
                   <LayoutDashboard className="h-4 w-4 mr-2" />
                   Agency
                 </Button>

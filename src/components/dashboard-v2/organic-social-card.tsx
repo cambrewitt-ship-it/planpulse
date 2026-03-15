@@ -9,6 +9,7 @@ import type { OrganicSocialActual } from '@/types/database';
 import { format, startOfMonth, endOfMonth, parseISO, eachWeekOfInterval } from 'date-fns';
 import Nango from '@nangohq/frontend';
 import InlineActionPoints from './inline-action-points';
+import { getChannelLogo } from '@/lib/utils/channel-icons';
 
 interface OrganicSocialCardProps {
   channel: MediaPlanChannel;
@@ -19,11 +20,8 @@ interface OrganicSocialCardProps {
 }
 
 function getChannelIcon(channelName: string) {
-  const lower = channelName.toLowerCase();
-  if (lower.includes('instagram')) return Instagram;
-  if (lower.includes('facebook')) return Facebook;
-  if (lower.includes('linkedin')) return Linkedin;
-  return Instagram; // Default
+  // Return the colored logo component
+  return getChannelLogo(channelName, "w-5 h-5");
 }
 
 function getStatusBadge(postsPublished: number | null, postsPerWeek: number) {
@@ -40,7 +38,6 @@ function getStatusBadge(postsPublished: number | null, postsPerWeek: number) {
 }
 
 export default function OrganicSocialCard({ channel, clientId, weekCommencing, actuals, onRefresh }: OrganicSocialCardProps) {
-  const Icon = getChannelIcon(channel.channelName);
   const postsPerWeek = channel.postsPerWeek || 0;
   const [viewMode, setViewMode] = useState<'week' | 'month'>('week');
   
@@ -326,7 +323,7 @@ export default function OrganicSocialCard({ channel, clientId, weekCommencing, a
           <div className="flex-1">
             <div className="flex items-start gap-3">
               <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-pink-100 text-pink-600">
-                <Icon className="w-5 h-5" />
+                {getChannelIcon(channel.channelName)}
               </div>
 
               <div className="flex-1 min-w-0">

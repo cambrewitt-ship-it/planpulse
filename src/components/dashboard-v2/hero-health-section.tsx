@@ -1,21 +1,42 @@
 'use client';
 
+import { useState, useRef, useEffect } from 'react';
+import { FileText } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import type { HealthScoreResult } from '@/lib/utils/health-score';
+import {
+  GanttCalendar,
+  type GanttClient,
+  type GanttChannel,
+} from '@/components/agency/GanttCalendar';
+
+const AM_OPTIONS = ['Cam', 'Lockie', 'James', 'Sarah'];
 
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
+
+interface HeroGanttProps {
+  clients: GanttClient[];
+  channels: GanttChannel[];
+  currentMonth: Date;
+  selectedDay: number | null;
+  onDaySelect: (day: number | null) => void;
+  filteredClientIds: string[];
+}
 
 export interface HeroHealthSectionProps {
   client: {
     name: string;
     notes?: string;
     logo_url?: string;
+    account_manager?: string;
   };
   healthScore: HealthScoreResult;
   currentSpend: number;
   totalBudget: number;
   daysRemaining: number;
+  completionPercentage: number;
   actionItemsCount: {
     urgent: number;
     thisWeek: number;
@@ -31,6 +52,10 @@ export interface HeroHealthSectionProps {
     ctr: number;
     status: 'excellent' | 'good' | 'needs-attention';
   };
+  gantt?: HeroGanttProps;
+  onAccountManagerChange?: (accountManager: string | null) => void;
+  isSavingAccountManager?: boolean;
+  onInvoiceClick?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -77,7 +102,7 @@ function Badge({ status, label }: { status: string; label: string }) {
 // ---------------------------------------------------------------------------
 
 function HealthRing({ score, status }: { score: number; status: HealthScoreResult['status'] }) {
-  const size = 96;
+  const size = 112;
   const strokeWidth = 8;
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
@@ -141,12 +166,12 @@ interface MetricCardProps {
 function MetricCard({ title, value, sub, badge, progress, children }: MetricCardProps) {
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-4 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 flex flex-col gap-2">
-      <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">{title}</p>
+      <p className="text-sm font-medium text-gray-500 uppercase tracking-wide">{title}</p>
       <div className="flex items-end justify-between gap-2">
-        <p className="text-xl font-bold text-gray-900 leading-none">{value}</p>
+        <p className="text-2xl font-bold text-gray-900 leading-none">{value}</p>
         {badge && <Badge status={badge.status} label={badge.label} />}
       </div>
-      {sub && <p className="text-xs text-gray-500">{sub}</p>}
+      {sub && <p className="text-sm text-gray-500">{sub}</p>}
       {progress && (
         <div className="mt-1">
           <div className="h-1.5 w-full rounded-full bg-gray-100 overflow-hidden">
@@ -175,22 +200,49 @@ export default function HeroHealthSection({
   currentSpend,
   totalBudget,
   daysRemaining,
+  completionPercentage,
   actionItemsCount,
   pacingStatus,
   performanceStatus,
+  gantt,
+  onAccountManagerChange,
+  isSavingAccountManager = false,
+  onInvoiceClick,
 }: HeroHealthSectionProps) {
+  const [showAmMenu, setShowAmMenu] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!showAmMenu) return;
+    function handleClick(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setShowAmMenu(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [showAmMenu]);
+
+  const handleAssignAm = (am: string | null) => {
+    setShowAmMenu(false);
+    onAccountManagerChange?.(am);
+  };
   const spendPct = totalBudget > 0 ? (currentSpend / totalBudget) * 100 : 0;
   const spendColor = STATUS_COLORS[healthScore.breakdown.budgetPacing.score >= 80 ? 'healthy' : healthScore.breakdown.budgetPacing.score >= 60 ? 'caution' : 'at-risk'].ring;
-
-  const pacingLabel =
-    pacingStatus.status === 'ahead' ? 'Ahead'
-    : pacingStatus.status === 'on-track' ? 'On Track'
-    : 'Behind';
 
   const pacingVarianceLabel =
     pacingStatus.variance >= 0
       ? `+${formatPct(pacingStatus.variance)} vs plan`
       : `${formatPct(pacingStatus.variance)} vs plan`;
+
+  // Human-readable spend pacing label for the Spend badge (no % over/under wording)
+  const pacingLabel =
+    pacingStatus.status === 'ahead'
+      ? 'Ahead of plan'
+      : pacingStatus.status === 'behind'
+        ? 'Behind plan'
+        : 'On track';
 
   const perfLabel =
     performanceStatus.status === 'excellent' ? 'Excellent'
@@ -200,11 +252,11 @@ export default function HeroHealthSection({
   const urgentTotal = actionItemsCount.urgent + actionItemsCount.thisWeek;
 
   return (
-    <div className="space-y-4">
-      {/* ── Top row: client identity + health ring ── */}
-      <div className="bg-white rounded-xl border border-gray-200 px-6 py-5 flex items-center justify-between gap-6">
-        {/* Left: avatar + name/notes */}
-        <div className="flex items-center gap-4 min-w-0">
+    <div className="space-y-5">
+      {/* ── Top row: client identity + Gantt (middle) + health ring/pills ── */}
+      <div className="bg-white rounded-xl border border-gray-200 px-7 py-6 flex flex-col gap-7 xl:grid xl:grid-cols-[minmax(0,1.6fr)_minmax(0,2.2fr)_minmax(0,1.1fr)] xl:items-start">
+        {/* Left: avatar + name/notes + Spend pacing */}
+        <div className="flex items-start gap-4 min-w-0 order-1">
           {client.logo_url ? (
             <img
               src={client.logo_url}
@@ -218,87 +270,152 @@ export default function HeroHealthSection({
               </span>
             </div>
           )}
-          <div className="min-w-0">
-            <h1 className="text-2xl font-bold text-gray-900 truncate">{client.name}</h1>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center justify-between gap-3 mb-1">
+              <h1 className="text-3xl font-bold truncate" style={{ color: '#1C1917', fontFamily: "'Inter', system-ui, sans-serif" }}>{client.name}</h1>
+              {onInvoiceClick && (
+                <Button
+                  onClick={onInvoiceClick}
+                  variant="outline"
+                  size="sm"
+                  className="flex items-center gap-2 shrink-0"
+                >
+                  <FileText className="w-4 h-4" />
+                  Invoice
+                </Button>
+              )}
+            </div>
             {client.notes && (
-              <p className="text-sm text-gray-500 line-clamp-1 mt-0.5">{client.notes}</p>
+              <p className="text-base text-gray-500 line-clamp-1">{client.notes}</p>
             )}
-            <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-              <span className="text-xs text-gray-400">
-                {daysRemaining > 0 ? `${daysRemaining}d remaining` : 'Campaign ended'}
+            <div className="flex items-center gap-2 mt-2 flex-wrap">
+              <span className="text-sm text-gray-400">
+                {completionPercentage >= 100
+                  ? 'Campaign completed'
+                  : `${formatPct(completionPercentage, 0)} completed`}
               </span>
-              <span className="text-gray-300">·</span>
-              <span className="text-xs text-gray-400">
-                {formatCurrency(currentSpend)} of {formatCurrency(totalBudget)} spent
-              </span>
+              {/* Account Manager selector */}
+              {onAccountManagerChange && (
+                <div className="relative" ref={menuRef}>
+                  <button
+                    onClick={() => setShowAmMenu(v => !v)}
+                    disabled={isSavingAccountManager}
+                    title="Assign account manager"
+                    className={`text-xs font-medium px-2 py-1 rounded border transition-colors ${
+                      client.account_manager
+                        ? 'border-blue-200 bg-blue-50 text-blue-700'
+                        : 'border-dashed border-gray-300 bg-transparent text-gray-400'
+                    } ${isSavingAccountManager ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:border-blue-300'}`}
+                  >
+                    {isSavingAccountManager ? 'Saving...' : (client.account_manager ?? 'Assign AM')}
+                  </button>
+                  {showAmMenu && (
+                    <div className="absolute left-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 min-w-[100px] overflow-hidden">
+                      {AM_OPTIONS.map(am => (
+                        <button
+                          key={am}
+                          onClick={() => handleAssignAm(am)}
+                          className={`block w-full text-left px-3 py-2 text-sm transition-colors ${
+                            client.account_manager === am
+                              ? 'bg-blue-50 text-blue-700 font-semibold'
+                              : 'text-gray-700 hover:bg-gray-50'
+                          }`}
+                        >
+                          {am}
+                        </button>
+                      ))}
+                      {client.account_manager && (
+                        <button
+                          onClick={() => handleAssignAm(null)}
+                          className="block w-full text-left px-3 py-2 text-xs text-gray-500 border-t border-gray-200 hover:bg-gray-50"
+                        >
+                          Unassign
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            {/* Inline Spend summary (was previously a separate card) */}
+            <div className="mt-3 space-y-1.5">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm font-semibold text-gray-600 uppercase tracking-wide">
+                  Spend
+                </span>
+                <Badge status={pacingStatus.status} label={pacingLabel} />
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-2xl font-bold text-gray-900">
+                  {formatCurrency(currentSpend)}
+                </span>
+                <span className="text-sm text-gray-500">
+                  {formatPct(spendPct, 0)} of {formatCurrency(totalBudget)} budget
+                </span>
+              </div>
+              <div className="mt-1">
+                <div className="h-1.5 w-full rounded-full bg-gray-100 overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all duration-500"
+                    style={{
+                      width: `${Math.min(100, (currentSpend / Math.max(totalBudget, 1)) * 100)}%`,
+                      backgroundColor: spendColor,
+                    }}
+                  />
+                </div>
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Right: health ring + breakdown summary */}
-        <div className="flex items-center gap-6 flex-shrink-0">
-          {/* Score breakdown pills */}
-          <div className="hidden sm:flex flex-col gap-1.5 text-right">
-            {(
-              [
-                { label: 'Pacing',     score: healthScore.breakdown.budgetPacing.score,    weight: '40%' },
-                { label: 'Actions',    score: healthScore.breakdown.actionCompletion.score, weight: '25%' },
-                { label: 'Perf',       score: healthScore.breakdown.performance.score,      weight: '25%' },
-                { label: 'Timeline',   score: healthScore.breakdown.timeline.score,         weight: '10%' },
-              ] as const
-            ).map(({ label, score, weight }) => {
-              const s = score >= 80 ? 'healthy' : score >= 60 ? 'caution' : 'at-risk';
-              const c = STATUS_COLORS[s];
-              return (
-                <div key={label} className="flex items-center gap-2 justify-end">
-                  <span className="text-xs text-gray-400">{label} <span className="text-gray-300">({weight})</span></span>
-                  <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${c.bg} ${c.text}`}>{score}</span>
-                </div>
-              );
-            })}
+        {/* Middle: Gantt calendar (only when data exists) */}
+        {gantt && gantt.clients.length > 0 && gantt.channels.length > 0 && (
+          <div className="w-full min-w-0 order-2">
+            <div className="w-full max-h-64 overflow-x-auto overflow-y-hidden border border-gray-100 rounded-lg bg-gray-50/80 px-3 py-2">
+              <GanttCalendar
+                clients={gantt.clients}
+                channels={gantt.channels}
+                healthChecks={[]}
+                setupPoints={[]}
+                pointEvents={[]}
+                selectedDay={gantt.selectedDay}
+                onDaySelect={gantt.onDaySelect}
+                filteredClientIds={gantt.filteredClientIds}
+                currentMonth={gantt.currentMonth}
+              />
+            </div>
           </div>
+        )}
 
-          <HealthRing score={healthScore.overallScore} status={healthScore.status} />
+        {/* Right: health ring + breakdown summary */}
+        <div className="flex flex-col gap-4 order-3 xl:items-end">
+          <div className="flex items-center gap-7 xl:self-end">
+            {/* Score breakdown pills */}
+            <div className="hidden sm:flex flex-col gap-1.5 text-right">
+              {(
+                [
+                  { label: 'Pacing',  score: healthScore.breakdown.budgetPacing.score,    weight: '44%' },
+                  { label: 'Actions', score: healthScore.breakdown.actionCompletion.score, weight: '28%' },
+                  { label: 'Perf',    score: healthScore.breakdown.performance.score,      weight: '28%' },
+                ] as const
+              ).map(({ label, score, weight }) => {
+                const s = score >= 80 ? 'healthy' : score >= 60 ? 'caution' : 'at-risk';
+                const c = STATUS_COLORS[s];
+                return (
+                  <div key={label} className="flex items-center gap-2 justify-end">
+                    <span className="text-sm text-gray-400 leading-tight text-right">
+                      <span className="block">{label}</span>
+                      <span className="block text-xs text-gray-300">({weight})</span>
+                    </span>
+                    <span className={`text-sm font-semibold px-1.5 py-0.5 rounded ${c.bg} ${c.text}`}>{score}</span>
+                  </div>
+                );
+              })}
+            </div>
+
+            <HealthRing score={healthScore.overallScore} status={healthScore.status} />
+          </div>
         </div>
-      </div>
-
-      {/* ── Metric cards ── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {/* Spend */}
-        <MetricCard
-          title="Spend"
-          value={formatCurrency(currentSpend)}
-          sub={`${formatPct(spendPct, 0)} of ${formatCurrency(totalBudget)} budget`}
-          progress={{ value: currentSpend, max: totalBudget, color: spendColor }}
-        />
-
-        {/* Pacing */}
-        <MetricCard
-          title="Pacing"
-          value={formatPct(pacingStatus.percentage, 0)}
-          sub={pacingVarianceLabel}
-          badge={{ status: pacingStatus.status, label: pacingLabel }}
-        />
-
-        {/* Performance */}
-        <MetricCard
-          title="Performance"
-          value={performanceStatus.label}
-          sub={`CTR ${formatPct(performanceStatus.ctr * 100, 2)}`}
-          badge={{ status: performanceStatus.status, label: perfLabel }}
-        />
-
-        {/* Actions */}
-        <MetricCard
-          title="Upcoming"
-          value={String(urgentTotal)}
-          sub={`${actionItemsCount.completed} completed`}
-          badge={
-            actionItemsCount.urgent > 0
-              ? { status: 'at-risk', label: `${actionItemsCount.urgent} urgent` }
-              : { status: 'healthy', label: 'All clear' }
-          }
-        />
       </div>
     </div>
   );

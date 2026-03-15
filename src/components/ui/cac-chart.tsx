@@ -14,6 +14,7 @@ import {
 import { useMemo, useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AlertTriangle, TrendingUp, TrendingDown, Minus, Filter, Facebook, Search, Linkedin, Music, Instagram } from "lucide-react";
+import { getChannelLogo } from '@/lib/utils/channel-icons';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -23,6 +24,13 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectTrigger,
+  SelectContent,
+  SelectItem,
+  SelectValue,
+} from "@/components/ui/select";
 
 interface CostMetricPoint {
   date: string;
@@ -47,6 +55,13 @@ interface CostPerMetricChartProps {
   availableChannels?: Array<{ id: string; name: string }>;
   selectedChannels?: Set<string>;
   onChannelsChange?: (channels: Set<string>) => void;
+  // Optional controls for choosing the "X" in Cost Per X
+  onMetricChange?: (metric: string) => void;
+  availableMetrics?: Set<string>;
+  availableEventNames?: Array<{ name: string; count: number }>;
+  selectedEventName?: string | null;
+  onEventNameChange?: (name: string | null) => void;
+  loadingEventNames?: boolean;
 }
 
 // Get singular display name for metric
@@ -63,29 +78,7 @@ function getMetricDisplayName(metricKey: string): string {
 
 // Get channel icon based on channel name or platform
 function getChannelIcon(channelName: string) {
-  const lowerName = channelName.toLowerCase();
-  // Check for Meta/Facebook (including meta-ads platform name)
-  if (lowerName.includes('facebook') || lowerName.includes('meta') || lowerName === 'meta-ads') {
-    return <Facebook className="w-4 h-4 text-blue-600" />;
-  }
-  // Check for Instagram
-  if (lowerName.includes('instagram')) {
-    return <Instagram className="w-4 h-4 text-pink-600" />;
-  }
-  // Check for Google (including google-ads platform name)
-  if (lowerName.includes('google') || lowerName === 'google-ads') {
-    return <Search className="w-4 h-4 text-red-600" />;
-  }
-  // Check for LinkedIn
-  if (lowerName.includes('linkedin')) {
-    return <Linkedin className="w-4 h-4 text-blue-700" />;
-  }
-  // Check for TikTok
-  if (lowerName.includes('tiktok')) {
-    return <Music className="w-4 h-4 text-black" />;
-  }
-  // Default icon
-  return <Filter className="w-4 h-4 text-gray-500" />;
+  return getChannelLogo(channelName, "w-4 h-4");
 }
 
 // Metric configuration with Grafana colors - keys match new property names
@@ -109,6 +102,12 @@ export function CostPerMetricChart({
   availableChannels = [],
   selectedChannels = new Set(),
   onChannelsChange,
+  onMetricChange,
+  availableMetrics,
+  availableEventNames = [],
+  selectedEventName = null,
+  onEventNameChange,
+  loadingEventNames = false,
 }: CostPerMetricChartProps) {
   // State for comparison mode
   const [showComparison, setShowComparison] = useState(false);
@@ -487,9 +486,93 @@ export function CostPerMetricChart({
   return (
     <Card>
       <CardHeader className="pb-2">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <CardTitle>Cost Per {metricDisplayName}</CardTitle>
-          <div className="flex items-center gap-3">
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          {/* Title + optional metric selector */}
+          <div className="flex flex-wrap items-center gap-3">
+            <CardTitle>Cost Per {metricDisplayName}</CardTitle>
+
+            {/* Metric selector lives on the card when onMetricChange is provided */}
+            {onMetricChange && (
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-600 dark:text-gray-300">Metric:</span>
+                <Select
+                  value={selectedMetric}
+                  onValueChange={(value) => {
+                    onMetricChange(value);
+                    if (value !== 'eventCount' && onEventNameChange) {
+                      onEventNameChange(null);
+                    }
+                  }}
+                >
+                  <SelectTrigger className="w-[180px] h-9 text-sm">
+                    <SelectValue placeholder="Select metric" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {[
+                      { value: 'conversions', label: 'Conversions' },
+                      { value: 'activeUsers', label: 'Active Users' },
+                      { value: 'totalUsers', label: 'Total Users' },
+                      { value: 'sessions', label: 'Sessions' },
+                      { value: 'eventCount', label: 'Events' },
+                    ].map((option) => {
+                      const isAvailable = availableMetrics ? availableMetrics.has(option.value) : true;
+                      return (
+                        <SelectItem
+                          key={option.value}
+                          value={option.value}
+                          className={!isAvailable ? 'text-gray-500' : ''}
+                        >
+                          <div className="flex items-center justify-between w-full gap-2">
+                            <span>{option.label}</span>
+                            {availableMetrics && !isAvailable && (
+                              <span className="text-xs text-amber-500 italic">No data</span>
+                            )}
+                          </div>
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {/* Event selector for eventCount */}
+            {onMetricChange && selectedMetric === 'eventCount' && onEventNameChange && (
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-600 dark:text-gray-300">Event:</span>
+                <Select
+                  value={selectedEventName || ''}
+                  onValueChange={(value) => onEventNameChange(value === '_none' ? null : value)}
+                  disabled={loadingEventNames}
+                >
+                  <SelectTrigger className="w-[200px] h-9 text-sm">
+                    <SelectValue placeholder={loadingEventNames ? 'Loading events...' : 'Select event'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableEventNames.length === 0 && !loadingEventNames ? (
+                      <SelectItem value="_none" disabled>
+                        No events found
+                      </SelectItem>
+                    ) : (
+                      availableEventNames.map((event) => (
+                        <SelectItem key={event.name} value={event.name}>
+                          <div className="flex items-center justify-between w-full gap-2">
+                            <span className="truncate">{event.name}</span>
+                            <span className="text-xs text-gray-400">
+                              ({event.count.toLocaleString()})
+                            </span>
+                          </div>
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+
+          {/* Right-side controls: channel filter + comparison toggle */}
+          <div className="flex items-center gap-3 flex-wrap">
             {/* Channel Filter Dropdown */}
             {availableChannels.length > 0 && onChannelsChange && (
               <DropdownMenu>
@@ -532,7 +615,10 @@ export function CostPerMetricChart({
                       checked={selectedChannels.has(channel.id)}
                       onCheckedChange={() => handleChannelToggle(channel.id)}
                     >
-                      {channel.name}
+                      <div className="flex items-center gap-2">
+                        {getChannelIcon(channel.name)}
+                        <span>{channel.name}</span>
+                      </div>
                     </DropdownMenuCheckboxItem>
                   ))}
                 </DropdownMenuContent>

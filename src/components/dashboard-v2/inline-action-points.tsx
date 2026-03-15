@@ -6,6 +6,82 @@ import { format, addDays, differenceInDays } from 'date-fns';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
+// Returns the next health check occurrence to display:
+// - If overdue (past occurrence not completed): returns the past occurrence date
+// - Otherwise: returns the next future occurrence
+function getHealthCheckDisplayDate(
+  channelStart: Date,
+  frequency: string,
+  isCompletedForCurrentPeriod: boolean
+): Date | null {
+  const intervalDays =
+    frequency === 'weekly' ? 7 :
+    frequency === 'fortnightly' ? 14 :
+    frequency === 'monthly' ? 30 : 0;
+  if (!intervalDays) return null;
+
+  const intervalMs = intervalDays * 24 * 60 * 60 * 1000;
+  const startMs = channelStart.getTime();
+  const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+  const todayMs = todayStart.getTime();
+  const capMs = todayMs + 2 * 365 * 24 * 60 * 60 * 1000;
+
+  let lastPastOcc: Date | null = null;
+  let nextFutureOcc: Date | null = null;
+
+  for (let n = 1; ; n++) {
+    const occMs = startMs + n * intervalMs;
+    if (occMs > capMs) break;
+    const occ = new Date(occMs); occ.setHours(0, 0, 0, 0);
+    if (occ.getTime() <= todayMs) {
+      lastPastOcc = occ;
+    } else if (!nextFutureOcc) {
+      nextFutureOcc = occ;
+      break;
+    }
+  }
+
+  if (!isCompletedForCurrentPeriod && lastPastOcc) return lastPastOcc; // overdue
+  return nextFutureOcc;
+}
+
+// Checks whether a health check completion is still valid for the current period.
+// A period resets when a new occurrence date arrives (completedAt < currentPeriodStart).
+function isHealthCheckCompletedForCurrentPeriod(
+  channelStart: Date,
+  frequency: string,
+  completedAt: string | null
+): boolean {
+  if (!completedAt) return false;
+
+  const intervalDays =
+    frequency === 'weekly' ? 7 :
+    frequency === 'fortnightly' ? 14 :
+    frequency === 'monthly' ? 30 : 0;
+  if (!intervalDays) return false;
+
+  const intervalMs = intervalDays * 24 * 60 * 60 * 1000;
+  const startMs = channelStart.getTime();
+  const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+  const todayMs = todayStart.getTime();
+  const capMs = todayMs + 2 * 365 * 24 * 60 * 60 * 1000;
+
+  let lastPastOccStr: string | null = null;
+  for (let n = 1; ; n++) {
+    const occMs = startMs + n * intervalMs;
+    if (occMs > capMs) break;
+    if (occMs <= todayMs) {
+      const d = new Date(occMs);
+      lastPastOccStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    } else {
+      break;
+    }
+  }
+
+  if (!lastPastOccStr) return false; // No occurrence yet, nothing to compare
+  return completedAt.slice(0, 10) >= lastPastOccStr;
+}
+
 export interface InlineActionPoint {
   id: string;
   text: string;
@@ -13,6 +89,7 @@ export interface InlineActionPoint {
   category: 'SET UP' | 'ONGOING' | 'HEALTH CHECK';
   days_before_live_due?: number | null;
   frequency?: 'daily' | 'weekly' | 'fortnightly' | 'monthly' | null;
+  completed_at?: string | null;
 }
 
 interface InlineActionPointsProps {
@@ -23,6 +100,7 @@ interface InlineActionPointsProps {
   onToggleComplete?: (id: string, completed: boolean) => void;
   showBorder?: boolean;
   showTitle?: boolean;
+  refetchTrigger?: number;
 }
 
 export default function InlineActionPoints({
@@ -33,6 +111,7 @@ export default function InlineActionPoints({
   onToggleComplete,
   showBorder = true,
   showTitle = true,
+  refetchTrigger,
 }: InlineActionPointsProps) {
   const [actionPoints, setActionPoints] = useState<InlineActionPoint[]>([]);
   const [loading, setLoading] = useState(false);
@@ -65,15 +144,34 @@ export default function InlineActionPoints({
         if (response.ok) {
           const { data } = await response.json();
           if (data && Array.isArray(data)) {
-            setActionPoints(data.map((ap: any) => ({
-              id: ap.id,
-              text: ap.text,
-              completed: ap.completed || false,
-              // Keep category as is (HEALTH CHECK or SET UP)
-              category: ap.category === 'HEALTH CHECK' ? 'HEALTH CHECK' : (ap.category === 'SET UP' ? 'SET UP' : 'HEALTH CHECK'),
-              days_before_live_due: ap.days_before_live_due ?? null,
-              frequency: ap.frequency ?? null,
-            })));
+            setActionPoints(data.map((ap: any) => {
+              const completedAt: string | null = ap.completed_at || null;
+              let effectiveCompleted = ap.completed || false;
+
+              // For HEALTH CHECK: reset completed if a new period has started
+              if (
+                (ap.category === 'HEALTH CHECK') &&
+                ap.frequency &&
+                channelStartDate &&
+                effectiveCompleted
+              ) {
+                effectiveCompleted = isHealthCheckCompletedForCurrentPeriod(
+                  channelStartDate,
+                  ap.frequency,
+                  completedAt
+                );
+              }
+
+              return {
+                id: ap.id,
+                text: ap.text,
+                completed: effectiveCompleted,
+                category: ap.category === 'HEALTH CHECK' ? 'HEALTH CHECK' : (ap.category === 'SET UP' ? 'SET UP' : 'HEALTH CHECK'),
+                days_before_live_due: ap.days_before_live_due ?? null,
+                frequency: ap.frequency ?? null,
+                completed_at: completedAt,
+              };
+            }));
           }
         }
       } catch (error) {
@@ -84,7 +182,7 @@ export default function InlineActionPoints({
     };
 
     fetchActionPoints();
-  }, [channelType, clientId]);
+  }, [channelType, clientId, refetchTrigger]);
 
   const handleToggle = async (id: string, completed: boolean) => {
     try {
@@ -183,14 +281,22 @@ export default function InlineActionPoints({
       if (refreshResponse.ok) {
         const { data } = await refreshResponse.json();
         if (data && Array.isArray(data)) {
-          setActionPoints(data.map((ap: any) => ({
-            id: ap.id,
-            text: ap.text,
-            completed: ap.completed || false,
-            category: ap.category === 'HEALTH CHECK' ? 'HEALTH CHECK' : (ap.category === 'SET UP' ? 'SET UP' : 'HEALTH CHECK'),
-            days_before_live_due: ap.days_before_live_due ?? null,
-            frequency: ap.frequency ?? null,
-          })));
+          setActionPoints(data.map((ap: any) => {
+            const completedAt: string | null = ap.completed_at || null;
+            let effectiveCompleted = ap.completed || false;
+            if ((ap.category === 'HEALTH CHECK') && ap.frequency && channelStartDate && effectiveCompleted) {
+              effectiveCompleted = isHealthCheckCompletedForCurrentPeriod(channelStartDate, ap.frequency, completedAt);
+            }
+            return {
+              id: ap.id,
+              text: ap.text,
+              completed: effectiveCompleted,
+              category: ap.category === 'HEALTH CHECK' ? 'HEALTH CHECK' : (ap.category === 'SET UP' ? 'SET UP' : 'HEALTH CHECK'),
+              days_before_live_due: ap.days_before_live_due ?? null,
+              frequency: ap.frequency ?? null,
+              completed_at: completedAt,
+            };
+          }));
         }
       }
 
@@ -266,14 +372,22 @@ export default function InlineActionPoints({
       if (refreshResponse.ok) {
         const { data } = await refreshResponse.json();
         if (data && Array.isArray(data)) {
-          setActionPoints(data.map((ap: any) => ({
-            id: ap.id,
-            text: ap.text,
-            completed: ap.completed || false,
-            category: ap.category === 'HEALTH CHECK' ? 'HEALTH CHECK' : (ap.category === 'SET UP' ? 'SET UP' : 'HEALTH CHECK'),
-            days_before_live_due: ap.days_before_live_due ?? null,
-            frequency: ap.frequency ?? null,
-          })));
+          setActionPoints(data.map((ap: any) => {
+            const completedAt: string | null = ap.completed_at || null;
+            let effectiveCompleted = ap.completed || false;
+            if ((ap.category === 'HEALTH CHECK') && ap.frequency && channelStartDate && effectiveCompleted) {
+              effectiveCompleted = isHealthCheckCompletedForCurrentPeriod(channelStartDate, ap.frequency, completedAt);
+            }
+            return {
+              id: ap.id,
+              text: ap.text,
+              completed: effectiveCompleted,
+              category: ap.category === 'HEALTH CHECK' ? 'HEALTH CHECK' : (ap.category === 'SET UP' ? 'SET UP' : 'HEALTH CHECK'),
+              days_before_live_due: ap.days_before_live_due ?? null,
+              frequency: ap.frequency ?? null,
+              completed_at: completedAt,
+            };
+          }));
         }
       }
 
@@ -476,9 +590,20 @@ export default function InlineActionPoints({
                       </>
                     )}
                     {(ap.category === 'HEALTH CHECK' || ap.category === 'ONGOING') && ap.frequency && (
-                      <span className="text-xs text-gray-500">
-                        {ap.frequency}
-                      </span>
+                      <>
+                        <span className="text-xs text-gray-400">{ap.frequency}</span>
+                        {channelStartDate && (() => {
+                          const nextOcc = getHealthCheckDisplayDate(channelStartDate, ap.frequency, ap.completed);
+                          if (!nextOcc) return null;
+                          const dueDateText = formatDueDate(nextOcc);
+                          const isOverdue = differenceInDays(nextOcc, new Date()) < 0;
+                          return (
+                            <span className={`text-xs ${isOverdue ? 'text-red-600 font-medium' : 'text-gray-500'}`}>
+                              {dueDateText}
+                            </span>
+                          );
+                        })()}
+                      </>
                     )}
                   </div>
                 </div>
@@ -579,7 +704,7 @@ export default function InlineActionPoints({
   return (
     <div className={showBorder ? 'mt-3 pt-3 border-t border-gray-100' : ''}>
       <div className="flex items-center justify-between mb-3">
-        {showTitle && <h4 className="text-xs font-medium text-gray-700">Action Points</h4>}
+        {showTitle && <h4 className="text-xs font-medium text-gray-700" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>Action Points</h4>}
         {!isAdding && (
           <button
             type="button"

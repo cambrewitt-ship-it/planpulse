@@ -48,6 +48,16 @@ export function getPlatformForChannel(channelName: string): string {
   return lower.replace(/\s+/g, '-');
 }
 
+export function getChannelDisplayNameFromPlatform(platform?: string): string {
+  if (!platform) return 'Unknown Channel';
+  const lower = platform.toLowerCase();
+  if (lower.includes('meta') || lower.includes('facebook')) return 'Meta Ads';
+  if (lower.includes('google')) return 'Google Search';
+  if (lower.includes('linkedin')) return 'LinkedIn Ads';
+  if (lower.includes('tiktok')) return 'TikTok Ads';
+  return platform;
+}
+
 // Determine channel category from channelName
 export function getChannelCategory(channelName: string): 'paid_digital' | 'organic_social' | 'edm' | 'ooh' {
   if (!channelName) return 'paid_digital';

@@ -42,18 +42,21 @@ export default function LoginPage() {
     }
   };
 
+  const pageFont: React.CSSProperties = { fontFamily: "'DM Sans', system-ui, sans-serif" };
+  const serifFont: React.CSSProperties = { fontFamily: "'DM Serif Display', Georgia, serif" };
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <Card className="w-full max-w-md">
+    <div className="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8" style={{ background: '#F5F3EF', ...pageFont }}>
+      <Card className="w-full max-w-md" style={{ background: '#FDFCF8', border: '0.5px solid #E8E4DC', borderRadius: 6 }}>
         <CardHeader>
-          <CardTitle className="text-2xl font-bold text-center">
+          <CardTitle className="text-2xl font-bold text-center" style={{ color: '#1C1917', ...serifFont }}>
             Sign in to Plan Check
           </CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleLogin} className="space-y-6">
             {error && (
-              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+              <div className="px-4 py-3 rounded" style={{ background: '#F5EDE9', border: '0.5px solid rgba(160,68,42,0.25)', color: '#A0442A', borderRadius: 4 }}>
                 {error}
               </div>
             )}
@@ -106,8 +109,8 @@ export default function LoginPage() {
             </Button>
 
             <div className="text-center text-sm">
-              <span className="text-gray-600">Don't have an account? </span>
-              <Link href="/auth/signup" className="text-blue-600 hover:text-blue-700 font-medium">
+              <span style={{ color: '#8A8578' }}>Don't have an account? </span>
+              <Link href="/auth/signup" style={{ color: '#4A6580', fontWeight: 500 }}>
                 Sign up
               </Link>
             </div>

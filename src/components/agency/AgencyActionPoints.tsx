@@ -24,6 +24,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
+import { getChannelLogo } from '@/lib/utils/channel-icons';
 
 interface AgencyActionPoint {
   id: string;
@@ -53,20 +54,7 @@ interface FlattenedActionPoint extends AgencyActionPoint {
 }
 
 function getChannelIcon(channelType: string) {
-  const lower = channelType.toLowerCase();
-  if (lower.includes('facebook') || lower.includes('meta')) {
-    return <Facebook className="w-3.5 h-3.5 text-blue-600" />;
-  }
-  if (lower.includes('google')) {
-    return <Search className="w-3.5 h-3.5 text-red-600" />;
-  }
-  if (lower.includes('linkedin')) {
-    return <Linkedin className="w-3.5 h-3.5 text-blue-700" />;
-  }
-  if (lower.includes('tiktok')) {
-    return <Music className="w-3.5 h-3.5 text-black" />;
-  }
-  return <Radio className="w-3.5 h-3.5 text-gray-500" />;
+  return getChannelLogo(channelType, "w-3.5 h-3.5");
 }
 
 function formatDueDate(dateString: string | null): {

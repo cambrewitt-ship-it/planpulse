@@ -8,6 +8,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { CheckSquare, Building2, Radio, Facebook, Search, Linkedin, Music, Instagram, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { getChannelLogo } from '@/lib/utils/channel-icons';
 
 interface ActionPoint {
   id: string;
@@ -47,23 +48,7 @@ const getChannelDisplayName = (channelName: string, detail: string) => {
 
 // Helper function to get channel icon (same logic as MediaChannels)
 const getChannelIcon = (channelType: string) => {
-  const lowerName = channelType.toLowerCase();
-  if (lowerName.includes('facebook') || lowerName.includes('meta')) {
-    return <Facebook className="w-4 h-4 text-blue-600" />;
-  }
-  if (lowerName.includes('instagram')) {
-    return <Instagram className="w-4 h-4 text-pink-600" />;
-  }
-  if (lowerName.includes('google')) {
-    return <Search className="w-4 h-4 text-red-600" />;
-  }
-  if (lowerName.includes('linkedin')) {
-    return <Linkedin className="w-4 h-4 text-blue-700" />;
-  }
-  if (lowerName.includes('tiktok')) {
-    return <Music className="w-4 h-4 text-black" />;
-  }
-  return <Radio className="w-4 h-4 text-gray-500" />;
+  return getChannelLogo(channelType, "w-4 h-4");
 };
 
 export default function ActionPointsTodoList() {

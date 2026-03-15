@@ -21,6 +21,7 @@ export interface ClientCardData extends ClientWithHealth {
   spendVariancePct: number | null;     // ((actual - planned) / planned) * 100, positive = over
   totalActionPoints: number;           // total action points for this client
   completedActionPoints: number;       // completed action points for this client
+  account_manager: string | null;      // assigned account manager name
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -43,11 +44,16 @@ function channelStatus(startDate: string | null, endDate: string | null): 'live'
  * Fetch all clients with their health status
  * Query params:
  *  - status: 'red' | 'amber' | 'green' (optional filter)
+ *  - startDate: YYYY-MM-DD (optional, defaults to current month start)
+ *  - endDate: YYYY-MM-DD (optional, defaults to today)
  */
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const statusFilter = searchParams.get('status') as HealthStatus | null;
+    const startDateParam = searchParams.get('startDate');
+    const endDateParam = searchParams.get('endDate');
+    const accountManagerFilter = searchParams.get('accountManager');
 
     // Validate status filter if provided
     if (statusFilter && !['red', 'amber', 'green'].includes(statusFilter)) {
@@ -116,17 +122,16 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // ── Fetch actual spend per client for the current calendar month ─────────
-    // Match new-client-dashboard: get spend data up to today for current month
-    // This should match what MediaChannelCard calculates from liveSpendData
-    const currentMonthStart = toDateStr(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
-    const todayStr = toDateStr(new Date()); // Get today's date, not month start
+    // ── Fetch actual spend per client for the specified date range ─────────
+    // Use provided date range or default to current month
+    const dateRangeStart = startDateParam || toDateStr(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+    const dateRangeEnd = endDateParam || toDateStr(new Date());
     const { data: spendRows } = await supabase
       .from('ad_performance_metrics')
       .select('client_id, spend, campaign_id, date, platform, account_id')
       .eq('user_id', session.user.id) // Filter by current user
-      .gte('date', currentMonthStart)
-      .lte('date', todayStr)
+      .gte('date', dateRangeStart)
+      .lte('date', dateRangeEnd)
       .not('client_id', 'is', null); // Only include rows with client_id (matching new-client-dashboard which filters by client)
 
     // Sum actual API spend per client — exclude manual-override rows to match
@@ -205,17 +210,34 @@ export async function GET(request: NextRequest) {
           return clientCompletions.get(ap.id) !== true;
         }).length;
 
-        // ── Planned budget for the current month (from monthlySpend breakdown) ──
-        // Match new-client-dashboard logic: check both padded and unpadded month keys
+        // ── Planned budget for the date range (from monthlySpend breakdown) ──
+        // Calculate planned budget for all months in the date range
         let plannedBudget = 0;
-        for (const ch of rawChannels) {
-          for (const f of ch.flights || []) {
-            if (f.monthlySpend && typeof f.monthlySpend === 'object') {
-              // Try both padded and unpadded formats (matching new-client-dashboard)
-              const spend = f.monthlySpend[paddedMonthKey] || f.monthlySpend[unpaddedMonthKey] || 0;
-              plannedBudget += Number(spend);
+        const rangeStart = new Date(dateRangeStart);
+        const rangeEnd = new Date(dateRangeEnd);
+        
+        // Iterate through each month in the date range
+        let currentMonth = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), 1);
+        const rangeEndMonth = new Date(rangeEnd.getFullYear(), rangeEnd.getMonth(), 1);
+        
+        while (currentMonth <= rangeEndMonth) {
+          const year = currentMonth.getFullYear();
+          const monthNum = currentMonth.getMonth() + 1;
+          const unpaddedMonthKey = `${year}-${monthNum}`;
+          const paddedMonthKey = `${year}-${String(monthNum).padStart(2, '0')}`;
+          
+          for (const ch of rawChannels) {
+            for (const f of ch.flights || []) {
+              if (f.monthlySpend && typeof f.monthlySpend === 'object') {
+                // Try both padded and unpadded formats (matching new-client-dashboard)
+                const spend = f.monthlySpend[paddedMonthKey] || f.monthlySpend[unpaddedMonthKey] || 0;
+                plannedBudget += Number(spend);
+              }
             }
           }
+          
+          // Move to next month
+          currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1);
         }
 
         // ── Actual spend ──
@@ -265,6 +287,7 @@ export async function GET(request: NextRequest) {
           spendVariancePct,
           totalActionPoints: apStats.total,
           completedActionPoints: apStats.completed,
+          account_manager: client.account_manager || null,
         };
       })
     );
@@ -274,6 +297,13 @@ export async function GET(request: NextRequest) {
     if (statusFilter) {
       filteredClients = enrichedClients.filter(
         (client) => client.health?.status === statusFilter
+      );
+    }
+
+    // Apply account manager filter if provided
+    if (accountManagerFilter) {
+      filteredClients = filteredClients.filter(
+        (client) => client.account_manager === accountManagerFilter
       );
     }
 

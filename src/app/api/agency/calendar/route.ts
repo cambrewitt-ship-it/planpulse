@@ -10,7 +10,8 @@ import { createClient } from '@/lib/supabase/server';
 export type CalendarEventType =
   | 'action-point'
   | 'channel-start'
-  | 'channel-end';
+  | 'channel-end'
+  | 'health-check';
 
 export interface CalendarEvent {
   id: string;
@@ -61,34 +62,23 @@ export async function GET(request: NextRequest) {
 
     const clientMap = new Map(clients.map((c) => [c.id, c.name]));
 
-    // --- 2. Action point due dates in this month ---
+    // --- 2. Action point templates (all — due dates are calculated per-client from channel start dates) ---
     const { data: actionPoints } = await supabase
       .from('action_points')
-      .select('id, text, channel_type, category, due_date')
-      .gte('due_date', monthStartStr)
-      .lte('due_date', monthEndStr);
+      .select('id, text, channel_type, category, frequency, days_before_live_due');
 
-    // Fetch completions for these APs so we can exclude fully-completed ones
+    // Fetch all completions so we can skip completed APs per client
     const apIds = (actionPoints || []).map((ap) => ap.id);
-    let completedApIds = new Set<string>();
+    let completedPairsGlobal = new Set<string>(); // "clientId|apId"
     if (apIds.length > 0) {
       const { data: completions } = await supabase
         .from('client_action_point_completions')
         .select('action_point_id, client_id, completed')
         .in('action_point_id', apIds)
         .eq('completed', true);
-
-      // Build a set of (clientId|apId) pairs that are completed
-      const completedPairs = new Set(
+      completedPairsGlobal = new Set(
         (completions || []).map((c) => `${c.client_id}|${c.action_point_id}`)
       );
-      completedApIds = new Set((completions || []).map((c) => c.action_point_id));
-
-      // We'll use completedPairs below when we map to clients
-      // Store on the map keyed differently
-      (actionPoints || []).forEach((ap) => {
-        (ap as any)._completedPairs = completedPairs;
-      });
     }
 
     // --- 3. Fetch media plan builder data for all clients (channel flights) ---
@@ -97,6 +87,60 @@ export async function GET(request: NextRequest) {
       .select('client_id, channels');
 
     const events: CalendarEvent[] = [];
+
+    // Helper: calculate AP due date from channel start date (mirrors action-points/route.ts)
+    function calculateDueDate(ap: any, channelStartDate: string | null): string | null {
+      if (!channelStartDate) return null;
+      if (ap.category === 'SET UP') {
+        const daysBefore = ap.days_before_live_due;
+        if (daysBefore === null || daysBefore === undefined) return null;
+        const d = new Date(channelStartDate);
+        d.setDate(d.getDate() - daysBefore);
+        return toDateStr(d);
+      }
+      if (ap.category === 'HEALTH CHECK') {
+        const freq = ap.frequency;
+        let offset = 0;
+        if (freq === 'weekly') offset = 7;
+        else if (freq === 'fortnightly') offset = 14;
+        else if (freq === 'monthly') offset = 30;
+        else return null;
+        const d = new Date(channelStartDate);
+        d.setDate(d.getDate() + offset);
+        return toDateStr(d);
+      }
+      return null;
+    }
+
+    // Build per-client channel start dates (normalised name → earliest start, for non-ended channels)
+    const clientChannelStartDates = new Map<string, Map<string, string | null>>();
+    const todayStr2 = toDateStr(new Date());
+    for (const plan of allMediaPlans || []) {
+      const channels = plan.channels as any[];
+      if (!channels || !Array.isArray(channels)) continue;
+      const startMap = new Map<string, string | null>();
+      for (const ch of channels) {
+        if (!ch.channelName) continue;
+        const normName = normalizeChannelName(ch.channelName);
+        const flights: any[] = ch.flights || [];
+        let earliestStart: string | null = null;
+        let latestEnd: string | null = null;
+        for (const f of flights) {
+          if (f.startWeek) {
+            const sd = toDateStr(new Date(f.startWeek));
+            if (!earliestStart || sd < earliestStart) earliestStart = sd;
+          }
+          if (f.endWeek) {
+            const ed = toDateStr(new Date(f.endWeek));
+            if (!latestEnd || ed > latestEnd) latestEnd = ed;
+          }
+        }
+        // Skip ended channels
+        if (latestEnd && latestEnd < todayStr2) continue;
+        if (!startMap.has(normName)) startMap.set(normName, earliestStart);
+      }
+      if (startMap.size > 0) clientChannelStartDates.set(plan.client_id, startMap);
+    }
 
     // --- Build flight start/end events ---
     for (const plan of allMediaPlans || []) {
@@ -140,36 +184,62 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // --- Build action point due date events ---
-    // For each outstanding AP with a due date, associate it with all clients that have
-    // that channel and haven't completed it
-    const clientChannelMap = new Map<string, Set<string>>();
+    // --- Build health check events (derived from channel start dates + 14 days) ---
+    // TODO: wire to real health check due dates once the field exists in DB
     for (const plan of allMediaPlans || []) {
+      const clientName = clientMap.get(plan.client_id) ?? 'Unknown Client';
       const channels = plan.channels as any[];
-      if (!channels) continue;
-      const set = new Set<string>();
-      for (const ch of channels) {
-        if (ch.channelName) set.add(normalizeChannelName(ch.channelName));
+      if (!channels || !Array.isArray(channels)) continue;
+
+      for (const channel of channels) {
+        const channelName: string = channel.channelName || 'Unknown Channel';
+        const flights: any[] = channel.flights || [];
+
+        for (const flight of flights) {
+          if (flight.startWeek) {
+            const startDate = toDateStr(new Date(flight.startWeek));
+            // Calculate health check due date: start_date + 14 days
+            const startMs = new Date(startDate).getTime();
+            const healthCheckDate = new Date(startMs + 14 * 24 * 60 * 60 * 1000);
+            const healthCheckDateStr = toDateStr(healthCheckDate);
+
+            if (healthCheckDateStr >= monthStartStr && healthCheckDateStr <= monthEndStr) {
+              events.push({
+                id: `health-check-${plan.client_id}-${channel.id || channelName}-${flight.id || startDate}`,
+                type: 'health-check',
+                date: healthCheckDateStr,
+                clientId: plan.client_id,
+                clientName,
+                channelName,
+                label: `${channelName} health check due`,
+              });
+            }
+          }
+        }
       }
-      if (set.size > 0) clientChannelMap.set(plan.client_id, set);
     }
 
-    for (const ap of actionPoints || []) {
-      if (!ap.due_date) continue;
-      const apChannelNorm = normalizeChannelName(ap.channel_type);
-      const completedPairs: Set<string> = (ap as any)._completedPairs || new Set();
+    // --- Build action point due date events (due dates calculated from channel start dates) ---
+    for (const client of clients) {
+      const startMap = clientChannelStartDates.get(client.id);
+      if (!startMap) continue;
 
-      for (const client of clients) {
-        const clientChannels = clientChannelMap.get(client.id);
-        if (!clientChannels || !clientChannels.has(apChannelNorm)) continue;
+      for (const ap of actionPoints || []) {
+        const apChannelNorm = normalizeChannelName(ap.channel_type);
+        if (!startMap.has(apChannelNorm)) continue;
 
-        // Skip if this client has completed this AP
-        if (completedPairs.has(`${client.id}|${ap.id}`)) continue;
+        // Skip completed
+        if (completedPairsGlobal.has(`${client.id}|${ap.id}`)) continue;
+
+        const channelStartDate = startMap.get(apChannelNorm) || null;
+        const calculatedDate = calculateDueDate(ap, channelStartDate);
+        if (!calculatedDate) continue;
+        if (calculatedDate < monthStartStr || calculatedDate > monthEndStr) continue;
 
         events.push({
           id: `ap-${ap.id}-${client.id}`,
           type: 'action-point',
-          date: ap.due_date,
+          date: calculatedDate,
           clientId: client.id,
           clientName: client.name,
           channelName: ap.channel_type,
@@ -183,7 +253,8 @@ export async function GET(request: NextRequest) {
     const typeOrder: Record<CalendarEventType, number> = {
       'channel-start': 0,
       'channel-end': 1,
-      'action-point': 2,
+      'health-check': 2,
+      'action-point': 3,
     };
     events.sort((a, b) => {
       const dateDiff = a.date.localeCompare(b.date);

@@ -5,6 +5,7 @@ import { Facebook, Search, Linkedin, Music, Instagram } from 'lucide-react';
 import { format, eachDayOfInterval, startOfMonth, endOfMonth, parseISO, isWithinInterval, addDays, startOfWeek, addWeeks, differenceInWeeks } from 'date-fns';
 import { useState, useEffect } from 'react';
 import { MediaPlanChannel, MediaFlight } from '@/components/media-plan-builder/media-plan-grid';
+import { getChannelLogo } from '@/lib/utils/channel-icons';
 
 interface ActivePlan {
   id: string;
@@ -245,23 +246,7 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
 
   // Map channel names to icons
   const getChannelIcon = (channelName: string) => {
-    const lowerName = channelName.toLowerCase();
-    if (lowerName.includes('facebook') || lowerName.includes('meta')) {
-      return <Facebook className="w-6 h-6 text-blue-600" />;
-    }
-    if (lowerName.includes('instagram')) {
-      return <Instagram className="w-6 h-6 text-pink-600" />;
-    }
-    if (lowerName.includes('google')) {
-      return <Search className="w-6 h-6 text-red-600" />;
-    }
-    if (lowerName.includes('linkedin')) {
-      return <Linkedin className="w-6 h-6 text-blue-700" />;
-    }
-    if (lowerName.includes('tiktok')) {
-      return <Music className="w-6 h-6 text-black" />;
-    }
-    return <Facebook className="w-6 h-6 text-gray-600" />;
+    return getChannelLogo(channelName, "w-6 h-6");
   };
 
   // Get display name for channel

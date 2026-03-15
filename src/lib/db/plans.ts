@@ -478,6 +478,39 @@ export interface MediaPlanBuilderData {
   commission: number;
 }
 
+// Helper to normalise channel names into the same format used by action_points.channel_type
+// e.g. "meta ads" -> "Meta Ads"
+function normalizeChannelType(name: string | null | undefined): string | null {
+  if (!name || typeof name !== 'string') return null;
+  const trimmed = name.trim();
+  if (!trimmed) return null;
+  return trimmed
+    .toLowerCase()
+    .split(' ')
+    .filter(Boolean)
+    .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
+function extractChannelTypesFromChannels(rawChannels: any[] | null | undefined): Set<string> {
+  const types = new Set<string>();
+  if (!rawChannels || !Array.isArray(rawChannels)) return types;
+
+  for (const ch of rawChannels as any[]) {
+    const raw =
+      ch?.channelName ??
+      ch?.name ??
+      ch?.platform ??
+      null;
+    const normalized = normalizeChannelType(raw);
+    if (normalized) {
+      types.add(normalized);
+    }
+  }
+
+  return types;
+}
+
 // Convert Date objects to ISO strings for JSON storage
 function serializeMediaPlanBuilderData(data: MediaPlanBuilderData): any {
   const serializedChannels = (data.channels || []).map(channel => ({
@@ -549,13 +582,39 @@ export async function saveClientMediaPlanBuilder(
   });
 
   try {
+    // 1) Fetch existing channel types for this client (before update)
+    const { data: existingRow, error: existingError } = await dbClient
+      .from('client_media_plan_builder')
+      .select('channels')
+      .eq('client_id', clientId)
+      .single();
+
+    if (existingError && existingError.code !== 'PGRST116') {
+      // PGRST116 = no row found, which is fine for first-time save
+      console.error('Error loading existing client_media_plan_builder row:', existingError);
+      throw existingError;
+    }
+
+    const previousChannelTypes = extractChannelTypesFromChannels(
+      existingRow?.channels as any[] | null | undefined
+    );
+    const newChannelTypes = extractChannelTypesFromChannels(data.channels);
+
+    // Channel types that are newly added in this save (were not present before)
+    const newlyAddedChannelTypes: string[] = [];
+    for (const type of newChannelTypes) {
+      if (!previousChannelTypes.has(type)) {
+        newlyAddedChannelTypes.push(type);
+      }
+    }
+
     const serializedData = serializeMediaPlanBuilderData(data);
     console.log('Serialized data:', { 
       channelsCount: serializedData.channels?.length || 0, 
       commission: serializedData.commission 
     });
 
-    // Use upsert to insert or update
+    // 2) Upsert the media plan builder snapshot
     const { data: result, error } = await dbClient
       .from('client_media_plan_builder')
       .upsert(
@@ -583,6 +642,62 @@ export async function saveClientMediaPlanBuilder(
     }
     
     console.log('Successfully saved to database');
+
+    // 3) If any channel types were newly added, reset their per-client action point completions
+    if (newlyAddedChannelTypes.length > 0) {
+      console.log('Newly added channel types detected; resetting action point completions for:', newlyAddedChannelTypes);
+
+      for (const channelType of newlyAddedChannelTypes) {
+        try {
+          // Find all action point IDs for this channel_type
+          const { data: actionPoints, error: apError } = await dbClient
+            .from('action_points')
+            .select('id')
+            .eq('channel_type', channelType);
+
+          if (apError) {
+            console.error('Error fetching action points for reset:', {
+              channelType,
+              error: apError,
+            });
+            continue;
+          }
+
+          const actionPointIds = (actionPoints || []).map((ap: any) => ap.id);
+          if (actionPointIds.length === 0) {
+            continue;
+          }
+
+          // Delete all per-client completions for this client + channel_type
+          const { error: deleteError } = await dbClient
+            .from('client_action_point_completions')
+            .delete()
+            .eq('client_id', clientId)
+            .in('action_point_id', actionPointIds);
+
+          if (deleteError) {
+            console.error('Error resetting client_action_point_completions for channel type:', {
+              clientId,
+              channelType,
+              error: deleteError,
+            });
+          } else {
+            console.log('Reset client_action_point_completions for channel type:', {
+              clientId,
+              channelType,
+              resetCount: actionPointIds.length,
+            });
+          }
+        } catch (resetError: any) {
+          console.error('Unexpected error while resetting action point completions:', {
+            clientId,
+            channelType,
+            error: resetError,
+          });
+        }
+      }
+    }
+
     return result;
   } catch (error: any) {
     console.error('Error in saveClientMediaPlanBuilder:', error);
