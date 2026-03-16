@@ -247,7 +247,7 @@ export async function calculateClientHealth(
       clientStatus = 'red';
       reasons.push(`${overdueIncomplete} overdue action points`);
     } else if (overdueIncomplete === 1) {
-      if (clientStatus !== 'red') clientStatus = 'amber';
+      clientStatus = 'amber';
       reasons.push('1 overdue action point');
     }
 
@@ -347,6 +347,8 @@ export async function calculateClientHealth(
       next_critical_date: nextCriticalDate,
       next_critical_task: nextCriticalTask,
       last_calculated_at: new Date().toISOString(),
+      mtd_actual_spend: null,
+      mtd_actual_spend_updated_at: null,
     };
 
     const { data: upserted, error: upsertError } = await supabase

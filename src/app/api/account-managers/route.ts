@@ -4,6 +4,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import type { Database } from '@/types/database';
 
 export interface AccountManager {
   id: string;
@@ -66,7 +67,7 @@ export async function POST(request: NextRequest) {
         name: name.trim(),
         email: email && typeof email === 'string' ? email.trim() || null : null,
         updated_at: new Date().toISOString(),
-      })
+      } as any)
       .select()
       .single();
 

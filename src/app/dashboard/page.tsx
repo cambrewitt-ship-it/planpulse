@@ -135,7 +135,7 @@ export default function ClientsPage() {
       <div style={{ minHeight: '100vh', background: '#F5F3EF', display: 'flex', alignItems: 'center', justifyContent: 'center', ...pageFont }}>
         <div style={{ textAlign: 'center' }}>
           <p style={{ color: '#A0442A', marginBottom: 16 }}>{error}</p>
-          <Button onClick={fetchData}>Try Again</Button>
+          <Button onClick={() => fetchData()}>Try Again</Button>
         </div>
       </div>
     );

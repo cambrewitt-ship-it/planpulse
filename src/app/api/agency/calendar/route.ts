@@ -21,7 +21,7 @@ export interface CalendarEvent {
   clientName: string;
   channelName: string;
   label: string;
-  category?: 'SET UP' | 'HEALTH CHECK'; // for action-point events
+  category?: 'SET UP' | 'HEALTH CHECK' | 'ONGOING'; // for action-point events
 }
 
 /**

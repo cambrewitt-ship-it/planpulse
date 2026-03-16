@@ -58,7 +58,7 @@ export default function PlanEditForm({ plan, onClose, onSave, onDelete }: PlanEd
   const [clients, setClients] = useState<Client[]>([]);
   const [selectedClient, setSelectedClient] = useState<string>(plan.clients.id);
   const [planName, setPlanName] = useState(plan.name);
-  const [planStatus, setPlanStatus] = useState(plan.status);
+  const [planStatus, setPlanStatus] = useState<'draft' | 'active' | 'completed'>(plan.status as 'draft' | 'active' | 'completed');
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -257,7 +257,7 @@ export default function PlanEditForm({ plan, onClose, onSave, onDelete }: PlanEd
                   </div>
                   <div className="grid gap-2">
                     <Label htmlFor="plan-status">Status</Label>
-                    <Select value={planStatus} onValueChange={setPlanStatus}>
+                    <Select value={planStatus} onValueChange={(v) => setPlanStatus(v as 'draft' | 'active' | 'completed')}>
                       <SelectTrigger className="w-40">
                         <SelectValue placeholder="Select status" />
                       </SelectTrigger>

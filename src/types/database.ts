@@ -17,6 +17,7 @@ export interface Database {
             id?: string;
             name?: string;
           };
+          Relationships: [];
         };
         account_managers: {
           Row: {
@@ -39,6 +40,7 @@ export interface Database {
             email?: string | null;
             updated_at?: string;
           };
+          Relationships: [];
         };
         media_plans: {
           Row: {
@@ -61,6 +63,16 @@ export interface Database {
             total_budget: number;
             status?: 'draft' | 'active' | 'completed';
           };
+          Update: {
+            id?: string;
+            client_id?: string;
+            name?: string;
+            start_date?: string;
+            end_date?: string;
+            total_budget?: number;
+            status?: 'draft' | 'active' | 'completed';
+          };
+          Relationships: [];
         };
         channels: {
           Row: {
@@ -72,6 +84,24 @@ export interface Database {
             type: 'paid' | 'organic' | 'both';
             created_at: string;
           };
+          Insert: {
+            id?: string;
+            client_id: string;
+            plan_id: string;
+            channel: string;
+            detail?: string;
+            type?: 'paid' | 'organic' | 'both';
+            created_at?: string;
+          };
+          Update: {
+            id?: string;
+            client_id?: string;
+            plan_id?: string;
+            channel?: string;
+            detail?: string;
+            type?: 'paid' | 'organic' | 'both';
+          };
+          Relationships: [];
         };
         weekly_plans: {
           Row: {
@@ -85,6 +115,27 @@ export interface Database {
             posts_actual: number;
             created_at: string;
           };
+          Insert: {
+            id?: string;
+            channel_id: string;
+            week_commencing: string;
+            week_number: number;
+            budget_planned?: number;
+            budget_actual?: number;
+            posts_planned?: number;
+            posts_actual?: number;
+          };
+          Update: {
+            id?: string;
+            channel_id?: string;
+            week_commencing?: string;
+            week_number?: number;
+            budget_planned?: number;
+            budget_actual?: number;
+            posts_planned?: number;
+            posts_actual?: number;
+          };
+          Relationships: [];
         };
         meta_ads_accounts: {
           Row: {
@@ -92,6 +143,7 @@ export interface Database {
             user_id: string;
             account_id: string;
             account_name: string | null;
+            currency: string | null;
             is_active: boolean;
             created_at: string;
             updated_at: string;
@@ -101,6 +153,7 @@ export interface Database {
             user_id: string;
             account_id: string;
             account_name?: string | null;
+            currency?: string | null;
             is_active?: boolean;
             created_at?: string;
             updated_at?: string;
@@ -110,9 +163,11 @@ export interface Database {
             user_id?: string;
             account_id?: string;
             account_name?: string | null;
+            currency?: string | null;
             is_active?: boolean;
             updated_at?: string;
           };
+          Relationships: [];
         };
         action_points: {
           Row: {
@@ -120,8 +175,10 @@ export interface Database {
             channel_type: string;
             text: string;
             completed: boolean;
-            category: 'SET UP' | 'ONGOING';
-            reset_frequency: 'weekly' | 'fortnightly' | 'monthly' | null;
+            category: 'SET UP' | 'HEALTH CHECK' | 'ONGOING';
+            frequency: string | null;
+            days_before_live_due: number | null;
+            due_date: string | null;
             created_at: string;
             updated_at: string;
           };
@@ -130,8 +187,10 @@ export interface Database {
             channel_type: string;
             text: string;
             completed?: boolean;
-            category: 'SET UP' | 'ONGOING';
-            reset_frequency?: 'weekly' | 'fortnightly' | 'monthly' | null;
+            category: 'SET UP' | 'HEALTH CHECK' | 'ONGOING';
+            frequency?: string | null;
+            days_before_live_due?: number | null;
+            due_date?: string | null;
             created_at?: string;
             updated_at?: string;
           };
@@ -140,10 +199,13 @@ export interface Database {
             channel_type?: string;
             text?: string;
             completed?: boolean;
-            category?: 'SET UP' | 'ONGOING';
-            reset_frequency?: 'weekly' | 'fortnightly' | 'monthly' | null;
+            category?: 'SET UP' | 'HEALTH CHECK' | 'ONGOING';
+            frequency?: string | null;
+            days_before_live_due?: number | null;
+            due_date?: string | null;
             updated_at?: string;
           };
+          Relationships: [];
         };
         client_health_status: {
           Row: {
@@ -196,6 +258,7 @@ export interface Database {
             mtd_actual_spend?: number | null;
             mtd_actual_spend_updated_at?: string | null;
           };
+          Relationships: [];
         };
         client_tasks: {
           Row: {
@@ -242,6 +305,7 @@ export interface Database {
             completed?: boolean;
             assigned_to?: string | null;
           };
+          Relationships: [];
         };
         media_plan_funnels: {
           Row: {
@@ -249,7 +313,7 @@ export interface Database {
             client_id: string | null;
             channel_ids: string[];
             name: string;
-            config: Record<string, any>;
+            config: Record<string, unknown>;
             created_at: string;
             updated_at: string;
           };
@@ -258,7 +322,7 @@ export interface Database {
             client_id?: string | null;
             channel_ids?: string[];
             name: string;
-            config: Record<string, any>;
+            config: Record<string, unknown>;
             created_at?: string;
             updated_at?: string;
           };
@@ -267,9 +331,10 @@ export interface Database {
             client_id?: string | null;
             channel_ids?: string[];
             name?: string;
-            config?: Record<string, any>;
+            config?: Record<string, unknown>;
             updated_at?: string;
           };
+          Relationships: [];
         };
         ad_performance_metrics: {
           Row: {
@@ -343,6 +408,7 @@ export interface Database {
             frequency?: number | null;
             updated_at?: string;
           };
+          Relationships: [];
         };
         organic_social_actuals: {
           Row: {
@@ -380,6 +446,7 @@ export interface Database {
             notes?: string | null;
             updated_at?: string;
           };
+          Relationships: [];
         };
         edm_actuals: {
           Row: {
@@ -408,8 +475,286 @@ export interface Database {
             subject?: string | null;
             notes?: string | null;
           };
+          Relationships: [];
+        };
+        ad_platform_connections: {
+          Row: {
+            id: string;
+            user_id: string;
+            client_id: string | null;
+            platform: string;
+            connection_id: string;
+            connection_status: string;
+            created_at: string;
+            updated_at: string;
+          };
+          Insert: {
+            id?: string;
+            user_id: string;
+            client_id?: string | null;
+            platform: string;
+            connection_id: string;
+            connection_status?: string;
+            created_at?: string;
+            updated_at?: string;
+          };
+          Update: {
+            id?: string;
+            user_id?: string;
+            client_id?: string | null;
+            platform?: string;
+            connection_id?: string;
+            connection_status?: string;
+            updated_at?: string;
+          };
+          Relationships: [];
+        };
+        google_ads_accounts: {
+          Row: {
+            id: string;
+            user_id: string;
+            connection_id: string;
+            customer_id: string;
+            account_name: string | null;
+            is_active: boolean;
+            created_at: string;
+            updated_at: string;
+          };
+          Insert: {
+            id?: string;
+            user_id: string;
+            connection_id: string;
+            customer_id: string;
+            account_name?: string | null;
+            is_active?: boolean;
+            created_at?: string;
+            updated_at?: string;
+          };
+          Update: {
+            id?: string;
+            user_id?: string;
+            connection_id?: string;
+            customer_id?: string;
+            account_name?: string | null;
+            is_active?: boolean;
+            updated_at?: string;
+          };
+          Relationships: [];
+        };
+        google_analytics_accounts: {
+          Row: {
+            id: string;
+            user_id: string;
+            connection_id: string | null;
+            property_id: string;
+            property_name: string | null;
+            account_id: string | null;
+            account_name: string | null;
+            is_active: boolean;
+            created_at: string;
+            updated_at: string;
+          };
+          Insert: {
+            id?: string;
+            user_id: string;
+            connection_id?: string | null;
+            property_id: string;
+            property_name?: string | null;
+            account_id?: string | null;
+            account_name?: string | null;
+            is_active?: boolean;
+            created_at?: string;
+            updated_at?: string;
+          };
+          Update: {
+            id?: string;
+            user_id?: string;
+            connection_id?: string | null;
+            property_id?: string;
+            property_name?: string | null;
+            account_id?: string | null;
+            account_name?: string | null;
+            is_active?: boolean;
+            updated_at?: string;
+          };
+          Relationships: [];
+        };
+        google_analytics_metrics: {
+          Row: {
+            id: string;
+            user_id: string;
+            client_id: string | null;
+            property_id: string;
+            date: string;
+            metric_name: string;
+            metric_value: number;
+            users_count: number | null;
+            created_at: string;
+            updated_at: string;
+          };
+          Insert: {
+            id?: string;
+            user_id: string;
+            client_id?: string | null;
+            property_id: string;
+            date: string;
+            metric_name: string;
+            metric_value: number;
+            users_count?: number | null;
+            created_at?: string;
+            updated_at?: string;
+          };
+          Update: {
+            id?: string;
+            user_id?: string;
+            client_id?: string | null;
+            property_id?: string;
+            date?: string;
+            metric_name?: string;
+            metric_value?: number;
+            users_count?: number | null;
+            updated_at?: string;
+          };
+          Relationships: [];
+        };
+        client_action_point_completions: {
+          Row: {
+            id: string;
+            client_id: string;
+            action_point_id: string;
+            completed: boolean;
+            completed_at: string | null;
+            assigned_to: string | null;
+            created_at: string;
+            updated_at: string;
+          };
+          Insert: {
+            id?: string;
+            client_id: string;
+            action_point_id: string;
+            completed?: boolean;
+            completed_at?: string | null;
+            assigned_to?: string | null;
+            created_at?: string;
+            updated_at?: string;
+          };
+          Update: {
+            id?: string;
+            client_id?: string;
+            action_point_id?: string;
+            completed?: boolean;
+            completed_at?: string | null;
+            assigned_to?: string | null;
+            updated_at?: string;
+          };
+          Relationships: [];
+        };
+        client_media_plan_builder: {
+          Row: {
+            id: string;
+            client_id: string;
+            channels: unknown;
+            commission: number | null;
+            created_at: string;
+            updated_at: string;
+          };
+          Insert: {
+            id?: string;
+            client_id: string;
+            channels?: unknown;
+            commission?: number | null;
+            created_at?: string;
+            updated_at?: string;
+          };
+          Update: {
+            id?: string;
+            client_id?: string;
+            channels?: unknown;
+            commission?: number | null;
+            updated_at?: string;
+          };
+          Relationships: [];
+        };
+        media_channel_library: {
+          Row: {
+            id: string;
+            title: string;
+            notes: string | null;
+            channel_type: string;
+            created_at: string;
+            updated_at: string | null;
+          };
+          Insert: {
+            id?: string;
+            title: string;
+            notes?: string | null;
+            channel_type: string;
+            created_at?: string;
+            updated_at?: string | null;
+          };
+          Update: {
+            id?: string;
+            title?: string;
+            notes?: string | null;
+            channel_type?: string;
+            updated_at?: string | null;
+          };
+          Relationships: [];
+        };
+        media_channel_specs: {
+          Row: {
+            id: string;
+            media_channel_library_id: string;
+            spec_text: string;
+            created_at: string;
+          };
+          Insert: {
+            id?: string;
+            media_channel_library_id: string;
+            spec_text: string;
+            created_at?: string;
+          };
+          Update: {
+            id?: string;
+            media_channel_library_id?: string;
+            spec_text?: string;
+          };
+          Relationships: [];
+        };
+        integrations: {
+          Row: {
+            id: string;
+            client_id: string;
+            provider: string;
+            connection_id: string | null;
+            last_sync: string | null;
+            created_at: string;
+            updated_at: string;
+          };
+          Insert: {
+            id?: string;
+            client_id: string;
+            provider: string;
+            connection_id?: string | null;
+            last_sync?: string | null;
+            created_at?: string;
+            updated_at?: string;
+          };
+          Update: {
+            id?: string;
+            client_id?: string;
+            provider?: string;
+            connection_id?: string | null;
+            last_sync?: string | null;
+            updated_at?: string;
+          };
+          Relationships: [];
         };
       };
+      Views: { [_ in never]: never };
+      Functions: { [_ in never]: never };
+      Enums: { [_ in never]: never };
+      CompositeTypes: { [_ in never]: never };
     };
   }
 

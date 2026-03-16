@@ -58,7 +58,7 @@ export async function GET(request: NextRequest) {
     console.log('[Channels API] Media plan builder query result:', {
       found: !!mediaPlanBuilder,
       hasChannels: !!mediaPlanBuilder?.channels,
-      channelsCount: mediaPlanBuilder?.channels?.length || 0,
+      channelsCount: (mediaPlanBuilder?.channels as unknown[])?.length || 0,
       error: fetchError
     });
 

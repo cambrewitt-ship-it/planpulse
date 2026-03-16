@@ -8,7 +8,7 @@ import { createClient } from '@/lib/supabase/server';
 export interface AgencyActionPoint {
   id: string;
   text: string;
-  category: 'SET UP' | 'HEALTH CHECK';
+  category: 'SET UP' | 'HEALTH CHECK' | 'ONGOING';
   channel_type: string;
   due_date: string | null; // Calculated based on channel start date
   frequency?: string | null;

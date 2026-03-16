@@ -255,7 +255,7 @@ function MetricPill({
           ? 'ring-2 ring-offset-1'
           : 'hover:bg-gray-50'
       }`}
-      style={isActive ? { ringColor: cfg.color, backgroundColor: `${cfg.color}10` } : undefined}
+      style={isActive ? { backgroundColor: `${cfg.color}10` } : undefined}
       title={`View ${cfg.label} over time`}
     >
       <span

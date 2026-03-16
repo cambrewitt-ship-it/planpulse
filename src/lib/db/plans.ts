@@ -1,6 +1,7 @@
 // src/lib/db/plans.ts
 import { supabase } from '@/lib/supabase/client';
 import { MediaChannel } from '@/types/media-plan';
+import { MediaPlan, Channel } from '@/types/database';
 import { addWeeks, format, parseISO } from 'date-fns';
 
 export async function getClients() {
@@ -203,7 +204,8 @@ export async function getMediaPlans(clientId?: string) {
 
   const { data, error } = await query;
   if (error) throw error;
-  return data;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return data as unknown as (MediaPlan & { clients: { name: string } | null; channels: Channel[] })[] | null;
 }
 
 export async function getPlanById(planId: string) {
@@ -258,7 +260,7 @@ export async function updateMediaPlan(
     start_date?: string;
     end_date?: string;
     total_budget?: number;
-    status?: string;
+    status?: 'draft' | 'active' | 'completed';
   }
 ) {
   const { data, error } = await supabase
@@ -280,7 +282,7 @@ export async function updateMediaPlanWithChannels(
     start_date?: string;
     end_date?: string;
     total_budget?: number;
-    status?: string;
+    status?: 'draft' | 'active' | 'completed';
   },
   channels: MediaChannel[]
 ) {

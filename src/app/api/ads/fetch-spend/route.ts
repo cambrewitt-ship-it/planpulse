@@ -113,7 +113,7 @@ export async function POST(request: NextRequest) {
 
     // If no connection found and clientId was provided, for Google Ads and Meta Ads,
     // fall back to checking for any connection (since accounts are user-level)
-    let connection = connections?.[0];
+    let connection: any = connections?.[0];
     if (!connection && clientId && (platform === 'google-ads' || platform === 'meta-ads')) {
       console.log(`No connection found for client ${clientId}, checking for any ${platform} connection...`);
       const { data: anyConnections, error: anyConnectionError } = await supabase
@@ -126,7 +126,7 @@ export async function POST(request: NextRequest) {
         .limit(1);
       
       if (!anyConnectionError && anyConnections && anyConnections.length > 0) {
-        connection = anyConnections[0];
+        connection = anyConnections[0] as any;
         console.log(`Found connection for different client: ${connection.client_id}, using it for client ${clientId}`);
       }
     }
@@ -167,11 +167,13 @@ export async function POST(request: NextRequest) {
         console.log('=== GOOGLE ADS DATA FETCH ===');
         
         // Step 1: Get Google Ads accounts from database
-        const { data: googleAdsAccounts, error: accountsError } = await supabase
+        const { data: googleAdsAccountsData, error: accountsError } = await supabase
           .from('google_ads_accounts')
           .select('*')
           .eq('user_id', user.id)
           .eq('is_active', true);
+
+        const googleAdsAccounts = (googleAdsAccountsData || []) as any[];
 
         if (accountsError || !googleAdsAccounts || googleAdsAccounts.length === 0) {
           return Response.json({
@@ -181,7 +183,7 @@ export async function POST(request: NextRequest) {
         }
 
         console.log(`Found ${googleAdsAccounts.length} Google Ads account(s)`);
-        googleAdsAccounts.forEach((account, idx) => {
+        googleAdsAccounts.forEach((account: any, idx) => {
           console.log(`  Account ${idx + 1}:`, {
             customerId: account.customer_id,
             accountName: account.account_name,

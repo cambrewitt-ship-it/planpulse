@@ -92,37 +92,25 @@ export async function POST(request: NextRequest) {
 
     // Get GA4 properties to associate data with property_ids
     // First try with client_id, then fallback to just user_id
-    let propertiesQuery = supabase
-      .from('google_analytics_accounts')
-      .select('property_id')
-      .eq('user_id', userId)
-      .eq('is_active', true);
-
-    if (propertyId) {
-      propertiesQuery = propertiesQuery.eq('property_id', propertyId);
-    }
-
-    if (clientId) {
-      propertiesQuery = propertiesQuery.eq('client_id', clientId);
-    }
-
-    let { data: gaProperties } = await propertiesQuery;
-
-    // If no properties found with client_id filter, try without it
-    if ((!gaProperties || gaProperties.length === 0) && clientId) {
-      console.log('⚠️  No GA4 properties found with client_id filter, trying without client_id...');
-
-      let fallbackQuery = supabase
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const buildPropertiesQuery = (withClientId: boolean) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let q: any = supabase
         .from('google_analytics_accounts')
         .select('property_id')
         .eq('user_id', userId)
         .eq('is_active', true);
+      if (propertyId) q = q.eq('property_id', propertyId);
+      if (withClientId && clientId) q = q.eq('client_id', clientId);
+      return q;
+    };
 
-      if (propertyId) {
-        fallbackQuery = fallbackQuery.eq('property_id', propertyId);
-      }
+    let { data: gaProperties } = await buildPropertiesQuery(true);
 
-      const { data: fallbackProperties } = await fallbackQuery;
+    // If no properties found with client_id filter, try without it
+    if ((!gaProperties || gaProperties.length === 0) && clientId) {
+      console.log('⚠️  No GA4 properties found with client_id filter, trying without client_id...');
+      const { data: fallbackProperties } = await buildPropertiesQuery(false);
       gaProperties = fallbackProperties;
     }
 

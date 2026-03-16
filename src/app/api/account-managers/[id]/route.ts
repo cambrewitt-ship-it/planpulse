@@ -22,14 +22,16 @@ export async function DELETE(
     }
 
     // First, get the account manager name to check clients
-    const { data: accountManager } = await supabase
+    const { data: amData } = await supabase
       .from('account_managers')
       .select('name')
       .eq('id', id)
-      .single<{ name: string }>();
+      .single();
+    const accountManager = amData as { name: string } | null;
 
     if (accountManager) {
-      const { data: assignedClients } = await supabase
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: assignedClients } = await (supabase as any)
         .from('clients')
         .select('id')
         .eq('account_manager', accountManager.name)
