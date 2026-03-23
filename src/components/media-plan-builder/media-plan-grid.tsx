@@ -400,8 +400,8 @@ const getMonthKey = (date: Date): string => {
 
   // Update a channel
   const handleUpdateChannel = (channelId: string, updates: Partial<MediaPlanChannel>) => {
-    setChannels((prev) =>
-      prev.map((channel) =>
+    setChannels(
+      channels.map((channel) =>
         channel.id === channelId ? { ...channel, ...updates } : channel
       )
     );
