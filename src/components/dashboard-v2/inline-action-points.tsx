@@ -468,7 +468,7 @@ export default function InlineActionPoints({
           return (
             <div
               key={ap.id}
-              className="flex items-start gap-2 group hover:bg-gray-50 rounded px-1.5 py-1 transition-colors"
+              className="flex items-start gap-2 group rounded-md px-2 py-1.5 transition-colors border border-gray-100 bg-gray-50 hover:border-gray-200 hover:bg-white"
             >
               <button
                 type="button"

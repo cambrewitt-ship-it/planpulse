@@ -29,6 +29,7 @@ import { fetchAnalyticsData, fetchSpendData, calculateCostPerMetric, SpendDataPo
 import { subDays, addDays, format, differenceInDays, parseISO, startOfMonth, endOfMonth, startOfYear } from 'date-fns';
 import { FunnelStage, MediaPlanFunnel, FunnelConfig } from '@/lib/types/funnel';
 import { calculateHealthScore, type HealthScoreResult } from '@/lib/utils/health-score';
+import { calculatePerformanceHealth, type PerformanceHealthResult } from '@/lib/calculate-performance-health';
 import {
   getPlatformForChannel,
   generateChannelChartData,
@@ -38,18 +39,20 @@ import {
 import OrganicSocialCard from '@/components/dashboard-v2/organic-social-card';
 import EdmCard from '@/components/dashboard-v2/edm-card';
 import OohCard from '@/components/dashboard-v2/ooh-card';
-import type { OrganicSocialActual, EdmActual } from '@/types/database';
+import type { OrganicSocialActual, EdmActual, ChannelBenchmark, MetricPreset, ClientChannelPreset } from '@/types/database';
 import { startOfWeek } from 'date-fns';
 import { CACChart } from '@/components/ui/cac-chart';
 import { DateRangePicker } from '@/components/ui/date-range-picker';
 import { FunnelChart } from '@/components/funnel-chart';
 import { FunnelBuilderModal } from '@/components/funnel-builder-modal';
 import TodoSection from '@/components/TodoSection';
+import AdPlatformConnector from '@/components/AdPlatformConnector';
 import HeroHealthSection from '@/components/dashboard-v2/hero-health-section';
-import { ClientKanbanCard } from '@/components/dashboard-v2/client-kanban-card';
-import ActionItemsSection, { type ActionItem } from '@/components/dashboard-v2/action-items-section';
+import { NotesChecklist } from '@/components/agency/NotesChecklist';
+import ClientActionPointsList from '@/components/dashboard-v2/client-action-points-list';
 import ChannelPerformanceCard from '@/components/dashboard-v2/channel-performance-card';
-import { InvoiceModal } from '@/components/dashboard-v2/invoice-modal';
+import dynamic from 'next/dynamic';
+const InvoiceModal = dynamic(() => import('@/components/dashboard-v2/invoice-modal').then(m => m.InvoiceModal), { ssr: false });
 import type { GanttClient, GanttChannel } from '@/components/agency/GanttCalendar';
 
 interface Client {
@@ -138,6 +141,7 @@ export default function DashboardV2() {
   const [isSavingClientName, setIsSavingClientName] = useState(false);
   const [isEditingClientNotes, setIsEditingClientNotes] = useState(false);
   const [editingClientNotes, setEditingClientNotes] = useState('');
+  const [notesCollapsed, setNotesCollapsed] = useState(false);
   const [isSavingClientNotes, setIsSavingClientNotes] = useState(false);
   const [isSavingAccountManager, setIsSavingAccountManager] = useState(false);
   const [accountManagers, setAccountManagers] = useState<Array<{ id: string; name: string; email: string | null }>>([]);
@@ -157,7 +161,7 @@ export default function DashboardV2() {
   const [loadingEventNames, setLoadingEventNames] = useState(false);
   const [selectedChannels, setSelectedChannels] = useState<Set<string>>(new Set());
   const [availableChannels, setAvailableChannels] = useState<Array<{ id: string; name: string }>>([]);
-  const [viewMode, setViewMode] = useState<'overview' | 'funnels' | 'media-plan'>('overview');
+  const [viewMode, setViewMode] = useState<'overview' | 'funnels' | 'media-plan' | 'admin'>('overview');
   const [ganttSelectedDay, setGanttSelectedDay] = useState<number | null>(null);
   const [selectedMonth, setSelectedMonth] = useState<Date>(() => {
     if (typeof window === 'undefined') return new Date();
@@ -181,6 +185,7 @@ export default function DashboardV2() {
   const [allActionPoints, setAllActionPoints] = useState<any[]>([]);
   const [actionPointsRefetchTrigger, setActionPointsRefetchTrigger] = useState(0);
   const [healthScore, setHealthScore] = useState<HealthScoreResult | null>(null);
+  const [perfHealthResult, setPerfHealthResult] = useState<PerformanceHealthResult | null>(null);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
   // Spend data scoped to the visible analytics period — fetched independently for channel cards.
   const [channelMonthSpendData, setChannelMonthSpendData] = useState<SpendDataPoint[]>([]);
@@ -188,6 +193,20 @@ export default function DashboardV2() {
   const [organicSocialActuals, setOrganicSocialActuals] = useState<OrganicSocialActual[]>([]);
   const [edmActuals, setEdmActuals] = useState<EdmActual[]>([]);
   const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
+  const [healthWeights, setHealthWeights] = useState<{ pacing: number; actions: number; perf: number }>(() => {
+    if (typeof window === 'undefined') return { pacing: 44, actions: 28, perf: 28 };
+    try {
+      const saved = localStorage.getItem(`health-weights-${params.id}`);
+      return saved ? JSON.parse(saved) : { pacing: 44, actions: 28, perf: 28 };
+    } catch { return { pacing: 44, actions: 28, perf: 28 }; }
+  });
+  const [invoiceHistory, setInvoiceHistory] = useState<Array<{ id: string; dateRange: { startDate: string; endDate: string }; generatedAt: string }>>(() => {
+    if (typeof window === 'undefined') return [];
+    try {
+      const saved = localStorage.getItem(`invoice-history-${params.id}`);
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
   const [analyticsDateRange, setAnalyticsDateRange] = useState(() => {
     const today = new Date();
     return {
@@ -195,6 +214,9 @@ export default function DashboardV2() {
       endDate: format(today, 'yyyy-MM-dd'),
     };
   });
+  const [allBenchmarks, setAllBenchmarks] = useState<ChannelBenchmark[]>([]);
+  const [allPresets, setAllPresets] = useState<MetricPreset[]>([]);
+  const [clientChannelPresets, setClientChannelPresets] = useState<ClientChannelPreset[]>([]);
   // Derived from channelMonthSpendData — sum of spend across all platforms for
   // the currently selected analytics period.
   const totalActualSpend = useMemo(() => {
@@ -224,6 +246,45 @@ export default function DashboardV2() {
     };
     fetchAccountManagers();
   }, []);
+
+  // Fetch benchmarks, presets, and client channel presets for benchmark comparison
+  useEffect(() => {
+    const fetchBenchmarkData = async () => {
+      try {
+        const [benchmarksRes, presetsRes] = await Promise.all([
+          fetch('/api/benchmarks'),
+          fetch('/api/benchmarks/presets'),
+        ]);
+        if (benchmarksRes.ok) {
+          const { data } = await benchmarksRes.json();
+          setAllBenchmarks(data ?? []);
+        }
+        if (presetsRes.ok) {
+          const { data } = await presetsRes.json();
+          setAllPresets(data ?? []);
+        }
+      } catch (err) {
+        console.error('Error fetching benchmark data:', err);
+      }
+    };
+    fetchBenchmarkData();
+  }, []);
+
+  useEffect(() => {
+    if (!clientId) return;
+    const fetchClientPresets = async () => {
+      try {
+        const res = await fetch(`/api/clients/${clientId}/channel-presets`);
+        if (res.ok) {
+          const { data } = await res.json();
+          setClientChannelPresets(data ?? []);
+        }
+      } catch (err) {
+        console.error('Error fetching client channel presets:', err);
+      }
+    };
+    fetchClientPresets();
+  }, [clientId]);
 
   // Mirror the computed MTD actual spend to the DB so the agency dashboard can
   // show the exact same number without recalculating.
@@ -372,11 +433,13 @@ export default function DashboardV2() {
 
   useEffect(() => {
     if (clientId) {
-      loadData();
-      loadMediaPlanBuilderData();
-      loadAnalyticsData(selectedMetric, selectedMetric === 'eventCount' ? selectedEventName : null);
-      loadFunnels();
-      loadNonDigitalActuals();
+      Promise.all([
+        loadData(),
+        loadMediaPlanBuilderData(),
+        loadAnalyticsData(selectedMetric, selectedMetric === 'eventCount' ? selectedEventName : null),
+        loadFunnels(),
+        loadNonDigitalActuals(),
+      ]);
     }
   }, [clientId]);
 
@@ -851,9 +914,26 @@ export default function DashboardV2() {
     }
   }, [clientId, client]);
 
+  // ── Adjusted health score with custom weights ────────────────────────────
+  const adjustedHealthScore = useMemo(() => {
+    if (!healthScore) return null;
+    const total = healthWeights.pacing + healthWeights.actions + healthWeights.perf;
+    const wp = total > 0 ? healthWeights.pacing / total : 4 / 9;
+    const wa = total > 0 ? healthWeights.actions / total : 2.5 / 9;
+    const wf = total > 0 ? healthWeights.perf / total : 2.5 / 9;
+    const overallScore = Math.round(
+      healthScore.breakdown.budgetPacing.score * wp +
+      healthScore.breakdown.actionCompletion.score * wa +
+      healthScore.breakdown.performance.score * wf
+    );
+    const status = overallScore >= 80 ? 'healthy' : overallScore >= 60 ? 'caution' : 'at-risk';
+    const statusColor = overallScore >= 80 ? 'green' : overallScore >= 60 ? 'amber' : 'red';
+    return { ...healthScore, overallScore, status: status as 'healthy' | 'caution' | 'at-risk', statusColor: statusColor as 'green' | 'amber' | 'red' };
+  }, [healthScore, healthWeights]);
+
   // ── Props for HeroHealthSection ─────────────────────────────────────────
   const heroProps = useMemo(() => {
-    if (!client || !healthScore || !campaignDates) return null;
+    if (!client || !adjustedHealthScore || !campaignDates) return null;
 
     const pacingRatio = plannedBudget > 0
       ? totalActualSpend / plannedBudget
@@ -865,18 +945,34 @@ export default function DashboardV2() {
       status: pacingPct > 110 ? 'ahead' : pacingPct < 90 ? 'behind' : 'on-track',
     };
 
-    const perfScore = healthScore.breakdown.performance.score;
-    const performanceStatus = {
-      label: perfScore >= 85 ? 'Excellent' : perfScore >= 70 ? 'Good' : perfScore >= 50 ? 'Needs Attention' : 'Poor',
-      ctr: 0, // aggregated CTR not available from current state; will be wired when perf data integrated
-      status: (perfScore >= 85 ? 'excellent' : perfScore >= 70 ? 'good' : 'needs-attention') as 'excellent' | 'good' | 'needs-attention',
-    };
+    const performanceStatus = perfHealthResult && perfHealthResult.total > 0
+      ? {
+          label: perfHealthResult.status === 'good' ? 'Good'
+               : perfHealthResult.status === 'caution' ? 'Caution'
+               : 'At Risk',
+          ctr: 0,
+          status: (perfHealthResult.status === 'good' ? 'good' : 'needs-attention') as 'excellent' | 'good' | 'needs-attention',
+        }
+      : {
+          label: 'No Data',
+          ctr: 0,
+          status: 'needs-attention' as 'excellent' | 'good' | 'needs-attention',
+        };
 
     // We have totals from actionPointsStats; split outstanding evenly into
     // urgent / this-week as a placeholder until individual items are surfaced.
     const outstanding = Math.max(0, actionPointsStats.totalAll - actionPointsStats.completedAll);
     const urgent   = Math.ceil(outstanding * 0.3);
     const thisWeek = outstanding - urgent;
+
+    const completionPercentage = Math.max(
+      0,
+      Math.min(100, (campaignDates.daysElapsed / campaignDates.totalDays) * 100),
+    );
+    const now = Date.now();
+    const daysUntilStart = campaignDates.start.getTime() > now
+      ? Math.ceil((campaignDates.start.getTime() - now) / 86400000)
+      : 0;
 
     return {
       client: {
@@ -886,14 +982,12 @@ export default function DashboardV2() {
         logo_url: client.logo_url ?? undefined,
         account_manager: client.account_manager ?? undefined,
       },
-      healthScore,
+      healthScore: adjustedHealthScore,
       currentSpend: totalActualSpend,
       totalBudget: plannedBudget,
       daysRemaining: campaignDates.daysRemaining,
-      completionPercentage: Math.max(
-        0,
-        Math.min(100, (campaignDates.daysElapsed / campaignDates.totalDays) * 100),
-      ),
+      completionPercentage,
+      daysUntilStart,
       actionItemsCount: {
         urgent,
         thisWeek,
@@ -911,10 +1005,9 @@ export default function DashboardV2() {
       },
       onAccountManagerChange: handleAccountManagerChange,
       isSavingAccountManager,
-      onInvoiceClick: () => setIsInvoiceModalOpen(true),
       accountManagers,
     };
-  }, [client, clientId, healthScore, campaignDates, totalActualSpend, plannedBudget, actionPointsStats, ganttClients, ganttChannels, selectedMonth, ganttSelectedDay, setGanttSelectedDay, handleAccountManagerChange, isSavingAccountManager, accountManagers]);
+  }, [client, clientId, adjustedHealthScore, campaignDates, totalActualSpend, plannedBudget, actionPointsStats, ganttClients, ganttChannels, selectedMonth, ganttSelectedDay, setGanttSelectedDay, handleAccountManagerChange, isSavingAccountManager, accountManagers, perfHealthResult]);
 
   // Calculate current week commencing (Monday of current week)
   const currentWeekCommencing = useMemo(() => {
@@ -1134,14 +1227,15 @@ export default function DashboardV2() {
       const daysElapsed = Math.max(0, Math.ceil((now.getTime() - campaignStart.getTime()) / (1000 * 60 * 60 * 24)));
       const plannedSpend = Math.min(totalBudget, totalBudget * (daysElapsed / totalDays));
 
-      const channelPerformanceScores = mediaPlanBuilderChannels.map(channel => ({
-        channelId: channel.channelName,
-        score: 75,
-        budget: channel.flights.reduce(
-          (sum, flight) => sum + Object.values(flight.monthlySpend).reduce((a, b) => a + b, 0),
-          0
-        ),
-      }));
+      // Compute benchmark-based performance score
+      const paidCards = (channelCards as Array<{ type: string; name?: string; platform?: string; metrics?: { impressions: number; clicks: number; ctr: number; cpc: number; conversions: number } }>)
+        .filter(ch => ch.type === 'paid_digital' && ch.name && ch.metrics)
+        .map(ch => ({ name: ch.name!, platform: ch.platform ?? '', metrics: ch.metrics! }));
+
+      const perfHealth = calculatePerformanceHealth(paidCards, allBenchmarks, allPresets, clientChannelPresets);
+      setPerfHealthResult(perfHealth);
+
+      const channelPerformanceScores = [{ channelId: 'benchmark-aggregate', score: perfHealth.score, budget: 1 }];
 
       const result = calculateHealthScore(
         totalActualSpend,
@@ -1154,13 +1248,18 @@ export default function DashboardV2() {
         channelPerformanceScores,
       );
 
+      // Override the performance details with benchmark met/total
+      result.breakdown.performance.details = perfHealth.total > 0
+        ? `${perfHealth.met} of ${perfHealth.total} benchmarks met`
+        : 'No benchmark data available';
+
       setHealthScore(result);
       setDashboardError(null);
     } catch (err) {
       console.error('Health score calculation failed:', err);
       setDashboardError('Health score could not be calculated. Other data is still available below.');
     }
-  }, [mediaPlanBuilderChannels, totalActualSpend, actionPointsStats]);
+  }, [mediaPlanBuilderChannels, totalActualSpend, actionPointsStats, channelCards, allBenchmarks, allPresets, clientChannelPresets]);
 
   // ── Action points data pipeline ─────────────────────────────────────────
   const handleActionPointsUpdate = useCallback((actionPoints: any[]) => {
@@ -1273,20 +1372,11 @@ export default function DashboardV2() {
     <div className="min-h-screen" style={{ background: '#F5F3EF', ...pageFont }}>
       {/* ── Top nav bar ── */}
       <header className="sticky top-0 z-10 px-6 py-3" style={{ background: '#FDFCF8', borderBottom: '0.5px solid #E8E4DC' }}>
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div>
-            <span className="text-xs font-medium px-2 py-0.5 rounded-full" style={{ color: '#4A6580', background: '#E8EDF2', border: '0.5px solid rgba(74,101,128,0.25)', borderRadius: 4 }}>
-              V2 Preview
-            </span>
-            <span className="ml-2 text-sm" style={{ color: '#8A8578' }}>{client?.name ?? 'Loading…'}</span>
-          </div>
-          <Link
-            href={`/clients/${clientId}/new-client-dashboard`}
-            className="text-sm font-medium"
-            style={{ color: '#4A6580' }}
-          >
-            ← Back to Current Dashboard
+        <div className="max-w-7xl mx-auto flex items-center gap-3">
+          <Link href="/agency-v2" className="flex items-center gap-1 text-xs font-medium px-2 py-1 rounded" style={{ color: '#8A8578', border: '0.5px solid #E8E4DC', background: 'transparent' }}>
+            ← Back
           </Link>
+          <span className="text-sm font-medium" style={{ color: '#1C1917' }}>{client?.name ?? 'Loading…'}</span>
         </div>
       </header>
 
@@ -1397,6 +1487,16 @@ export default function DashboardV2() {
                   >
                     Media Plan
                   </button>
+                  <button
+                    onClick={() => setViewMode('admin')}
+                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                      viewMode === 'admin'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    Admin
+                  </button>
                 </div>
                 {/* Right: Date Controls */}
                 <div className="flex items-center gap-4">
@@ -1426,13 +1526,65 @@ export default function DashboardV2() {
               </div>
             </div>
 
-            {/* ── Overview: Client Kanban + Channels ── */}
+            {/* ── Overview: Notes + Action Points + Channels ── */}
             {viewMode === 'overview' && (
               <>
-                <ClientKanbanCard
-                  clientId={clientId}
-                  onActionPointCompleted={handleActionPointsChange}
-                />
+                {/* Notes (left, collapsible) + Action Points list (right) */}
+                <div style={{ display: 'flex', gap: 16, height: 240 }}>
+                  {/* Notes panel */}
+                  <div style={{
+                    flexShrink: 0,
+                    width: notesCollapsed ? 48 : 280,
+                    transition: 'width 0.2s ease',
+                    position: 'relative',
+                    overflow: 'hidden',
+                  }}>
+                    {notesCollapsed ? (
+                      /* Collapsed pill */
+                      <div
+                        onClick={() => setNotesCollapsed(false)}
+                        style={{
+                          height: '100%',
+                          background: '#FFFBF0',
+                          border: '0.5px solid rgba(176,112,48,0.3)',
+                          borderRadius: 6,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 6,
+                        }}
+                        title="Expand notes"
+                      >
+                        <span style={{ fontSize: 9, color: '#B07030', textTransform: 'uppercase', letterSpacing: '0.1em', writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>Notes</span>
+                        <span style={{ fontSize: 14, color: '#B07030' }}>›</span>
+                      </div>
+                    ) : (
+                      <div style={{ height: '100%', position: 'relative' }}>
+                        <NotesChecklist activeClientId={clientId} />
+                        {/* Collapse toggle */}
+                        <button
+                          onClick={() => setNotesCollapsed(true)}
+                          title="Collapse notes"
+                          style={{
+                            position: 'absolute', top: 8, right: 8,
+                            background: 'transparent', border: 'none', cursor: 'pointer',
+                            color: '#B07030', fontSize: 14, lineHeight: 1, padding: 2,
+                          }}
+                        >‹</button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Action Points — fills remaining space */}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <ClientActionPointsList
+                      actionPoints={allActionPoints}
+                      onToggle={handleToggleActionPoint}
+                    />
+                  </div>
+                </div>
 
                 {channelCards.length > 0 ? (
                   <div className="bg-white rounded-xl border border-gray-200 p-6">
@@ -1495,6 +1647,15 @@ export default function DashboardV2() {
                             clientId={clientId}
                             channelStartDate={earliestStartDate}
                             refetchTrigger={actionPointsRefetchTrigger}
+                            benchmarks={allBenchmarks}
+                            presets={allPresets}
+                            clientChannelPresets={clientChannelPresets}
+                            onPresetSaved={(updated) => setClientChannelPresets(prev => {
+                              const idx2 = prev.findIndex(p => p.client_id === updated.client_id && p.channel_name === updated.channel_name);
+                              return idx2 >= 0
+                                ? prev.map((p, i) => i === idx2 ? updated : p)
+                                : [...prev, updated];
+                            })}
                           />
                         );
                       })}
@@ -1575,6 +1736,121 @@ export default function DashboardV2() {
               </div>
               </>
             )}
+
+            {/* ── Admin view ── */}
+            {viewMode === 'admin' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                {/* Ad Platform Connections */}
+                <div className="rounded-lg p-6" style={{ background: '#FDFCF8', border: '0.5px solid #E8E4DC', borderRadius: 6 }}>
+                  <AdPlatformConnector clientId={clientId} />
+                </div>
+
+                {/* Health Score Configuration */}
+                {healthScore && (
+                  <div style={{ background: '#FDFCF8', border: '0.5px solid #E8E4DC', borderRadius: 6, padding: '20px 24px' }}>
+                    <div style={{ marginBottom: 16 }}>
+                      <span style={{ fontSize: 13, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Health Score</span>
+                      <span style={{ fontSize: 11, color: '#B5B0A5', marginLeft: 8, fontFamily: "'DM Sans', system-ui, sans-serif" }}>Adjust component weightings — will be normalised to 100%</span>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      {([
+                        { key: 'pacing' as const, label: 'Budget Pacing', score: healthScore.breakdown.budgetPacing.score, details: healthScore.breakdown.budgetPacing.details },
+                        { key: 'actions' as const, label: 'Action Completion', score: healthScore.breakdown.actionCompletion.score, details: healthScore.breakdown.actionCompletion.details },
+                        { key: 'perf' as const, label: 'Performance', score: healthScore.breakdown.performance.score, details: healthScore.breakdown.performance.details },
+                      ]).map(({ key, label, score, details }) => {
+                        const s = score >= 80 ? '#4A7C59' : score >= 60 ? '#B07030' : '#A0442A';
+                        const bg = score >= 80 ? '#EAF0EB' : score >= 60 ? '#F5EDE0' : '#F5EDE9';
+                        return (
+                          <div key={key} style={{ padding: '12px 14px', borderRadius: 4, border: '0.5px solid #E8E4DC', background: '#FAFAF8' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                              <span style={{ flex: 1, fontSize: 13, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}>{label}</span>
+                              <span style={{ fontSize: 13, fontWeight: 700, color: s, background: bg, padding: '2px 8px', borderRadius: 4 }}>{score}</span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                <span style={{ fontSize: 11, color: '#8A8578', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Weight</span>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  max={100}
+                                  value={healthWeights[key]}
+                                  onChange={(e) => {
+                                    const v = Math.max(0, Math.min(100, Number(e.target.value) || 0));
+                                    const updated = { ...healthWeights, [key]: v };
+                                    setHealthWeights(updated);
+                                    try { localStorage.setItem(`health-weights-${clientId}`, JSON.stringify(updated)); } catch {}
+                                  }}
+                                  style={{
+                                    width: 52, height: 28, borderRadius: 4, border: '0.5px solid #D5D0C5',
+                                    background: '#FDFCF8', textAlign: 'center', fontSize: 13, color: '#1C1917',
+                                    fontFamily: "'DM Sans', system-ui, sans-serif", outline: 'none',
+                                  }}
+                                />
+                                <span style={{ fontSize: 11, color: '#8A8578', fontFamily: "'DM Sans', system-ui, sans-serif" }}>%</span>
+                              </div>
+                            </div>
+                            <p style={{ fontSize: 11, color: '#8A8578', marginTop: 5, fontFamily: "'DM Sans', system-ui, sans-serif" }}>{details}</p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {/* Composite score preview */}
+                    <div style={{ marginTop: 12, paddingTop: 12, borderTop: '0.5px solid #E8E4DC', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span style={{ fontSize: 13, color: '#8A8578', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+                        Composite Score
+                        {(healthWeights.pacing + healthWeights.actions + healthWeights.perf) !== 100 && (
+                          <span style={{ marginLeft: 8, fontSize: 11, color: '#B07030' }}>
+                            (weights sum to {healthWeights.pacing + healthWeights.actions + healthWeights.perf}%, will be normalised)
+                          </span>
+                        )}
+                      </span>
+                      <span style={{ fontSize: 17, fontWeight: 700, color: '#1C1917', fontFamily: "'Inter', system-ui, sans-serif" }}>
+                        {adjustedHealthScore?.overallScore ?? healthScore.overallScore}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Invoices section */}
+                <div style={{ background: '#FDFCF8', border: '0.5px solid #E8E4DC', borderRadius: 6, padding: '20px 24px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                    <span style={{ fontSize: 13, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Invoices</span>
+                    <button
+                      onClick={() => setIsInvoiceModalOpen(true)}
+                      style={{
+                        height: 30, padding: '0 12px', borderRadius: 4,
+                        border: '0.5px solid #D5D0C5', background: '#FDFCF8',
+                        color: '#1C1917', fontSize: 12, fontWeight: 500,
+                        cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif",
+                        display: 'flex', alignItems: 'center', gap: 5,
+                      }}
+                    >
+                      + New Invoice
+                    </button>
+                  </div>
+                  {invoiceHistory.length === 0 ? (
+                    <p style={{ fontSize: 13, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>No invoices generated yet.</p>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {invoiceHistory.map((inv) => {
+                        const start = inv.dateRange.startDate;
+                        const end = inv.dateRange.endDate;
+                        const label = `${start} → ${end}`;
+                        const generated = new Date(inv.generatedAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
+                        return (
+                          <div key={inv.id} style={{
+                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                            padding: '9px 12px', borderRadius: 4, border: '0.5px solid #E8E4DC',
+                            background: '#FAFAF8', fontFamily: "'DM Sans', system-ui, sans-serif",
+                          }}>
+                            <span style={{ fontSize: 13, color: '#1C1917', fontWeight: 500 }}>{label}</span>
+                            <span style={{ fontSize: 11, color: '#B5B0A5' }}>Generated {generated}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </>
         )}
       </main>
@@ -1586,6 +1862,12 @@ export default function DashboardV2() {
           onClose={() => setIsInvoiceModalOpen(false)}
           clientId={clientId}
           clientName={client.name}
+          onGenerated={(inv) => {
+            const record = { id: crypto.randomUUID(), ...inv };
+            const updated = [record, ...invoiceHistory];
+            setInvoiceHistory(updated);
+            try { localStorage.setItem(`invoice-history-${clientId}`, JSON.stringify(updated)); } catch {}
+          }}
         />
       )}
     </div>

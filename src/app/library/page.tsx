@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/dialog';
 import { Plus, Facebook, Search, Linkedin, Music, Instagram, Radio, Edit2, Trash2, Check, X } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { MetricsBenchmarksPanel } from '@/components/library/metrics-benchmarks-panel';
 
 interface ActionPoint {
   id: string;
@@ -53,6 +54,14 @@ const CHANNEL_OPTIONS = [
   { value: 'LinkedIn Ads', label: 'LinkedIn Ads', icon: Linkedin },
   { value: 'TikTok Ads', label: 'TikTok Ads', icon: Music },
   { value: 'Instagram Ads', label: 'Instagram Ads', icon: Instagram },
+  { value: 'Twitter Ads', label: 'Twitter Ads', icon: Radio },
+  { value: 'YouTube Ads', label: 'YouTube Ads', icon: Radio },
+  { value: 'Snapchat Ads', label: 'Snapchat Ads', icon: Radio },
+  { value: 'Instagram (Organic)', label: 'Instagram (Organic)', icon: Instagram },
+  { value: 'Facebook (Organic)', label: 'Facebook (Organic)', icon: Facebook },
+  { value: 'LinkedIn (Organic)', label: 'LinkedIn (Organic)', icon: Linkedin },
+  { value: 'EDM / Email', label: 'EDM / Email', icon: Radio },
+  { value: 'OOH', label: 'OOH', icon: Radio },
 ];
 
 export default function LibraryPage() {
@@ -60,6 +69,7 @@ export default function LibraryPage() {
   const [actionPoints, setActionPoints] = useState<Record<string, ActionPoint[]>>({});
   const [specs, setSpecs] = useState<Record<string, MediaChannelSpec[]>>({});
   const [loading, setLoading] = useState(true);
+  const [loadingDetails, setLoadingDetails] = useState(false);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [newChannelTitle, setNewChannelTitle] = useState('');
   const [newChannelNotes, setNewChannelNotes] = useState('');
@@ -82,6 +92,7 @@ export default function LibraryPage() {
   const [editingSpecText, setEditingSpecText] = useState('');
   const [addingSpecChannelId, setAddingSpecChannelId] = useState<string | null>(null);
   const [newSpecText, setNewSpecText] = useState('');
+  const [activeTab, setActiveTab] = useState<'channels' | 'benchmarks'>('channels');
 
   useEffect(() => {
     loadLibraryEntries();
@@ -90,6 +101,7 @@ export default function LibraryPage() {
   useEffect(() => {
     // Load action points and specs for each library entry
     const loadActionPointsAndSpecs = async () => {
+      setLoadingDetails(true);
       const channelTypes = new Set(libraryEntries.map(entry => entry.channel_type));
       const actionPointsMap: Record<string, ActionPoint[]> = {};
       const specsMap: Record<string, MediaChannelSpec[]> = {};
@@ -124,6 +136,7 @@ export default function LibraryPage() {
 
       setActionPoints(actionPointsMap);
       setSpecs(specsMap);
+      setLoadingDetails(false);
     };
 
     if (libraryEntries.length > 0) {
@@ -630,12 +643,14 @@ export default function LibraryPage() {
             <p className="mt-1" style={{ color: '#8A8578' }}>Manage media channel information and action points</p>
           </div>
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-          <DialogTrigger asChild>
-            <Button>
-              <Plus className="h-4 w-4 mr-2" />
-              Add Media Channel
-            </Button>
-          </DialogTrigger>
+          {activeTab === 'channels' ? (
+            <DialogTrigger asChild>
+              <Button>
+                <Plus className="h-4 w-4 mr-2" />
+                Add Media Channel
+              </Button>
+            </DialogTrigger>
+          ) : null}
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Add Media Channel</DialogTitle>
@@ -697,7 +712,29 @@ export default function LibraryPage() {
         </Dialog>
       </div>
 
-      {libraryEntries.length === 0 ? (
+      {/* Tab toggle */}
+      <div className="flex gap-1 mb-6" style={{ background: '#EEECE8', padding: 4, borderRadius: 8, display: 'inline-flex' }}>
+        <Button
+          size="sm"
+          variant={activeTab === 'channels' ? 'default' : 'ghost'}
+          onClick={() => setActiveTab('channels')}
+          className="h-8 text-sm px-4"
+        >
+          Channels
+        </Button>
+        <Button
+          size="sm"
+          variant={activeTab === 'benchmarks' ? 'default' : 'ghost'}
+          onClick={() => setActiveTab('benchmarks')}
+          className="h-8 text-sm px-4"
+        >
+          Metrics & Benchmarks
+        </Button>
+      </div>
+
+      {activeTab === 'benchmarks' && <MetricsBenchmarksPanel />}
+
+      {activeTab === 'channels' ? (libraryEntries.length === 0 ? (
         <Card style={{ background: '#FDFCF8', border: '0.5px solid #E8E4DC', borderRadius: 6 }}>
           <CardContent className="text-center py-12">
             <p style={{ color: '#8A8578', marginBottom: 16 }}>No media channels in library yet</p>
@@ -837,7 +874,13 @@ export default function LibraryPage() {
                         </Button>
                       </div>
                     )}
-                    {channelActionPoints.length === 0 ? (
+                    {loadingDetails && actionPoints[entry.channel_type] === undefined ? (
+                      <div className="space-y-2 animate-pulse">
+                        {[1,2,3].map(i => (
+                          <div key={i} className="h-8 rounded-lg bg-gray-100" />
+                        ))}
+                      </div>
+                    ) : channelActionPoints.length === 0 ? (
                       <p className="text-xs text-gray-500">No {currentFilter.toLowerCase()} action points for this channel</p>
                     ) : (
                       <div className="space-y-2 max-h-64 overflow-y-auto">
@@ -1003,7 +1046,11 @@ export default function LibraryPage() {
                     </div>
                     {!isEditing && (
                       <div className="space-y-1 max-h-32 overflow-y-auto">
-                        {(specs[entry.id] || []).length === 0 ? (
+                        {loadingDetails && specs[entry.id] === undefined ? (
+                          <div className="space-y-1 animate-pulse">
+                            {[1,2].map(i => <div key={i} className="h-7 rounded-lg bg-gray-100" />)}
+                          </div>
+                        ) : (specs[entry.id] || []).length === 0 ? (
                           <p className="text-xs text-gray-500">No specs for this channel</p>
                         ) : (
                           (specs[entry.id] || []).map((spec) => {
@@ -1078,7 +1125,7 @@ export default function LibraryPage() {
             );
           })}
         </div>
-      )}
+      )) : null}
 
       {/* Add Action Point Dialog */}
       <Dialog open={addingActionPointChannelType !== null} onOpenChange={(open) => !open && setAddingActionPointChannelType(null)}>

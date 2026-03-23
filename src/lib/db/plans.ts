@@ -44,6 +44,29 @@ export async function createClient(name: string) {
   return data;
 }
 
+export async function uploadClientLogo(clientId: string, file: File): Promise<string> {
+  const ext = file.name.split('.').pop() || 'png';
+  const path = `${clientId}/logo.${ext}`;
+
+  const { error } = await supabase.storage
+    .from('client-logos')
+    .upload(path, file, { upsert: true });
+
+  if (error) throw error;
+
+  const { data } = supabase.storage.from('client-logos').getPublicUrl(path);
+  return data.publicUrl;
+}
+
+export async function updateClientLogoUrl(clientId: string, logoUrl: string): Promise<void> {
+  const { error } = await supabase
+    .from('clients')
+    .update({ logo_url: logoUrl })
+    .eq('id', clientId);
+
+  if (error) throw error;
+}
+
 export async function updateClient(clientId: string, name: string, notes?: string | null) {
   const updateData: { name: string; notes?: string | null } = { name };
   if (notes !== undefined) {

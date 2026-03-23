@@ -80,19 +80,6 @@ export async function fetchGA4Data(
   errorDetails?: string;
   activationUrl?: string;
 }> {
-  console.log('');
-  console.log('════════════════════════════════════════════════════════');
-  console.log('🔵 fetchGA4Data CALLED');
-  console.log('════════════════════════════════════════════════════════');
-  console.log('Start Date:', startDate);
-  console.log('End Date:', endDate);
-  console.log('Metrics:', metrics);
-  console.log('Property ID:', propertyId || '(will use active properties from database)');
-  console.log('Client ID:', clientId);
-  console.log('Event Name:', eventName || '(all events)');
-  console.log('════════════════════════════════════════════════════════');
-  console.log('');
-
   // Note: propertyId is optional - the API route will fetch active properties from
   // google_analytics_accounts table if not provided
 
@@ -106,9 +93,6 @@ export async function fetchGA4Data(
       eventName,
     };
 
-    console.log('🔵 Making GA4 API request to:', '/api/ads/google-analytics/fetch-data');
-    console.log('🔵 Request body:', JSON.stringify(requestBody, null, 2));
-
     const response = await fetch('/api/ads/google-analytics/fetch-data', {
       method: 'POST',
       headers: {
@@ -117,34 +101,8 @@ export async function fetchGA4Data(
       body: JSON.stringify(requestBody),
     });
 
-    console.log('🔵 GA4 API response received:', {
-      status: response.status,
-      statusText: response.statusText,
-      ok: response.ok,
-      headers: Object.fromEntries(response.headers.entries()),
-    });
-
     // Parse response regardless of status to get error details
     const data = await response.json().catch(() => ({}));
-
-    console.log('');
-    console.log('════════════════════════════════════════════════════════');
-    console.log('📊 GA4 FETCH RESPONSE DEBUG');
-    console.log('════════════════════════════════════════════════════════');
-    console.log('Response status:', response.status);
-    console.log('Response OK:', response.ok);
-    console.log('Data success:', data.success);
-    console.log('Data length:', data.data?.length || 0);
-    console.log('First data point:', JSON.stringify(data.data?.[0], null, 2));
-    console.log('Metrics requested:', data.metrics);
-    console.log('Properties processed:', data.propertiesProcessed);
-    console.log('Errors:', data.errors);
-    console.log('Error message:', data.error);
-    console.log('Error details:', data.errorDetails);
-    console.log('Activation URL:', data.activationUrl);
-    console.log('Full response data:', JSON.stringify(data, null, 2));
-    console.log('════════════════════════════════════════════════════════');
-    console.log('');
 
     // Handle non-OK responses (like 403, 500, etc.)
     if (!response.ok) {
@@ -180,18 +138,7 @@ export async function fetchGA4Data(
         propertiesProcessed: data.propertiesProcessed,
         errors: data.errors,
       });
-    } else {
-      console.log('GA4 data retrieved successfully:', {
-        dataPoints: ga4Data.length,
-        samplePoint: ga4Data[0],
-        metricsInData: ga4Data[0] ? Object.keys(ga4Data[0]).filter(k => k !== 'date' && k !== 'propertyId' && k !== 'propertyName') : [],
-      });
     }
-
-    console.log('✅ fetchGA4Data success:', {
-      dataPoints: ga4Data.length,
-      hasError: false,
-    });
 
     return { data: ga4Data };
   } catch (error: any) {
@@ -485,12 +432,6 @@ export function calculateCostPerMetric(
       }
     }
 
-    console.log('📊 Cost Per Metric Calculation starting:', {
-      spendDataPoints: spendData.length,
-      gaDataPoints: gaData.length,
-      metricKey,
-    });
-
     // Create maps for quick lookup
     const spendByDate = new Map<string, number>();
     const metricByDate = new Map<string, number>();
@@ -604,13 +545,6 @@ export function calculateCostPerMetric(
       cost_14d: cost14d[index] ?? null,
       cost_30d: cost30d[index] ?? null,
     }));
-
-    console.log('✅ Cost Per Metric Calculation complete:', {
-      dataPoints: results.length,
-      metricKey,
-      daysWithCost: results.filter(r => r.dailyCost !== null).length,
-      daysWithoutCost: results.filter(r => r.dailyCost === null).length,
-    });
 
     return { data: results };
   } catch (error: any) {

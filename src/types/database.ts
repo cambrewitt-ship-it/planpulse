@@ -6,16 +6,19 @@ export interface Database {
           Row: {
             id: string;
             name: string;
+            logo_url: string | null;
             created_at: string;
             updated_at: string;
           };
           Insert: {
             id?: string;
             name: string;
+            logo_url?: string | null;
           };
           Update: {
             id?: string;
             name?: string;
+            logo_url?: string | null;
           };
           Relationships: [];
         };
@@ -750,6 +753,94 @@ export interface Database {
           };
           Relationships: [];
         };
+        metric_presets: {
+          Row: {
+            id: string;
+            name: string;
+            channel_name: string;
+            is_custom: boolean;
+            metrics: string[];
+            created_at: string;
+          };
+          Insert: {
+            id?: string;
+            name: string;
+            channel_name: string;
+            is_custom?: boolean;
+            metrics: string[];
+            created_at?: string;
+          };
+          Update: {
+            id?: string;
+            name?: string;
+            channel_name?: string;
+            is_custom?: boolean;
+            metrics?: string[];
+          };
+          Relationships: [];
+        };
+        channel_benchmarks: {
+          Row: {
+            id: string;
+            channel_name: string;
+            metric_key: string;
+            metric_label: string;
+            benchmark_value: number;
+            unit: string;
+            direction: 'higher_is_better' | 'lower_is_better';
+            updated_at: string;
+          };
+          Insert: {
+            id?: string;
+            channel_name: string;
+            metric_key: string;
+            metric_label: string;
+            benchmark_value: number;
+            unit: string;
+            direction: 'higher_is_better' | 'lower_is_better';
+            updated_at?: string;
+          };
+          Update: {
+            id?: string;
+            channel_name?: string;
+            metric_key?: string;
+            metric_label?: string;
+            benchmark_value?: number;
+            unit?: string;
+            direction?: 'higher_is_better' | 'lower_is_better';
+            updated_at?: string;
+          };
+          Relationships: [];
+        };
+        client_channel_presets: {
+          Row: {
+            id: string;
+            client_id: string;
+            channel_name: string;
+            preset_name: string;
+            custom_metrics: string[];
+            created_at: string;
+            updated_at: string;
+          };
+          Insert: {
+            id?: string;
+            client_id: string;
+            channel_name: string;
+            preset_name: string;
+            custom_metrics?: string[];
+            created_at?: string;
+            updated_at?: string;
+          };
+          Update: {
+            id?: string;
+            client_id?: string;
+            channel_name?: string;
+            preset_name?: string;
+            custom_metrics?: string[];
+            updated_at?: string;
+          };
+          Relationships: [];
+        };
       };
       Views: { [_ in never]: never };
       Functions: { [_ in never]: never };
@@ -786,3 +877,16 @@ export type EdmActualUpdate = Database['public']['Tables']['edm_actuals']['Updat
 // Composite types for API responses
 export type ClientWithHealth = Client & { health: ClientHealthStatus | null };
 export type HealthStatus = 'green' | 'amber' | 'red';
+
+// Benchmarks types
+export type MetricPreset = Database['public']['Tables']['metric_presets']['Row'];
+export type MetricPresetInsert = Database['public']['Tables']['metric_presets']['Insert'];
+export type MetricPresetUpdate = Database['public']['Tables']['metric_presets']['Update'];
+
+export type ChannelBenchmark = Database['public']['Tables']['channel_benchmarks']['Row'];
+export type ChannelBenchmarkInsert = Database['public']['Tables']['channel_benchmarks']['Insert'];
+export type ChannelBenchmarkUpdate = Database['public']['Tables']['channel_benchmarks']['Update'];
+
+export type ClientChannelPreset = Database['public']['Tables']['client_channel_presets']['Row'];
+export type ClientChannelPresetInsert = Database['public']['Tables']['client_channel_presets']['Insert'];
+export type ClientChannelPresetUpdate = Database['public']['Tables']['client_channel_presets']['Update'];

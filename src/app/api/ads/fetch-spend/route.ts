@@ -111,25 +111,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // If no connection found and clientId was provided, for Google Ads and Meta Ads,
-    // fall back to checking for any connection (since accounts are user-level)
-    let connection: any = connections?.[0];
-    if (!connection && clientId && (platform === 'google-ads' || platform === 'meta-ads')) {
-      console.log(`No connection found for client ${clientId}, checking for any ${platform} connection...`);
-      const { data: anyConnections, error: anyConnectionError } = await supabase
-        .from('ad_platform_connections')
-        .select('connection_id, platform, connection_status, client_id')
-        .eq('user_id', user.id)
-        .eq('platform', platform)
-        .eq('connection_status', 'active')
-        .order('created_at', { ascending: false })
-        .limit(1);
-      
-      if (!anyConnectionError && anyConnections && anyConnections.length > 0) {
-        connection = anyConnections[0] as any;
-        console.log(`Found connection for different client: ${connection.client_id}, using it for client ${clientId}`);
-      }
-    }
+    // Only use a connection that belongs to this specific client — never fall back
+    // to another client's connection, as that would leak cross-client spend data.
+    const connection: any = connections?.[0];
 
     if (!connection) {
       return Response.json(

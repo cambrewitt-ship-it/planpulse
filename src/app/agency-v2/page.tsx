@@ -16,6 +16,14 @@ import { DateRangePicker } from '@/components/ui/date-range-picker';
 // ── Constants ────────────────────────────────────────────────────────────────
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
+const AM_TAB_COLORS = [
+  { active: '#4A6580', light: 'rgba(74,101,128,0.12)', text: '#fff', inactiveText: '#4A6580' },
+  { active: '#B07030', light: 'rgba(176,112,48,0.12)', text: '#fff', inactiveText: '#B07030' },
+  { active: '#4A7C59', light: 'rgba(74,124,89,0.12)', text: '#fff', inactiveText: '#4A7C59' },
+  { active: '#A0442A', light: 'rgba(160,68,42,0.12)', text: '#fff', inactiveText: '#A0442A' },
+  { active: '#7A5C8A', light: 'rgba(122,92,138,0.12)', text: '#fff', inactiveText: '#7A5C8A' },
+];
+
 interface AccountManager {
   id: string;
   name: string;
@@ -227,35 +235,6 @@ export default function AgencyDashboard() {
         height: 48, background: '#FDFCF8', borderBottom: '0.5px solid #E8E4DC',
         display: 'flex', alignItems: 'center', paddingLeft: 16, paddingRight: 16, gap: 5,
       }}>
-        {/* AM filter pills */}
-        <button
-          key="All"
-          onClick={() => setAmFilter('All')}
-          style={{
-            height: 28, padding: '0 11px', borderRadius: 4,
-            border: amFilter === 'All' ? '0.5px solid #D5D0C5' : 'none',
-            background: 'transparent',
-            color: amFilter === 'All' ? '#1C1917' : '#8A8578',
-            fontSize: 13, fontWeight: amFilter === 'All' ? 500 : 400,
-            cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif",
-          }}
-        >
-          All
-        </button>
-        {accountManagers.map(am => (
-          <button
-            key={am.id}
-            onClick={() => setAmFilter(am.name)}
-            style={{
-              height: 28, padding: '0 11px', borderRadius: 4,
-              border: amFilter === am.name ? '0.5px solid #D5D0C5' : 'none',
-              background: 'transparent',
-              color: amFilter === am.name ? '#1C1917' : '#8A8578',
-              fontSize: 13, fontWeight: amFilter === am.name ? 500 : 400,
-              cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif",
-            }}
-          >{am.name}</button>
-        ))}
 
         <div style={{ flex: 1 }} />
 
@@ -308,14 +287,64 @@ export default function AgencyDashboard() {
         <span style={{ fontSize: 12, color: '#B5B0A5', flexShrink: 0 }}>{formatLastRefreshed()}</span>
       </div>
 
+      {/* ── Team member tabs ──────────────────────────────── */}
+      <div style={{
+        display: 'flex', alignItems: 'flex-end', gap: 4,
+        padding: '12px 18px 0', maxWidth: 1440, margin: '0 auto',
+      }}>
+        {/* "All" tab */}
+        {(() => {
+          const isActive = amFilter === 'All';
+          return (
+            <button
+              onClick={() => setAmFilter('All')}
+              style={{
+                padding: '7px 16px',
+                borderRadius: '6px 6px 0 0',
+                border: `0.5px solid ${isActive ? '#D5D0C5' : 'transparent'}`,
+                borderBottom: isActive ? `0.5px solid #F5F3EF` : '0.5px solid #E8E4DC',
+                background: isActive ? '#F5F3EF' : '#FDFCF8',
+                color: isActive ? '#1C1917' : '#8A8578',
+                fontSize: 13, fontWeight: isActive ? 600 : 400,
+                cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif",
+                transition: 'all 0.15s',
+              }}
+            >All</button>
+          );
+        })()}
+        {accountManagers.map((am, idx) => {
+          const palette = AM_TAB_COLORS[idx % AM_TAB_COLORS.length];
+          const isActive = amFilter === am.name;
+          return (
+            <button
+              key={am.id}
+              onClick={() => setAmFilter(am.name)}
+              style={{
+                padding: '7px 16px',
+                borderRadius: '6px 6px 0 0',
+                border: `0.5px solid ${isActive ? palette.active : 'transparent'}`,
+                borderBottom: isActive ? `0.5px solid #F5F3EF` : `0.5px solid ${palette.active}22`,
+                background: isActive ? palette.active : palette.light,
+                color: isActive ? palette.text : palette.inactiveText,
+                fontSize: 13, fontWeight: isActive ? 600 : 500,
+                cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif",
+                transition: 'all 0.15s',
+              }}
+            >{am.name}</button>
+          );
+        })}
+      </div>
+
       {/* ── Main 2-column body ────────────────────────────── */}
       <div style={{
         display: 'grid',
         gridTemplateColumns: '1fr 264px',
         gap: 14,
-        padding: '14px 18px',
+        padding: '0 18px 14px',
+        paddingTop: 14,
         maxWidth: 1440,
         margin: '0 auto',
+        borderTop: '0.5px solid #E8E4DC',
       }}>
         {/* ── Left column ─────────────────────────────────── */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -414,12 +443,13 @@ export default function AgencyDashboard() {
 
           {/* Scrollable client list */}
           <div style={{ flex: 1, overflowY: 'auto', paddingRight: 8 }}>
-            {filteredClients.map(client => (
+            {filteredClients.map((client, idx) => (
               <ClientCardCompact
                 key={client.id}
                 client={client}
                 selected={selectedClientId === client.id}
                 onClick={() => setSelectedClientId(client.id)}
+                index={idx}
                 accountManagers={accountManagers}
               />
             ))}

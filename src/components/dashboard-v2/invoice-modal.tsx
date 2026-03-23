@@ -23,6 +23,7 @@ interface InvoiceModalProps {
   onClose: () => void;
   clientId: string;
   clientName: string;
+  onGenerated?: (invoice: { dateRange: { startDate: string; endDate: string }; generatedAt: string }) => void;
 }
 
 interface InvoiceChannel {
@@ -34,7 +35,7 @@ interface InvoiceChannel {
   channelId?: string;
 }
 
-export function InvoiceModal({ isOpen, onClose, clientId, clientName }: InvoiceModalProps) {
+export function InvoiceModal({ isOpen, onClose, clientId, clientName, onGenerated }: InvoiceModalProps) {
   const [dateRange, setDateRange] = useState(() => {
     const today = new Date();
     const lastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
@@ -327,6 +328,7 @@ export function InvoiceModal({ isOpen, onClose, clientId, clientName }: InvoiceM
       // Save PDF
       const fileName = `Invoice_${clientName.replace(/\s+/g, '_')}_${formatDateRange(dateRange.startDate, dateRange.endDate).replace(/\s+/g, '_')}.pdf`;
       doc.save(fileName);
+      onGenerated?.({ dateRange, generatedAt: new Date().toISOString() });
     } catch (error) {
       console.error('Error generating PDF:', error);
       alert('Error generating PDF. Please make sure jsPDF is installed: npm install jspdf');

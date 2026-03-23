@@ -1,8 +1,6 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { FileText } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 import type { HealthScoreResult } from '@/lib/utils/health-score';
 import {
   GanttCalendar,
@@ -41,6 +39,7 @@ export interface HeroHealthSectionProps {
   totalBudget: number;
   daysRemaining: number;
   completionPercentage: number;
+  daysUntilStart?: number;
   actionItemsCount: {
     urgent: number;
     thisWeek: number;
@@ -59,7 +58,6 @@ export interface HeroHealthSectionProps {
   gantt?: HeroGanttProps;
   onAccountManagerChange?: (accountManager: string | null) => void;
   isSavingAccountManager?: boolean;
-  onInvoiceClick?: () => void;
   accountManagers?: AccountManager[];
 }
 
@@ -84,7 +82,7 @@ const STATUS_COLORS: Record<string, { bg: string; text: string; border: string; 
   healthy:         { bg: 'bg-emerald-50',  text: 'text-emerald-700', border: 'border-emerald-200', ring: '#10b981' },
   caution:         { bg: 'bg-amber-50',    text: 'text-amber-700',   border: 'border-amber-200',   ring: '#f59e0b' },
   'at-risk':       { bg: 'bg-red-50',      text: 'text-red-700',     border: 'border-red-200',     ring: '#ef4444' },
-  ahead:           { bg: 'bg-blue-50',     text: 'text-blue-700',    border: 'border-blue-200',    ring: '#3b82f6' },
+  ahead:           { bg: 'bg-red-50',      text: 'text-red-700',     border: 'border-red-200',     ring: '#ef4444' },
   'on-track':      { bg: 'bg-emerald-50',  text: 'text-emerald-700', border: 'border-emerald-200', ring: '#10b981' },
   behind:          { bg: 'bg-red-50',      text: 'text-red-700',     border: 'border-red-200',     ring: '#ef4444' },
   excellent:       { bg: 'bg-emerald-50',  text: 'text-emerald-700', border: 'border-emerald-200', ring: '#10b981' },
@@ -206,13 +204,13 @@ export default function HeroHealthSection({
   totalBudget,
   daysRemaining,
   completionPercentage,
+  daysUntilStart = 0,
   actionItemsCount,
   pacingStatus,
   performanceStatus,
   gantt,
   onAccountManagerChange,
   isSavingAccountManager = false,
-  onInvoiceClick,
   accountManagers = [],
 }: HeroHealthSectionProps) {
   const [showAmMenu, setShowAmMenu] = useState(false);
@@ -245,7 +243,7 @@ export default function HeroHealthSection({
   // Human-readable spend pacing label for the Spend badge (no % over/under wording)
   const pacingLabel =
     pacingStatus.status === 'ahead'
-      ? 'Ahead of plan'
+      ? 'Overspending'
       : pacingStatus.status === 'behind'
         ? 'Behind plan'
         : 'On track';
@@ -260,7 +258,7 @@ export default function HeroHealthSection({
   return (
     <div className="space-y-5">
       {/* ── Top row: client identity + Gantt (middle) + health ring/pills ── */}
-      <div className="bg-white rounded-xl border border-gray-200 px-7 py-6 flex flex-col gap-7 xl:grid xl:grid-cols-[minmax(0,1.6fr)_minmax(0,2.2fr)_minmax(0,1.1fr)] xl:items-start">
+      <div className="bg-white rounded-xl border border-gray-200 px-7 py-6 flex flex-col gap-7 xl:grid xl:grid-cols-[minmax(0,1.8fr)_minmax(0,2.8fr)_minmax(0,1fr)] xl:items-start">
         {/* Left: avatar + name/notes + Spend pacing */}
         <div className="flex items-start gap-4 min-w-0 order-1">
           <div className="flex flex-col items-center gap-3 flex-shrink-0">
@@ -276,17 +274,6 @@ export default function HeroHealthSection({
                   {client.name.charAt(0).toUpperCase()}
                 </span>
               </div>
-            )}
-            {onInvoiceClick && (
-              <Button
-                onClick={onInvoiceClick}
-                variant="outline"
-                size="sm"
-                className="w-12 h-12 flex flex-col items-center justify-center gap-0.5 text-[10px] p-0"
-              >
-                <FileText className="w-3 h-3" />
-                <span>Invoice</span>
-              </Button>
             )}
           </div>
           <div className="min-w-0 flex-1">
@@ -343,8 +330,14 @@ export default function HeroHealthSection({
                 </div>
               )}
             </div>
-            {/* Inline Spend summary (was previously a separate card) */}
-            <div className="mt-3 space-y-1.5">
+            {/* Inline Spend summary / pre-launch banner */}
+            {completionPercentage <= 0 && daysUntilStart > 0 ? (
+              <div className="mt-3 flex items-center gap-2">
+                <span className="text-sm font-medium text-gray-500">Starting in</span>
+                <span className="text-sm font-bold text-blue-600">{daysUntilStart} day{daysUntilStart !== 1 ? 's' : ''}</span>
+              </div>
+            ) : null}
+            <div className="mt-3 space-y-1.5" style={{ display: completionPercentage <= 0 ? 'none' : undefined }}>
               <div className="flex items-center justify-between gap-3">
                 <span className="text-sm font-semibold text-gray-600 uppercase tracking-wide">
                   Spend
@@ -376,7 +369,7 @@ export default function HeroHealthSection({
 
         {/* Middle: Gantt calendar (only when data exists) */}
         {gantt && gantt.clients.length > 0 && gantt.channels.length > 0 && (
-          <div className="w-full min-w-0 order-2">
+          <div className="w-full min-w-0 order-2 pl-10">
             <div className="w-full max-h-64 overflow-x-auto overflow-y-hidden border border-gray-100 rounded-lg bg-gray-50/80 px-3 py-2">
               <GanttCalendar
                 clients={gantt.clients}
@@ -393,32 +386,9 @@ export default function HeroHealthSection({
           </div>
         )}
 
-        {/* Right: health ring + breakdown summary */}
+        {/* Right: health ring */}
         <div className="flex flex-col gap-4 order-3 xl:items-end">
-          <div className="flex items-center gap-7 xl:self-end">
-            {/* Score breakdown pills */}
-            <div className="hidden sm:flex flex-col gap-1.5 text-right">
-              {(
-                [
-                  { label: 'Pacing',  score: healthScore.breakdown.budgetPacing.score,    weight: '44%' },
-                  { label: 'Actions', score: healthScore.breakdown.actionCompletion.score, weight: '28%' },
-                  { label: 'Perf',    score: healthScore.breakdown.performance.score,      weight: '28%' },
-                ] as const
-              ).map(({ label, score, weight }) => {
-                const s = score >= 80 ? 'healthy' : score >= 60 ? 'caution' : 'at-risk';
-                const c = STATUS_COLORS[s];
-                return (
-                  <div key={label} className="flex items-center gap-2 justify-end">
-                    <span className="text-sm text-gray-400 leading-tight text-right">
-                      <span className="block">{label}</span>
-                      <span className="block text-xs text-gray-300">({weight})</span>
-                    </span>
-                    <span className={`text-sm font-semibold px-1.5 py-0.5 rounded ${c.bg} ${c.text}`}>{score}</span>
-                  </div>
-                );
-              })}
-            </div>
-
+          <div className="flex items-center xl:self-end">
             <HealthRing score={healthScore.overallScore} status={healthScore.status} />
           </div>
         </div>

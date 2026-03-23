@@ -3,7 +3,7 @@
 
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useRef, useEffect } from 'react';
 import { Facebook, Instagram, Search, Linkedin, Music, Radio } from 'lucide-react';
 import { getChannelLogo } from '@/lib/utils/channel-icons';
 
@@ -63,6 +63,19 @@ export interface GanttCalendarProps {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Brand colours for channel bars — matches platform logo hues. */
+function getChannelBarColor(label: string, type: 'paid' | 'organic'): { bg: string; border: string } {
+  const lower = label.toLowerCase();
+  if (lower.includes('meta') || lower.includes('facebook')) return { bg: 'rgba(24,119,242,0.22)', border: 'rgba(24,119,242,0.4)' };
+  if (lower.includes('google')) return { bg: 'rgba(66,133,244,0.22)', border: 'rgba(66,133,244,0.4)' };
+  if (lower.includes('linkedin')) return { bg: 'rgba(10,102,194,0.22)', border: 'rgba(10,102,194,0.4)' };
+  if (lower.includes('tiktok')) return { bg: 'rgba(105,201,208,0.28)', border: 'rgba(105,201,208,0.5)' };
+  if (lower.includes('youtube')) return { bg: 'rgba(255,0,0,0.18)', border: 'rgba(255,0,0,0.35)' };
+  if (lower.includes('pinterest')) return { bg: 'rgba(230,0,35,0.18)', border: 'rgba(230,0,35,0.35)' };
+  if (type === 'organic') return { bg: 'rgba(74,124,89,0.22)', border: 'rgba(74,124,89,0.4)' };
+  return { bg: 'rgba(74,101,128,0.22)', border: 'rgba(74,101,128,0.4)' };
+}
 
 /** Normalize a channel label so "Google Ads", "Google-Ads", "google ads" all map to the same key. */
 function normalizeChannelLabel(label: string): string {
@@ -255,22 +268,13 @@ export function GanttCalendar({
 
   const maxDensity = useMemo(() => Math.max(...densityByDay), [densityByDay]);
 
-  // Determine visible day window (for compact view, e.g. 1 day back + 10 ahead)
+  // Always show the full month; horizontal scroll handles navigation
   const days = useMemo(() => Array.from({ length: daysInMo }, (_, i) => i + 1), [daysInMo]);
 
-  let windowStart = 1;
-  let windowEnd = daysInMo;
-
-  if (compactWindow && today !== null) {
-    windowStart = clampDay(today - windowPastDays, daysInMo);
-    windowEnd = clampDay(today + windowFutureDays, daysInMo);
-  }
-
-  const windowSpan = windowEnd - windowStart + 1;
-  const visibleDays = useMemo(
-    () => days.filter(d => d >= windowStart && d <= windowEnd),
-    [days, windowStart, windowEnd]
-  );
+  const windowStart = 1;
+  const windowEnd   = daysInMo;
+  const windowSpan  = daysInMo;
+  const visibleDays = days;
 
   // Today's column left% within the visible window
   const todayLeftPct =
@@ -279,16 +283,27 @@ export function GanttCalendar({
       : null;
 
   // Layout constants
-  const LABEL_COL = 130; // px — fixed left label column (wider for icon + label)
-  const DAY_WIDTH = 32; // px per day column for horizontal scrolling
+  const LABEL_COL = 130; // px — fixed left label column
+  const DAY_WIDTH = 38;  // px per day column — fixed so horizontal scroll works
+  const LABEL_BG  = '#E5E0D8'; // darker colour for sticky client column + ruler header
+
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // On mount, scroll so yesterday sits just after the sticky column
+  useEffect(() => {
+    if (!containerRef.current || !today) return;
+    const yesterdayIdx = Math.max(0, today - 2);
+    containerRef.current.scrollLeft = yesterdayIdx * DAY_WIDTH;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleDayClick = (day: number) => {
     onDaySelect(selectedDay === day ? null : day);
   };
 
   return (
-    <div style={{ overflowX: compactWindow ? 'hidden' : 'auto', overflowY: 'hidden', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
-      <div style={{ minWidth: LABEL_COL + windowSpan * DAY_WIDTH }}>
+    <div ref={containerRef} style={{ overflowX: 'auto', overflowY: 'hidden', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+      <div style={{ minWidth: LABEL_COL + daysInMo * DAY_WIDTH }}>
       {/* ── Ruler row ─────────────────────────────────────────── */}
       <div style={{ display: 'grid', gridTemplateColumns: `${LABEL_COL}px 1fr` }}>
         {/* Label cell */}
@@ -301,16 +316,16 @@ export function GanttCalendar({
             position: 'sticky',
             left: 0,
             zIndex: 5,
-            background: '#FDFCF8',
+            background: LABEL_BG,
           }}
         >
-          <span style={{ fontSize: 9, color: '#B5B0A5', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+          <span style={{ fontSize: 9, color: '#8A8070', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
             Client
           </span>
         </div>
-        {/* Days ruler */}
-        <div style={{ position: 'relative', height: 28 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${windowSpan}, 1fr)`, height: '100%' }}>
+        {/* Days ruler — same background as the sticky client column */}
+        <div style={{ position: 'relative', height: 28, background: LABEL_BG }}>
+          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${daysInMo}, ${DAY_WIDTH}px)`, height: '100%' }}>
             {visibleDays.map(day => (
               <RulerCell
                 key={day}
@@ -346,13 +361,12 @@ export function GanttCalendar({
         const clientChannels = channelsByClient.get(client.id) || [];
 
         return (
-          <div key={client.id}>
+          <div key={client.id} style={{ borderTop: '1.5px solid #C8C4BC', marginTop: 2 }}>
             {/* Client header row (24px) */}
             <div style={{
               display: 'grid',
               gridTemplateColumns: `${LABEL_COL}px 1fr`,
               height: 24,
-              borderTop: '0.5px solid #E8E4DC',
             }}>
               {/* Left label */}
               <div style={{
@@ -363,7 +377,7 @@ export function GanttCalendar({
                 position: 'sticky',
                 left: 0,
                 zIndex: 5,
-                background: '#FDFCF8',
+                background: LABEL_BG,
               }}
               >
                 <div style={{
@@ -521,8 +535,8 @@ export function GanttCalendar({
                       position: 'sticky',
                       left: 0,
                       zIndex: 5,
-                      background: '#FDFCF8',
-                      boxShadow: 'inset -0.5px 0 0 #E8E4DC',
+                      background: LABEL_BG,
+                      boxShadow: 'inset -1px 0 0 #C8C0B4',
                     }}
                   >
                     <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -568,35 +582,25 @@ export function GanttCalendar({
                       }} />
                     )}
 
-                    {/* Channel bar — translucent ink fills per design spec */}
-                    {ch.type === 'paid' ? (
-                      <div style={{
-                        position: 'absolute',
-                        left: `${barLeftPct}%`,
-                        width: `${barWidthPct}%`,
-                        top: '50%',
-                        transform: 'translateY(-50%)',
-                        height: 6,
-                        background: 'rgba(74,101,128,0.25)',
-                        border: '0.5px solid rgba(74,101,128,0.35)',
-                        borderRadius: 3,
-                        zIndex: 2,
-                      }} />
-                    ) : (
-                      <div style={{
-                        position: 'absolute',
-                        left: `${barLeftPct}%`,
-                        width: `${barWidthPct}%`,
-                        top: '50%',
-                        transform: 'translateY(-50%)',
-                        height: 6,
-                        background: 'rgba(74,124,89,0.25)',
-                        border: '0.5px dashed rgba(74,124,89,0.4)',
-                        borderRadius: 3,
-                        zIndex: 2,
-                        boxSizing: 'border-box',
-                      }} />
-                    )}
+                    {/* Channel bar — brand colours per platform */}
+                    {(() => {
+                      const barColor = getChannelBarColor(ch.label, ch.type);
+                      return (
+                        <div style={{
+                          position: 'absolute',
+                          left: `${barLeftPct}%`,
+                          width: `${barWidthPct}%`,
+                          top: '50%',
+                          transform: 'translateY(-50%)',
+                          height: 6,
+                          background: barColor.bg,
+                          border: `0.5px ${ch.type === 'organic' ? 'dashed' : 'solid'} ${barColor.border}`,
+                          borderRadius: 3,
+                          zIndex: 2,
+                          boxSizing: 'border-box',
+                        }} />
+                      );
+                    })()}
 
                     {/* Start dot (clipped to visible window) */}
                     <div style={{
@@ -694,14 +698,14 @@ export function GanttCalendar({
             position: 'sticky',
             left: 0,
             zIndex: 5,
-            background: '#FDFCF8',
+            background: LABEL_BG,
           }}
         >
-          <span style={{ fontSize: 7, color: '#B5B0A5', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+          <span style={{ fontSize: 7, color: '#8A8070', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
             Activity
           </span>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${windowSpan}, 1fr)`, alignItems: 'flex-end', height: '100%' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${daysInMo}, ${DAY_WIDTH}px)`, alignItems: 'flex-end', height: '100%' }}>
           {visibleDays.map(day => {
             const count = densityByDay[day];
             const heightPx = maxDensity > 0 ? Math.max(1, Math.round((count / maxDensity) * 10)) : 0;

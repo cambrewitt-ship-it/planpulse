@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
-import { AlertTriangle, Settings, FileText } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import { AlertTriangle, ChevronDown, ExternalLink, FileText } from 'lucide-react';
 import InlineActionPoints from './inline-action-points';
+import type { ChannelBenchmark, MetricPreset, ClientChannelPreset } from '@/types/database';
 import { getChannelLogo } from '@/lib/utils/channel-icons';
 import {
   LineChart,
@@ -23,6 +24,7 @@ import {
 // ---------------------------------------------------------------------------
 
 type MetricKey = 'impressions' | 'clicks' | 'ctr' | 'cpc' | 'conversions';
+const ALL_METRIC_KEYS: MetricKey[] = ['impressions', 'clicks', 'ctr', 'cpc', 'conversions'];
 
 export interface ChannelCardProps {
   channel: {
@@ -64,6 +66,10 @@ export interface ChannelCardProps {
   clientId?: string;
   channelStartDate?: Date | null;
   refetchTrigger?: number;
+  benchmarks?: ChannelBenchmark[];
+  presets?: MetricPreset[];
+  clientChannelPresets?: ClientChannelPreset[];
+  onPresetSaved?: (updated: ClientChannelPreset) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -140,6 +146,85 @@ const METRIC_CONFIG: Record<MetricKey, {
     formatTooltip: (v) => fmt(v, 'decimal', 0),
   },
 };
+
+// Map platform/channel name to benchmark channel_name used in the DB
+function inferBenchmarkChannelName(platform: string, channelName: string): string {
+  const lower = (platform + ' ' + channelName).toLowerCase();
+  if (lower.includes('meta') || lower.includes('facebook')) return 'Meta Ads';
+  if (lower.includes('display')) return 'Google Display';
+  if (lower.includes('google')) return 'Google Ads';
+  return channelName;
+}
+
+// Real metric values keyed by metric_key (matches benchmark seed keys)
+function getRealValue(
+  metricKey: string,
+  metrics: ChannelCardProps['channel']['metrics']
+): number | null {
+  switch (metricKey) {
+    case 'ctr':         return metrics.ctr * 100;  // stored as 0-1, benchmark is %
+    case 'cpc':         return metrics.cpc;
+    case 'impressions': return metrics.impressions;
+    case 'clicks':      return metrics.clicks;
+    case 'conversions': return metrics.conversions;
+    default:            return null;
+  }
+}
+
+function formatBenchmarkValue(value: number, unit: string): string {
+  if (unit === '%')  return `${value}%`;
+  if (unit === '$')  return `$${value}`;
+  if (unit === 'x')  return `${value}x`;
+  return `${value}${unit ? ` ${unit}` : ''}`;
+}
+
+function formatRealValue(value: number, unit: string): string {
+  if (unit === '%')  return `${value.toFixed(2)}%`;
+  if (unit === '$')  return `$${value.toFixed(2)}`;
+  if (unit === 'x')  return `${value.toFixed(2)}x`;
+  return value >= 1000
+    ? new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(value)
+    : `${value}`;
+}
+
+function BenchmarkRow({
+  benchmark,
+  realValue,
+}: {
+  benchmark: ChannelBenchmark;
+  realValue: number | null;
+}) {
+  const hasReal = realValue !== null && realValue > 0;
+  const isGood = hasReal
+    ? benchmark.direction === 'higher_is_better'
+      ? realValue >= benchmark.benchmark_value
+      : realValue <= benchmark.benchmark_value
+    : null;
+
+  return (
+    <div className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
+      <span className="text-xs text-gray-500 truncate flex-1 min-w-0 pr-2">{benchmark.metric_label}</span>
+      <div className="flex items-center gap-2 flex-shrink-0">
+        {hasReal && (
+          <>
+            <span className={`text-xs font-semibold ${isGood ? 'text-emerald-600' : 'text-red-500'}`}>
+              {formatRealValue(realValue, benchmark.unit)}
+            </span>
+            <span className="text-xs text-gray-300">vs</span>
+          </>
+        )}
+        <span className="text-xs text-gray-400">
+          {formatBenchmarkValue(benchmark.benchmark_value, benchmark.unit)}
+        </span>
+        {hasReal && (
+          <span className={`text-xs ${isGood ? 'text-emerald-500' : 'text-red-400'}`}>
+            {isGood ? '↑' : '↓'}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
 
 /** Simple inline platform icon using the brand initial */
 function PlatformIcon({ platform }: { platform: string }) {
@@ -218,59 +303,130 @@ function PacingBar({
 }
 
 // ---------------------------------------------------------------------------
-// Metric pill — clickable when in metrics view
+// MetricSlot — metric pill with inline benchmark + swap dropdown
 // ---------------------------------------------------------------------------
 
-function MetricPill({
+function MetricSlot({
   metricKey,
-  label,
-  value,
+  displayValue,
+  benchmark,
+  realValue,
   isActive,
-  isClickable,
-  onClick,
+  hasMetrics,
+  availableSwaps,
+  onChart,
+  onSwap,
 }: {
   metricKey: MetricKey;
-  label: string;
-  value: string;
+  displayValue: string;
+  benchmark: ChannelBenchmark | undefined;
+  realValue: number | null;
   isActive: boolean;
-  isClickable: boolean;
-  onClick: (key: MetricKey) => void;
+  hasMetrics: boolean;
+  availableSwaps: MetricKey[];
+  onChart: () => void;
+  onSwap: (newKey: MetricKey) => void;
 }) {
+  const [swapOpen, setSwapOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
   const cfg = METRIC_CONFIG[metricKey];
 
-  if (!isClickable) {
-    return (
-      <div className="flex flex-col gap-0.5">
-        <span className="text-xs text-gray-400 uppercase tracking-wide leading-none">{label}</span>
-        <span className="text-sm font-semibold text-gray-800 leading-none">{value}</span>
-      </div>
-    );
-  }
+  const hasReal = realValue !== null && realValue > 0;
+  const isGood = benchmark && hasReal
+    ? benchmark.direction === 'higher_is_better'
+      ? realValue! >= benchmark.benchmark_value
+      : realValue! <= benchmark.benchmark_value
+    : null;
+
+  // Close swap dropdown on outside click
+  useEffect(() => {
+    if (!swapOpen) return;
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setSwapOpen(false);
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [swapOpen]);
 
   return (
-    <button
-      onClick={() => onClick(metricKey)}
-      className={`flex flex-col gap-0.5 rounded-lg px-1.5 py-1 text-left transition-all w-full ${
-        isActive
-          ? 'ring-2 ring-offset-1'
-          : 'hover:bg-gray-50'
-      }`}
-      style={isActive ? { backgroundColor: `${cfg.color}10` } : undefined}
-      title={`View ${cfg.label} over time`}
-    >
-      <span
-        className="text-xs uppercase tracking-wide leading-none font-medium"
-        style={{ color: isActive ? cfg.color : undefined }}
-      >
-        {label}
-      </span>
-      <span
-        className="text-sm font-semibold leading-none"
-        style={{ color: isActive ? cfg.color : '#1f2937' }}
-      >
-        {value}
-      </span>
-    </button>
+    <div ref={ref} style={{ flex: 1, minWidth: 60, position: 'relative' }}>
+      {/* Label + swap trigger */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 2, marginBottom: 2 }}>
+        <span style={{ fontSize: 9, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 500 }}>
+          {cfg.shortLabel}
+        </span>
+        {availableSwaps.length > 0 && (
+          <button
+            onClick={(e) => { e.stopPropagation(); setSwapOpen(v => !v); }}
+            title="Swap metric"
+            style={{
+              background: 'none', border: 'none', padding: '0 1px', cursor: 'pointer',
+              color: '#d1d5db', fontSize: 8, lineHeight: 1, display: 'flex', alignItems: 'center',
+            }}
+          >▾</button>
+        )}
+      </div>
+
+      {/* Value */}
+      {hasMetrics ? (
+        <button
+          onClick={onChart}
+          style={{
+            display: 'block', width: '100%', textAlign: 'left',
+            background: isActive ? `${cfg.color}12` : 'transparent',
+            border: 'none', borderRadius: 4, padding: '1px 3px', cursor: 'pointer',
+            fontSize: 13, fontWeight: 600,
+            color: isActive ? cfg.color : '#1f2937',
+            transition: 'background 0.15s',
+          }}
+          title={`View ${cfg.label} over time`}
+        >
+          {displayValue}
+        </button>
+      ) : (
+        <span style={{ fontSize: 13, fontWeight: 600, color: '#1f2937', display: 'block', padding: '1px 3px' }}>
+          {displayValue}
+        </span>
+      )}
+
+      {/* Benchmark */}
+      {benchmark ? (
+        <div style={{ fontSize: 9, marginTop: 2, padding: '0 3px', display: 'flex', alignItems: 'center', gap: 2 }}>
+          <span style={{ color: '#d1d5db' }}>bm</span>
+          <span style={{ fontWeight: 500, color: isGood === null ? '#9ca3af' : isGood ? '#10b981' : '#ef4444' }}>
+            {formatBenchmarkValue(benchmark.benchmark_value, benchmark.unit)}
+            {isGood !== null && (isGood ? ' ↑' : ' ↓')}
+          </span>
+        </div>
+      ) : (
+        <div style={{ height: 14 }} />
+      )}
+
+      {/* Swap dropdown */}
+      {swapOpen && (
+        <div style={{
+          position: 'absolute', top: '100%', left: 0, zIndex: 30,
+          background: 'white', border: '1px solid #e5e7eb', borderRadius: 6,
+          boxShadow: '0 4px 12px rgba(0,0,0,0.1)', minWidth: 110, overflow: 'hidden',
+        }}>
+          {availableSwaps.map(k => (
+            <button
+              key={k}
+              onClick={() => { onSwap(k); setSwapOpen(false); }}
+              style={{
+                display: 'block', width: '100%', textAlign: 'left',
+                padding: '6px 10px', fontSize: 11, color: '#374151',
+                background: 'transparent', border: 'none', cursor: 'pointer',
+              }}
+              onMouseEnter={e => (e.currentTarget.style.background = '#f9fafb')}
+              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+            >
+              {METRIC_CONFIG[k].label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -288,10 +444,70 @@ function normalizeChannelType(channelName: string): string {
     .join(' ');
 }
 
-export default function ChannelPerformanceCard({ channel, selectedMonth, dateRange, onAdjust, onViewReport, clientId, channelStartDate, refetchTrigger }: ChannelCardProps) {
+export default function ChannelPerformanceCard({ channel, selectedMonth, dateRange, onAdjust, onViewReport, clientId, channelStartDate, refetchTrigger, benchmarks, presets, clientChannelPresets, onPresetSaved }: ChannelCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [chartType, setChartType] = useState<'spend' | 'metrics'>('spend');
   const [selectedMetrics, setSelectedMetrics] = useState<Set<MetricKey>>(new Set(['impressions']));
+  const [presetOpen, setPresetOpen] = useState(false);
+  const [savingPreset, setSavingPreset] = useState(false);
+  const [displayedMetrics, setDisplayedMetrics] = useState<MetricKey[]>(ALL_METRIC_KEYS);
+
+  // Benchmark / preset derived values
+  const benchmarkChannelName = inferBenchmarkChannelName(channel.platform, channel.name);
+  const channelBenchmarks = (benchmarks ?? []).filter(b => b.channel_name === benchmarkChannelName);
+  const channelPresets = (presets ?? []).filter(p => p.channel_name === benchmarkChannelName);
+  const savedPreset = (clientChannelPresets ?? []).find(p => p.channel_name === channel.name);
+  const activePresetName = savedPreset?.preset_name ?? (channelPresets[0]?.name ?? null);
+  const activePreset = channelPresets.find(p => p.name === activePresetName) ?? channelPresets[0] ?? null;
+
+  const handlePresetSelect = async (presetName: string) => {
+    setPresetOpen(false);
+    // Filter displayed metrics to those in the preset
+    const preset = channelPresets.find(p => p.name === presetName);
+    if (preset && preset.metrics.length > 0) {
+      const validKeys = preset.metrics.filter(k => (METRIC_CONFIG as any)[k]) as MetricKey[];
+      if (validKeys.length > 0) {
+        setDisplayedMetrics(validKeys);
+        // Keep selectedMetrics in sync
+        setSelectedMetrics(prev => {
+          const filtered = [...prev].filter(k => validKeys.includes(k));
+          return new Set(filtered.length > 0 ? filtered : [validKeys[0]]);
+        });
+      }
+    } else {
+      setDisplayedMetrics(ALL_METRIC_KEYS);
+    }
+    if (!clientId) return;
+    setSavingPreset(true);
+    try {
+      const res = await fetch(`/api/clients/${clientId}/channel-presets`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel_name: channel.name, preset_name: presetName, custom_metrics: [] }),
+      });
+      if (res.ok) {
+        const { data } = await res.json();
+        onPresetSaved?.(data);
+      }
+    } finally {
+      setSavingPreset(false);
+    }
+  };
+
+  const handleSwapMetric = (slotIdx: number, newKey: MetricKey) => {
+    setDisplayedMetrics(prev => prev.map((k, i) => i === slotIdx ? newKey : k));
+    // If swapped metric was selected for chart, update selection
+    setSelectedMetrics(prev => {
+      const oldKey = displayedMetrics[slotIdx];
+      if (prev.has(oldKey)) {
+        const next = new Set(prev);
+        next.delete(oldKey);
+        next.add(newKey);
+        return next;
+      }
+      return prev;
+    });
+  };
 
   const hasIssues     = (channel.issues?.length ?? 0) > 0;
   const hasChartData  = (channel.chartData?.length ?? 0) > 0;
@@ -444,28 +660,63 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
             </div>
           </div>
 
-          {/* ── Metrics grid ── */}
-          <div className="px-4 pb-3 grid grid-cols-5 gap-1 border-t border-gray-50 pt-3">
-            {(Object.keys(METRIC_CONFIG) as MetricKey[]).map((key) => {
-              const cfg = METRIC_CONFIG[key];
-              const rawValue = channel.metrics[key];
-              const displayValue = key === 'ctr'
-                ? fmt(rawValue * 100, 'percent', 2)
-                : key === 'cpc'
-                  ? fmt(rawValue, 'currency', 2)
-                  : fmt(rawValue, 'decimal', 0);
-              return (
-                <MetricPill
-                  key={key}
-                  metricKey={key}
-                  label={cfg.shortLabel}
-                  value={displayValue}
-                  isActive={isMetricsView && selectedMetrics.has(key)}
-                  isClickable={hasMetrics}
-                  onClick={handleMetricClick}
-                />
-              );
-            })}
+          {/* ── Metrics: Preset selector + Metric slots with inline benchmarks ── */}
+          <div className="px-4 pb-3 border-t border-gray-50 pt-3">
+            {/* Preset selector */}
+            {channelPresets.length > 0 && (
+              <div className="relative mb-3">
+                <button
+                  onClick={() => setPresetOpen(v => !v)}
+                  disabled={savingPreset}
+                  className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 transition-colors"
+                >
+                  <span className="font-medium">{activePresetName ?? 'Select preset'}</span>
+                  <ChevronDown className="w-3 h-3" />
+                </button>
+                {presetOpen && (
+                  <div className="absolute top-full left-0 mt-1 z-20 bg-white border border-gray-200 rounded-lg shadow-md py-1 min-w-[140px]">
+                    {channelPresets.map(p => (
+                      <button
+                        key={p.id}
+                        onClick={() => handlePresetSelect(p.name)}
+                        className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 transition-colors ${p.name === activePresetName ? 'font-medium text-blue-600' : 'text-gray-700'}`}
+                      >
+                        {p.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Metric slots — shown metrics with benchmarks inline */}
+            <div style={{ display: 'flex', gap: 4 }}>
+              {displayedMetrics.map((key, slotIdx) => {
+                const rawValue = channel.metrics[key];
+                const displayValue = key === 'ctr'
+                  ? fmt(rawValue * 100, 'percent', 2)
+                  : key === 'cpc'
+                    ? fmt(rawValue, 'currency', 2)
+                    : fmt(rawValue, 'decimal', 0);
+                const benchmark = channelBenchmarks.find(b => b.metric_key === key);
+                const realValue = getRealValue(key, channel.metrics);
+                const availableSwaps = ALL_METRIC_KEYS.filter(k => k !== key && !displayedMetrics.includes(k));
+                return (
+                  <MetricSlot
+                    key={`${slotIdx}-${key}`}
+                    metricKey={key}
+                    displayValue={displayValue}
+                    benchmark={benchmark}
+                    realValue={realValue}
+                    isActive={isMetricsView && selectedMetrics.has(key)}
+                    hasMetrics={hasMetrics}
+                    availableSwaps={availableSwaps}
+                    onChart={() => handleMetricClick(key)}
+                    onSwap={(newKey) => handleSwapMetric(slotIdx, newKey)}
+                  />
+                );
+              })}
+            </div>
           </div>
 
           {/* ── Issues warning ── */}
@@ -518,8 +769,8 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                   onClick={onAdjust}
                   className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
                 >
-                  <Settings className="w-3 h-3" />
-                  Adjust
+                  <ExternalLink className="w-3 h-3" />
+                  Open
                 </button>
               )}
               {onViewReport && (
@@ -689,10 +940,19 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                         )}
                         <div className="h-64">
                           <ResponsiveContainer width="100%" height="100%">
-                            <LineChart
+                            <ComposedChart
                               data={channel.metricsChartData}
                               margin={{ top: 10, right: axisMode === 'dual' ? 64 : 16, left: 0, bottom: 8 }}
                             >
+                              <defs>
+                                {selectedKeys.map(key => (
+                                  <linearGradient key={key} id={`grad-${key}`} x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="0%" stopColor={METRIC_CONFIG[key].color} stopOpacity={0.18} />
+                                    <stop offset="50%" stopColor={METRIC_CONFIG[key].color} stopOpacity={0.06} />
+                                    <stop offset="100%" stopColor={METRIC_CONFIG[key].color} stopOpacity={0} />
+                                  </linearGradient>
+                                ))}
+                              </defs>
                               <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                               <XAxis
                                 dataKey="date"
@@ -740,6 +1000,21 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                                 }}
                               />
                               {selectedKeys.map(key => (
+                                <Area
+                                  key={`area-${key}`}
+                                  yAxisId={key}
+                                  type="monotone"
+                                  dataKey={key}
+                                  stroke="none"
+                                  fill={`url(#grad-${key})`}
+                                  dot={false}
+                                  activeDot={false}
+                                  legendType="none"
+                                  tooltipType="none"
+                                  name={`__area_${key}`}
+                                />
+                              ))}
+                              {selectedKeys.map(key => (
                                 <Line
                                   key={key}
                                   yAxisId={key}
@@ -752,7 +1027,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                                   name={key}
                                 />
                               ))}
-                            </LineChart>
+                            </ComposedChart>
                           </ResponsiveContainer>
                         </div>
                       </>

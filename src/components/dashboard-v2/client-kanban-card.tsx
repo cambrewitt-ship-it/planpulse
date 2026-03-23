@@ -81,6 +81,7 @@ export function ClientKanbanCard({ clientId, onActionPointCompleted }: ClientKan
             actionPointClients={[clientActionPoints]}
             amFilter="All"
             onActionPointCompleted={handleCompleted}
+            availableChannels={clientActionPoints.channels.map(ch => ch.channelType)}
           />
         </div>
       )}

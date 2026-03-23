@@ -120,18 +120,56 @@ export async function POST(request: NextRequest) {
     console.log('Connection ID:', connection.connection_id);
 
     try {
-      // Step 1: Get Meta Ads accounts from database
-      const { data: metaAdsAccounts, error: accountsError } = await supabase
-        .from('meta_ads_accounts')
-        .select('*')
-        .eq('user_id', user.id)
-        .eq('is_active', true);
+      // Step 1: Get Meta Ads accounts from database, restricted to accounts
+      // that have stored performance data for this client. This prevents
+      // cross-client data leakage when multiple clients share the same user.
+      let metaAdsAccounts: any[] = [];
+      {
+        const { data: allAccounts, error: accountsError } = await supabase
+          .from('meta_ads_accounts')
+          .select('*')
+          .eq('user_id', user.id)
+          .eq('is_active', true);
 
-      if (accountsError || !metaAdsAccounts || metaAdsAccounts.length === 0) {
-        return Response.json({
-          success: false,
-          error: 'No Meta Ads accounts configured'
-        }, { status: 404 });
+        if (accountsError || !allAccounts || allAccounts.length === 0) {
+          return Response.json({
+            success: false,
+            error: 'No Meta Ads accounts configured'
+          }, { status: 404 });
+        }
+
+        // If a clientId was provided, only include accounts that have
+        // ad_performance_metrics rows for that client.
+        if (clientId) {
+          const { data: clientMetrics } = await supabase
+            .from('ad_performance_metrics')
+            .select('account_id')
+            .eq('client_id', clientId)
+            .eq('platform', 'meta-ads')
+            .limit(500);
+
+          const clientAccountIds = new Set(
+            (clientMetrics || []).map((r: any) => String(r.account_id).replace(/^act_/, ''))
+          );
+
+          if (clientAccountIds.size > 0) {
+            metaAdsAccounts = allAccounts.filter((acc: any) =>
+              clientAccountIds.has(String(acc.account_id).replace(/^act_/, ''))
+            );
+          } else {
+            // No stored metrics for this client — don't show other clients' accounts
+            metaAdsAccounts = [];
+          }
+        } else {
+          metaAdsAccounts = allAccounts;
+        }
+
+        if (metaAdsAccounts.length === 0) {
+          return Response.json({
+            success: false,
+            error: 'No Meta Ads accounts configured for this client'
+          }, { status: 404 });
+        }
       }
 
       console.log(`Found ${metaAdsAccounts.length} Meta Ads account(s)`);

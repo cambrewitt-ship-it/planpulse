@@ -48,9 +48,11 @@ function dueDateColor(dateStr: string | null): string {
 interface NotesChecklistProps {
   /** When set, only show notes linked to these client IDs (or notes with no client_id) */
   filteredClientIds?: string[] | null;
+  /** When set, new notes are tagged to this client and only this client's notes are shown */
+  activeClientId?: string | null;
 }
 
-export function NotesChecklist({ filteredClientIds }: NotesChecklistProps = {}) {
+export function NotesChecklist({ filteredClientIds, activeClientId }: NotesChecklistProps = {}) {
   const [notes, setNotes] = useState<Note[]>([]);
   const [input, setInput] = useState('');
   const [userId, setUserId] = useState<string | null>(null);
@@ -108,14 +110,15 @@ export function NotesChecklist({ filteredClientIds }: NotesChecklistProps = {}) 
     if (!text || !userId) return;
     setInput('');
     const due_date = newDate || null;
+    const client_id = activeClientId ?? null;
     setNewDate('');
 
     if (!useLocal) {
       try {
         const { data, error } = await (supabase as any)
           .from('agency_notes')
-          .insert({ text, done: false, user_id: userId, due_date })
-          .select('id, text, done, due_date')
+          .insert({ text, done: false, user_id: userId, due_date, client_id })
+          .select('id, text, done, due_date, client_id')
           .single();
         if (error) throw error;
         setNotes(prev => [...prev, data]);
@@ -168,33 +171,43 @@ export function NotesChecklist({ filteredClientIds }: NotesChecklistProps = {}) 
 
   const sansFont = "'DM Sans', system-ui, sans-serif";
 
-  // When a client filter is active, show notes linked to those clients + notes with no client
-  const visibleNotes = filteredClientIds
-    ? notes.filter(n => !n.client_id || filteredClientIds.includes(n.client_id))
-    : notes;
+  // Single-client mode: only show notes tagged to that client
+  // Multi-client/agency mode: show notes for those clients + untagged notes
+  const visibleNotes = activeClientId
+    ? notes.filter(n => n.client_id === activeClientId)
+    : filteredClientIds
+      ? notes.filter(n => !n.client_id || filteredClientIds.includes(n.client_id))
+      : notes;
 
   return (
     <div style={{
       display: 'flex',
       flexDirection: 'column',
       height: '100%',
-      background: '#FDFCF8',
+      background: '#F2EDE4',
       borderRadius: 6,
-      border: '0.5px solid #E8E4DC',
+      border: '1px solid #C8C0B4',
       overflow: 'hidden',
       fontFamily: sansFont,
     }}>
       {/* Header */}
       <div style={{
         padding: '10px 13px 8px',
-        borderBottom: '0.5px solid #E8E4DC',
+        borderBottom: '1px solid #C8C0B4',
+        background: '#EAE3D8',
       }}>
         <div style={{ fontSize: 9, fontWeight: 400, color: '#B5B0A5', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Notes</div>
         <div style={{ fontSize: 9, color: '#B5B0A5', marginTop: 1 }}>Only visible to you</div>
       </div>
 
-      {/* Notes list — scrollable */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
+      {/* Notes list — scrollable, notebook-ruled */}
+      <div style={{
+        flex: 1,
+        overflowY: 'auto',
+        padding: '4px 0',
+        backgroundImage: 'repeating-linear-gradient(transparent, transparent 27px, rgba(120,100,80,0.12) 27px, rgba(120,100,80,0.12) 28px)',
+        backgroundPositionY: '4px',
+      }}>
         {visibleNotes.length === 0 ? (
           <div style={{ padding: '10px 13px', fontSize: 10, color: '#B5B0A5', fontStyle: 'italic' }}>
             No notes yet…
@@ -209,7 +222,7 @@ export function NotesChecklist({ filteredClientIds }: NotesChecklistProps = {}) 
                 gap: 7,
                 padding: '7px 13px',
                 cursor: 'default',
-                borderBottom: idx < visibleNotes.length - 1 ? '0.5px solid #E8E4DC' : 'none',
+                borderBottom: 'none',
               }}
             >
               {/* Circle checkbox */}

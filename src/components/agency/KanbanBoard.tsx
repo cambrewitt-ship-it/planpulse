@@ -3,9 +3,20 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Facebook, Search, Linkedin, Music, Radio } from 'lucide-react';
+import { Facebook, Search, Linkedin, Music, Radio, Plus, X, Check } from 'lucide-react';
 import type { AgencyClientActionPoints } from '@/app/api/agency/action-points/route';
 import { getChannelLogo } from '@/lib/utils/channel-icons';
+
+const COMMON_CHANNELS = [
+  'Meta Ads',
+  'Google Ads',
+  'LinkedIn Ads',
+  'TikTok Ads',
+  'Email',
+  'OOH',
+  'Radio',
+  'Other',
+];
 
 interface AccountManager {
   id: string;
@@ -193,14 +204,28 @@ interface KanbanBoardProps {
   amFilter: string;
   onActionPointCompleted?: () => void;
   accountManagers?: AccountManager[];
+  availableChannels?: string[];
 }
 
-export function KanbanBoard({ actionPointClients, amFilter, onActionPointCompleted, accountManagers = [] }: KanbanBoardProps) {
+export function KanbanBoard({ actionPointClients, amFilter, onActionPointCompleted, accountManagers = [], availableChannels }: KanbanBoardProps) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
   // Local override map for optimistic assigned_to updates
   const [assignedOverrides, setAssignedOverrides] = useState<Map<string, string | null>>(new Map());
+
+  // Add action point form state
+  const [isAdding, setIsAdding] = useState(false);
+  const [addText, setAddText] = useState('');
+  const [addChannel, setAddChannel] = useState('');
+  const [addCategory, setAddCategory] = useState<'SET UP' | 'HEALTH CHECK'>('SET UP');
+  const [addDaysBefore, setAddDaysBefore] = useState<string>('');
+  const [addFrequency, setAddFrequency] = useState<'weekly' | 'fortnightly' | 'monthly'>('weekly');
+  const [isSaving, setIsSaving] = useState(false);
+
+  const channelOptions = availableChannels && availableChannels.length > 0
+    ? availableChannels
+    : COMMON_CHANNELS;
 
   // Flatten all outstanding action points into kanban cards
   const cards: KanbanCard[] = [];
@@ -297,6 +322,42 @@ export function KanbanBoard({ actionPointClients, amFilter, onActionPointComplet
     }
   }
 
+  async function handleSaveAdd() {
+    if (!addText.trim() || !addChannel) return;
+    setIsSaving(true);
+    try {
+      const body: any = {
+        channel_type: addChannel,
+        text: addText.trim(),
+        category: addCategory,
+      };
+      if (addCategory === 'SET UP') {
+        body.days_before_live_due = addDaysBefore !== '' ? Number(addDaysBefore) : null;
+      } else {
+        body.frequency = addFrequency;
+      }
+      const res = await fetch('/api/action-points', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        console.error('Failed to add action point:', err);
+        return;
+      }
+      setIsAdding(false);
+      setAddText('');
+      setAddChannel('');
+      setAddDaysBefore('');
+      onActionPointCompleted?.();
+    } catch (err) {
+      console.error('Error adding action point:', err);
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   // Group by column and sort by days until due (ascending - soonest first)
   const byStatus = new Map<KanbanStatus, KanbanCard[]>();
   for (const col of COLUMNS) byStatus.set(col.key, []);
@@ -316,6 +377,181 @@ export function KanbanBoard({ actionPointClients, amFilter, onActionPointComplet
   }
 
   return (
+    <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {/* Add action point button + inline form */}
+      {!isAdding ? (
+        <button
+          onClick={() => {
+            setIsAdding(true);
+            setAddChannel(channelOptions[0] || '');
+            setAddText('');
+            setAddDaysBefore('');
+            setAddCategory('SET UP');
+            setAddFrequency('weekly');
+          }}
+          style={{
+            alignSelf: 'flex-start',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+            fontSize: 11,
+            color: '#8A8578',
+            background: 'transparent',
+            border: '0.5px dashed #D5D0C5',
+            borderRadius: 4,
+            padding: '3px 8px',
+            cursor: 'pointer',
+            fontFamily: "'DM Sans', system-ui, sans-serif",
+          }}
+        >
+          <Plus size={10} />
+          Add action point
+        </button>
+      ) : (
+        <div style={{
+          background: '#FDFCF8',
+          border: '0.5px solid #D5D0C5',
+          borderRadius: 6,
+          padding: '10px 12px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+        }}>
+          {/* Row 1: text input */}
+          <input
+            autoFocus
+            value={addText}
+            onChange={e => setAddText(e.target.value)}
+            placeholder="Action point text…"
+            style={{
+              width: '100%',
+              fontSize: 12,
+              padding: '5px 8px',
+              border: '0.5px solid #D5D0C5',
+              borderRadius: 4,
+              background: '#fff',
+              fontFamily: "'DM Sans', system-ui, sans-serif",
+              outline: 'none',
+              color: '#1C1917',
+            }}
+            onKeyDown={e => { if (e.key === 'Enter') void handleSaveAdd(); if (e.key === 'Escape') setIsAdding(false); }}
+          />
+          {/* Row 2: channel + category + conditional */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <select
+              value={addChannel}
+              onChange={e => setAddChannel(e.target.value)}
+              style={{
+                fontSize: 11,
+                padding: '3px 6px',
+                border: '0.5px solid #D5D0C5',
+                borderRadius: 4,
+                background: '#fff',
+                fontFamily: "'DM Sans', system-ui, sans-serif",
+                color: '#1C1917',
+                cursor: 'pointer',
+              }}
+            >
+              {channelOptions.map(c => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+            <select
+              value={addCategory}
+              onChange={e => setAddCategory(e.target.value as 'SET UP' | 'HEALTH CHECK')}
+              style={{
+                fontSize: 11,
+                padding: '3px 6px',
+                border: '0.5px solid #D5D0C5',
+                borderRadius: 4,
+                background: '#fff',
+                fontFamily: "'DM Sans', system-ui, sans-serif",
+                color: '#1C1917',
+                cursor: 'pointer',
+              }}
+            >
+              <option value="SET UP">SET UP</option>
+              <option value="HEALTH CHECK">HEALTH CHECK</option>
+            </select>
+            {addCategory === 'SET UP' && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ fontSize: 11, color: '#8A8578', whiteSpace: 'nowrap' }}>days before:</span>
+                <input
+                  type="number"
+                  min="0"
+                  value={addDaysBefore}
+                  onChange={e => setAddDaysBefore(e.target.value)}
+                  placeholder="0"
+                  style={{
+                    width: 52,
+                    fontSize: 11,
+                    padding: '3px 6px',
+                    border: '0.5px solid #D5D0C5',
+                    borderRadius: 4,
+                    background: '#fff',
+                    fontFamily: "'DM Sans', system-ui, sans-serif",
+                    color: '#1C1917',
+                    outline: 'none',
+                  }}
+                />
+              </div>
+            )}
+            {addCategory === 'HEALTH CHECK' && (
+              <select
+                value={addFrequency}
+                onChange={e => setAddFrequency(e.target.value as 'weekly' | 'fortnightly' | 'monthly')}
+                style={{
+                  fontSize: 11,
+                  padding: '3px 6px',
+                  border: '0.5px solid #D5D0C5',
+                  borderRadius: 4,
+                  background: '#fff',
+                  fontFamily: "'DM Sans', system-ui, sans-serif",
+                  color: '#1C1917',
+                  cursor: 'pointer',
+                }}
+              >
+                <option value="weekly">weekly</option>
+                <option value="fortnightly">fortnightly</option>
+                <option value="monthly">monthly</option>
+              </select>
+            )}
+          </div>
+          {/* Row 3: save / cancel */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <button
+              onClick={() => void handleSaveAdd()}
+              disabled={isSaving || !addText.trim() || !addChannel}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 3,
+                fontSize: 11, padding: '3px 10px',
+                borderRadius: 4, border: 'none',
+                background: isSaving || !addText.trim() || !addChannel ? '#D5D0C5' : '#4A6580',
+                color: '#fff', cursor: isSaving || !addText.trim() || !addChannel ? 'default' : 'pointer',
+                fontFamily: "'DM Sans', system-ui, sans-serif",
+              }}
+            >
+              <Check size={10} />
+              Save
+            </button>
+            <button
+              onClick={() => setIsAdding(false)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 3,
+                fontSize: 11, padding: '3px 8px',
+                borderRadius: 4, border: '0.5px solid #D5D0C5',
+                background: 'transparent', color: '#8A8578',
+                cursor: 'pointer',
+                fontFamily: "'DM Sans', system-ui, sans-serif",
+              }}
+            >
+              <X size={10} />
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
     <div
       style={{
         display: 'grid',
@@ -337,12 +573,18 @@ export function KanbanBoard({ actionPointClients, amFilter, onActionPointComplet
             }}
           >
             {/* Column header */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 8 }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8,
+              background: `${col.color}18`,
+              border: `0.5px solid ${col.color}40`,
+              borderRadius: 5,
+              padding: '5px 9px',
+            }}>
               <div style={{ width: 5, height: 5, borderRadius: '50%', background: col.color, flexShrink: 0 }} />
-              <span style={{ fontSize: 10, fontWeight: 400, textTransform: 'uppercase', color: '#B5B0A5', letterSpacing: '0.1em' }}>
+              <span style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', color: col.color, letterSpacing: '0.08em' }}>
                 {col.label}
               </span>
-              <span style={{ fontSize: 9, color: '#B5B0A5', marginLeft: 2 }}>{colCards.length}</span>
+              <span style={{ fontSize: 9, color: col.color, opacity: 0.6, marginLeft: 'auto' }}>{colCards.length}</span>
             </div>
 
             {/* Cards */}
@@ -444,6 +686,7 @@ export function KanbanBoard({ actionPointClients, amFilter, onActionPointComplet
           </div>
         );
       })}
+    </div>
     </div>
   );
 }

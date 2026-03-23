@@ -780,9 +780,9 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
   };
 
   return (
-    <div className="w-full">
+    <div className="w-full font-[family-name:var(--font-inter)]">
       <div className="mb-6">
-        <h2 className="text-xl font-semibold text-[#0f172a] mb-2">
+        <h2 className="text-xl font-bold text-[#0f172a] mb-2 font-[family-name:var(--font-inter)]">
           Ad Platform Connections
         </h2>
         <p className="text-sm text-[#64748b]">
@@ -829,7 +829,7 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
       {/* Connection Modal */}
       {openModal && (
         <Dialog open={!!openModal} onOpenChange={(open) => !open && setOpenModal(null)}>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto font-[family-name:var(--font-inter)]">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-3">
                 <PlatformLogo platformId={openModal} />
@@ -931,7 +931,7 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
                   {/* Google Ads Account Management */}
                   {openModal === 'google-ads' && (
                     <div className="space-y-4 border-t pt-4">
-                      <h3 className="font-semibold text-gray-900">Manage Google Ads Accounts</h3>
+                      <h3 className="font-bold text-gray-900 font-[family-name:var(--font-inter)]">Manage Google Ads Accounts</h3>
                       
                       {accountMessage && (
                         <div
@@ -946,7 +946,7 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
                       )}
 
                       <div className="bg-gray-50 p-4 rounded-lg space-y-3">
-                        <h4 className="font-semibold text-sm text-gray-900">Add New Account</h4>
+                        <h4 className="font-bold text-sm text-gray-900 font-[family-name:var(--font-inter)]">Add New Account</h4>
                         
                         <div>
                           <Label htmlFor="customerId" className="text-xs font-medium text-gray-700">
@@ -991,7 +991,7 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
                       </div>
 
                       <div className="space-y-2">
-                        <h4 className="font-semibold text-sm text-gray-900">Saved Accounts</h4>
+                        <h4 className="font-bold text-sm text-gray-900 font-[family-name:var(--font-inter)]">Saved Accounts</h4>
                         
                         {isLoadingAccounts ? (
                           <div className="flex items-center justify-center py-4">
@@ -1042,7 +1042,7 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
                   {/* Meta Ads Account Management */}
                   {openModal === 'facebook' && (
                     <div className="space-y-4 border-t pt-4">
-                      <h3 className="font-semibold text-gray-900">Manage Meta Ads Accounts</h3>
+                      <h3 className="font-bold text-gray-900 font-[family-name:var(--font-inter)]">Manage Meta Ads Accounts</h3>
                       
                       {metaAccountMessage && (
                         <div
@@ -1057,7 +1057,7 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
                       )}
 
                       <div className="bg-gray-50 p-4 rounded-lg space-y-3">
-                        <h4 className="font-semibold text-sm text-gray-900">Add New Accounts</h4>
+                        <h4 className="font-bold text-sm text-gray-900 font-[family-name:var(--font-inter)]">Add New Accounts</h4>
                         
                         <Button
                           onClick={handleDiscoverMetaAccounts}
@@ -1108,7 +1108,7 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
                       </div>
 
                       <div className="space-y-2">
-                        <h4 className="font-semibold text-sm text-gray-900">Saved Accounts</h4>
+                        <h4 className="font-bold text-sm text-gray-900 font-[family-name:var(--font-inter)]">Saved Accounts</h4>
                         
                         {isLoadingMetaAccounts ? (
                           <div className="flex items-center justify-center py-4">
@@ -1157,7 +1157,7 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
                   {/* Google Analytics Account Management */}
                   {openModal === 'google-analytics' && (
                     <div className="space-y-4 border-t pt-4">
-                      <h3 className="font-semibold text-gray-900">Manage Google Analytics Properties</h3>
+                      <h3 className="font-bold text-gray-900 font-[family-name:var(--font-inter)]">Manage Google Analytics Properties</h3>
                       
                       {googleAnalyticsAccountMessage && (
                         <div
@@ -1172,7 +1172,7 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
                       )}
 
                       <div className="bg-gray-50 p-4 rounded-lg space-y-3">
-                        <h4 className="font-semibold text-sm text-gray-900">Add New Properties</h4>
+                        <h4 className="font-bold text-sm text-gray-900 font-[family-name:var(--font-inter)]">Add New Properties</h4>
                         
                         <Button
                           onClick={handleDiscoverGoogleAnalyticsAccounts}
@@ -1228,7 +1228,7 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
                       </div>
 
                       <div className="space-y-2">
-                        <h4 className="font-semibold text-sm text-gray-900">Saved Properties</h4>
+                        <h4 className="font-bold text-sm text-gray-900 font-[family-name:var(--font-inter)]">Saved Properties</h4>
                         
                         {isLoadingGoogleAnalyticsAccounts ? (
                           <div className="flex items-center justify-center py-4">

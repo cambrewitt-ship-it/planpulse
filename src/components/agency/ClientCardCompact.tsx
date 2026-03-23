@@ -29,6 +29,38 @@ function scoreColor(score: number): string {
   return '#A0442A';
 }
 
+function calcBudgetPacingScore(pacingRatio: number): number {
+  const pct = pacingRatio * 100;
+  if (pct >= 95 && pct <= 105) return 100;
+  if ((pct >= 85 && pct < 95) || (pct > 105 && pct <= 115)) return 80;
+  if ((pct >= 75 && pct < 85) || (pct > 115 && pct <= 125)) return 60;
+  if ((pct >= 65 && pct < 75) || (pct > 125 && pct <= 135)) return 40;
+  return 20;
+}
+
+function calcActionScore(completionRate: number): number {
+  const pct = completionRate * 100;
+  if (pct >= 100) return 100;
+  if (pct >= 75) return 80;
+  if (pct >= 50) return 60;
+  if (pct >= 25) return 40;
+  return 20;
+}
+
+function calcCompositeHealthScore(
+  spendVariancePct: number | null,
+  completedActions: number,
+  totalActions: number,
+  healthStatus: string | undefined
+): number {
+  const pacingRatio = spendVariancePct != null ? 1 + spendVariancePct / 100 : 1.0;
+  const budgetPacingScore = calcBudgetPacingScore(pacingRatio);
+  const completionRate = totalActions > 0 ? completedActions / totalActions : 1.0;
+  const actionScore = calcActionScore(completionRate);
+  const perfScore = healthStatus === 'green' ? 85 : healthStatus === 'amber' ? 50 : 20;
+  return Math.round(budgetPacingScore * (4 / 9) + actionScore * (2.5 / 9) + perfScore * (2.5 / 9));
+}
+
 function formatCurrency(n: number): string {
   if (n >= 1000) return `$${(n / 1000).toFixed(1)}k`;
   return `$${Math.round(n)}`;
@@ -54,8 +86,8 @@ function HealthRing({ score, color }: HealthRingProps) {
         strokeLinecap="round"
         transform="rotate(-90 18 18)"
       />
-      <text x="18" y="22" textAnchor="middle" fontSize="10" fontWeight="400" fill="#1C1917"
-        fontFamily="'DM Serif Display', Georgia, serif">
+      <text x="18" y="22" textAnchor="middle" fontSize="10" fontWeight="700" fill="#1C1917"
+        fontFamily="'Inter', system-ui, sans-serif">
         {Math.round(score)}
       </text>
     </svg>
@@ -66,11 +98,12 @@ interface ClientCardCompactProps {
   client: ClientCardData;
   selected: boolean;
   onClick: () => void;
+  index?: number;
   onAccountManagerChange?: (clientId: string, am: string | null) => void;
   accountManagers?: AccountManager[];
 }
 
-export function ClientCardCompact({ client, selected, onClick, onAccountManagerChange, accountManagers = [] }: ClientCardCompactProps) {
+export function ClientCardCompact({ client, selected, onClick, index = 0, onAccountManagerChange, accountManagers = [] }: ClientCardCompactProps) {
   const router = useRouter();
   const color = clientColor(client.id);
   const initials = clientInitials(client.name);
@@ -112,10 +145,13 @@ export function ClientCardCompact({ client, selected, onClick, onAccountManagerC
     }
   }
 
-  // Derived health score 0-100
-  const healthScore = health?.budget_health_percentage != null
-    ? Number(health.budget_health_percentage)
-    : health?.status === 'green' ? 85 : health?.status === 'amber' ? 50 : 20;
+  // Composite health score 0-100 (mirrors dashboard-v2 calculateHealthScore logic)
+  const healthScore = calcCompositeHealthScore(
+    client.spendVariancePct,
+    client.completedActionPoints,
+    client.totalActionPoints,
+    health?.status
+  );
 
   const healthLabel = health?.status === 'green' ? 'Healthy' : health?.status === 'amber' ? 'At Risk' : 'Critical';
   const healthColor = health?.status === 'red' ? '#A0442A' : health?.status === 'amber' ? '#B07030' : '#4A7C59';
@@ -134,15 +170,17 @@ export function ClientCardCompact({ client, selected, onClick, onAccountManagerC
   const hasSpend = client.plannedBudget > 0;
   const budgetPct = hasSpend ? Math.min(200, (client.actualSpend / client.plannedBudget) * 100) : 0;
 
+  const isAlt = index % 2 === 1;
   const cardStyle: React.CSSProperties = {
-    background: '#FDFCF8',
-    border: selected ? '0.5px solid rgba(74,101,128,0.4)' : '0.5px solid #E8E4DC',
+    background: isAlt ? '#F2EDE6' : '#FDFCF8',
+    border: selected ? '1.5px solid rgba(74,101,128,0.5)' : '1px solid #B8B4AE',
     borderRadius: 6,
     padding: '14px',
     marginBottom: 6,
     cursor: 'pointer',
     fontFamily: "'DM Sans', system-ui, sans-serif",
   };
+  const subTextColor = isAlt ? '#6A6560' : '#8A8578';
 
   const scores = [
     {
@@ -278,12 +316,12 @@ export function ClientCardCompact({ client, selected, onClick, onAccountManagerC
       <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
         {scores.map(({ label, fullLabel, value, detail }) => (
           <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start', flex: 1, minWidth: 0 }}>
-            <span style={{ fontSize: 13, color: '#B5B0A5', fontWeight: 500 }}>{fullLabel}</span>
+            <span style={{ fontSize: 13, color: subTextColor, fontWeight: 500 }}>{fullLabel}</span>
             <div style={{
               width: '100%', height: 3, borderRadius: 1,
               background: scoreColor(value),
             }} />
-            <span style={{ fontSize: 10, color: '#8A8578', fontWeight: 400, lineHeight: 1.3 }}>
+            <span style={{ fontSize: 10, color: subTextColor, fontWeight: 400, lineHeight: 1.3 }}>
               {detail}
             </span>
           </div>

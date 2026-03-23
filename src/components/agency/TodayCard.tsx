@@ -45,17 +45,17 @@ export function TodayCard({ clients, today }: TodayCardProps) {
       fontFamily: sansFont,
     }}>
       {/* TODAY label */}
-      <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: '0.1em', fontFamily: sansFont }}>
+      <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.65)', textTransform: 'uppercase', letterSpacing: '0.1em', fontFamily: sansFont }}>
         TODAY
       </span>
 
       {/* Date */}
-      <span style={{ fontSize: 28, color: 'rgba(255,255,255,0.88)', lineHeight: 1.1, marginTop: 4, fontFamily: serifFont }}>
+      <span style={{ fontSize: 28, color: '#ffffff', lineHeight: 1.1, marginTop: 4, fontFamily: serifFont }}>
         {month} {day}
       </span>
 
       {/* Day of week */}
-      <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', marginTop: 2, fontFamily: sansFont }}>
+      <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)', marginTop: 2, fontFamily: sansFont }}>
         {dayName}
       </span>
 
@@ -63,7 +63,7 @@ export function TodayCard({ clients, today }: TodayCardProps) {
       <div style={{ height: '0.5px', background: 'rgba(255,255,255,0.08)', margin: '12px 0' }} />
 
       {/* Live channels label */}
-      <span style={{ fontSize: 9, textTransform: 'uppercase', color: 'rgba(255,255,255,0.3)', letterSpacing: '0.1em', marginBottom: 8, fontFamily: sansFont }}>
+      <span style={{ fontSize: 9, textTransform: 'uppercase', color: 'rgba(255,255,255,0.65)', letterSpacing: '0.1em', marginBottom: 8, fontFamily: sansFont }}>
         Live Channels
       </span>
 
@@ -80,7 +80,7 @@ export function TodayCard({ clients, today }: TodayCardProps) {
                   background: 'rgba(74,124,89,0.6)',
                   flexShrink: 0,
                 }} />
-                <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', fontFamily: sansFont }}>
+                <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.85)', fontFamily: sansFont }}>
                   {client.name}
                 </span>
               </div>
@@ -90,7 +90,7 @@ export function TodayCard({ clients, today }: TodayCardProps) {
                   <div style={{ width: 12, height: 12, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     {getChannelLogo(ch.channelName, "w-3 h-3")}
                   </div>
-                  <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', fontFamily: sansFont }}>{ch.channelName}</span>
+                  <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.6)', fontFamily: sansFont }}>{ch.channelName}</span>
                 </div>
               ))}
             </div>
