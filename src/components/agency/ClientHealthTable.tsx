@@ -134,7 +134,7 @@ export function ClientHealthTable({ clients, onClientClick }: ClientHealthTableP
   // Handle client click
   const handleClientClick = useCallback((clientId: string) => {
     onClientClick(clientId);
-    router.push(`/clients/${clientId}/new-client-dashboard`);
+    router.push(`/clients/${clientId}/dashboard-v2`);
   }, [onClientClick, router]);
 
   // Load client tasks

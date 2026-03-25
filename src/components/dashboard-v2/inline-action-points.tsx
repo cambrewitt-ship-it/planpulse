@@ -101,6 +101,7 @@ interface InlineActionPointsProps {
   showBorder?: boolean;
   showTitle?: boolean;
   refetchTrigger?: number;
+  sideBySide?: boolean;
 }
 
 export default function InlineActionPoints({
@@ -112,6 +113,7 @@ export default function InlineActionPoints({
   showBorder = true,
   showTitle = true,
   refetchTrigger,
+  sideBySide = false,
 }: InlineActionPointsProps) {
   const [actionPoints, setActionPoints] = useState<InlineActionPoint[]>([]);
   const [loading, setLoading] = useState(false);
@@ -725,97 +727,102 @@ export default function InlineActionPoints({
         <p className="text-xs text-gray-500 mb-2">No action points yet. Click "Add" to create one.</p>
       )}
       
-      {/* SET UP section */}
-      {(setupIncomplete.length > 0 || setupCompleted.length > 0) && (
-        <div className="mb-4">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-semibold text-gray-800">SET UP</span>
-            {hasMoreSetup && (
-              <button
-                onClick={() => setShowAllSetup(!showAllSetup)}
-                className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1"
-              >
-                {showAllSetup ? (
-                  <>
-                    <ChevronUp className="w-3 h-3" />
-                    Show less
-                  </>
-                ) : (
-                  <>
-                    <ChevronDown className="w-3 h-3" />
-                    View all ({setupIncomplete.length})
-                  </>
-                )}
-              </button>
-            )}
-          </div>
-          {renderActionList(visibleSetupIncomplete)}
-          
-          {/* Completed SET UP items */}
-          {setupCompleted.length > 0 && (
-            <div className="mt-2">
-              <button
-                onClick={() => setCompletedSetupOpen(!completedSetupOpen)}
-                className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 transition-colors py-1 w-full text-left"
-              >
-                <ChevronDown className={`h-3 w-3 transition-transform ${completedSetupOpen ? '' : '-rotate-90'}`} />
-                Completed ({setupCompleted.length})
-              </button>
-              {completedSetupOpen && (
-                <div className="mt-1">
-                  {renderActionList(setupCompleted)}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
+      {/* SET UP + HEALTH CHECK sections — side-by-side or stacked */}
+      <div style={sideBySide ? { display: 'flex', gap: 12, alignItems: 'flex-start' } : {}}>
 
-      {/* HEALTH CHECK section */}
-      {(ongoingIncomplete.length > 0 || ongoingCompleted.length > 0) && (
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-semibold text-gray-800">HEALTH CHECK</span>
-            {hasMoreOngoing && (
-              <button
-                onClick={() => setShowAllOngoing(!showAllOngoing)}
-                className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1"
-              >
-                {showAllOngoing ? (
-                  <>
-                    <ChevronUp className="w-3 h-3" />
-                    Show less
-                  </>
-                ) : (
-                  <>
-                    <ChevronDown className="w-3 h-3" />
-                    View all ({ongoingIncomplete.length})
-                  </>
-                )}
-              </button>
-            )}
-          </div>
-          {renderActionList(visibleOngoingIncomplete)}
-          
-          {/* Completed HEALTH CHECK items */}
-          {ongoingCompleted.length > 0 && (
-            <div className="mt-2">
-              <button
-                onClick={() => setCompletedOngoingOpen(!completedOngoingOpen)}
-                className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 transition-colors py-1 w-full text-left"
-              >
-                <ChevronDown className={`h-3 w-3 transition-transform ${completedOngoingOpen ? '' : '-rotate-90'}`} />
-                Completed ({ongoingCompleted.length})
-              </button>
-              {completedOngoingOpen && (
-                <div className="mt-1">
-                  {renderActionList(ongoingCompleted)}
-                </div>
+        {/* SET UP section */}
+        {(setupIncomplete.length > 0 || setupCompleted.length > 0) && (
+          <div style={sideBySide ? { flex: 1, minWidth: 0 } : { marginBottom: 16 }}>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold text-gray-800">SET UP</span>
+              {hasMoreSetup && (
+                <button
+                  onClick={() => setShowAllSetup(!showAllSetup)}
+                  className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                >
+                  {showAllSetup ? (
+                    <>
+                      <ChevronUp className="w-3 h-3" />
+                      Show less
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown className="w-3 h-3" />
+                      View all ({setupIncomplete.length})
+                    </>
+                  )}
+                </button>
               )}
             </div>
-          )}
-        </div>
-      )}
+            {renderActionList(visibleSetupIncomplete)}
+
+            {/* Completed SET UP items */}
+            {setupCompleted.length > 0 && (
+              <div className="mt-2">
+                <button
+                  onClick={() => setCompletedSetupOpen(!completedSetupOpen)}
+                  className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 transition-colors py-1 w-full text-left"
+                >
+                  <ChevronDown className={`h-3 w-3 transition-transform ${completedSetupOpen ? '' : '-rotate-90'}`} />
+                  Completed ({setupCompleted.length})
+                </button>
+                {completedSetupOpen && (
+                  <div className="mt-1">
+                    {renderActionList(setupCompleted)}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* HEALTH CHECK section */}
+        {(ongoingIncomplete.length > 0 || ongoingCompleted.length > 0) && (
+          <div style={sideBySide ? { flex: 1, minWidth: 0 } : {}}>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold text-gray-800">HEALTH CHECK</span>
+              {hasMoreOngoing && (
+                <button
+                  onClick={() => setShowAllOngoing(!showAllOngoing)}
+                  className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                >
+                  {showAllOngoing ? (
+                    <>
+                      <ChevronUp className="w-3 h-3" />
+                      Show less
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown className="w-3 h-3" />
+                      View all ({ongoingIncomplete.length})
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+            {renderActionList(visibleOngoingIncomplete)}
+
+            {/* Completed HEALTH CHECK items */}
+            {ongoingCompleted.length > 0 && (
+              <div className="mt-2">
+                <button
+                  onClick={() => setCompletedOngoingOpen(!completedOngoingOpen)}
+                  className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 transition-colors py-1 w-full text-left"
+                >
+                  <ChevronDown className={`h-3 w-3 transition-transform ${completedOngoingOpen ? '' : '-rotate-90'}`} />
+                  Completed ({ongoingCompleted.length})
+                </button>
+                {completedOngoingOpen && (
+                  <div className="mt-1">
+                    {renderActionList(ongoingCompleted)}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+      </div>
     </div>
   );
 }

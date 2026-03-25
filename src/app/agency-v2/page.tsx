@@ -1,17 +1,18 @@
 // src/app/agency-v2/page.tsx
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import { RefreshCw } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { RefreshCw, Plus, Maximize2 } from 'lucide-react';
 import { format, startOfYear } from 'date-fns';
 import type { ClientCardData } from '@/app/api/agency/clients/route';
 import type { AgencyClientActionPoints } from '@/app/api/agency/action-points/route';
 import { ClientCardCompact } from '@/components/agency/ClientCardCompact';
 import { TodayCard } from '@/components/agency/TodayCard';
-import { KanbanBoard } from '@/components/agency/KanbanBoard';
+import { KanbanBoard, type KanbanBoardHandle } from '@/components/agency/KanbanBoard';
 import { NotesChecklist } from '@/components/agency/NotesChecklist';
 import { CalendarPanel } from '@/components/agency/CalendarPanel';
 import { DateRangePicker } from '@/components/ui/date-range-picker';
+import { FullscreenGanttView, type GanttAPMarker } from '@/components/agency/FullscreenGanttView';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -108,6 +109,9 @@ export default function AgencyDashboard() {
     };
   });
 
+  const [showFullscreenGantt, setShowFullscreenGantt] = useState(false);
+
+  const kanbanRef = useRef<KanbanBoardHandle>(null);
   const today = useMemo(() => new Date(), []);
   const monthLabel = `${MONTH_NAMES[today.getMonth()]} ${today.getFullYear()}`;
 
@@ -207,6 +211,54 @@ export default function AgencyDashboard() {
 
   const briefingItems = useMemo(() => computeBriefing(filteredClients, filteredActionPointClients), [filteredClients, filteredActionPointClients]);
 
+  // Fullscreen Gantt data derivation
+  const ganttClients = useMemo(() =>
+    filteredClients.map(c => {
+      let hash = 0;
+      for (let i = 0; i < c.id.length; i++) hash = (hash * 31 + c.id.charCodeAt(i)) & 0xffffffff;
+      const COLORS = ['#6366f1','#f59e0b','#10b981','#ef4444','#3b82f6','#8b5cf6','#ec4899','#14b8a6'];
+      return {
+        id: c.id, name: c.name,
+        initials: c.name.split(' ').map((w: string) => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase(),
+        color: COLORS[Math.abs(hash) % COLORS.length],
+      };
+    }),
+    [filteredClients]
+  );
+
+  const ganttChannels = useMemo(() =>
+    filteredClients.flatMap(c =>
+      (c.channels ?? []).map((ch: { channelName: string; startDate: string | null; endDate: string | null }) => ({
+        id: `${c.id}:${ch.channelName}`,
+        client_id: c.id,
+        label: ch.channelName,
+        start_date: ch.startDate,
+        end_date: ch.endDate,
+        type: (/organic|social|seo|email|edm|content/.test(ch.channelName.toLowerCase()) ? 'organic' : 'paid') as 'paid' | 'organic',
+      }))
+    ),
+    [filteredClients]
+  );
+
+  const ganttAPMarkers = useMemo<GanttAPMarker[]>(() =>
+    filteredActionPointClients.flatMap(c =>
+      c.channels.flatMap(ch =>
+        ch.actionPoints.map(ap => ({
+          client_id: c.clientId,
+          client_name: c.clientName,
+          channel_label: ch.channelType,
+          text: ap.text,
+          category: ap.category,
+          due_date: ap.due_date ?? null,
+          frequency: ap.frequency,
+          assigned_to: ap.assigned_to ?? null,
+          id: ap.id,
+        }))
+      )
+    ),
+    [filteredActionPointClients]
+  );
+
   const formatLastRefreshed = () => {
     if (!lastRefreshed) return 'Updated just now';
     const diffMs = Date.now() - lastRefreshed.getTime();
@@ -230,61 +282,69 @@ export default function AgencyDashboard() {
 
   return (
     <div style={{ minHeight: '100vh', background: '#F5F3EF', ...pageFont }}>
-      {/* ── Sub-nav (48px) ────────────────────────────────── */}
+      {/* ── Subheader ──────────────────────────────────────── */}
       <div style={{
         height: 48, background: '#FDFCF8', borderBottom: '0.5px solid #E8E4DC',
-        display: 'flex', alignItems: 'center', paddingLeft: 16, paddingRight: 16, gap: 5,
+        display: 'flex', alignItems: 'center', paddingLeft: 16, paddingRight: 16, gap: 9,
+        overflow: 'hidden',
       }}>
-
-        <div style={{ flex: 1 }} />
-
-        {/* Date Range Picker */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <DateRangePicker
-            value={dateRange}
-            onChange={setDateRange}
-          />
-        </div>
-
+        <span style={{ fontSize: 19, fontWeight: 700, color: '#1C1917', fontFamily: "'Inter', system-ui, sans-serif", flexShrink: 0 }}>Agency Dashboard</span>
         {/* Refresh button */}
         <button
           onClick={handleRefresh}
           disabled={refreshing}
           style={{
-            width: 32, height: 32, borderRadius: 4, border: '0.5px solid #E8E4DC',
+            width: 28, height: 28, borderRadius: 4, border: '0.5px solid #E8E4DC',
             background: '#FDFCF8', display: 'flex', alignItems: 'center', justifyContent: 'center',
-            cursor: 'pointer',
+            cursor: 'pointer', flexShrink: 0,
           }}
         >
-          <RefreshCw size={14} color="#8A8578" style={{ animation: refreshing ? 'spin 1s linear infinite' : 'none' }} />
+          <RefreshCw size={13} color="#8A8578" style={{ animation: refreshing ? 'spin 1s linear infinite' : 'none' }} />
         </button>
-      </div>
-
-      {/* ── Subheader (40px) ──────────────────────────────── */}
-      <div style={{
-        height: 40, background: '#FDFCF8', borderBottom: '0.5px solid #E8E4DC',
-        display: 'flex', alignItems: 'center', paddingLeft: 16, paddingRight: 16, gap: 9,
-      }}>
-        <span style={{ fontSize: 19, fontWeight: 700, color: '#1C1917', fontFamily: "'Inter', system-ui, sans-serif" }}>Agency Dashboard</span>
-        <span style={{ fontSize: 13, color: '#8A8578' }}>{monthLabel}</span>
-        <div style={{ width: '0.5px', height: 16, background: '#E8E4DC' }} />
-        {/* Briefing chips */}
-        <div style={{ display: 'flex', gap: 6, flex: 1, overflowX: 'auto' }}>
-          {briefingItems.map((item, i) => (
-            <span key={i} style={{
-              fontSize: 12, fontWeight: 400, padding: '3px 12px',
-              whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6,
-              ...CHIP_STYLES[item.color],
-            }}>
-              <span style={{
-                width: 6, height: 6, borderRadius: '50%', flexShrink: 0, display: 'inline-block',
-                background: item.color === 'red' ? '#A0442A' : item.color === 'amber' ? '#B07030' : item.color === 'green' ? '#4A7C59' : '#4A6580',
-              }} />
-              {item.label}
-            </span>
-          ))}
+        <span style={{ fontSize: 13, color: '#8A8578', flexShrink: 0 }}>{monthLabel}</span>
+        <div style={{ width: '0.5px', height: 16, background: '#E8E4DC', flexShrink: 0 }} />
+        {/* Briefing chips — scrollable with right fade */}
+        <div style={{ position: 'relative', flex: 1, overflow: 'hidden', minWidth: 0 }}>
+          <div style={{ display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none' }}>
+            {briefingItems.map((item, i) => (
+              <span key={i} style={{
+                fontSize: 12, fontWeight: 400, padding: '3px 12px',
+                whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6,
+                ...CHIP_STYLES[item.color],
+              }}>
+                <span style={{
+                  width: 6, height: 6, borderRadius: '50%', flexShrink: 0, display: 'inline-block',
+                  background: item.color === 'red' ? '#A0442A' : item.color === 'amber' ? '#B07030' : item.color === 'green' ? '#4A7C59' : '#4A6580',
+                }} />
+                {item.label}
+              </span>
+            ))}
+          </div>
+          {/* Fade out on the right */}
+          <div style={{
+            position: 'absolute', top: 0, right: 0, bottom: 0, width: 40, pointerEvents: 'none',
+            background: 'linear-gradient(to right, transparent, #FDFCF8)',
+          }} />
+        </div>
+        {/* Date Range Picker */}
+        <div style={{ flexShrink: 0 }}>
+          <DateRangePicker value={dateRange} onChange={setDateRange} />
         </div>
         <span style={{ fontSize: 12, color: '#B5B0A5', flexShrink: 0 }}>{formatLastRefreshed()}</span>
+        <button
+          onClick={() => setShowFullscreenGantt(true)}
+          style={{
+            height: 28, padding: '0 10px',
+            border: '0.5px solid #D5D0C5', borderRadius: 4,
+            background: '#FDFCF8', color: '#4A6580',
+            fontSize: 12, fontWeight: 500, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', gap: 5,
+            fontFamily: "'DM Sans', system-ui, sans-serif", flexShrink: 0,
+          }}
+        >
+          <Maximize2 size={12} />
+          Timeline
+        </button>
       </div>
 
       {/* ── Team member tabs ──────────────────────────────── */}
@@ -356,7 +416,7 @@ export default function AgencyDashboard() {
             {/* Notes — personal notes, made wider so content isn't cut off */}
             <div
               style={{
-                width: 300,
+                width: 360,
                 flexShrink: 0,
                 display: 'flex',
                 flexDirection: 'column',
@@ -385,12 +445,27 @@ export default function AgencyDashboard() {
                 }}>
                   Action Points
                 </span>
+                <button
+                  onClick={() => kanbanRef.current?.startAdding()}
+                  style={{
+                    marginLeft: 8,
+                    display: 'flex', alignItems: 'center', gap: 3,
+                    fontSize: 10, color: '#8A8578',
+                    background: 'transparent', border: '0.5px dashed #D5D0C5',
+                    borderRadius: 4, padding: '2px 7px', cursor: 'pointer',
+                    fontFamily: "'DM Sans', system-ui, sans-serif",
+                  }}
+                >
+                  <Plus size={9} />
+                  Add action point
+                </button>
                 <span style={{ marginLeft: 'auto', fontSize: 11, color: '#B5B0A5' }}>
                   {filteredActionPointClients.reduce((sum, c) => sum + c.totalOutstanding, 0)} total
                 </span>
               </div>
               <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
                 <KanbanBoard
+                  ref={kanbanRef}
                   actionPointClients={filteredActionPointClients}
                   amFilter={amFilter}
                   onActionPointCompleted={() => fetchData(true)}
@@ -402,8 +477,8 @@ export default function AgencyDashboard() {
 
           {/* Calendar panel */}
           <div style={{
-            background: '#FDFCF8',
-            border: '0.5px solid #E8E4DC',
+            background: '#E5E0D8',
+            border: '0.5px solid #C8C4BC',
             borderRadius: 6,
           }}>
             <CalendarPanel
@@ -471,6 +546,17 @@ export default function AgencyDashboard() {
       <style>{`
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
       `}</style>
+
+      {/* Fullscreen Gantt overlay */}
+      {showFullscreenGantt && (
+        <FullscreenGanttView
+          clients={ganttClients}
+          channels={ganttChannels}
+          actionPointMarkers={ganttAPMarkers}
+          filteredClientIds={filteredIds}
+          onClose={() => setShowFullscreenGantt(false)}
+        />
+      )}
     </div>
   );
 }

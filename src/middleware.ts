@@ -5,6 +5,7 @@ import type { Database } from '@/types/database';
 
 // Define public routes that don't require authentication
 const PUBLIC_ROUTES = [
+  '/',
   '/auth/login',
   '/auth/signup',
   '/auth/callback',

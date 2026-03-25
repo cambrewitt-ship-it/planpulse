@@ -217,10 +217,15 @@ export function CalendarPanel({
   }, [actionPointClients]);
 
   return (
-    <div style={{ padding: '12px 16px', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+    <div style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10 }}>
-        <span style={{ fontSize: 9, fontWeight: 400, color: '#B5B0A5', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+      <div style={{
+        display: 'flex', alignItems: 'center',
+        background: '#E5E0D8',
+        borderRadius: '6px 6px 0 0',
+        padding: '8px 16px',
+      }}>
+        <span style={{ fontSize: 9, fontWeight: 500, color: '#fff', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
           Calendar — {monthLabel}
         </span>
         <div style={{ flex: 1 }} />
@@ -231,11 +236,11 @@ export function CalendarPanel({
             style={{
               height: 22, padding: '0 8px', border: 'none',
               background: 'transparent',
-              color: view === v ? '#1C1917' : '#B5B0A5',
-              fontSize: 11, fontWeight: 400,
+              color: view === v ? '#fff' : 'rgba(255,255,255,0.55)',
+              fontSize: 11, fontWeight: view === v ? 600 : 400,
               cursor: 'pointer',
               fontFamily: "'DM Sans', system-ui, sans-serif",
-              borderBottom: view === v ? '1px solid #1C1917' : '1px solid transparent',
+              borderBottom: view === v ? '1px solid rgba(255,255,255,0.8)' : '1px solid transparent',
               borderRadius: 0,
             }}
           >
@@ -243,6 +248,7 @@ export function CalendarPanel({
           </button>
         ))}
       </div>
+      <div style={{ padding: '12px 16px', background: '#E5E0D8' }}>
 
       {view === 'gantt' ? (
         <GanttCalendar
@@ -259,6 +265,7 @@ export function CalendarPanel({
       ) : (
         <AgencyCalendar clients={clients.map(c => ({ id: c.id, name: c.name }))} />
       )}
+      </div>
     </div>
   );
 }

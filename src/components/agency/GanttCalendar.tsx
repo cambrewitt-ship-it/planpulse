@@ -302,7 +302,7 @@ export function GanttCalendar({
   };
 
   return (
-    <div ref={containerRef} style={{ overflowX: 'auto', overflowY: 'hidden', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+    <div ref={containerRef} style={{ overflowX: 'auto', overflowY: 'hidden', background: '#FDFCF8', borderRadius: 4, fontFamily: "'DM Sans', system-ui, sans-serif" }}>
       <div style={{ minWidth: LABEL_COL + daysInMo * DAY_WIDTH }}>
       {/* ── Ruler row ─────────────────────────────────────────── */}
       <div style={{ display: 'grid', gridTemplateColumns: `${LABEL_COL}px 1fr` }}>

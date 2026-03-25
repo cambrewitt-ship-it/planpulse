@@ -11,7 +11,6 @@ import {
   Calendar, 
   CheckCircle2, 
   TrendingUp,
-  Sparkles,
   ArrowRight
 } from 'lucide-react';
 
@@ -25,17 +24,12 @@ export default function Home() {
         {/* Hero Section */}
         <section className="relative overflow-hidden" style={{ background: '#F5F3EF' }}>
           <div className="container mx-auto px-4 py-24 md:py-32">
-            <div className="max-w-4xl mx-auto text-center space-y-8">
-              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium mb-4" style={{ background: '#E8EDF2', color: '#4A6580', border: '0.5px solid rgba(74,101,128,0.25)', borderRadius: 4 }}>
-                <Sparkles className="w-4 h-4" />
-                Streamline Your Marketing Operations
-              </div>
-              <h1 className="text-5xl md:text-7xl font-bold tracking-tight leading-[1.1] mb-12 pb-1" style={{ color: '#1C1917', ...serifFont }}>
-                Your Campaign Manager
+            <div className="max-w-4xl mx-auto text-center space-y-6">
+              <h1 className="text-5xl md:text-6xl font-bold leading-none" style={{ color: '#1C1917', ...serifFont, letterSpacing: '-0.02em' }}>
+                PlanPulse
               </h1>
-              <p className="text-xl md:text-2xl max-w-2xl mx-auto leading-relaxed" style={{ color: '#8A8578' }}>
-                The all-in-one platform to manage client campaigns, media plans, and action points. 
-                Take control of your marketing strategy with powerful tools designed for efficiency.
+              <p className="text-4xl md:text-6xl font-black leading-tight max-w-3xl mx-auto" style={{ color: '#1C1917', letterSpacing: '-0.02em' }}>
+                Health check software for marketing agencies
               </p>
               <div className="flex flex-col sm:flex-row gap-4 justify-center items-center pt-6">
                 <Link href="/dashboard">

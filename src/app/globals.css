@@ -142,6 +142,6 @@
     font-family: var(--av2-sans), system-ui, sans-serif;
   }
   h1, h2, h3, h4, h5, h6 {
-    font-family: var(--av2-serif), Georgia, serif;
+    font-family: var(--av2-sans);
   }
 }

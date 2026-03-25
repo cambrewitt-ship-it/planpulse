@@ -1,7 +1,7 @@
 // src/components/agency/KanbanBoard.tsx
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, forwardRef, useImperativeHandle, type ForwardedRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Facebook, Search, Linkedin, Music, Radio, Plus, X, Check } from 'lucide-react';
 import type { AgencyClientActionPoints } from '@/app/api/agency/action-points/route';
@@ -32,7 +32,7 @@ function clientColor(id: string): string {
   return COLORS[Math.abs(hash) % COLORS.length];
 }
 
-type KanbanStatus = '1-3' | '4-6' | '7+';
+type KanbanStatus = '1-2' | '3-4' | '5+';
 
 interface KanbanCard {
   id: string;
@@ -52,9 +52,9 @@ function getChannelIcon(channelType: string) {
 }
 
 const COLUMNS: { key: KanbanStatus; label: string; color: string }[] = [
-  { key: '1-3', label: '1–3 days', color: '#A0442A' },
-  { key: '4-6', label: '4–6 days', color: '#B07030' },
-  { key: '7+', label: '7+ days', color: '#4A6580' },
+  { key: '1-2', label: '1–2 days', color: '#A0442A' },
+  { key: '3-4', label: '3–4 days', color: '#B07030' },
+  { key: '5+', label: '5+ days', color: '#4A6580' },
 ];
 
 interface AssignMenuProps {
@@ -199,6 +199,10 @@ function AssignMenu({ card, onAssign, accountManagers = [] }: AssignMenuProps) {
   );
 }
 
+export interface KanbanBoardHandle {
+  startAdding: () => void;
+}
+
 interface KanbanBoardProps {
   actionPointClients: AgencyClientActionPoints[];
   amFilter: string;
@@ -207,12 +211,27 @@ interface KanbanBoardProps {
   availableChannels?: string[];
 }
 
-export function KanbanBoard({ actionPointClients, amFilter, onActionPointCompleted, accountManagers = [], availableChannels }: KanbanBoardProps) {
+export const KanbanBoard = forwardRef(function KanbanBoard(
+  { actionPointClients, amFilter, onActionPointCompleted, accountManagers = [], availableChannels }: KanbanBoardProps,
+  ref: ForwardedRef<KanbanBoardHandle>
+) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
   // Local override map for optimistic assigned_to updates
   const [assignedOverrides, setAssignedOverrides] = useState<Map<string, string | null>>(new Map());
+
+  // In-progress state (local UI state)
+  const [inProgressIds, setInProgressIds] = useState<Set<string>>(new Set());
+
+  function handleToggleInProgress(card: KanbanCard) {
+    setInProgressIds(prev => {
+      const next = new Set(prev);
+      if (next.has(card.id)) next.delete(card.id);
+      else next.add(card.id);
+      return next;
+    });
+  }
 
   // Add action point form state
   const [isAdding, setIsAdding] = useState(false);
@@ -226,6 +245,17 @@ export function KanbanBoard({ actionPointClients, amFilter, onActionPointComplet
   const channelOptions = availableChannels && availableChannels.length > 0
     ? availableChannels
     : COMMON_CHANNELS;
+
+  useImperativeHandle(ref, () => ({
+    startAdding() {
+      setIsAdding(true);
+      setAddChannel(channelOptions[0] || '');
+      setAddText('');
+      setAddDaysBefore('');
+      setAddCategory('SET UP');
+      setAddFrequency('weekly');
+    },
+  }));
 
   // Flatten all outstanding action points into kanban cards
   const cards: KanbanCard[] = [];
@@ -241,12 +271,12 @@ export function KanbanBoard({ actionPointClients, amFilter, onActionPointComplet
           daysUntilDue = Math.ceil((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
         }
 
-        if (daysUntilDue === null || daysUntilDue > 6) {
-          status = '7+';
-        } else if (daysUntilDue >= 4) {
-          status = '4-6';
+        if (daysUntilDue === null || daysUntilDue >= 5) {
+          status = '5+';
+        } else if (daysUntilDue >= 3) {
+          status = '3-4';
         } else {
-          status = '1-3';
+          status = '1-2';
         }
 
         // Use optimistic override if available, else API value
@@ -378,36 +408,8 @@ export function KanbanBoard({ actionPointClients, amFilter, onActionPointComplet
 
   return (
     <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {/* Add action point button + inline form */}
-      {!isAdding ? (
-        <button
-          onClick={() => {
-            setIsAdding(true);
-            setAddChannel(channelOptions[0] || '');
-            setAddText('');
-            setAddDaysBefore('');
-            setAddCategory('SET UP');
-            setAddFrequency('weekly');
-          }}
-          style={{
-            alignSelf: 'flex-start',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 4,
-            fontSize: 11,
-            color: '#8A8578',
-            background: 'transparent',
-            border: '0.5px dashed #D5D0C5',
-            borderRadius: 4,
-            padding: '3px 8px',
-            cursor: 'pointer',
-            fontFamily: "'DM Sans', system-ui, sans-serif",
-          }}
-        >
-          <Plus size={10} />
-          Add action point
-        </button>
-      ) : (
+      {/* Inline add form — shown when isAdding */}
+      {isAdding && (
         <div style={{
           background: '#FDFCF8',
           border: '0.5px solid #D5D0C5',
@@ -556,7 +558,7 @@ export function KanbanBoard({ actionPointClients, amFilter, onActionPointComplet
       style={{
         display: 'grid',
         gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-        gap: 12,
+        gap: 6,
         width: '100%',
       }}
     >
@@ -575,16 +577,15 @@ export function KanbanBoard({ actionPointClients, amFilter, onActionPointComplet
             {/* Column header */}
             <div style={{
               display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8,
-              background: `${col.color}18`,
-              border: `0.5px solid ${col.color}40`,
+              background: col.color,
               borderRadius: 5,
               padding: '5px 9px',
             }}>
-              <div style={{ width: 5, height: 5, borderRadius: '50%', background: col.color, flexShrink: 0 }} />
-              <span style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', color: col.color, letterSpacing: '0.08em' }}>
+              <div style={{ width: 5, height: 5, borderRadius: '50%', background: 'rgba(255,255,255,0.5)', flexShrink: 0 }} />
+              <span style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', color: '#FFFFFF', letterSpacing: '0.08em' }}>
                 {col.label}
               </span>
-              <span style={{ fontSize: 9, color: col.color, opacity: 0.6, marginLeft: 'auto' }}>{colCards.length}</span>
+              <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.7)', marginLeft: 'auto' }}>{colCards.length}</span>
             </div>
 
             {/* Cards */}
@@ -597,13 +598,15 @@ export function KanbanBoard({ actionPointClients, amFilter, onActionPointComplet
                 gap: 5,
                 paddingBottom: colCards.length > 3 ? 10 : 2,
               }}>
-              {colCards.map((card) => (
+              {colCards.map((card) => {
+                const isInProgress = inProgressIds.has(card.id);
+                return (
                 <div key={card.id} style={{
-                  background: '#FDFCF8',
-                  border: '0.5px solid #E8E4DC',
-                  borderLeft: `2px solid ${col.color}`,
-                  borderRadius: 6,
-                  padding: '9px 11px',
+                  background: isInProgress ? '#FFFBF4' : '#FDFCF8',
+                  border: `0.5px solid ${isInProgress ? 'rgba(176,112,48,0.4)' : '#E8E4DC'}`,
+                  borderLeft: `2px solid ${isInProgress ? '#B07030' : col.color}`,
+                  borderRadius: 5,
+                  padding: '6px 8px',
                   display: 'flex',
                   alignItems: 'flex-start',
                   gap: 8,
@@ -651,11 +654,21 @@ export function KanbanBoard({ actionPointClients, amFilter, onActionPointComplet
                     <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 6 }}>
                       <div style={{
                         width: 5, height: 5, borderRadius: '50%',
-                        background: col.color, opacity: 0.6, flexShrink: 0,
+                        background: isInProgress ? '#B07030' : col.color, opacity: 0.6, flexShrink: 0,
                       }} />
                       <span style={{ flex: 1, fontSize: 10, color: '#8A8578', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {card.clientName}
                       </span>
+                      {isInProgress && (
+                        <span style={{
+                          fontSize: 8, fontWeight: 600, color: '#B07030',
+                          background: 'rgba(176,112,48,0.12)',
+                          border: '0.5px solid rgba(176,112,48,0.3)',
+                          borderRadius: 3, padding: '1px 4px',
+                          textTransform: 'uppercase', letterSpacing: '0.07em',
+                          whiteSpace: 'nowrap',
+                        }}>In Progress</span>
+                      )}
                       <span style={{
                         fontSize: 9, fontWeight: 400,
                         color: card.tag === 'SET UP' ? '#B07030' : card.tag === 'HEALTH CHECK' ? '#4A7C59' : '#4A6580',
@@ -676,11 +689,32 @@ export function KanbanBoard({ actionPointClients, amFilter, onActionPointComplet
                               ? 'today'
                               : `${card.daysUntilDue}d`}
                       </span>
+                      {/* In Progress toggle button */}
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); handleToggleInProgress(card); }}
+                        title={isInProgress ? 'Clear in progress' : 'Mark as in progress'}
+                        style={{
+                          fontSize: 8, fontWeight: 500,
+                          padding: '1px 5px',
+                          borderRadius: 3,
+                          border: isInProgress ? '0.5px solid rgba(176,112,48,0.4)' : '0.5px dashed #D5D0C5',
+                          background: isInProgress ? 'rgba(176,112,48,0.1)' : 'transparent',
+                          color: isInProgress ? '#B07030' : '#C0BBC0',
+                          cursor: 'pointer',
+                          fontFamily: "'DM Sans', system-ui, sans-serif",
+                          whiteSpace: 'nowrap',
+                          flexShrink: 0,
+                        }}
+                      >
+                        {isInProgress ? '▶ in prog.' : '▶'}
+                      </button>
                       <AssignMenu card={card} onAssign={handleAssign} accountManagers={accountManagers} />
                     </div>
                   </div>
                 </div>
-              ))}
+                );
+              })}
               </div>
             </div>
           </div>
@@ -689,4 +723,4 @@ export function KanbanBoard({ actionPointClients, amFilter, onActionPointComplet
     </div>
     </div>
   );
-}
+});

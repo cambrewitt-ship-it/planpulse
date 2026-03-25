@@ -410,7 +410,7 @@ function ClientSection({
         <span
           onClick={(e) => {
             e.stopPropagation();
-            router.push(`/clients/${client.clientId}/new-client-dashboard`);
+            router.push(`/clients/${client.clientId}/dashboard-v2`);
           }}
           className="text-xs text-blue-600 hover:underline ml-2 flex-shrink-0 cursor-pointer"
         >

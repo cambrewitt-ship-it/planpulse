@@ -496,8 +496,8 @@ export default function OrganicSocialCard({ channel, clientId, weekCommencing, a
             )}
           </div>
 
-          {/* Right: action points (side column) + refresh/connect */}
-          <div className="w-full md:w-64 md:border-l md:border-gray-100 md:pl-4">
+          {/* Right: action points (side column) — half width */}
+          <div className="flex-1 md:border-l md:border-gray-100 md:pl-4">
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs font-semibold text-gray-700">Action points</span>
               <div className="flex items-center gap-2">
@@ -529,6 +529,7 @@ export default function OrganicSocialCard({ channel, clientId, weekCommencing, a
               channelType={channel.channelName}
               clientId={clientId}
               maxVisible={4}
+              sideBySide={true}
             />
           </div>
         </div>

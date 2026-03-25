@@ -176,7 +176,7 @@ export function NotesChecklist({ filteredClientIds, activeClientId }: NotesCheck
   const visibleNotes = activeClientId
     ? notes.filter(n => n.client_id === activeClientId)
     : filteredClientIds
-      ? notes.filter(n => !n.client_id || filteredClientIds.includes(n.client_id))
+      ? notes.filter(n => n.client_id != null && filteredClientIds.includes(n.client_id))
       : notes;
 
   return (
@@ -184,29 +184,34 @@ export function NotesChecklist({ filteredClientIds, activeClientId }: NotesCheck
       display: 'flex',
       flexDirection: 'column',
       height: '100%',
-      background: '#F2EDE4',
-      borderRadius: 6,
-      border: '1px solid #C8C0B4',
+      background: '#FFFFFF',
+      borderRadius: 4,
+      border: '0.5px solid #D8D4CE',
+      boxShadow: '0 2px 6px rgba(0,0,0,0.07)',
       overflow: 'hidden',
       fontFamily: sansFont,
     }}>
       {/* Header */}
       <div style={{
         padding: '10px 13px 8px',
-        borderBottom: '1px solid #C8C0B4',
-        background: '#EAE3D8',
+        borderBottom: '1.5px solid #E0E8F4',
+        background: '#FFFFFF',
       }}>
-        <div style={{ fontSize: 9, fontWeight: 400, color: '#B5B0A5', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Notes</div>
-        <div style={{ fontSize: 9, color: '#B5B0A5', marginTop: 1 }}>Only visible to you</div>
+        <div style={{ fontSize: 9, fontWeight: 600, color: '#8A8578', textTransform: 'uppercase', letterSpacing: '0.12em' }}>Notes</div>
+        <div style={{ fontSize: 9, color: '#C0BBC0', marginTop: 1 }}>Only visible to you</div>
       </div>
 
-      {/* Notes list — scrollable, notebook-ruled */}
+      {/* Notes list — scrollable, moleskine-ruled */}
       <div style={{
         flex: 1,
         overflowY: 'auto',
         padding: '4px 0',
-        backgroundImage: 'repeating-linear-gradient(transparent, transparent 27px, rgba(120,100,80,0.12) 27px, rgba(120,100,80,0.12) 28px)',
+        backgroundImage: [
+          'repeating-linear-gradient(transparent, transparent 27px, rgba(160,200,240,0.55) 27px, rgba(160,200,240,0.55) 28px)',
+          'linear-gradient(to right, transparent 28px, rgba(220,90,90,0.28) 28px, rgba(220,90,90,0.28) 29.5px, transparent 29.5px)',
+        ].join(', '),
         backgroundPositionY: '4px',
+        backgroundPositionX: '0px',
       }}>
         {visibleNotes.length === 0 ? (
           <div style={{ padding: '10px 13px', fontSize: 10, color: '#B5B0A5', fontStyle: 'italic' }}>
@@ -371,12 +376,12 @@ export function NotesChecklist({ filteredClientIds, activeClientId }: NotesCheck
 
       {/* Input — pinned at bottom */}
       <div style={{
-        borderTop: '0.5px solid #E8E4DC',
+        borderTop: '1.5px solid #E0E8F4',
         padding: '7px 9px',
         display: 'flex',
         gap: 4,
         alignItems: 'center',
-        background: '#FDFCF8',
+        background: '#FFFFFF',
       }}>
         <input
           ref={inputRef}

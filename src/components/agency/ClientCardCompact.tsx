@@ -170,9 +170,8 @@ export function ClientCardCompact({ client, selected, onClick, index = 0, onAcco
   const hasSpend = client.plannedBudget > 0;
   const budgetPct = hasSpend ? Math.min(200, (client.actualSpend / client.plannedBudget) * 100) : 0;
 
-  const isAlt = index % 2 === 1;
   const cardStyle: React.CSSProperties = {
-    background: isAlt ? '#F2EDE6' : '#FDFCF8',
+    background: '#FDFCF8',
     border: selected ? '1.5px solid rgba(74,101,128,0.5)' : '1px solid #B8B4AE',
     borderRadius: 6,
     padding: '14px',
@@ -180,7 +179,7 @@ export function ClientCardCompact({ client, selected, onClick, index = 0, onAcco
     cursor: 'pointer',
     fontFamily: "'DM Sans', system-ui, sans-serif",
   };
-  const subTextColor = isAlt ? '#6A6560' : '#8A8578';
+  const subTextColor = '#8A8578';
 
   const scores = [
     {

@@ -54,6 +54,7 @@ import ChannelPerformanceCard from '@/components/dashboard-v2/channel-performanc
 import dynamic from 'next/dynamic';
 const InvoiceModal = dynamic(() => import('@/components/dashboard-v2/invoice-modal').then(m => m.InvoiceModal), { ssr: false });
 import type { GanttClient, GanttChannel } from '@/components/agency/GanttCalendar';
+import { FullscreenGanttView, type GanttAPMarker } from '@/components/agency/FullscreenGanttView';
 
 interface Client {
   id: string;
@@ -163,6 +164,7 @@ export default function DashboardV2() {
   const [availableChannels, setAvailableChannels] = useState<Array<{ id: string; name: string }>>([]);
   const [viewMode, setViewMode] = useState<'overview' | 'funnels' | 'media-plan' | 'admin'>('overview');
   const [ganttSelectedDay, setGanttSelectedDay] = useState<number | null>(null);
+  const [showFullscreenGantt, setShowFullscreenGantt] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState<Date>(() => {
     if (typeof window === 'undefined') return new Date();
     try {
@@ -883,6 +885,21 @@ export default function DashboardV2() {
     return result;
   }, [clientId, mediaPlanBuilderChannels]);
 
+  // AP markers derived from allActionPoints for fullscreen Gantt
+  const ganttAPMarkers = useMemo<GanttAPMarker[]>(() =>
+    allActionPoints
+      .filter((ap: any) => ap.channel_type && !ap.completed)
+      .map((ap: any) => ({
+        client_id: clientId,
+        channel_label: ap.channel_type,
+        text: ap.text || '',
+        category: ap.category || 'ONGOING',
+        due_date: ap.due_date ?? null,
+        frequency: ap.frequency ?? null,
+      })),
+    [allActionPoints, clientId]
+  );
+
   // ── Account Manager handler ──────────────────────────────────────────────
   const handleAccountManagerChange = useCallback(async (accountManager: string | null) => {
     if (!clientId) return;
@@ -1497,6 +1514,23 @@ export default function DashboardV2() {
                   >
                     Admin
                   </button>
+                  <div style={{ width: '0.5px', height: 20, background: '#E8E4DC', margin: '0 4px' }} />
+                  <button
+                    onClick={() => setShowFullscreenGantt(true)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      padding: '8px 14px', borderRadius: 8, border: '0.5px solid #D5D0C5',
+                      background: '#FDFCF8', color: '#4A6580',
+                      fontSize: 14, fontWeight: 500, cursor: 'pointer',
+                      fontFamily: "'DM Sans', system-ui, sans-serif",
+                    }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/>
+                      <line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
+                    </svg>
+                    Timeline
+                  </button>
                 </div>
                 {/* Right: Date Controls */}
                 <div className="flex items-center gap-4">
@@ -1534,7 +1568,7 @@ export default function DashboardV2() {
                   {/* Notes panel */}
                   <div style={{
                     flexShrink: 0,
-                    width: notesCollapsed ? 48 : 280,
+                    width: notesCollapsed ? 48 : 360,
                     transition: 'width 0.2s ease',
                     position: 'relative',
                     overflow: 'hidden',
@@ -1868,6 +1902,17 @@ export default function DashboardV2() {
             setInvoiceHistory(updated);
             try { localStorage.setItem(`invoice-history-${clientId}`, JSON.stringify(updated)); } catch {}
           }}
+        />
+      )}
+
+      {/* Fullscreen Gantt overlay */}
+      {showFullscreenGantt && (
+        <FullscreenGanttView
+          clients={ganttClients}
+          channels={ganttChannels}
+          actionPointMarkers={ganttAPMarkers}
+          filteredClientIds={ganttClients.map(c => c.id)}
+          onClose={() => setShowFullscreenGantt(false)}
         />
       )}
     </div>

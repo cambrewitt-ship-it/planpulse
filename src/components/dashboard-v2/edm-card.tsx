@@ -134,6 +134,9 @@ export default function EdmCard({ channel, clientId, actuals }: EdmCardProps) {
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden hover:shadow-md transition-shadow duration-200">
+      <div style={{ display: 'flex' }}>
+      {/* Main content */}
+      <div style={{ flex: 1, minWidth: 0 }}>
       {/* Header */}
       <div className="px-4 pt-4 pb-3">
         <div className="flex items-start gap-3">
@@ -231,12 +234,21 @@ export default function EdmCard({ channel, clientId, actuals }: EdmCardProps) {
         </div>
       </div>
 
-      {/* Action Points */}
-      <InlineActionPoints
-        channelType="EDM / Email"
-        clientId={clientId}
-        maxVisible={3}
-      />
+      </div>{/* end main content (flex:1 left column) */}
+
+        {/* Action Points — right side column (half width) */}
+        <div style={{ flex: 1, minWidth: 0, borderLeft: '1px solid #F3F4F6', background: '#FAFAFA', padding: 16 }}>
+          <h3 style={{ fontSize: 13, fontWeight: 600, color: '#1C1917', marginBottom: 10, fontFamily: "'Inter', system-ui, sans-serif" }}>Action Points</h3>
+          <InlineActionPoints
+            channelType="EDM / Email"
+            clientId={clientId}
+            maxVisible={5}
+            showBorder={false}
+            showTitle={false}
+            sideBySide={true}
+          />
+        </div>
+      </div>{/* end display:flex container */}
     </div>
   );
 }

@@ -62,6 +62,8 @@ const CHANNEL_OPTIONS = [
   { value: 'LinkedIn (Organic)', label: 'LinkedIn (Organic)', icon: Linkedin },
   { value: 'EDM / Email', label: 'EDM / Email', icon: Radio },
   { value: 'OOH', label: 'OOH', icon: Radio },
+  { value: 'Radio', label: 'Radio', icon: Radio },
+  { value: 'Other', label: 'Other', icon: Radio },
 ];
 
 export default function LibraryPage() {
