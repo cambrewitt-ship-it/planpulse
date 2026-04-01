@@ -75,12 +75,15 @@ export const createEmptyChannel = (): MediaPlanChannel => ({
 const MEDIA_CHANNELS = [
   { name: "Meta Ads", color: "bg-blue-50", textColor: "text-blue-900" },
   { name: "Google Ads", color: "bg-red-50", textColor: "text-red-900" },
+  { name: "Display Ads", color: "bg-cyan-50", textColor: "text-cyan-900" },
+  { name: "Native Ads", color: "bg-teal-50", textColor: "text-teal-900" },
   { name: "LinkedIn Ads", color: "bg-blue-100", textColor: "text-blue-950" },
   { name: "TikTok Ads", color: "bg-gray-100", textColor: "text-gray-900" },
   { name: "Instagram Ads", color: "bg-pink-50", textColor: "text-pink-900" },
   { name: "Twitter Ads", color: "bg-sky-50", textColor: "text-sky-900" },
   { name: "YouTube Ads", color: "bg-red-100", textColor: "text-red-950" },
   { name: "Snapchat Ads", color: "bg-yellow-50", textColor: "text-yellow-900" },
+  { name: "Reddit Ads", color: "bg-orange-100", textColor: "text-orange-950" },
   { name: "Instagram (Organic)", color: "bg-pink-50", textColor: "text-pink-900" },
   { name: "Facebook (Organic)", color: "bg-blue-50", textColor: "text-blue-900" },
   { name: "LinkedIn (Organic)", color: "bg-cyan-50", textColor: "text-cyan-900" },
@@ -111,12 +114,15 @@ const getChannelBudgetColor = (channelName: string): string => {
   const channelMap: { [key: string]: string } = {
     "meta ads": "bg-blue-500",
     "google ads": "bg-red-500",
+    "display ads": "bg-cyan-500",
+    "native ads": "bg-teal-500",
     "linkedin ads": "bg-indigo-500",
     "tiktok ads": "bg-gray-500",
     "instagram ads": "bg-pink-500",
     "twitter ads": "bg-sky-500",
     "youtube ads": "bg-red-600",
     "snapchat ads": "bg-yellow-500",
+    "reddit ads": "bg-orange-600",
   };
   return channelMap[channelName.toLowerCase()] || "bg-gray-500";
 };
@@ -219,10 +225,39 @@ export function MediaPlanGrid({ channels: externalChannels, onChannelsChange, co
   // Zoom: column width in px (default 40, range 20–60)
   const [cellWidth, setCellWidth] = useState<number>(40);
 
+  // Other channel optional detail expansion
+  const [expandedOtherDetails, setExpandedOtherDetails] = useState<Set<string>>(new Set());
+
+  // Inline total budget editing
+  const [editingTotalBudget, setEditingTotalBudget] = useState<{ channelId: string; value: string } | null>(null);
+
+  // Pending budgets (entered in Total Budget before any flights exist)
+  const [pendingBudgets, setPendingBudgets] = useState<Record<string, number>>({});
+
+  // Custom columns
+  const [customColumns, setCustomColumns] = useState<{ id: string; name: string }[]>([]);
+  const [customColumnData, setCustomColumnData] = useState<Record<string, Record<string, string>>>({});
+  const [editingCustomColHeader, setEditingCustomColHeader] = useState<string | null>(null);
+  const [editingCustomCell, setEditingCustomCell] = useState<{ channelId: string; colId: string; value: string } | null>(null);
+
+  const handleAddCustomColumn = () => {
+    const id = `custom-${Date.now()}`;
+    setCustomColumns(prev => [...prev, { id, name: 'New Column' }]);
+    setEditingCustomColHeader(id);
+  };
+
   // 3-dots flight menu state
   const [openFlightMenu, setOpenFlightMenu] = useState<string | null>(null);
   const [flightMenuPos, setFlightMenuPos] = useState<{ top: number; right: number } | null>(null);
   const [flightStatusMap, setFlightStatusMap] = useState<Map<string, 'in_progress' | 'booked'>>(new Map());
+
+  // Flight resize ("Change Dates") state
+  const [resizingFlight, setResizingFlight] = useState<{ channelId: string; flightId: string } | null>(null);
+  const [edgeDragState, setEdgeDragState] = useState<{
+    channelId: string; flightId: string; edge: 'start' | 'end';
+    currentIdx: number; origStartIdx: number; origEndIdx: number;
+  } | null>(null);
+  const isEdgeDraggingRef = useRef(false);
 
   // Inline spend editing
   const [editingSpendFlight, setEditingSpendFlight] = useState<{
@@ -549,12 +584,13 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
               totalBudget: newTotalBudget,
             });
           } else if (overlappingFlights.length === 0) {
-            // No existing flights, show budget input
+            // No existing flights, show budget input (pre-fill from pending budget if set)
+            const pending = pendingBudgets[dragState.channelId!];
             setActiveSelection({
               channelId: dragState.channelId!,
               startWeekIdx: startIdx,
               endWeekIdx: endIdx,
-              budget: "",
+              budget: pending ? String(pending) : "",
             });
           }
         }
@@ -580,9 +616,46 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
     }
   }, [dragState, channels, weeks]);
 
-  // Handle flight block click — no-op (use 3-dots menu for actions)
-  const handleFlightBlockClick = (_channelId: string, _flight: MediaFlight, e: React.MouseEvent) => {
+  // Edge drag (resize flight) mouse events
+  useEffect(() => {
+    if (!edgeDragState) return;
+    const handleMouseMove = (e: MouseEvent) => {
+      const target = document.elementFromPoint(e.clientX, e.clientY);
+      const weekCell = target?.closest('[data-week-cell]');
+      if (weekCell) {
+        const weekIdx = parseInt(weekCell.getAttribute('data-week-index') || '-1');
+        if (weekIdx >= 0) {
+          setEdgeDragState(prev => prev ? { ...prev, currentIdx: weekIdx } : prev);
+        }
+      }
+    };
+    const handleMouseUp = () => {
+      if (edgeDragState) {
+        const { channelId, flightId, edge, currentIdx, origStartIdx, origEndIdx } = edgeDragState;
+        const newStartIdx = edge === 'start' ? Math.min(currentIdx, origEndIdx) : origStartIdx;
+        const newEndIdx = edge === 'end' ? Math.max(currentIdx, origStartIdx) : origEndIdx;
+        handleResizeFlight(channelId, flightId, newStartIdx, newEndIdx);
+      }
+      setEdgeDragState(null);
+      setResizingFlight(null);
+      isEdgeDraggingRef.current = false;
+    };
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [edgeDragState]);
+
+  // Handle flight block click — activate spend editing for that flight
+  const handleFlightBlockClick = (channelId: string, flight: MediaFlight, e: React.MouseEvent) => {
     e.stopPropagation();
+    const totalSpend = Object.values(flight.monthlySpend).reduce((s, v) => s + v, 0);
+    // Only trigger if not already editing this flight's spend, not clicking the 3-dots, and has a value (empty blocks require double-click)
+    if (editingSpendFlight?.flightId !== flight.id && totalSpend > 0) {
+      setEditingSpendFlight({ channelId, flightId: flight.id, value: String(Math.round(totalSpend)) });
+    }
   };
 
   // Save flight from inline input
@@ -742,6 +815,7 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
       });
     }
     
+    setPendingBudgets(prev => { const next = { ...prev }; delete next[activeSelection.channelId]; return next; });
     setActiveSelection(null);
   };
 
@@ -831,6 +905,14 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
     return () => document.removeEventListener('click', close);
   }, [openFlightMenu]);
 
+  // Dismiss resize mode on Escape
+  useEffect(() => {
+    if (!resizingFlight) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { setResizingFlight(null); setEdgeDragState(null); } };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [resizingFlight]);
+
   // Save inline-edited spend value
   const handleSaveEditedSpend = () => {
     if (!editingSpendFlight) return;
@@ -867,15 +949,44 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
   const handleDeleteFlight = (channelId: string, flightId: string) => {
     const channel = channels.find((c) => c.id === channelId);
     if (!channel) return;
-    
+
     const updatedFlights = channel.flights.filter((f) => f.id !== flightId);
     const newTotalBudget = calculateTotalBudgetFromFlights(updatedFlights);
-    
+
     handleUpdateChannel(channelId, {
       flights: updatedFlights,
       totalBudget: newTotalBudget,
     });
     setEditingFlight(null);
+  };
+
+  // Resize flight to new week range (keeps total spend, redistributes by month)
+  const handleResizeFlight = (channelId: string, flightId: string, newStartIdx: number, newEndIdx: number) => {
+    const channel = channels.find(c => c.id === channelId);
+    if (!channel) return;
+    const flight = channel.flights.find(f => f.id === flightId);
+    if (!flight) return;
+    const totalBudget = Object.values(flight.monthlySpend).reduce((a, b) => a + b, 0);
+    const selectedWeeks = weeks.slice(newStartIdx, newEndIdx + 1);
+    const weeksByMonth: { [k: string]: WeekRange[] } = {};
+    selectedWeeks.forEach(w => {
+      const mk = getMonthKey(w.weekStart);
+      if (!weeksByMonth[mk]) weeksByMonth[mk] = [];
+      weeksByMonth[mk].push(w);
+    });
+    const monthlySpend: { [k: string]: number } = {};
+    const totalWeeks = selectedWeeks.length;
+    Object.entries(weeksByMonth).forEach(([mk, mw]) => {
+      monthlySpend[mk] = (totalBudget * mw.length) / totalWeeks;
+    });
+    const updatedFlight: MediaFlight = {
+      ...flight,
+      startWeek: weeks[newStartIdx].weekStart,
+      endWeek: weeks[newEndIdx].weekEnd,
+      monthlySpend,
+    };
+    const updatedFlights = channel.flights.map(f => f.id === flightId ? updatedFlight : f);
+    handleUpdateChannel(channelId, { flights: updatedFlights, totalBudget: calculateTotalBudgetFromFlights(updatedFlights) });
   };
 
   return (
@@ -954,7 +1065,9 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
               <th className="border border-gray-300 bg-gray-50 text-left px-3 py-2 font-semibold sticky left-0 mr-[-1px] z-20 w-[200px] min-w-[200px] border-r-2 border-gray-400 shadow-[2px_0_4px_rgba(0,0,0,0.1)]"></th>
               <th className="border border-gray-300 bg-gray-50 text-left px-3 py-2 font-semibold sticky left-[200px] mr-[-1px] z-20 w-[150px] min-w-[150px] border-r-2 border-gray-400 shadow-[2px_0_4px_rgba(0,0,0,0.1)]"></th>
               <th className="border-l-2 border-l-gray-400 border border-gray-300 bg-gray-50 text-left px-3 py-2 font-semibold sticky left-[350px] mr-[-1px] z-20 w-[120px] min-w-[120px] border-r-2 border-gray-400 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)]"></th>
-              
+              {customColumns.map((col) => (
+                <th key={col.id} className="border border-gray-300 bg-gray-50 w-[120px] min-w-[120px]"></th>
+              ))}
               {monthGroups.map((group, groupIdx) => (
                 <th
                   key={groupIdx}
@@ -973,12 +1086,52 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                 Channel Name
               </th>
               <th className="border border-gray-300 bg-gray-50 text-left px-3 py-2 font-semibold sticky left-[200px] mr-[-1px] z-20 w-[150px] min-w-[150px] border-r-2 border-gray-400 shadow-[2px_0_4px_rgba(0,0,0,0.1)]">
-                Detail
+                <div className="flex items-center justify-between">
+                  <span>Detail</span>
+                  <button
+                    onClick={handleAddCustomColumn}
+                    className="ml-1 w-5 h-5 flex items-center justify-center rounded bg-gray-200 hover:bg-gray-300 text-gray-600 hover:text-gray-900 transition-colors text-xs font-bold"
+                    title="Add custom column"
+                  >
+                    +
+                  </button>
+                </div>
               </th>
               <th className="border-l-2 border-l-gray-400 border border-gray-300 bg-gray-50 text-left px-3 py-2 font-semibold sticky left-[350px] mr-[-1px] z-30 w-[120px] min-w-[120px] border-r-2 border-gray-400 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)]">
                 Total Budget
               </th>
-              
+
+              {/* Custom columns */}
+              {customColumns.map((col) => (
+                <th key={col.id} className="border border-gray-300 bg-gray-50 px-2 py-2 font-semibold w-[120px] min-w-[120px] text-left">
+                  {editingCustomColHeader === col.id ? (
+                    <input
+                      autoFocus
+                      type="text"
+                      defaultValue={col.name}
+                      className="w-full text-sm border border-blue-400 rounded px-1 py-0.5 bg-white outline-none"
+                      onBlur={(e) => {
+                        setCustomColumns(prev => prev.map(c => c.id === col.id ? { ...c, name: e.target.value || col.name } : c));
+                        setEditingCustomColHeader(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                        if (e.key === 'Escape') setEditingCustomColHeader(null);
+                      }}
+                    />
+                  ) : (
+                    <div className="flex items-center justify-between group cursor-pointer" onClick={() => setEditingCustomColHeader(col.id)}>
+                      <span className="text-xs">{col.name}</span>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setCustomColumns(prev => prev.filter(c => c.id !== col.id)); }}
+                        className="ml-1 text-gray-400 hover:text-red-500 text-xs leading-none"
+                        title="Remove column"
+                      >×</button>
+                    </div>
+                  )}
+                </th>
+              ))}
+
               {/* Week date columns - scrollable section */}
               {weeks.map((week, weekIdx) => (
                 <th
@@ -988,16 +1141,14 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                   }`}
                   style={{ height: '80px', width: cellWidth, minWidth: cellWidth, maxWidth: cellWidth }}
                 >
-                  {/* Vertical red line for current day of week */}
+                  {/* Today line */}
                   {currentWeekIndex >= 0 && weekIdx === currentWeekIndex && (
                     <div
-                      className="absolute top-0 bottom-0 bg-red-500 pointer-events-none"
-                      style={{
-                        left: `${currentDayPosition}px`,
-                        width: '2px',
-                        zIndex: 9999,
-                      }}
-                    />
+                      className="absolute top-0 bottom-0 pointer-events-none"
+                      style={{ left: `${currentDayPosition}px`, width: '2px', background: '#8A8578', zIndex: 9999, overflow: 'visible' }}
+                    >
+                      <div style={{ position: 'absolute', top: 0, left: '-4px', width: '9px', height: '9px', borderRadius: '50%', background: '#8A8578' }} />
+                    </div>
                   )}
                   <div className="transform -rotate-90 origin-center whitespace-nowrap">
                     {formatWeekDate(week.weekStart)}
@@ -1012,7 +1163,7 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
               // Empty state
               <tr>
                 <td
-                  colSpan={3 + weeks.length}
+                  colSpan={3 + customColumns.length + weeks.length}
                   className="border border-gray-300 bg-white px-3 py-8 text-center text-gray-500"
                 >
                   No channels added yet
@@ -1095,15 +1246,6 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                           ))}
                         </SelectContent>
                       </Select>
-                      {channel.status && (
-                        <span className={`mt-1 inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded ${
-                          channel.status === 'booked'
-                            ? 'bg-green-100 text-green-700'
-                            : 'bg-yellow-100 text-yellow-700'
-                        }`}>
-                          {channel.status === 'booked' ? 'BOOKED' : 'IN PROGRESS'}
-                        </span>
-                      )}
                     </td>
 
                     {/* Format/Detail */}
@@ -1331,8 +1473,9 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                           );
                         }
 
-                        // Other: Custom name + fees + frequency + log count
+                        // Other: Custom name (required) + optional fees/frequency/count
                         if (category === 'other') {
+                          const isExpanded = expandedOtherDetails.has(channel.id);
                           return (
                             <div className="flex flex-col gap-2">
                               <div>
@@ -1345,60 +1488,66 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                                   className="h-7 text-sm"
                                 />
                               </div>
-                              <div>
-                                <Label className="text-xs text-gray-600">Total Spend</Label>
-                                <Input
-                                  type="number"
-                                  min="0"
-                                  step="0.01"
-                                  value={channel.totalUpfrontSpend || ''}
-                                  onChange={(e) => handleUpdateChannel(channel.id, { totalUpfrontSpend: parseFloat(e.target.value) || 0 })}
-                                  placeholder="0.00"
-                                  className="h-7 text-sm"
-                                />
-                              </div>
-                              <div>
-                                <Label className="text-xs text-gray-600">Fees</Label>
-                                <Input
-                                  type="number"
-                                  min="0"
-                                  step="0.01"
-                                  value={channel.fees || ''}
-                                  onChange={(e) => handleUpdateChannel(channel.id, { fees: parseFloat(e.target.value) || 0 })}
-                                  placeholder="0.00"
-                                  className="h-7 text-sm"
-                                />
-                              </div>
-                              <div>
-                                <Label className="text-xs text-gray-600">Frequency</Label>
-                                <Select
-                                  value={channel.otherFrequency || 'weekly'}
-                                  onValueChange={(value) => handleUpdateChannel(channel.id, { otherFrequency: value })}
-                                >
-                                  <SelectTrigger className="h-7 text-xs">
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="daily">Daily</SelectItem>
-                                    <SelectItem value="weekly">Weekly</SelectItem>
-                                    <SelectItem value="fortnightly">Fortnightly</SelectItem>
-                                    <SelectItem value="monthly">Monthly</SelectItem>
-                                    <SelectItem value="one-off">One-off</SelectItem>
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                              <div>
-                                <Label className="text-xs text-gray-600">Count per period</Label>
-                                <Input
-                                  type="number"
-                                  min="0"
-                                  step="1"
-                                  value={channel.otherLogCount || ''}
-                                  onChange={(e) => handleUpdateChannel(channel.id, { otherLogCount: parseInt(e.target.value) || 0 })}
-                                  placeholder="0"
-                                  className="h-7 text-sm"
-                                />
-                              </div>
+                              <button
+                                type="button"
+                                className="text-xs text-blue-600 hover:text-blue-800 text-left underline underline-offset-2"
+                                onClick={() => {
+                                  setExpandedOtherDetails(prev => {
+                                    const next = new Set(prev);
+                                    if (next.has(channel.id)) next.delete(channel.id);
+                                    else next.add(channel.id);
+                                    return next;
+                                  });
+                                }}
+                              >
+                                {isExpanded ? '− Hide details' : '+ Add details (optional)'}
+                              </button>
+                              {isExpanded && (
+                                <>
+                                  <div>
+                                    <Label className="text-xs text-gray-600">Fees</Label>
+                                    <Input
+                                      type="number"
+                                      min="0"
+                                      step="0.01"
+                                      value={channel.fees || ''}
+                                      onChange={(e) => handleUpdateChannel(channel.id, { fees: parseFloat(e.target.value) || 0 })}
+                                      placeholder="0.00"
+                                      className="h-7 text-sm"
+                                    />
+                                  </div>
+                                  <div>
+                                    <Label className="text-xs text-gray-600">Frequency</Label>
+                                    <Select
+                                      value={channel.otherFrequency || ''}
+                                      onValueChange={(value) => handleUpdateChannel(channel.id, { otherFrequency: value })}
+                                    >
+                                      <SelectTrigger className="h-7 text-xs">
+                                        <SelectValue placeholder="Select…" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="daily">Daily</SelectItem>
+                                        <SelectItem value="weekly">Weekly</SelectItem>
+                                        <SelectItem value="fortnightly">Fortnightly</SelectItem>
+                                        <SelectItem value="monthly">Monthly</SelectItem>
+                                        <SelectItem value="one-off">One-off</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                  <div>
+                                    <Label className="text-xs text-gray-600">Count per period</Label>
+                                    <Input
+                                      type="number"
+                                      min="0"
+                                      step="1"
+                                      value={channel.otherLogCount || ''}
+                                      onChange={(e) => handleUpdateChannel(channel.id, { otherLogCount: parseInt(e.target.value) || 0 })}
+                                      placeholder="0"
+                                      className="h-7 text-sm"
+                                    />
+                                  </div>
+                                </>
+                              )}
                             </div>
                           );
                         }
@@ -1420,42 +1569,139 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                     
                     {/* Total Budget */}
                     <td className="border-l-2 border-l-gray-400 border border-gray-300 px-3 py-2 text-center font-[family-name:var(--font-inter)] sticky left-[350px] mr-[-1px] z-30 bg-gray-50 w-[120px] min-w-[120px] border-r-2 border-gray-400 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)]">
-                      <div className="w-full px-2 py-1 text-center">
-                        {(() => {
-                          const category = channel.channelCategory || getChannelCategory(channel.channelName);
-                          if (category === 'ooh' || category === 'radio') {
-                            return formatCurrency(channel.totalUpfrontSpend || 0);
-                          }
-                          if (category === 'other') {
-                            const total = (channel.totalUpfrontSpend || 0) + (channel.fees || 0);
-                            return formatCurrency(total);
-                          }
-                          if (category === 'organic_social') {
-                            return `${channel.postsPerWeek || 0} posts/week`;
-                          }
-                          if (category === 'edm') {
-                            return channel.sendFrequency || 'N/A';
-                          }
-                          return formatCurrency(calculateTotalBudgetFromFlights(channel.flights || []));
-                        })()}
-                      </div>
+                      {(() => {
+                        const category = channel.channelCategory || getChannelCategory(channel.channelName);
+                        if (category === 'ooh') {
+                          return <div className="w-full px-2 py-1 text-center">{formatCurrency(channel.totalUpfrontSpend || 0)}</div>;
+                        }
+                        if (category === 'organic_social') {
+                          return <div className="w-full px-2 py-1 text-center">{`${channel.postsPerWeek || 0} posts/week`}</div>;
+                        }
+                        if (category === 'edm') {
+                          return <div className="w-full px-2 py-1 text-center">{channel.sendFrequency || 'N/A'}</div>;
+                        }
+                        // paid_digital / radio / other: editable total budget
+                        const calcTotal = category === 'other'
+                          ? calculateTotalBudgetFromFlights(channel.flights || []) + (channel.fees || 0)
+                          : (channel.flights?.length > 0
+                              ? calculateTotalBudgetFromFlights(channel.flights)
+                              : (pendingBudgets[channel.id] ?? channel.totalBudget ?? 0));
+                        const isEditing = editingTotalBudget?.channelId === channel.id;
+                        if (isEditing) {
+                          return (
+                            <input
+                              autoFocus
+                              type="number"
+                              value={editingTotalBudget!.value}
+                              onChange={e => setEditingTotalBudget({ channelId: channel.id, value: e.target.value })}
+                              onBlur={() => {
+                                const newTotal = parseFloat(editingTotalBudget!.value);
+                                if (!isNaN(newTotal) && newTotal >= 0) {
+                                  // Distribute across flights proportionally, or set single-flight budget
+                                  const flights = channel.flights || [];
+                                  if (flights.length === 1) {
+                                    const f = flights[0];
+                                    const months = Object.keys(f.monthlySpend);
+                                    const perMonth = months.length > 0 ? newTotal / months.length : newTotal;
+                                    const newMonthlySpend = Object.fromEntries(months.map(m => [m, perMonth]));
+                                    const updated = [{ ...f, monthlySpend: newMonthlySpend }];
+                                    handleUpdateChannel(channel.id, { flights: updated, totalBudget: newTotal });
+                                  } else if (flights.length > 1) {
+                                    const oldTotal = calculateTotalBudgetFromFlights(flights);
+                                    const ratio = oldTotal > 0 ? newTotal / oldTotal : 0;
+                                    const updated = flights.map(f => ({
+                                      ...f,
+                                      monthlySpend: Object.fromEntries(
+                                        Object.entries(f.monthlySpend).map(([m, v]) => [m, v * ratio])
+                                      ),
+                                    }));
+                                    handleUpdateChannel(channel.id, { flights: updated, totalBudget: newTotal });
+                                  } else {
+                                    // No flights yet — store as pending budget and prompt user to highlight weeks
+                                    handleUpdateChannel(channel.id, { totalBudget: newTotal });
+                                    if (newTotal > 0) setPendingBudgets(prev => ({ ...prev, [channel.id]: newTotal }));
+                                  }
+                                }
+                                setEditingTotalBudget(null);
+                              }}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                                if (e.key === 'Escape') setEditingTotalBudget(null);
+                              }}
+                              className="w-full text-center text-sm border border-blue-400 rounded px-1 py-0.5 bg-white outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                            />
+                          );
+                        }
+                        return (
+                          <div
+                            className="w-full px-2 py-1 text-center cursor-text hover:bg-blue-50 rounded transition-colors"
+                            title="Click to edit total budget"
+                            onClick={() => setEditingTotalBudget({ channelId: channel.id, value: String(calcTotal) })}
+                          >
+                            {formatCurrency(calcTotal)}
+                          </div>
+                        );
+                      })()}
                     </td>
-                  
+
+                  {/* Custom column cells */}
+                  {customColumns.map((col) => {
+                    const cellVal = customColumnData[channel.id]?.[col.id] ?? '';
+                    const isEditing = editingCustomCell?.channelId === channel.id && editingCustomCell?.colId === col.id;
+                    return (
+                      <td key={col.id} className="border border-gray-300 px-2 py-2 w-[120px] min-w-[120px] text-sm">
+                        {isEditing ? (
+                          <input
+                            autoFocus
+                            type="text"
+                            value={editingCustomCell!.value}
+                            onChange={(e) => setEditingCustomCell({ channelId: channel.id, colId: col.id, value: e.target.value })}
+                            onBlur={() => {
+                              setCustomColumnData(prev => ({
+                                ...prev,
+                                [channel.id]: { ...(prev[channel.id] || {}), [col.id]: editingCustomCell!.value },
+                              }));
+                              setEditingCustomCell(null);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                              if (e.key === 'Escape') setEditingCustomCell(null);
+                            }}
+                            className="w-full text-sm border border-blue-400 rounded px-1 py-0.5 bg-white outline-none"
+                          />
+                        ) : (
+                          <div
+                            className="w-full min-h-[24px] cursor-text hover:bg-blue-50 rounded px-1 py-0.5 transition-colors"
+                            onClick={() => setEditingCustomCell({ channelId: channel.id, colId: col.id, value: cellVal })}
+                          >
+                            {cellVal || <span className="text-gray-300">—</span>}
+                          </div>
+                        )}
+                      </td>
+                    );
+                  })}
+
                   {/* Week data cells with flight blocks */}
                   {(() => {
                     const category = channel.channelCategory || getChannelCategory(channel.channelName);
                     
-                    // EDM / Radio / Other: Hide week grid, no drag
-                    if (category === 'edm' || category === 'radio' || category === 'other') {
+                    // EDM only: Hide week grid, no drag
+                    if (category === 'edm') {
                       return weeks.map((week, weekIdx) => (
                         <td
                           key={`week-${weekIdx}`}
-                          className="border-l-2 border-l-gray-400 border border-gray-300 px-2 py-2 text-center text-xs bg-gray-50 cursor-default"
+                          className={`border-l-2 border-l-gray-400 border border-gray-300 px-2 py-2 text-center text-xs bg-gray-50 cursor-default relative${weekIdx === 0 ? ' border-l-2 border-l-gray-400' : ''}`}
                           onMouseDown={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
                           }}
                         >
+                          {currentWeekIndex >= 0 && weekIdx === currentWeekIndex && (
+                            <div
+                              className="absolute top-0 bottom-0 pointer-events-none"
+                              style={{ left: `${currentDayPosition}px`, width: '2px', background: '#8A8578', zIndex: 9999 }}
+                            />
+                          )}
                         </td>
                       ));
                     }
@@ -1464,16 +1710,25 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                     const flightRanges = channel.flights.map((flight) => {
                       let startIdx = -1;
                       let endIdx = -1;
-                      
+
                       weeks.forEach((week, idx) => {
                         if (weekOverlapsFlight(week, flight)) {
                           if (startIdx === -1) startIdx = idx;
                           endIdx = idx;
                         }
                       });
-                      
+
                       return { flight, startIdx, endIdx };
-                    }).filter((f) => f.startIdx !== -1);
+                    }).filter((f) => f.startIdx !== -1).map(range => {
+                      // Override indices live during edge drag
+                      if (edgeDragState?.flightId === range.flight.id && edgeDragState?.channelId === channel.id) {
+                        const { edge, currentIdx, origStartIdx, origEndIdx } = edgeDragState;
+                        return edge === 'start'
+                          ? { ...range, startIdx: Math.max(0, Math.min(currentIdx, origEndIdx)) }
+                          : { ...range, endIdx: Math.min(weeks.length - 1, Math.max(currentIdx, origStartIdx)) };
+                      }
+                      return range;
+                    });
                     
                     // Convert hex color to rgba with 80% opacity
                     const hexToRgba = (hex: string, opacity: number): string => {
@@ -1574,15 +1829,11 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                               handleWeekCellMouseDown(channel.id, weekIdx, e);
                             }}
                           >
-                            {/* Vertical red line for current day of week */}
+                            {/* Today line */}
                             {currentWeekIndex >= 0 && weekIdx === currentWeekIndex && (
                               <div
-                                className="absolute top-0 bottom-0 bg-red-500 pointer-events-none"
-                                style={{
-                                  left: `${currentDayPosition}px`,
-                                  width: '2px',
-                                  zIndex: 9999,
-                                }}
+                                className="absolute top-0 bottom-0 pointer-events-none"
+                                style={{ left: `${currentDayPosition}px`, width: '2px', background: '#8A8578', zIndex: 9999 }}
                               />
                             )}
                             {/* Inline budget input spanning across selected cells */}
@@ -1605,15 +1856,12 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                                     onKeyDown={(e) => {
                                       if (e.key === 'Enter') {
                                         const budget = parseFloat(activeSelection.budget);
-                                        if (budget > 0) {
-                                          if (isOoh) {
-                                            handleSaveBudgetFromInput(budget);
-                                            handleUpdateChannel(channel.id, { totalUpfrontSpend: budget });
-                                          } else {
-                                            handleSaveBudgetFromInput(budget);
-                                          }
+                                        const finalBudget = isNaN(budget) ? 0 : budget;
+                                        if (isOoh) {
+                                          handleSaveBudgetFromInput(finalBudget);
+                                          handleUpdateChannel(channel.id, { totalUpfrontSpend: finalBudget });
                                         } else {
-                                          setActiveSelection(null);
+                                          handleSaveBudgetFromInput(finalBudget);
                                         }
                                       } else if (e.key === 'Escape') {
                                         setActiveSelection(null);
@@ -1621,18 +1869,15 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                                     }}
                                     onBlur={() => {
                                       const budget = parseFloat(activeSelection.budget);
-                                      if (budget > 0) {
-                                        if (isOoh) {
-                                          handleSaveBudgetFromInput(budget);
-                                          handleUpdateChannel(channel.id, { totalUpfrontSpend: budget });
-                                        } else {
-                                          handleSaveBudgetFromInput(budget);
-                                        }
+                                      const finalBudget = isNaN(budget) ? 0 : budget;
+                                      if (isOoh) {
+                                        handleSaveBudgetFromInput(finalBudget);
+                                        handleUpdateChannel(channel.id, { totalUpfrontSpend: finalBudget });
                                       } else {
-                                        setActiveSelection(null);
+                                        handleSaveBudgetFromInput(finalBudget);
                                       }
                                     }}
-                                    placeholder=""
+                                    placeholder="$"
                                     className="w-full h-full text-center text-xs font-semibold border-0 px-2 py-1 focus:ring-0 focus-visible:ring-0 shadow-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none text-white bg-transparent placeholder:text-white/70"
                                     style={{ 
                                       textShadow: 'none !important', 
@@ -1689,23 +1934,25 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                                     }}
                                     onMouseDown={(e) => e.stopPropagation()}
                                     onClick={(e) => handleFlightBlockClick(channel.id, flight, e)}
+                                    onDoubleClick={(e) => {
+                                      e.stopPropagation();
+                                      if (totalSpend === 0) {
+                                        setEditingSpendFlight({ channelId: channel.id, flightId: flight.id, value: '' });
+                                      }
+                                    }}
                                   >
-                                    {/* Vertical red line for current day of week */}
+                                    {/* Today line */}
                                     {currentWeekIndex >= 0 &&
                                      currentWeekIndex >= startIdx &&
                                      currentWeekIndex <= endIdx && (
                                       <div
-                                        className="absolute top-0 bottom-0 bg-red-500 pointer-events-none"
-                                        style={{
-                                          left: `${(currentWeekIndex - startIdx) * cellWidth + currentDayPosition}px`,
-                                          width: '2px',
-                                          zIndex: 9999,
-                                        }}
+                                        className="absolute top-0 bottom-0 pointer-events-none"
+                                        style={{ left: `${(currentWeekIndex - startIdx) * cellWidth + currentDayPosition}px`, width: '2px', background: '#8A8578', zIndex: 9999 }}
                                       />
                                     )}
 
                                     {/* Spend number — click to edit */}
-                                    {isFirstWeek && totalSpend > 0 && (
+                                    {isFirstWeek && (totalSpend > 0 || (editingSpendFlight?.flightId === flight.id && editingSpendFlight?.channelId === channel.id)) && (
                                       editingSpendFlight?.flightId === flight.id && editingSpendFlight?.channelId === channel.id ? (
                                         <input
                                           autoFocus
@@ -1756,6 +2003,39 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                                         {flightStatusMap.get(flight.id) === 'in_progress' ? 'In Prog' : 'Booked'}
                                       </div>
                                     )}
+
+                                    {/* Resize handles — shown when this flight is in "Change Dates" mode */}
+                                    {resizingFlight?.flightId === flight.id && resizingFlight?.channelId === channel.id && (() => {
+                                      const curRange = flightRanges.find(r => r.flight.id === flight.id);
+                                      const origStartIdx = curRange?.startIdx ?? 0;
+                                      const origEndIdx = curRange?.endIdx ?? 0;
+                                      return (
+                                        <>
+                                          {/* Left (start) handle */}
+                                          <div
+                                            onMouseDown={e => {
+                                              e.stopPropagation();
+                                              isEdgeDraggingRef.current = true;
+                                              setEdgeDragState({ channelId: channel.id, flightId: flight.id, edge: 'start', currentIdx: origStartIdx, origStartIdx, origEndIdx });
+                                            }}
+                                            style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 10, cursor: 'ew-resize', background: 'rgba(255,255,255,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 300 }}
+                                          >
+                                            <span style={{ fontSize: 8, color: 'rgba(255,255,255,0.9)', lineHeight: 1, userSelect: 'none' }}>⠿</span>
+                                          </div>
+                                          {/* Right (end) handle */}
+                                          <div
+                                            onMouseDown={e => {
+                                              e.stopPropagation();
+                                              isEdgeDraggingRef.current = true;
+                                              setEdgeDragState({ channelId: channel.id, flightId: flight.id, edge: 'end', currentIdx: origEndIdx, origStartIdx, origEndIdx });
+                                            }}
+                                            style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 10, cursor: 'ew-resize', background: 'rgba(255,255,255,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 300 }}
+                                          >
+                                            <span style={{ fontSize: 8, color: 'rgba(255,255,255,0.9)', lineHeight: 1, userSelect: 'none' }}>⠿</span>
+                                          </div>
+                                        </>
+                                      );
+                                    })()}
                                   </div>
                                 );
                               })}
@@ -1807,16 +2087,18 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                               handleWeekCellMouseDown(channel.id, weekIdx, e);
                             }}
                           >
-                            {/* Vertical red line for current day of week */}
+                            {/* Today line */}
                             {currentWeekIndex >= 0 && weekIdx === currentWeekIndex && (
                               <div
-                                className="absolute top-0 bottom-0 bg-red-500 pointer-events-none"
-                                style={{
-                                  left: `${currentDayPosition}px`,
-                                  width: '2px',
-                                  zIndex: 9999,
-                                }}
+                                className="absolute top-0 bottom-0 pointer-events-none"
+                                style={{ left: `${currentDayPosition}px`, width: '2px', background: '#8A8578', zIndex: 9999 }}
                               />
+                            )}
+                            {/* Pending budget hint — drag to set flights */}
+                            {weekIdx === 0 && !activeSelection && pendingBudgets[channel.id] && channel.flights.length === 0 && (
+                              <div className="absolute inset-0 flex items-center pointer-events-none z-10" style={{ paddingLeft: 6 }}>
+                                <span className="text-xs text-blue-500 whitespace-nowrap animate-pulse font-medium">← Drag to set flight dates</span>
+                              </div>
                             )}
                             {/* Inline budget input spanning across selected cells */}
                             {shouldShowInput && !isOrganicWeek && (() => {
@@ -1838,15 +2120,12 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                                     onKeyDown={(e) => {
                                       if (e.key === 'Enter') {
                                         const budget = parseFloat(activeSelection.budget);
-                                        if (budget > 0) {
-                                          if (isOoh) {
-                                            handleSaveBudgetFromInput(budget);
-                                            handleUpdateChannel(channel.id, { totalUpfrontSpend: budget });
-                                          } else {
-                                            handleSaveBudgetFromInput(budget);
-                                          }
+                                        const finalBudget = isNaN(budget) ? 0 : budget;
+                                        if (isOoh) {
+                                          handleSaveBudgetFromInput(finalBudget);
+                                          handleUpdateChannel(channel.id, { totalUpfrontSpend: finalBudget });
                                         } else {
-                                          setActiveSelection(null);
+                                          handleSaveBudgetFromInput(finalBudget);
                                         }
                                       } else if (e.key === 'Escape') {
                                         setActiveSelection(null);
@@ -1854,18 +2133,15 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                                     }}
                                     onBlur={() => {
                                       const budget = parseFloat(activeSelection.budget);
-                                      if (budget > 0) {
-                                        if (isOoh) {
-                                          handleSaveBudgetFromInput(budget);
-                                          handleUpdateChannel(channel.id, { totalUpfrontSpend: budget });
-                                        } else {
-                                          handleSaveBudgetFromInput(budget);
-                                        }
+                                      const finalBudget = isNaN(budget) ? 0 : budget;
+                                      if (isOoh) {
+                                        handleSaveBudgetFromInput(finalBudget);
+                                        handleUpdateChannel(channel.id, { totalUpfrontSpend: finalBudget });
                                       } else {
-                                        setActiveSelection(null);
+                                        handleSaveBudgetFromInput(finalBudget);
                                       }
                                     }}
-                                    placeholder=""
+                                    placeholder="$"
                                     className="w-full h-full text-center text-xs font-semibold border-0 px-2 py-1 focus:ring-0 focus-visible:ring-0 shadow-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none text-white bg-transparent placeholder:text-white/70"
                                     style={{ 
                                       textShadow: 'none !important', 
@@ -1897,16 +2173,13 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                                     zIndex: 10 + flightLayerIdx,
                                   }}
                                 >
-                                  {/* Vertical red line for current day of week - show if current week is within this flight's range */}
-                                  {currentWeekIndex >= 0 && 
-                                   currentWeekIndex >= startIdx && 
+                                  {/* Today line */}
+                                  {currentWeekIndex >= 0 &&
+                                   currentWeekIndex >= startIdx &&
                                    currentWeekIndex <= endIdx && (
                                     <div
-                                      className="absolute top-0 bottom-0 w-0.5 bg-red-500 pointer-events-none"
-                                      style={{
-                                        left: `${(currentWeekIndex - startIdx) * cellWidth + currentDayPosition}px`,
-                                        zIndex: 1000,
-                                      }}
+                                      className="absolute top-0 bottom-0 pointer-events-none"
+                                      style={{ left: `${(currentWeekIndex - startIdx) * cellWidth + currentDayPosition}px`, width: '2px', background: '#8A8578', zIndex: 1000 }}
                                     />
                                   )}
                                 </div>
@@ -1933,9 +2206,20 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
 
               return (
                 <tr className="bg-gray-50 font-semibold">
-                  {/* Channel Name column - TOTALS label */}
+                  {/* Channel Name column - TOTALS label + Add Channel button */}
                   <td className="border border-gray-300 px-3 py-2 sticky left-0 mr-[-1px] z-20 bg-gray-50 w-[200px] min-w-[200px] border-r-2 border-gray-400 shadow-[2px_0_4px_rgba(0,0,0,0.1)]">
-                    TOTALS
+                    <div className="flex items-center gap-2">
+                      <Button
+                        onClick={handleAddChannel}
+                        variant="outline"
+                        size="sm"
+                        className="h-7 px-2 text-xs"
+                      >
+                        <Plus className="h-3 w-3 mr-1" />
+                        Add Channel
+                      </Button>
+                      <span>TOTALS</span>
+                    </div>
                   </td>
                   {/* Detail column - empty */}
                   <td className="border border-gray-300 px-3 py-2 sticky left-[200px] mr-[-1px] z-20 bg-gray-50 w-[150px] min-w-[150px] border-r-2 border-gray-400 shadow-[2px_0_4px_rgba(0,0,0,0.1)]">
@@ -1945,7 +2229,12 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                   <td className="border-l-2 border-l-gray-400 border border-gray-300 px-3 py-2 text-right font-[family-name:var(--font-inter)] sticky left-[350px] mr-[-1px] z-30 bg-gray-50 w-[120px] min-w-[120px] border-r-2 border-gray-400 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)]">
                     {formatCurrency(totalBudget)}
                   </td>
-                  
+
+                  {/* Custom column cells - empty in totals row */}
+                  {customColumns.map((col) => (
+                    <td key={col.id} className="border border-gray-300 px-2 py-2 w-[120px] min-w-[120px]"></td>
+                  ))}
+
                   {/* Monthly totals in date columns */}
                   {monthGroups.map((group, groupIdx) => {
                     const monthKey = getMonthKey(group.weeks[0].weekStart);
@@ -1986,7 +2275,7 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
               return (
                 <tr className="bg-gray-100 font-bold">
                   <td
-                    colSpan={3 + weeks.length}
+                    colSpan={3 + customColumns.length + weeks.length}
                     className="border border-gray-300 px-3 py-2 text-right font-[family-name:var(--font-inter)] bg-gray-100"
                   >
                     <div className="flex justify-end items-center gap-6">
@@ -2000,17 +2289,7 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
           </tbody>
         </table>
       </div>
-      {/* Add Channel Button */}
-      <div className="p-4 border-t border-gray-300">
-        <Button
-          onClick={handleAddChannel}
-          variant="outline"
-          className="w-full sm:w-auto"
-        >
-          <Plus className="h-4 w-4 mr-2" />
-          Add Channel
-        </Button>
-      </div>
+
 
       {/* Flight 3-dots portal dropdown — renders outside overflow:hidden containers */}
       {openFlightMenu && flightMenuPos && typeof window !== 'undefined' && createPortal(
@@ -2042,12 +2321,25 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
             const channelWithFlight = channels.find(c => c.flights.some(f => f.id === openFlightMenu));
             const flightId = openFlightMenu;
             return channelWithFlight ? (
-              <button
-                onClick={(e) => { e.stopPropagation(); handleDeleteFlight(channelWithFlight.id, flightId); setOpenFlightMenu(null); setFlightMenuPos(null); }}
-                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 10px', fontSize: 11, color: '#A0442A', background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif" }}
-              >
-                🗑 Delete
-              </button>
+              <>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setResizingFlight({ channelId: channelWithFlight.id, flightId });
+                    setOpenFlightMenu(null);
+                    setFlightMenuPos(null);
+                  }}
+                  style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 10px', fontSize: 11, color: '#4A6580', background: 'transparent', border: 'none', borderTop: '0.5px solid #F0EDE8', cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif" }}
+                >
+                  ↔ Change Dates
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleDeleteFlight(channelWithFlight.id, flightId); setOpenFlightMenu(null); setFlightMenuPos(null); }}
+                  style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 10px', fontSize: 11, color: '#A0442A', background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif" }}
+                >
+                  🗑 Delete
+                </button>
+              </>
             ) : null;
           })()}
         </div>,

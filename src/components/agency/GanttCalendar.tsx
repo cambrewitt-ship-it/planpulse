@@ -1,10 +1,10 @@
 // src/components/agency/GanttCalendar.tsx
-// Gantt-style timeline view of the current month showing all client channels.
+// Gantt-style continuous scrollable timeline of client channels.
 
 'use client';
 
 import { useMemo, useRef, useEffect } from 'react';
-import { Facebook, Instagram, Search, Linkedin, Music, Radio } from 'lucide-react';
+import { Radio } from 'lucide-react';
 import { getChannelLogo } from '@/lib/utils/channel-icons';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -53,148 +53,154 @@ export interface GanttCalendarProps {
   selectedDay: number | null;
   onDaySelect: (day: number | null) => void;
   filteredClientIds: string[];
+  /** Kept for API compatibility but not used for display range (always centers on Today). */
   currentMonth: Date;
-  /** Optional compact window mode: show only a slice of the month around "today". */
+  /** @deprecated No longer used. */
   compactWindow?: boolean;
-  /** Days to show before today when compactWindow is true (default: 1). */
   windowPastDays?: number;
-  /** Days to show after today when compactWindow is true (default: 8). */
   windowFutureDays?: number;
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── Palette ───────────────────────────────────────────────────────────────────
 
-/** Brand colours for channel bars — matches platform logo hues. */
-function getChannelBarColor(label: string, type: 'paid' | 'organic'): { bg: string; border: string } {
-  const lower = label.toLowerCase();
-  if (lower.includes('meta') || lower.includes('facebook')) return { bg: 'rgba(24,119,242,0.22)', border: 'rgba(24,119,242,0.4)' };
-  if (lower.includes('google')) return { bg: 'rgba(66,133,244,0.22)', border: 'rgba(66,133,244,0.4)' };
-  if (lower.includes('linkedin')) return { bg: 'rgba(10,102,194,0.22)', border: 'rgba(10,102,194,0.4)' };
-  if (lower.includes('tiktok')) return { bg: 'rgba(105,201,208,0.28)', border: 'rgba(105,201,208,0.5)' };
-  if (lower.includes('youtube')) return { bg: 'rgba(255,0,0,0.18)', border: 'rgba(255,0,0,0.35)' };
-  if (lower.includes('pinterest')) return { bg: 'rgba(230,0,35,0.18)', border: 'rgba(230,0,35,0.35)' };
-  if (type === 'organic') return { bg: 'rgba(74,124,89,0.22)', border: 'rgba(74,124,89,0.4)' };
-  return { bg: 'rgba(74,101,128,0.22)', border: 'rgba(74,101,128,0.4)' };
+// Channel-specific bar colours — solid bg + solid border
+function getChannelBarColor(label: string, type: 'paid' | 'organic', status: ChannelStatusSimple): { bg: string; border: string } {
+  if (status === 'completed') return { bg: '#C8D8C4', border: '#6A9E6A' };
+  if (status === 'future')    return { bg: '#D8D8D8', border: '#A0A0A0' };
+
+  const l = label.toLowerCase();
+  if (l.includes('meta') || l.includes('facebook'))  return { bg: '#BFDBFE', border: '#1877F2' };
+  if (l.includes('google'))                           return { bg: '#FDE68A', border: '#D97706' };
+  if (l.includes('linkedin'))                         return { bg: '#BAE6FD', border: '#0A66C2' };
+  if (l.includes('tiktok'))                           return { bg: '#99F6E4', border: '#0D9488' };
+  if (l.includes('instagram'))                        return { bg: '#FBCFE8', border: '#C13584' };
+  if (l.includes('youtube'))                          return { bg: '#FECACA', border: '#EF4444' };
+  if (l.includes('pinterest'))                        return { bg: '#FECDD3', border: '#E60023' };
+  if (l.includes('snapchat'))                         return { bg: '#FEF08A', border: '#CA8A04' };
+  if (l.includes('twitter') || l.includes('x ads') || l.includes('x-ads')) return { bg: '#BAE6FD', border: '#1DA1F2' };
+  if (l.includes('bing') || l.includes('microsoft'))  return { bg: '#DDD6FE', border: '#5C6BC0' };
+  if (l.includes('programmatic') || l.includes('display') || l.includes('dv360')) return { bg: '#C7D2FE', border: '#4F46E5' };
+  if (type === 'organic')                             return { bg: '#BBF7D0', border: '#16A34A' };
+  return                                               { bg: '#CBD5E1', border: '#64748B' };
 }
 
-/** Normalize a channel label so "Google Ads", "Google-Ads", "google ads" all map to the same key. */
+type ChannelStatusSimple = 'completed' | 'active' | 'future';
+
+const ROW_COLORS = ['#FAF9F8', '#F4F1EE'] as const;
+
+// ── Date helpers ──────────────────────────────────────────────────────────────
+
+function dateToMs(s: string): number {
+  const [y, m, d] = s.split('-').map(Number);
+  return Date.UTC(y, m - 1, d);
+}
+
+function msToStr(ms: number): string {
+  const d = new Date(ms);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+}
+
+const MONTH_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function getChannelStatus(ch: GanttChannel, todayStr: string): ChannelStatusSimple {
+  if (ch.end_date && ch.end_date < todayStr) return 'completed';
+  if (ch.start_date && ch.start_date > todayStr) return 'future';
+  return 'active';
+}
+
 function normalizeChannelLabel(label: string): string {
   const lower = label.toLowerCase().trim();
   if (lower.includes('meta') || lower.includes('facebook')) return 'meta-ads';
-  if (lower.includes('google')) return 'google-ads';
+  if (lower.includes('google'))   return 'google-ads';
   if (lower.includes('linkedin')) return 'linkedin-ads';
-  if (lower.includes('tiktok')) return 'tiktok-ads';
+  if (lower.includes('tiktok'))   return 'tiktok-ads';
   return lower;
 }
 
-function daysInMonth(date: Date): number {
-  return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
-}
-
-function parseDayNum(dateStr: string, year: number, month: number): number | null {
-  // month is 1-indexed
-  const parts = dateStr.split('-');
-  if (parts.length < 3) return null;
-  const y = parseInt(parts[0], 10);
-  const m = parseInt(parts[1], 10);
-  const d = parseInt(parts[2], 10);
-  if (y === year && m === month) return d;
-  // Clamp: if before month, return 1; if after month, return last day of month
-  const dInMonth = new Date(year, month, 0).getDate();
-  if (y < year || (y === year && m < month)) return 1;
-  if (y > year || (y === year && m > month)) return dInMonth;
-  return null;
-}
-
-function clampDay(day: number, max: number): number {
-  return Math.max(1, Math.min(max, day));
-}
-
 function getChannelIcon(label: string, type: 'paid' | 'organic') {
-  // For organic channels, use a simple icon
   if (type === 'organic') {
     return <Radio size={11} strokeWidth={1.5} color="#8A8578" />;
   }
-  // For paid channels, use colored logos
   return getChannelLogo(label, "w-[11px] h-[11px]");
 }
 
-// ── Sub-components ───────────────────────────────────────────────────────────
-
-interface RulerCellProps {
-  day: number;
-  isToday: boolean;
-  isSelected: boolean;
-  densityCount: number;
-  maxDensity: number;
-  daysInMo: number;
-  onSelect: (d: number) => void;
-}
-
-function RulerCell({ day, isToday, isSelected, densityCount, maxDensity, daysInMo, onSelect }: RulerCellProps) {
-  const dotSize = maxDensity > 0 ? Math.max(2, Math.round((densityCount / maxDensity) * 4)) : 0;
-  return (
-    <div
-      onClick={() => onSelect(day)}
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'flex-end',
-        paddingBottom: 3,
-        cursor: 'pointer',
-        gap: 1,
-        userSelect: 'none',
-      }}
-    >
-      {/* Density dot */}
-      <div style={{
-        width: dotSize,
-        height: dotSize,
-        borderRadius: '50%',
-        background: densityCount > 0 ? '#B5B0A5' : 'transparent',
-        flexShrink: 0,
-        marginBottom: 1,
-      }} />
-      {/* Day number */}
-      <span style={{
-        fontSize: isToday ? 9 : 7.5,
-        fontWeight: isToday ? 500 : 400,
-        color: isToday ? '#1C1917' : '#B5B0A5',
-        lineHeight: 1,
-        fontFamily: "'DM Sans', system-ui, sans-serif",
-      }}>
-        {day}
-      </span>
-    </div>
-  );
-}
-
-// ── Main component ───────────────────────────────────────────────────────────
+// ── Main component ────────────────────────────────────────────────────────────
 
 export function GanttCalendar({
   clients,
   channels = [],
   healthChecks = [],
   setupPoints = [],
-  pointEvents = [],
+  filteredClientIds,
   selectedDay,
   onDaySelect,
-  filteredClientIds,
-  currentMonth,
-  compactWindow = false,
-  windowPastDays = 1,
-  windowFutureDays = 8,
 }: GanttCalendarProps) {
-  const year = currentMonth.getFullYear();
-  const month = currentMonth.getMonth() + 1; // 1-indexed
-  const daysInMo = daysInMonth(currentMonth);
-  const todayDay = new Date().getDate();
-  const todayMonth = new Date().getMonth() + 1;
-  const todayYear = new Date().getFullYear();
-  const isCurrentMonth = todayYear === year && todayMonth === month;
-  const today = isCurrentMonth ? todayDay : null;
-  const lastDay = daysInMo;
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const todayStr = useMemo(() => {
+    const d = new Date();
+    return msToStr(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  }, []);
+
+  // Compute the continuous date range: 1 month back to 12 months forward,
+  // extended to cover all channel start/end dates.
+  const { rangeStartMs, rangeEndMs } = useMemo(() => {
+    const todayMs = dateToMs(todayStr);
+    let lo = todayMs - 31 * 86400000;
+    let hi = todayMs + 365 * 86400000;
+    for (const ch of channels) {
+      if (ch.start_date) { const s = dateToMs(ch.start_date); if (s < lo) lo = s; }
+      if (ch.end_date)   { const e = dateToMs(ch.end_date);   if (e > hi) hi = e; }
+    }
+    // Snap to month boundaries
+    const loD = new Date(lo), hiD = new Date(hi);
+    return {
+      rangeStartMs: Date.UTC(loD.getUTCFullYear(), loD.getUTCMonth(), 1),
+      rangeEndMs:   Date.UTC(hiD.getUTCFullYear(), hiD.getUTCMonth() + 1, 0),
+    };
+  }, [channels, todayStr]);
+
+  const dayList = useMemo(() => {
+    const l: string[] = [];
+    for (let ms = rangeStartMs; ms <= rangeEndMs; ms += 86400000) l.push(msToStr(ms));
+    return l;
+  }, [rangeStartMs, rangeEndMs]);
+
+  const dateIndex = useMemo(() => {
+    const m = new Map<string, number>();
+    dayList.forEach((s, i) => m.set(s, i));
+    return m;
+  }, [dayList]);
+
+  const todayIdx = useMemo(() => dateIndex.get(todayStr) ?? null, [dateIndex, todayStr]);
+
+  // Month header groups
+  const monthGroups = useMemo(() => {
+    const g: Array<{ label: string; startIdx: number; dayCount: number }> = [];
+    let cur: (typeof g)[0] | null = null;
+    dayList.forEach((s, i) => {
+      const mo = parseInt(s.slice(5, 7), 10) - 1;
+      const yr = parseInt(s.slice(0, 4), 10);
+      const label = `${MONTH_SHORT[mo]} ${yr}`;
+      if (!cur || cur.label !== label) {
+        cur = { label, startIdx: i, dayCount: 1 };
+        g.push(cur);
+      } else {
+        cur.dayCount++;
+      }
+    });
+    return g;
+  }, [dayList]);
+
+  const totalDays = dayList.length;
+
+  // Layout constants
+  const LABEL_COL = 130;
+  const DAY_WIDTH = 38;
+  const RULER_BG  = '#E5E0D8';
+  const Z_STICKY  = 20; // above all timeline z-indices (bars=4, dots=5, markers=6)
 
   const filteredSet = useMemo(() => new Set(filteredClientIds), [filteredClientIds]);
   const filteredClients = useMemo(
@@ -202,7 +208,6 @@ export function GanttCalendar({
     [clients, filteredSet]
   );
 
-  // Index channels by client
   const channelsByClient = useMemo(() => {
     const map = new Map<string, GanttChannel[]>();
     for (const ch of channels) {
@@ -212,7 +217,6 @@ export function GanttCalendar({
     return map;
   }, [channels]);
 
-  // Index health checks by client+normalised-channel
   const hcByClientChannel = useMemo(() => {
     const map = new Map<string, GanttHealthCheck[]>();
     for (const hc of healthChecks) {
@@ -223,7 +227,6 @@ export function GanttCalendar({
     return map;
   }, [healthChecks]);
 
-  // Index setup points by client+normalised-channel
   const spByClientChannel = useMemo(() => {
     const map = new Map<string, GanttSetupPoint[]>();
     for (const sp of setupPoints) {
@@ -234,521 +237,445 @@ export function GanttCalendar({
     return map;
   }, [setupPoints]);
 
-  // Index point events by client+day
-  const pointsByClientDay = useMemo(() => {
-    const map = new Map<string, GanttPointEvent[]>();
-    for (const pe of pointEvents) {
-      const key = `${pe.client_id}:${pe.day}`;
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(pe);
-    }
-    return map;
-  }, [pointEvents]);
-
-  // Density: events per day (channel starts + ends + action events in current month)
-  const densityByDay = useMemo(() => {
-    const counts = new Array<number>(daysInMo + 1).fill(0);
+  // Activity density per day (index into dayList)
+  const densityByIdx = useMemo(() => {
+    const counts = new Array<number>(totalDays).fill(0);
     for (const ch of channels) {
       if (!filteredSet.has(ch.client_id)) continue;
       if (ch.start_date) {
-        const d = parseDayNum(ch.start_date, year, month);
-        if (d && d >= 1 && d <= daysInMo) counts[d]++;
+        const idx = dateIndex.get(ch.start_date);
+        if (idx !== undefined) counts[idx]++;
       }
       if (ch.end_date) {
-        const d = parseDayNum(ch.end_date, year, month);
-        if (d && d >= 1 && d <= daysInMo) counts[d]++;
+        const idx = dateIndex.get(ch.end_date);
+        if (idx !== undefined) counts[idx]++;
       }
     }
-    for (const pe of pointEvents) {
-      if (!filteredSet.has(pe.client_id)) continue;
-      if (pe.day >= 1 && pe.day <= daysInMo) counts[pe.day]++;
-    }
     return counts;
-  }, [channels, pointEvents, filteredSet, daysInMo, year, month]);
+  }, [channels, filteredSet, dateIndex, totalDays]);
 
-  const maxDensity = useMemo(() => Math.max(...densityByDay), [densityByDay]);
+  const maxDensity = useMemo(() => Math.max(...densityByIdx, 1), [densityByIdx]);
 
-  // Always show the full month; horizontal scroll handles navigation
-  const days = useMemo(() => Array.from({ length: daysInMo }, (_, i) => i + 1), [daysInMo]);
-
-  const windowStart = 1;
-  const windowEnd   = daysInMo;
-  const windowSpan  = daysInMo;
-  const visibleDays = days;
-
-  // Today's column left% within the visible window
-  const todayLeftPct =
-    today !== null && today >= windowStart && today <= windowEnd
-      ? ((today - windowStart + 0.5) / windowSpan) * 100
-      : null;
-
-  // Layout constants
-  const LABEL_COL = 130; // px — fixed left label column
-  const DAY_WIDTH = 38;  // px per day column — fixed so horizontal scroll works
-  const LABEL_BG  = '#E5E0D8'; // darker colour for sticky client column + ruler header
-
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  // On mount, scroll so yesterday sits just after the sticky column
+  // Scroll to today on mount — yesterday sits at the left edge, today + 8 days visible ahead
   useEffect(() => {
-    if (!containerRef.current || !today) return;
-    const yesterdayIdx = Math.max(0, today - 2);
-    containerRef.current.scrollLeft = yesterdayIdx * DAY_WIDTH;
+    if (!containerRef.current || todayIdx === null) return;
+    containerRef.current.scrollLeft = Math.max(0, (todayIdx - 1) * DAY_WIDTH);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleDayClick = (day: number) => {
-    onDaySelect(selectedDay === day ? null : day);
+  const handleDayClick = (dateStr: string) => {
+    const d = parseInt(dateStr.slice(8, 10), 10);
+    onDaySelect(selectedDay === d ? null : d);
   };
 
+  const totalW = totalDays * DAY_WIDTH;
+
+  // Helper: get pixel left for a date string
+  const pxLeft = (dateStr: string) => {
+    const idx = dateIndex.get(dateStr);
+    return idx !== undefined ? idx * DAY_WIDTH : null;
+  };
+
+  const todayPx = todayIdx !== null ? todayIdx * DAY_WIDTH : null;
+
   return (
-    <div ref={containerRef} style={{ overflowX: 'auto', overflowY: 'hidden', background: '#FDFCF8', borderRadius: 4, fontFamily: "'DM Sans', system-ui, sans-serif" }}>
-      <div style={{ minWidth: LABEL_COL + daysInMo * DAY_WIDTH }}>
-      {/* ── Ruler row ─────────────────────────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: `${LABEL_COL}px 1fr` }}>
-        {/* Label cell */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'flex-end',
-            paddingBottom: 4,
-            paddingLeft: 8,
-            position: 'sticky',
-            left: 0,
-            zIndex: 5,
-            background: LABEL_BG,
-          }}
-        >
-          <span style={{ fontSize: 9, color: '#8A8070', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-            Client
-          </span>
-        </div>
-        {/* Days ruler — same background as the sticky client column */}
-        <div style={{ position: 'relative', height: 28, background: LABEL_BG }}>
-          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${daysInMo}, ${DAY_WIDTH}px)`, height: '100%' }}>
-            {visibleDays.map(day => (
-              <RulerCell
-                key={day}
-                day={day}
-                isToday={today === day}
-                isSelected={selectedDay === day}
-                densityCount={densityByDay[day]}
-                maxDensity={maxDensity}
-                daysInMo={daysInMo}
-                onSelect={handleDayClick}
-              />
-            ))}
-          </div>
-          {/* Selected day column highlight — rendered over the ruler */}
-          {selectedDay !== null && selectedDay >= windowStart && selectedDay <= windowEnd && (
-            <div
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: `${((selectedDay - windowStart) / windowSpan) * 100}%`,
-                width: `${(1 / windowSpan) * 100}%`,
-                height: '100%',
-                background: 'rgba(74,101,128,0.06)',
-                pointerEvents: 'none',
-              }}
-            />
-          )}
-        </div>
-      </div>
+    <div
+      ref={containerRef}
+      style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 394, width: '100%', minWidth: 0, background: '#FAF9F8', borderRadius: 4, fontFamily: "'DM Sans', system-ui, sans-serif" }}
+    >
+      <div style={{ width: LABEL_COL + totalW, position: 'relative' }}>
 
-      {/* ── Client rows ───────────────────────────────────────── */}
-      {filteredClients.map(client => {
-        const clientChannels = channelsByClient.get(client.id) || [];
-
-        return (
-          <div key={client.id} style={{ borderTop: '1.5px solid #C8C4BC', marginTop: 2 }}>
-            {/* Client header row (24px) */}
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: `${LABEL_COL}px 1fr`,
-              height: 24,
-            }}>
-              {/* Left label */}
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 5,
-                paddingLeft: 8,
-                position: 'sticky',
-                left: 0,
-                zIndex: 5,
-                background: LABEL_BG,
-              }}
+        {/* ── Month header row ──────────────────────────────── */}
+        <div style={{ display: 'grid', gridTemplateColumns: `${LABEL_COL}px ${totalW}px`, height: 18 }}>
+          <div style={{
+            position: 'sticky', left: 0, zIndex: Z_STICKY,
+            background: RULER_BG,
+            borderBottom: '0.5px solid rgba(0,0,0,0.08)',
+          }} />
+          <div style={{ position: 'relative', background: RULER_BG, borderBottom: '0.5px solid rgba(0,0,0,0.08)' }}>
+            {monthGroups.map(grp => (
+              <div
+                key={grp.label}
+                style={{
+                  position: 'absolute',
+                  left: grp.startIdx * DAY_WIDTH,
+                  width: grp.dayCount * DAY_WIDTH,
+                  height: '100%',
+                  display: 'flex', alignItems: 'center',
+                  paddingLeft: 6,
+                  borderLeft: '0.5px solid rgba(0,0,0,0.10)',
+                  boxSizing: 'border-box',
+                  overflow: 'hidden',
+                }}
               >
-                <div style={{
-                  width: 15, height: 15, borderRadius: 3,
-                  background: '#E8E5DE',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  flexShrink: 0,
-                }}>
-                  <span style={{ fontSize: 8, fontWeight: 500, color: '#8A8578' }}>
-                    {client.initials}
-                  </span>
-                </div>
-                <span style={{
-                  fontSize: 11, fontWeight: 500, color: '#1C1917',
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                }}>
-                  {client.name}
+                <span style={{ fontSize: 8, fontWeight: 600, color: '#5C5650', textTransform: 'uppercase', letterSpacing: '0.08em', whiteSpace: 'nowrap' }}>
+                  {grp.label}
                 </span>
               </div>
+            ))}
+          </div>
+        </div>
 
-              {/* Right: today line + point event icons */}
-              <div style={{ position: 'relative' }}>
-                {/* Today vertical line */}
-                {todayLeftPct !== null && (
-                  <div style={{
-                    position: 'absolute',
-                    left: `${todayLeftPct}%`,
-                    top: 0,
-                    bottom: 0,
-                    width: '0.5px',
-                    background: '#D5D0C5',
-                    pointerEvents: 'none',
-                  }} />
-                )}
-                {/* Selected column highlight */}
-                {selectedDay !== null && selectedDay >= windowStart && selectedDay <= windowEnd && (
-                  <div style={{
-                    position: 'absolute',
-                    left: `${((selectedDay - windowStart) / windowSpan) * 100}%`,
-                    width: `${(1 / windowSpan) * 100}%`,
-                    top: 0, bottom: 0,
-                    background: 'rgba(74,101,128,0.06)',
-                    pointerEvents: 'none',
-                  }} />
-                )}
-                {/* Point events for this client */}
-                {visibleDays.map(day => {
-                  const events = pointsByClientDay.get(`${client.id}:${day}`) || [];
-                  return events.map((pe, idx) => {
-                    const leftPct = ((day - windowStart + 0.5) / windowSpan) * 100;
-                    const iconConfig = pe.type === 'start'
-                      ? { bg: 'rgba(74,124,89,0.15)', color: '#4A7C59', symbol: '▶' }
-                      : pe.type === 'end'
-                      ? { bg: 'rgba(160,68,42,0.12)', color: '#A0442A', symbol: '■' }
-                      : { bg: 'rgba(74,101,128,0.15)', color: '#4A6580', symbol: '⚡' };
-                    return (
-                      <div
-                        key={`${day}-${idx}`}
-                        title={pe.label}
-                        style={{
-                          position: 'absolute',
-                          left: `${leftPct}%`,
-                          top: '50%',
-                          transform: 'translate(-50%, -50%)',
-                          width: 12, height: 12,
-                          borderRadius: '50%',
-                          background: iconConfig.bg,
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          zIndex: 2,
-                        }}
-                      >
-                        <span style={{ fontSize: 6, color: iconConfig.color, lineHeight: 1 }}>
-                          {iconConfig.symbol}
-                        </span>
-                      </div>
-                    );
-                  });
-                })}
-              </div>
-            </div>
+        {/* ── Day ruler row ──────────────────────────────────── */}
+        <div style={{ display: 'grid', gridTemplateColumns: `${LABEL_COL}px ${totalW}px`, height: 28 }}>
+          <div style={{
+            display: 'flex', alignItems: 'flex-end',
+            paddingBottom: 4, paddingLeft: 8,
+            position: 'sticky', left: 0, zIndex: Z_STICKY,
+            background: RULER_BG,
+          }}>
+            <span style={{ fontSize: 9, color: '#1C1917', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+              Client
+            </span>
+          </div>
 
-            {/* Per-channel sub-rows (24px each) */}
-            {clientChannels.map(ch => {
-              // Parse start/end day numbers, clamping to month boundaries
-              let startDay: number | null = null;
-              let endDay: number | null = null;
-
-              if (ch.start_date) {
-                const parts = ch.start_date.split('-').map(Number);
-                if (parts.length >= 3) {
-                  const y2 = parts[0], m2 = parts[1], d2 = parts[2];
-                  if (y2 < year || (y2 === year && m2 < month)) {
-                    startDay = 1;
-                  } else if (y2 === year && m2 === month) {
-                    startDay = d2;
-                  }
-                  // If start is after this month, channel is not in this month
-                }
-              }
-
-              if (ch.end_date) {
-                const parts = ch.end_date.split('-').map(Number);
-                if (parts.length >= 3) {
-                  const y2 = parts[0], m2 = parts[1], d2 = parts[2];
-                  if (y2 > year || (y2 === year && m2 > month)) {
-                    endDay = daysInMo;
-                  } else if (y2 === year && m2 === month) {
-                    endDay = d2;
-                  }
-                  // If end is before this month, channel doesn't span this month
-                }
-              }
-
-              // Skip if channel doesn't intersect this month at all
-              if (startDay === null && endDay === null) return null;
-              if (ch.start_date && !startDay && endDay) startDay = 1;
-              if (ch.end_date && !endDay && startDay) endDay = daysInMo;
-              if (!startDay) startDay = 1;
-              if (!endDay) endDay = daysInMo;
-
-              // Clip bar to visible window when in compact mode
-              const visibleStartDay = Math.max(startDay, windowStart);
-              const visibleEndDay = Math.min(endDay, windowEnd);
-              if (visibleEndDay < windowStart || visibleStartDay > windowEnd) {
-                // Channel bar is completely outside the visible window
-                return null;
-              }
-
-              const barLeftPct = ((visibleStartDay - windowStart) / windowSpan) * 100;
-              const barWidthPct = ((visibleEndDay - visibleStartDay + 1) / windowSpan) * 100;
-              const endsBeforeMonthEnd = endDay < daysInMo;
-
-              // Health checks and setup points for this channel (normalised key for matching)
-              const hcKey = `${client.id}:${normalizeChannelLabel(ch.label)}`;
-              const chHealthChecks = hcByClientChannel.get(hcKey) || [];
-              const chSetupPoints = spByClientChannel.get(hcKey) || [];
-
+          <div style={{ position: 'relative', height: 28, background: RULER_BG }}>
+            {/* Day numbers */}
+            {dayList.map((dateStr, idx) => {
+              const dayNum = parseInt(dateStr.slice(8, 10), 10);
+              const isToday = dateStr === todayStr;
+              const dotCount = densityByIdx[idx];
+              const dotSize = dotCount > 0 ? Math.max(2, Math.round((dotCount / maxDensity) * 4)) : 0;
               return (
                 <div
-                  key={ch.id}
+                  key={dateStr}
+                  onClick={() => handleDayClick(dateStr)}
                   style={{
-                    display: 'grid',
-                    gridTemplateColumns: `${LABEL_COL}px 1fr`,
-                    height: 24,
+                    position: 'absolute',
+                    left: idx * DAY_WIDTH,
+                    width: DAY_WIDTH,
+                    height: '100%',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'flex-end',
+                    paddingBottom: 3,
+                    cursor: 'pointer',
+                    gap: 1,
+                    userSelect: 'none',
                   }}
                 >
-                  {/* Channel label + media icon */}
+                  <div style={{
+                    width: dotSize, height: dotSize,
+                    borderRadius: '50%',
+                    background: dotCount > 0 ? '#B5B0A5' : 'transparent',
+                    flexShrink: 0, marginBottom: 1,
+                  }} />
+                  <span style={{
+                    fontSize: isToday ? 9 : 7.5,
+                    fontWeight: isToday ? 600 : 400,
+                    color: isToday ? '#1C1917' : '#4C4840',
+                    lineHeight: 1,
+                    fontFamily: "'DM Sans', system-ui, sans-serif",
+                  }}>
+                    {dayNum}
+                  </span>
+                </div>
+              );
+            })}
+
+            {/* Today amber band in ruler */}
+            {todayPx !== null && (
+              <TodayOverlay px={todayPx} dayWidth={DAY_WIDTH} />
+            )}
+          </div>
+        </div>
+
+        {/* ── Client rows ────────────────────────────────────── */}
+        {filteredClients.map((client, clientIdx) => {
+          const clientChannels = channelsByClient.get(client.id) || [];
+          const rowBg = ROW_COLORS[clientIdx % 2];
+
+          return (
+            <div key={client.id}>
+              <div style={{ height: '0.5px', background: 'rgba(0,0,0,0.06)' }} />
+
+              {/* Client header row */}
+              <div style={{ display: 'grid', gridTemplateColumns: `${LABEL_COL}px ${totalW}px`, height: 24 }}>
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 5,
+                  paddingLeft: 8,
+                  position: 'sticky', left: 0, zIndex: Z_STICKY,
+                  background: rowBg,
+                }}>
+                  <div style={{
+                    width: 15, height: 15, borderRadius: 3,
+                    background: 'rgba(0,0,0,0.06)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                  }}>
+                    <span style={{ fontSize: 8, fontWeight: 500, color: '#8A8578' }}>{client.initials}</span>
+                  </div>
+                  <span style={{ fontSize: 11, fontWeight: 500, color: '#1C1917', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {client.name}
+                  </span>
+                </div>
+
+                <div style={{ position: 'relative', background: rowBg, height: 24 }}>
+                  {todayPx !== null && <TodayOverlay px={todayPx} dayWidth={DAY_WIDTH} />}
+                  {/* Month dividers */}
+                  {monthGroups.slice(1).map(grp => (
+                    <div key={grp.label} style={{
+                      position: 'absolute', left: grp.startIdx * DAY_WIDTH,
+                      top: 0, bottom: 0, width: '0.5px',
+                      background: 'rgba(0,0,0,0.06)', pointerEvents: 'none',
+                    }} />
+                  ))}
+                </div>
+              </div>
+
+              {/* Per-channel sub-rows */}
+              {clientChannels.map(ch => {
+                if (!ch.start_date && !ch.end_date) return null;
+
+                const startStr = ch.start_date ?? ch.end_date!;
+                const endStr   = ch.end_date ?? ch.start_date!;
+
+                // Clamp to range
+                const clampedStart = startStr < dayList[0] ? dayList[0] : startStr > dayList[dayList.length - 1] ? null : startStr;
+                const clampedEnd   = endStr > dayList[dayList.length - 1] ? dayList[dayList.length - 1] : endStr < dayList[0] ? null : endStr;
+
+                if (!clampedStart || !clampedEnd) return null;
+
+                const startIdx = dateIndex.get(clampedStart) ?? 0;
+                const endIdx   = dateIndex.get(clampedEnd)   ?? totalDays - 1;
+
+                if (endIdx < startIdx) return null;
+
+                const barLeft  = startIdx * DAY_WIDTH;
+                const barWidth = (endIdx - startIdx + 1) * DAY_WIDTH;
+
+                const hcKey        = `${client.id}:${normalizeChannelLabel(ch.label)}`;
+                const chHealthChecks = hcByClientChannel.get(hcKey) || [];
+                const chSetupPoints  = spByClientChannel.get(hcKey) || [];
+
+                const status     = getChannelStatus(ch, todayStr);
+                const barColor   = getChannelBarColor(ch.label, ch.type, status);
+                const barOpacity = status === 'future' ? 0.5 : 1;
+
+                const startDotColor = barColor.border;
+                const endDotColor   = status === 'completed' ? '#6A9E6A' : barColor.border;
+
+                return (
                   <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      paddingLeft: 18,
-                      overflow: 'hidden',
-                      position: 'sticky',
-                      left: 0,
-                      zIndex: 5,
-                      background: LABEL_BG,
-                      boxShadow: 'inset -1px 0 0 #C8C0B4',
-                    }}
+                    key={ch.id}
+                    style={{ display: 'grid', gridTemplateColumns: `${LABEL_COL}px ${totalW}px`, height: 24 }}
                   >
-                    <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      {getChannelIcon(ch.label, ch.type)}
+                    {/* Channel label */}
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      paddingLeft: 18, overflow: 'hidden',
+                      position: 'sticky', left: 0, zIndex: Z_STICKY,
+                      background: rowBg,
+                      boxShadow: 'inset -1px 0 0 rgba(0,0,0,0.06)',
+                    }}>
+                      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        {getChannelIcon(ch.label, ch.type)}
+                      </div>
+                      <span style={{ fontSize: 9, color: '#1C1917', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {ch.label}
+                      </span>
                     </div>
-                    <span
-                      style={{
-                        fontSize: 9,
-                        color: '#8A8578',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {ch.label}
-                    </span>
-                  </div>
 
-                  {/* Timeline area */}
-                  <div style={{ position: 'relative', overflow: 'visible' }}>
-                    {/* Today line */}
-                    {todayLeftPct !== null && (
-                      <div style={{
-                        position: 'absolute',
-                        left: `${todayLeftPct}%`,
-                        top: 0, bottom: 0,
-                        width: '0.5px',
-                        background: '#D5D0C5',
-                        pointerEvents: 'none',
-                        zIndex: 1,
-                      }} />
-                    )}
-                    {/* Selected column highlight */}
-                    {selectedDay !== null && selectedDay >= windowStart && selectedDay <= windowEnd && (
-                      <div style={{
-                        position: 'absolute',
-                        left: `${((selectedDay - 1) / daysInMo) * 100}%`,
-                        width: `${(1 / daysInMo) * 100}%`,
-                        top: 0, bottom: 0,
-                        background: 'rgba(74,101,128,0.06)',
-                        pointerEvents: 'none',
-                        zIndex: 0,
-                      }} />
-                    )}
+                    {/* Timeline area */}
+                    <div style={{ position: 'relative', overflow: 'visible', background: rowBg }}>
+                      {/* Today overlay */}
+                      {todayPx !== null && <TodayOverlay px={todayPx} dayWidth={DAY_WIDTH} />}
 
-                    {/* Channel bar — brand colours per platform */}
-                    {(() => {
-                      const barColor = getChannelBarColor(ch.label, ch.type);
-                      return (
-                        <div style={{
-                          position: 'absolute',
-                          left: `${barLeftPct}%`,
-                          width: `${barWidthPct}%`,
-                          top: '50%',
-                          transform: 'translateY(-50%)',
-                          height: 6,
-                          background: barColor.bg,
-                          border: `0.5px ${ch.type === 'organic' ? 'dashed' : 'solid'} ${barColor.border}`,
-                          borderRadius: 3,
-                          zIndex: 2,
-                          boxSizing: 'border-box',
+                      {/* Month dividers */}
+                      {monthGroups.slice(1).map(grp => (
+                        <div key={grp.label} style={{
+                          position: 'absolute', left: grp.startIdx * DAY_WIDTH,
+                          top: 0, bottom: 0, width: '0.5px',
+                          background: 'rgba(0,0,0,0.06)', pointerEvents: 'none',
                         }} />
-                      );
-                    })()}
+                      ))}
 
-                    {/* Start dot (clipped to visible window) */}
-                    <div style={{
-                      position: 'absolute',
-                      left: `${barLeftPct}%`,
-                      top: '50%',
-                      transform: 'translate(-50%, -50%)',
-                      width: 6, height: 6,
-                      borderRadius: '50%',
-                      background: '#4A7C59',
-                      zIndex: 3,
-                    }} />
+                      {/* Channel bar */}
+                      <div style={{
+                        position: 'absolute',
+                        left: barLeft,
+                        width: barWidth,
+                        top: '50%', transform: 'translateY(-50%)',
+                        height: 6,
+                        background: barColor.bg,
+                        border: `1px ${ch.type === 'organic' ? 'dashed' : 'solid'} ${barColor.border}`,
+                        borderRadius: 3,
+                        opacity: barOpacity,
+                        zIndex: 4,
+                        boxSizing: 'border-box',
+                      }} />
 
-                    {/* End dot (clipped to visible window) */}
-                    <div style={{
-                      position: 'absolute',
-                      left: `${((visibleEndDay - windowStart + 1) / windowSpan) * 100}%`,
-                      top: '50%',
-                      transform: 'translate(-50%, -50%)',
-                      width: 6, height: 6,
-                      borderRadius: '50%',
-                      background: endsBeforeMonthEnd ? '#A0442A' : '#B5B0A5',
-                      zIndex: 3,
-                    }} />
+                      {/* Start dot */}
+                      <div style={{
+                        position: 'absolute',
+                        left: barLeft,
+                        top: '50%', transform: 'translate(-50%, -50%)',
+                        width: 5, height: 5, borderRadius: '50%',
+                        background: startDotColor,
+                        opacity: barOpacity, zIndex: 5,
+                      }} />
 
-                    {/* Health check diamonds */}
-                    {chHealthChecks.map((hc, hcIdx) => {
-                      const hcDay = parseDayNum(hc.due_date, year, month);
-                      if (!hcDay) return null;
-                      if (hcDay < windowStart || hcDay > windowEnd) return null;
-                      const hcLeftPct = ((hcDay - windowStart + 0.5) / windowSpan) * 100;
-                      return (
-                        <div
-                          key={hcIdx}
-                          title={`Health check: ${hc.due_date}`}
-                          style={{
-                            position: 'absolute',
-                            left: `${hcLeftPct}%`,
-                            top: '50%',
-                            transform: 'translate(-50%, -50%) rotate(45deg)',
-                            width: 7, height: 7,
-                            background: '#FDFCF8',
-                            border: '1px solid #B07030',
-                            zIndex: 4,
-                          }}
-                        />
-                      );
-                    })}
+                      {/* End dot */}
+                      <div style={{
+                        position: 'absolute',
+                        left: barLeft + barWidth,
+                        top: '50%', transform: 'translate(-50%, -50%)',
+                        width: 5, height: 5, borderRadius: '50%',
+                        background: endDotColor,
+                        opacity: barOpacity, zIndex: 5,
+                      }} />
 
-                    {/* Set Up action point dots */}
-                    {chSetupPoints.map((sp, spIdx) => {
-                      const spDay = parseDayNum(sp.due_date, year, month);
-                      if (!spDay) return null;
-                      if (spDay < windowStart || spDay > windowEnd) return null;
-                      const spLeftPct = ((spDay - windowStart + 0.5) / windowSpan) * 100;
-                      return (
-                        <div
-                          key={spIdx}
-                          title={`Set Up due: ${sp.due_date}`}
-                          style={{
-                            position: 'absolute',
-                            left: `${spLeftPct}%`,
-                            top: '50%',
-                            transform: 'translate(-50%, -50%)',
-                            width: 6, height: 6,
-                            borderRadius: '50%',
-                            background: '#A0442A',
-                            zIndex: 4,
-                          }}
-                        />
-                      );
-                    })}
+                      {/* Health check diamonds */}
+                      {chHealthChecks.map((hc, hcIdx) => {
+                        const px = pxLeft(hc.due_date);
+                        if (px === null) return null;
+                        return (
+                          <div
+                            key={hcIdx}
+                            title={`Health check: ${hc.due_date}`}
+                            style={{
+                              position: 'absolute',
+                              left: px + DAY_WIDTH / 2,
+                              top: '50%',
+                              transform: 'translate(-50%, -50%) rotate(45deg)',
+                              width: 7, height: 7,
+                              background: '#FDFCF8',
+                              border: '1px solid rgba(176, 112, 48, 0.60)',
+                              zIndex: 6,
+                            }}
+                          />
+                        );
+                      })}
+
+                      {/* Set Up dots */}
+                      {chSetupPoints.map((sp, spIdx) => {
+                        const px = pxLeft(sp.due_date);
+                        if (px === null) return null;
+                        return (
+                          <div
+                            key={spIdx}
+                            title={`Set Up due: ${sp.due_date}`}
+                            style={{
+                              position: 'absolute',
+                              left: px + DAY_WIDTH / 2,
+                              top: '50%',
+                              transform: 'translate(-50%, -50%)',
+                              width: 5, height: 5, borderRadius: '50%',
+                              background: 'rgba(160, 68, 42, 0.70)',
+                              zIndex: 6,
+                            }}
+                          />
+                        );
+                      })}
+                    </div>
                   </div>
+                );
+              })}
+            </div>
+          );
+        })}
+
+        {/* ── Activity density bar ───────────────────────────────── */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: `${LABEL_COL}px ${totalW}px`,
+          height: 18, marginTop: 4,
+          borderTop: '0.5px solid rgba(0,0,0,0.06)',
+        }}>
+          <div style={{
+            display: 'flex', alignItems: 'flex-end',
+            paddingLeft: 8, paddingBottom: 2,
+            position: 'sticky', left: 0, zIndex: Z_STICKY,
+            background: RULER_BG,
+          }}>
+            <span style={{ fontSize: 7, color: '#8A8070', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+              Activity
+            </span>
+          </div>
+          <div style={{ position: 'relative', height: 18 }}>
+            {dayList.map((_, idx) => {
+              const count    = densityByIdx[idx];
+              const heightPx = count > 0 ? Math.max(1, Math.round((count / maxDensity) * 10)) : 0;
+              return (
+                <div
+                  key={idx}
+                  style={{
+                    position: 'absolute',
+                    left: idx * DAY_WIDTH,
+                    width: DAY_WIDTH,
+                    height: '100%',
+                    display: 'flex', alignItems: 'flex-end', paddingBottom: 2,
+                  }}
+                >
+                  {count > 0 && (
+                    <div style={{
+                      width: '80%', height: heightPx,
+                      background: 'rgba(138, 133, 120, 0.45)',
+                      borderRadius: 1, margin: '0 auto',
+                    }} />
+                  )}
                 </div>
               );
             })}
           </div>
-        );
-      })}
+        </div>
 
-      {/* ── Activity density bar ──────────────────────────────── */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: `${LABEL_COL}px 1fr`,
-        height: 18,
-        marginTop: 4,
-        borderTop: '0.5px solid #E8E4DC',
-      }}>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'flex-end',
-            paddingLeft: 8,
-            paddingBottom: 2,
-            position: 'sticky',
-            left: 0,
-            zIndex: 5,
-            background: LABEL_BG,
-          }}
-        >
-          <span style={{ fontSize: 7, color: '#8A8070', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-            Activity
+        {/* ── Legend ────────────────────────────────────────────── */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 12,
+          padding: '5px 10px', flexWrap: 'wrap',
+          borderTop: '0.5px solid rgba(0,0,0,0.06)',
+        }}>
+          {[
+            { color: '#BFDBFE', border: '#1877F2', label: 'Active (Paid)' },
+            { color: '#BBF7D0', border: '#16A34A', label: 'Active (Organic)' },
+            { color: '#C8D8C4', border: '#6A9E6A', label: 'Completed' },
+            { color: '#D8D8D8', border: '#A0A0A0', label: 'Upcoming' },
+          ].map(item => (
+            <span key={item.label} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 8, color: '#8A8070', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+              <span style={{
+                display: 'inline-block', width: 16, height: 5, borderRadius: 2,
+                background: item.color,
+                border: `1px solid ${item.border}`,
+                verticalAlign: 'middle',
+              }} />
+              {item.label}
+            </span>
+          ))}
+          <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 8, color: '#8A8070' }}>
+            <span style={{ display: 'inline-block', width: 7, height: 7, background: '#FDFCF8', border: '1px solid rgba(176,112,48,0.60)', transform: 'rotate(45deg)', verticalAlign: 'middle' }} />
+            Health Check
+          </span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 8, color: '#8A8070' }}>
+            <span style={{ display: 'inline-block', width: 5, height: 5, borderRadius: '50%', background: 'rgba(160,68,42,0.70)', verticalAlign: 'middle' }} />
+            Set Up
           </span>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${daysInMo}, ${DAY_WIDTH}px)`, alignItems: 'flex-end', height: '100%' }}>
-          {visibleDays.map(day => {
-            const count = densityByDay[day];
-            const heightPx = maxDensity > 0 ? Math.max(1, Math.round((count / maxDensity) * 10)) : 0;
-            return (
-              <div key={day} style={{ display: 'flex', alignItems: 'flex-end', height: '100%', paddingBottom: 2 }}>
-                {count > 0 && (
-                  <div style={{
-                    width: '80%',
-                    height: heightPx,
-                    background: '#B5B0A5',
-                    borderRadius: 1,
-                    margin: '0 auto',
-                  }} />
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </div>
 
-      {/* ── Legend row ───────────────────────────────────────── */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 12,
-        padding: '5px 10px',
-        flexWrap: 'wrap',
-        borderTop: '0.5px solid #E8E4DC',
-      }}>
-        {[
-          { symbol: '▶', color: '#4A7C59', label: 'Start' },
-          { symbol: '■', color: '#A0442A', label: 'End' },
-          { symbol: '⚡', color: '#4A6580', label: 'Action' },
-          { symbol: '◇', color: '#B07030', label: 'Health Check' },
-          { symbol: '●', color: '#A0442A', label: 'Set Up' },
-          { symbol: '▬', color: '#8A8578', label: 'Paid' },
-          { symbol: '╌', color: '#8A8578', label: 'Organic' },
-        ].map(item => (
-          <span key={item.label} style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 8, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
-            <span style={{ color: item.color }}>{item.symbol}</span>
-            {item.label}
-          </span>
-        ))}
-      </div>
       </div>
     </div>
+  );
+}
+
+// ── Today overlay ─────────────────────────────────────────────────────────────
+
+function TodayOverlay({ px, dayWidth }: { px: number; dayWidth: number }) {
+  return (
+    <>
+      <div style={{
+        position: 'absolute',
+        left: px, width: dayWidth,
+        top: 0, bottom: 0,
+        background: 'rgba(180, 140, 50, 0.08)',
+        pointerEvents: 'none', zIndex: 1,
+      }} />
+      <div style={{
+        position: 'absolute',
+        left: px + dayWidth / 2,
+        top: 0, bottom: 0, width: '1px',
+        background: 'rgba(180, 140, 50, 0.45)',
+        pointerEvents: 'none', zIndex: 2,
+      }} />
+    </>
   );
 }

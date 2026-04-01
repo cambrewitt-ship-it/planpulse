@@ -213,9 +213,13 @@ export function ClientCardCompact({ client, selected, onClick, index = 0, onAcco
         <div style={{
           width: 34, height: 34, borderRadius: 5,
           background: '#E8E5DE', display: 'flex', alignItems: 'center', justifyContent: 'center',
-          flexShrink: 0,
+          flexShrink: 0, overflow: 'hidden',
         }}>
-          <span style={{ color: '#8A8578', fontWeight: 500, fontSize: 13 }}>{initials}</span>
+          {client.logo_url ? (
+            <img src={client.logo_url} alt={client.name} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 5 }} />
+          ) : (
+            <span style={{ color: '#8A8578', fontWeight: 500, fontSize: 13 }}>{initials}</span>
+          )}
         </div>
         <span style={{
           flex: 1, fontWeight: 500, fontSize: 15, color: '#1C1917',

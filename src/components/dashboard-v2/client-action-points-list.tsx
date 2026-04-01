@@ -161,9 +161,9 @@ export default function ClientActionPointsList({ actionPoints, onToggle }: Props
             <div
               key={col.label}
               style={{
-                // ~45% width so next column is peeking, hinting scroll
+                // ~32% width so more columns are visible, hinting scroll
                 flexShrink: 0,
-                width: '45%',
+                width: '32%',
                 display: 'flex',
                 flexDirection: 'column',
                 background: '#F5F2EB',

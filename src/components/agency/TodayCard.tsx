@@ -67,7 +67,9 @@ export function TodayCard({ clients, today }: TodayCardProps) {
         Live Channels
       </span>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, overflowY: 'auto' }}>
+      {/* Scrollable live-channel list — shows ~12 lines; half of 13th visible as scroll hint */}
+      <div style={{ position: 'relative' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, overflowY: 'auto', maxHeight: 213 }}>
         {activeClients.length === 0 ? (
           <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)', fontFamily: sansFont }}>No active channels today</span>
         ) : (
@@ -96,6 +98,13 @@ export function TodayCard({ clients, today }: TodayCardProps) {
             </div>
           ))
         )}
+      </div>
+        {/* Gradient fade — signals more content below */}
+        <div style={{
+          position: 'absolute', bottom: 0, left: 0, right: 0, height: 28,
+          background: 'linear-gradient(to bottom, transparent, #1C1917)',
+          pointerEvents: 'none',
+        }} />
       </div>
     </div>
   );

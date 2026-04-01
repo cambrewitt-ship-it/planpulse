@@ -6,6 +6,8 @@ import {
   GanttCalendar,
   type GanttClient,
   type GanttChannel,
+  type GanttHealthCheck,
+  type GanttSetupPoint,
 } from '@/components/agency/GanttCalendar';
 
 interface AccountManager {
@@ -25,6 +27,8 @@ interface HeroGanttProps {
   selectedDay: number | null;
   onDaySelect: (day: number | null) => void;
   filteredClientIds: string[];
+  healthChecks?: GanttHealthCheck[];
+  setupPoints?: GanttSetupPoint[];
 }
 
 export interface HeroHealthSectionProps {
@@ -374,8 +378,8 @@ export default function HeroHealthSection({
               <GanttCalendar
                 clients={gantt.clients}
                 channels={gantt.channels}
-                healthChecks={[]}
-                setupPoints={[]}
+                healthChecks={gantt.healthChecks ?? []}
+                setupPoints={gantt.setupPoints ?? []}
                 pointEvents={[]}
                 selectedDay={gantt.selectedDay}
                 onDaySelect={gantt.onDaySelect}

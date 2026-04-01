@@ -143,6 +143,10 @@ export default function DashboardV2() {
   const [isEditingClientNotes, setIsEditingClientNotes] = useState(false);
   const [editingClientNotes, setEditingClientNotes] = useState('');
   const [notesCollapsed, setNotesCollapsed] = useState(false);
+  const [noteFiles, setNoteFiles] = useState<{ id: string; name: string }[]>([{ id: 'default', name: 'General' }]);
+  const [activeFileId, setActiveFileId] = useState<string>('default');
+  const [showFilesMenu, setShowFilesMenu] = useState(false);
+  const [newFileName, setNewFileName] = useState('');
   const [isSavingClientNotes, setIsSavingClientNotes] = useState(false);
   const [isSavingAccountManager, setIsSavingAccountManager] = useState(false);
   const [accountManagers, setAccountManagers] = useState<Array<{ id: string; name: string; email: string | null }>>([]);
@@ -303,6 +307,43 @@ export default function DashboardV2() {
   }, [clientId, totalActualSpend]);
 
   // Note: analyticsDateRange defaults to YTD (Jan 1 – today) on each load
+
+  // Load note files from localStorage
+  useEffect(() => {
+    if (!clientId) return;
+    try {
+      const saved = localStorage.getItem(`note_files_${clientId}`);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setNoteFiles(parsed);
+          setActiveFileId(parsed[0].id);
+        }
+      }
+    } catch {}
+  }, [clientId]);
+
+  const saveNoteFiles = (files: { id: string; name: string }[]) => {
+    setNoteFiles(files);
+    try { localStorage.setItem(`note_files_${clientId}`, JSON.stringify(files)); } catch {}
+  };
+
+  const addNoteFile = () => {
+    const name = newFileName.trim() || 'New File';
+    const id = `file-${Date.now()}`;
+    const updated = [...noteFiles, { id, name }];
+    saveNoteFiles(updated);
+    setActiveFileId(id);
+    setNewFileName('');
+    setShowFilesMenu(false);
+  };
+
+  const deleteNoteFile = (id: string) => {
+    const updated = noteFiles.filter(f => f.id !== id);
+    const next = updated.length > 0 ? updated : [{ id: 'default', name: 'General' }];
+    saveNoteFiles(next);
+    if (activeFileId === id) setActiveFileId(next[0].id);
+  };
 
   // Persist selectedMonth across refreshes
   useEffect(() => {
@@ -889,16 +930,89 @@ export default function DashboardV2() {
   const ganttAPMarkers = useMemo<GanttAPMarker[]>(() =>
     allActionPoints
       .filter((ap: any) => ap.channel_type && !ap.completed)
-      .map((ap: any) => ({
-        client_id: clientId,
-        channel_label: ap.channel_type,
-        text: ap.text || '',
-        category: ap.category || 'ONGOING',
-        due_date: ap.due_date ?? null,
-        frequency: ap.frequency ?? null,
-      })),
-    [allActionPoints, clientId]
+      .map((ap: any) => {
+        let effectiveDueDate: string | null = ap.due_date ?? null;
+        if (!effectiveDueDate && ap.category === 'SET UP' && ap.days_before_live_due != null) {
+          const matchedChannel = ganttChannels.find(
+            ch => ch.label.toLowerCase().trim() === (ap.channel_type ?? '').toLowerCase().trim() ||
+                  ch.label.toLowerCase().includes((ap.channel_type ?? '').toLowerCase()) ||
+                  (ap.channel_type ?? '').toLowerCase().includes(ch.label.toLowerCase())
+          );
+          const refDate = matchedChannel?.start_date
+            ? new Date(matchedChannel.start_date)
+            : (campaignDates?.start ?? null);
+          if (refDate) {
+            const d = new Date(refDate);
+            d.setDate(d.getDate() - (ap.days_before_live_due as number));
+            effectiveDueDate = d.toISOString().slice(0, 10);
+          }
+        }
+        return {
+          client_id: clientId,
+          channel_label: ap.channel_type,
+          text: ap.text || '',
+          category: ap.category || 'ONGOING',
+          due_date: effectiveDueDate,
+          frequency: ap.frequency ?? null,
+          id: ap.id,
+        };
+      }),
+    [allActionPoints, clientId, campaignDates, ganttChannels]
   );
+
+  // Compute an effective due_date for an action point for use in the Gantt timeline.
+  // SET UP: campaign_start - days_before_live_due; HEALTH CHECK: next occurrence from channel start.
+  const computeGanttDueDate = useCallback((ap: any): string | null => {
+    if (ap.due_date) return ap.due_date;
+
+    if (ap.category === 'SET UP' && ap.days_before_live_due != null) {
+      const matchedChannel = ganttChannels.find(
+        ch => ch.label.toLowerCase().trim() === (ap.channel_type ?? '').toLowerCase().trim() ||
+              ch.label.toLowerCase().includes((ap.channel_type ?? '').toLowerCase()) ||
+              (ap.channel_type ?? '').toLowerCase().includes(ch.label.toLowerCase())
+      );
+      const refDate = matchedChannel?.start_date
+        ? new Date(matchedChannel.start_date)
+        : (campaignDates?.start ?? null);
+      if (!refDate) return null;
+      const d = new Date(refDate);
+      d.setDate(d.getDate() - (ap.days_before_live_due as number));
+      return d.toISOString().slice(0, 10);
+    }
+
+    if (ap.category === 'HEALTH CHECK' && ap.frequency) {
+      const intervalDays =
+        ap.frequency === 'weekly' ? 7 :
+        ap.frequency === 'fortnightly' ? 14 :
+        ap.frequency === 'monthly' ? 30 : 0;
+      if (!intervalDays) return null;
+
+      // Use matching channel's start_date, falling back to campaign start
+      const matchedChannel = ganttChannels.find(
+        ch => ch.label.toLowerCase().trim() === (ap.channel_type ?? '').toLowerCase().trim() ||
+              ch.label.toLowerCase().includes((ap.channel_type ?? '').toLowerCase()) ||
+              (ap.channel_type ?? '').toLowerCase().includes(ch.label.toLowerCase())
+      );
+      const refDateStr = matchedChannel?.start_date ?? (campaignDates?.start ? campaignDates.start.toISOString().slice(0, 10) : null);
+      if (!refDateStr) return null;
+
+      const startMs = new Date(refDateStr).getTime();
+      const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+      const todayMs = todayStart.getTime();
+      const intervalMs = intervalDays * 86400000;
+
+      // Find next future occurrence
+      for (let n = 1; n <= 730; n++) {
+        const occMs = startMs + n * intervalMs;
+        if (occMs >= todayMs) {
+          return new Date(occMs).toISOString().slice(0, 10);
+        }
+      }
+      return todayStart.toISOString().slice(0, 10);
+    }
+
+    return null;
+  }, [campaignDates, ganttChannels]);
 
   // ── Account Manager handler ──────────────────────────────────────────────
   const handleAccountManagerChange = useCallback(async (accountManager: string | null) => {
@@ -1019,12 +1133,26 @@ export default function DashboardV2() {
         selectedDay: ganttSelectedDay,
         onDaySelect: setGanttSelectedDay,
         filteredClientIds: clientId ? [clientId] : [],
+        healthChecks: allActionPoints
+          .filter((ap: any) => ap.category === 'HEALTH CHECK' && ap.channel_type && !ap.completed)
+          .map((ap: any) => {
+            const due = computeGanttDueDate(ap);
+            return due ? { client_id: clientId, channel_label: ap.channel_type, due_date: due } : null;
+          })
+          .filter(Boolean) as { client_id: string; channel_label: string; due_date: string }[],
+        setupPoints: allActionPoints
+          .filter((ap: any) => ap.category === 'SET UP' && ap.channel_type && !ap.completed)
+          .map((ap: any) => {
+            const due = computeGanttDueDate(ap);
+            return due ? { client_id: clientId, channel_label: ap.channel_type, due_date: due } : null;
+          })
+          .filter(Boolean) as { client_id: string; channel_label: string; due_date: string }[],
       },
       onAccountManagerChange: handleAccountManagerChange,
       isSavingAccountManager,
       accountManagers,
     };
-  }, [client, clientId, adjustedHealthScore, campaignDates, totalActualSpend, plannedBudget, actionPointsStats, ganttClients, ganttChannels, selectedMonth, ganttSelectedDay, setGanttSelectedDay, handleAccountManagerChange, isSavingAccountManager, accountManagers, perfHealthResult]);
+  }, [client, clientId, adjustedHealthScore, campaignDates, totalActualSpend, plannedBudget, actionPointsStats, allActionPoints, ganttClients, ganttChannels, selectedMonth, ganttSelectedDay, setGanttSelectedDay, handleAccountManagerChange, isSavingAccountManager, accountManagers, perfHealthResult, computeGanttDueDate]);
 
   // Calculate current week commencing (Monday of current week)
   const currentWeekCommencing = useMemo(() => {
@@ -1196,6 +1324,7 @@ export default function DashboardV2() {
       return {
         type: 'paid_digital' as const,
         name:             ch.channelName,
+        format:           ch.format || undefined,
         platform,
         status:           determineStatus(currentSpend, plannedSpend),
         currentSpend,
@@ -1394,6 +1523,14 @@ export default function DashboardV2() {
             ← Back
           </Link>
           <span className="text-sm font-medium" style={{ color: '#1C1917' }}>{client?.name ?? 'Loading…'}</span>
+          <div className="ml-auto flex items-center gap-2">
+            <span className="text-xs text-gray-500">Analytics Period:</span>
+            <DateRangePicker
+              value={analyticsDateRange}
+              onChange={setAnalyticsDateRange}
+              disabled={loadingAnalytics}
+            />
+          </div>
         </div>
       </header>
 
@@ -1547,15 +1684,6 @@ export default function DashboardV2() {
                     </div>
                   )}
 
-                  {/* Analytics Date Range */}
-                  <div className="flex items-center gap-2">
-                    <label className="text-sm text-gray-600">Analytics Period:</label>
-                    <DateRangePicker
-                      value={analyticsDateRange}
-                      onChange={setAnalyticsDateRange}
-                      disabled={loadingAnalytics}
-                    />
-                  </div>
                 </div>
               </div>
             </div>
@@ -1568,19 +1696,20 @@ export default function DashboardV2() {
                   {/* Notes panel */}
                   <div style={{
                     flexShrink: 0,
-                    width: notesCollapsed ? 48 : 360,
+                    width: notesCollapsed ? 48 : 460,
                     transition: 'width 0.2s ease',
                     position: 'relative',
                     overflow: 'hidden',
+                    display: 'flex',
+                    borderRadius: 6,
                   }}>
                     {notesCollapsed ? (
                       /* Collapsed pill */
                       <div
                         onClick={() => setNotesCollapsed(false)}
                         style={{
-                          height: '100%',
-                          background: '#FFFBF0',
-                          border: '0.5px solid rgba(176,112,48,0.3)',
+                          height: '100%', width: '100%',
+                          background: '#1C1917',
                           borderRadius: 6,
                           cursor: 'pointer',
                           display: 'flex',
@@ -1591,22 +1720,136 @@ export default function DashboardV2() {
                         }}
                         title="Expand notes"
                       >
-                        <span style={{ fontSize: 9, color: '#B07030', textTransform: 'uppercase', letterSpacing: '0.1em', writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>Notes</span>
-                        <span style={{ fontSize: 14, color: '#B07030' }}>›</span>
+                        <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', letterSpacing: '0.1em', writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>Notes</span>
+                        <span style={{ fontSize: 14, color: 'rgba(255,255,255,0.4)' }}>›</span>
                       </div>
                     ) : (
-                      <div style={{ height: '100%', position: 'relative' }}>
-                        <NotesChecklist activeClientId={clientId} />
-                        {/* Collapse toggle */}
-                        <button
-                          onClick={() => setNotesCollapsed(true)}
-                          title="Collapse notes"
-                          style={{
-                            position: 'absolute', top: 8, right: 8,
-                            background: 'transparent', border: 'none', cursor: 'pointer',
-                            color: '#B07030', fontSize: 14, lineHeight: 1, padding: 2,
-                          }}
-                        >‹</button>
+                      <div style={{ display: 'flex', width: '100%', height: '100%', position: 'relative', borderRadius: 6, overflow: 'hidden' }}>
+                        {/* Dark textured left spine */}
+                        <div style={{
+                          width: 36,
+                          flexShrink: 0,
+                          background: '#1C1917',
+                          backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.035) 1px, transparent 1px)',
+                          backgroundSize: '5px 5px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          paddingTop: 10,
+                          gap: 10,
+                          position: 'relative',
+                          zIndex: 2,
+                        }}>
+                          {/* Hamburger button */}
+                          <button
+                            onClick={() => setShowFilesMenu(v => !v)}
+                            title="Files"
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 0', display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'center' }}
+                          >
+                            {[0,1,2].map(i => (
+                              <span key={i} style={{ width: 14, height: 1.5, background: showFilesMenu ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.5)', display: 'block', borderRadius: 1, transition: 'background 0.15s' }} />
+                            ))}
+                          </button>
+                          {/* Active file name — vertical */}
+                          <span style={{
+                            fontSize: 11,
+                            fontWeight: 700,
+                            color: '#FFFFFF',
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.13em',
+                            writingMode: 'vertical-rl',
+                            transform: 'rotate(180deg)',
+                            marginTop: 2,
+                            maxHeight: 100,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}>
+                            {noteFiles.find(f => f.id === activeFileId)?.name ?? 'Notes'}
+                          </span>
+                          {/* Collapse arrow at bottom */}
+                          <button
+                            onClick={() => setNotesCollapsed(true)}
+                            title="Collapse notes"
+                            style={{ marginTop: 'auto', marginBottom: 8, background: 'transparent', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.5)', fontSize: 16, lineHeight: 1, padding: 2 }}
+                          >‹</button>
+                        </div>
+
+
+                        {/* Files slide-out panel */}
+                        {showFilesMenu && (
+                          <div style={{
+                            position: 'absolute', top: 0, left: 36, width: 160, height: '100%',
+                            background: '#2C2925', zIndex: 10,
+                            display: 'flex', flexDirection: 'column',
+                            boxShadow: '2px 0 8px rgba(0,0,0,0.25)',
+                          }}>
+                            <div style={{ padding: '10px 12px 8px', borderBottom: '0.5px solid rgba(255,255,255,0.08)' }}>
+                              <div style={{ fontSize: 9, fontWeight: 600, color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>Files</div>
+                            </div>
+                            <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
+                              {noteFiles.map(file => (
+                                <div
+                                  key={file.id}
+                                  onClick={() => { setActiveFileId(file.id); setShowFilesMenu(false); }}
+                                  style={{
+                                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                    padding: '7px 12px', cursor: 'pointer',
+                                    background: activeFileId === file.id ? 'rgba(255,255,255,0.09)' : 'transparent',
+                                    transition: 'background 0.1s',
+                                  }}
+                                >
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                                    <svg width="10" height="12" viewBox="0 0 10 12" fill="none" style={{ flexShrink: 0 }}>
+                                      <rect x="0.5" y="0.5" width="9" height="11" rx="1.5" stroke={activeFileId === file.id ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.25)'} strokeWidth="0.8" fill="none"/>
+                                      <path d="M2.5 4h5M2.5 6h5M2.5 8h3" stroke={activeFileId === file.id ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.18)'} strokeWidth="0.7" strokeLinecap="round"/>
+                                    </svg>
+                                    <span style={{ fontSize: 11, color: activeFileId === file.id ? '#FFFFFF' : 'rgba(255,255,255,0.5)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                      {file.name}
+                                    </span>
+                                  </div>
+                                  {noteFiles.length > 1 && (
+                                    <button
+                                      onClick={e => { e.stopPropagation(); deleteNoteFile(file.id); }}
+                                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.2)', fontSize: 13, padding: 0, lineHeight: 1, flexShrink: 0 }}
+                                    >×</button>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                            {/* Add new file */}
+                            <div style={{ padding: '8px 12px', borderTop: '0.5px solid rgba(255,255,255,0.08)', display: 'flex', gap: 4 }}>
+                              <input
+                                value={newFileName}
+                                onChange={e => setNewFileName(e.target.value)}
+                                onKeyDown={e => e.key === 'Enter' && addNoteFile()}
+                                placeholder="New file…"
+                                style={{
+                                  flex: 1, fontSize: 10,
+                                  background: 'rgba(255,255,255,0.06)',
+                                  border: '0.5px solid rgba(255,255,255,0.12)',
+                                  borderRadius: 3, color: '#fff',
+                                  padding: '3px 6px', outline: 'none',
+                                  fontFamily: "'DM Sans', system-ui, sans-serif",
+                                }}
+                              />
+                              <button
+                                onClick={addNoteFile}
+                                style={{
+                                  background: 'rgba(255,255,255,0.1)', border: 'none',
+                                  borderRadius: 3, color: '#fff', fontSize: 15,
+                                  width: 22, cursor: 'pointer',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                }}
+                              >+</button>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Notes content */}
+                        <div style={{ flex: 1, position: 'relative', minWidth: 0 }}>
+                          <NotesChecklist activeClientId={`${clientId}:${activeFileId}`} />
+                        </div>
                       </div>
                     )}
                   </div>
@@ -1913,6 +2156,7 @@ export default function DashboardV2() {
           actionPointMarkers={ganttAPMarkers}
           filteredClientIds={ganttClients.map(c => c.id)}
           onClose={() => setShowFullscreenGantt(false)}
+          onActionPointCompleted={() => setActionPointsRefetchTrigger(prev => prev + 1)}
         />
       )}
     </div>

@@ -41,6 +41,7 @@ export interface ChannelCardProps {
       cpc: number;
       conversions: number;
     };
+    format?: string;
     issues?: string[];
     chartData?: Array<{
       date: string;
@@ -633,6 +634,9 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                   <h3 className="text-sm font-bold truncate" style={{ color: '#1C1917', fontFamily: "'Inter', system-ui, sans-serif" }}>{channel.name}</h3>
                   <StatusBadge status={channel.status} />
                 </div>
+                {channel.format && (
+                  <p className="text-xs text-gray-500 mt-0.5 uppercase tracking-wide">{channel.format}</p>
+                )}
                 <p className="text-xs text-gray-400 mt-0.5 capitalize">
                   {channel.platform.replace('-', ' ')}
                 </p>

@@ -2,6 +2,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
+import { Maximize2 } from 'lucide-react';
 import type { ClientCardData } from '@/app/api/agency/clients/route';
 import type { AgencyClientActionPoints } from '@/app/api/agency/action-points/route';
 import {
@@ -56,6 +57,8 @@ interface CalendarPanelProps {
   selectedDay: number | null;
   onDaySelect: (day: number | null) => void;
   currentMonth: Date;
+  /** Callback to open the fullscreen Timeline / Gantt overlay. */
+  onOpenTimeline?: () => void;
 }
 
 export function CalendarPanel({
@@ -65,6 +68,7 @@ export function CalendarPanel({
   selectedDay,
   onDaySelect,
   currentMonth,
+  onOpenTimeline,
 }: CalendarPanelProps) {
   const [view, setView] = useState<'gantt' | 'month'>('gantt');
   const monthLabel = `${MONTH_NAMES[currentMonth.getMonth()]} ${currentMonth.getFullYear()}`;
@@ -131,13 +135,12 @@ export function CalendarPanel({
     return result;
   }, [ganttChannels, currentMonth]);
 
-  // ── Health checks — generated from real action point data ─────────────────
+  // ── Health checks — generated across the full continuous range ────────────
   const ganttHealthChecks = useMemo<GanttHealthCheck[]>(() => {
-    const year = currentMonth.getFullYear();
-    const month = currentMonth.getMonth() + 1;
     const result: GanttHealthCheck[] = [];
+    const nowMs = Date.now();
+    const cutoffMs = nowMs + 2 * 365 * 24 * 60 * 60 * 1000; // 2 years ahead
 
-    // Build a lookup: `clientId:normalizedChannelLabel` → { start_date, end_date }
     const channelDateMap = new Map<string, { start: string | null; end: string | null }>();
     for (const ch of ganttChannels) {
       channelDateMap.set(`${ch.client_id}:${normalizeChannelLabel(ch.label)}`, {
@@ -167,35 +170,28 @@ export function CalendarPanel({
           const startMs = Date.UTC(startParts[0], startParts[1] - 1, startParts[2]);
           const endMs = dates.end
             ? (() => { const p = dates.end!.split('-').map(Number); return Date.UTC(p[0], p[1] - 1, p[2]); })()
-            : null;
+            : cutoffMs;
           const intervalMs = intervalDays * 24 * 60 * 60 * 1000;
 
-          // Generate all occurrences within the current month
-          for (let n = 1; ; n++) {
+          // Generate all occurrences across the full range
+          for (let n = 1; n <= 500; n++) {
             const occMs = startMs + n * intervalMs;
-            if (endMs !== null && occMs > endMs) break;
-            // Stop 2 years out to prevent infinite loop
-            if (occMs > startMs + 2 * 365 * 24 * 60 * 60 * 1000) break;
-
+            if (occMs > endMs || occMs > cutoffMs) break;
             const occ = new Date(occMs);
             const occYear = occ.getUTCFullYear();
             const occMonth = occ.getUTCMonth() + 1;
-
-            if (occYear > year || (occYear === year && occMonth > month)) break; // Past the current month
-            if (occYear === year && occMonth === month) {
-              const dueStr = `${occYear}-${String(occMonth).padStart(2, '0')}-${String(occ.getUTCDate()).padStart(2, '0')}`;
-              result.push({
-                client_id: clientGroup.clientId,
-                channel_label: channelGroup.channelType,
-                due_date: dueStr,
-              });
-            }
+            const dueStr = `${occYear}-${String(occMonth).padStart(2, '0')}-${String(occ.getUTCDate()).padStart(2, '0')}`;
+            result.push({
+              client_id: clientGroup.clientId,
+              channel_label: channelGroup.channelType,
+              due_date: dueStr,
+            });
           }
         }
       }
     }
     return result;
-  }, [actionPointClients, ganttChannels, currentMonth]);
+  }, [actionPointClients, ganttChannels]);
 
   // ── Set Up action points — from real actionPointClients data ───────────────
   const ganttSetupPoints = useMemo<GanttSetupPoint[]>(() => {
@@ -225,10 +221,36 @@ export function CalendarPanel({
         borderRadius: '6px 6px 0 0',
         padding: '8px 16px',
       }}>
-        <span style={{ fontSize: 9, fontWeight: 500, color: '#fff', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-          Calendar — {monthLabel}
+        <span style={{ fontSize: 12, fontWeight: 600, color: '#1C1917', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+          {view === 'gantt' ? 'Timeline' : `Calendar — ${monthLabel}`}
         </span>
         <div style={{ flex: 1 }} />
+        {/* Timeline (fullscreen) button */}
+        {onOpenTimeline && (
+          <button
+            onClick={onOpenTimeline}
+            title="Open fullscreen Timeline"
+            style={{
+              height: 22, padding: '0 8px', border: 'none',
+              background: 'transparent',
+              color: 'rgba(0,0,0,0.45)',
+              fontSize: 11, fontWeight: 400,
+              cursor: 'pointer',
+              fontFamily: "'DM Sans', system-ui, sans-serif",
+              display: 'flex', alignItems: 'center', gap: 4,
+              borderBottom: '1px solid transparent',
+              borderRadius: 0,
+              marginRight: 6,
+            }}
+          >
+            <Maximize2 size={11} />
+            Timeline
+          </button>
+        )}
+        {/* Divider */}
+        {onOpenTimeline && (
+          <div style={{ width: '0.5px', height: 14, background: 'rgba(0,0,0,0.15)', alignSelf: 'center', marginRight: 6 }} />
+        )}
         {(['gantt', 'month'] as const).map(v => (
           <button
             key={v}
@@ -236,11 +258,11 @@ export function CalendarPanel({
             style={{
               height: 22, padding: '0 8px', border: 'none',
               background: 'transparent',
-              color: view === v ? '#fff' : 'rgba(255,255,255,0.55)',
+              color: view === v ? '#1C1917' : 'rgba(0,0,0,0.45)',
               fontSize: 11, fontWeight: view === v ? 600 : 400,
               cursor: 'pointer',
               fontFamily: "'DM Sans', system-ui, sans-serif",
-              borderBottom: view === v ? '1px solid rgba(255,255,255,0.8)' : '1px solid transparent',
+              borderBottom: view === v ? '1px solid rgba(0,0,0,0.5)' : '1px solid transparent',
               borderRadius: 0,
             }}
           >

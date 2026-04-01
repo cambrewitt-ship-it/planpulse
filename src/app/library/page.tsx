@@ -51,12 +51,15 @@ interface MediaChannelSpec {
 const CHANNEL_OPTIONS = [
   { value: 'Google Ads', label: 'Google Ads', icon: Search },
   { value: 'Meta Ads', label: 'Meta Ads', icon: Facebook },
+  { value: 'Display Ads', label: 'Display Ads', icon: Radio },
+  { value: 'Native Ads', label: 'Native Ads', icon: Radio },
   { value: 'LinkedIn Ads', label: 'LinkedIn Ads', icon: Linkedin },
   { value: 'TikTok Ads', label: 'TikTok Ads', icon: Music },
   { value: 'Instagram Ads', label: 'Instagram Ads', icon: Instagram },
   { value: 'Twitter Ads', label: 'Twitter Ads', icon: Radio },
   { value: 'YouTube Ads', label: 'YouTube Ads', icon: Radio },
   { value: 'Snapchat Ads', label: 'Snapchat Ads', icon: Radio },
+  { value: 'Reddit Ads', label: 'Reddit Ads', icon: Radio },
   { value: 'Instagram (Organic)', label: 'Instagram (Organic)', icon: Instagram },
   { value: 'Facebook (Organic)', label: 'Facebook (Organic)', icon: Facebook },
   { value: 'LinkedIn (Organic)', label: 'LinkedIn (Organic)', icon: Linkedin },
@@ -572,9 +575,9 @@ export default function LibraryPage() {
     }
   };
 
-  const getChannelIcon = (channelType: string) => {
+  const getChannelIcon = (channelType: string, iconClass?: string) => {
     const l = channelType.toLowerCase();
-    const className = "w-5 h-5";
+    const className = iconClass ?? "w-5 h-5";
 
     if (l.includes('meta') || l.includes('facebook')) {
       return (
@@ -613,7 +616,7 @@ export default function LibraryPage() {
       );
     }
 
-    if (l.includes('instagram') || l.includes('instagram ads')) {
+    if (l.includes('instagram')) {
       return (
         <svg className={className} viewBox="0 0 24 24" fill="none" aria-label="Instagram">
           <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.26 0 12 0zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zM12 16c-2.209 0-4-1.79-4-4s1.791-4 4-4 4 1.79 4 4-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z" fill="#E4405F"/>
@@ -621,8 +624,104 @@ export default function LibraryPage() {
       );
     }
 
-    // Generic fallback
-    return <Radio className="w-5 h-5 text-gray-500" />;
+    if (l.includes('twitter')) {
+      return (
+        <svg className={className} viewBox="0 0 24 24" aria-label="X / Twitter">
+          <rect width="24" height="24" rx="4" fill="#000"/>
+          <path d="M17.75 4h-2.6l-3.45 4.6L8.3 4H3.5l5.9 8.1L3.5 20H6.1l3.75-5 3.85 5H18.5l-6.1-8.4L17.75 4zm-1.05 14.3-9.6-12.9h1.35l9.6 12.9h-1.35z" fill="white"/>
+        </svg>
+      );
+    }
+
+    if (l.includes('youtube')) {
+      return (
+        <svg className={className} viewBox="0 0 24 24" aria-label="YouTube">
+          <path d="M23.5 6.19a3.02 3.02 0 00-2.12-2.14C19.55 3.5 12 3.5 12 3.5s-7.55 0-9.38.55A3.02 3.02 0 00.5 6.19C0 8.03 0 12 0 12s0 3.97.5 5.81a3.02 3.02 0 002.12 2.14C4.45 20.5 12 20.5 12 20.5s7.55 0 9.38-.55a3.02 3.02 0 002.12-2.14C24 15.97 24 12 24 12s0-3.97-.5-5.81zM9.75 15.5v-7l6.5 3.5-6.5 3.5z" fill="#FF0000"/>
+        </svg>
+      );
+    }
+
+    if (l.includes('snapchat')) {
+      return (
+        <svg className={className} viewBox="0 0 24 24" aria-label="Snapchat">
+          <rect width="24" height="24" rx="4" fill="#FFFC00"/>
+          <path d="M12 3.5c-2.21 0-4 2.24-4 4.5v1c-.55 0-1 .45-1 1s.45 1 1 1c-.28.83-.83 1.5-1.5 1.5-.28 0-.5.22-.5.5s.22.5.5.5c1.1 0 2.05-.7 2.6-1.75.28.1.58.25.9.25s.62-.15.9-.25c.55 1.05 1.5 1.75 2.6 1.75.28 0 .5-.22.5-.5s-.22-.5-.5-.5c-.67 0-1.22-.67-1.5-1.5.55 0 1-.45 1-1s-.45-1-1-1V8c0-2.26-1.79-4.5-4-4.5z" fill="#000" opacity=".85"/>
+        </svg>
+      );
+    }
+
+    if (l.includes('reddit')) {
+      return (
+        <svg className={className} viewBox="0 0 24 24" aria-label="Reddit">
+          <circle cx="12" cy="12" r="12" fill="#FF4500"/>
+          <path d="M20 12a2 2 0 00-2-2 1.98 1.98 0 00-1.37.55C15.12 9.77 13.38 9.3 11.5 9.2l.8-3.74 2.58.55a1.5 1.5 0 103-0.01 1.5 1.5 0 00-2.8-.64l-2.88-.62a.25.25 0 00-.3.19l-.9 4.17c-1.92.08-3.68.56-5.14 1.36A1.98 1.98 0 004 12a2 2 0 001.1 1.78c-.04.2-.06.41-.06.62 0 3.14 3.58 5.7 8 5.7s8-2.56 8-5.7c0-.21-.02-.42-.06-.62A2 2 0 0020 12zm-13 1a1 1 0 112 0 1 1 0 01-2 0zm5.5 3.25c-.83.83-2.17.83-3 0a.25.25 0 01.35-.35c.55.55 1.75.55 2.3 0a.25.25 0 01.35.35zm-.5-2.25a1 1 0 110-2 1 1 0 010 2z" fill="white"/>
+        </svg>
+      );
+    }
+
+    if (l.includes('display')) {
+      return (
+        <svg className={className} viewBox="0 0 24 24" fill="none" aria-label="Display Ads">
+          <rect x="2" y="3" width="20" height="14" rx="2" stroke="#06B6D4" strokeWidth="2" fill="none"/>
+          <path d="M8 21h8M12 17v4" stroke="#06B6D4" strokeWidth="2" strokeLinecap="round"/>
+          <rect x="6" y="7" width="5" height="6" rx="1" fill="#06B6D4" opacity=".4"/>
+          <rect x="13" y="7" width="3" height="2" rx=".5" fill="#06B6D4"/>
+          <rect x="13" y="11" width="3" height="2" rx=".5" fill="#06B6D4"/>
+        </svg>
+      );
+    }
+
+    if (l.includes('native')) {
+      return (
+        <svg className={className} viewBox="0 0 24 24" fill="none" aria-label="Native Ads">
+          <rect x="3" y="3" width="8" height="8" rx="1.5" fill="#14B8A6" opacity=".5"/>
+          <rect x="13" y="3" width="8" height="4" rx="1" fill="#14B8A6"/>
+          <rect x="13" y="9" width="8" height="2" rx="1" fill="#14B8A6" opacity=".5"/>
+          <rect x="3" y="13" width="18" height="2" rx="1" fill="#14B8A6" opacity=".4"/>
+          <rect x="3" y="17" width="12" height="2" rx="1" fill="#14B8A6" opacity=".3"/>
+          <rect x="17" y="15" width="4" height="4" rx="1" fill="#14B8A6"/>
+        </svg>
+      );
+    }
+
+    if (l.includes('edm') || l.includes('email')) {
+      return (
+        <svg className={className} viewBox="0 0 24 24" fill="none" aria-label="EDM / Email">
+          <rect x="2" y="4" width="20" height="16" rx="2" stroke="#7C3AED" strokeWidth="2" fill="none"/>
+          <path d="M2 7l10 7 10-7" stroke="#7C3AED" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      );
+    }
+
+    if (l.includes('ooh')) {
+      return (
+        <svg className={className} viewBox="0 0 24 24" fill="none" aria-label="OOH">
+          <rect x="2" y="3" width="20" height="11" rx="2" stroke="#F97316" strokeWidth="2" fill="none"/>
+          <path d="M8 14v6M16 14v6M5 20h14" stroke="#F97316" strokeWidth="2" strokeLinecap="round"/>
+          <path d="M7 7h10M7 10h6" stroke="#F97316" strokeWidth="1.5" strokeLinecap="round" opacity=".6"/>
+        </svg>
+      );
+    }
+
+    if (l === 'radio') {
+      return (
+        <svg className={className} viewBox="0 0 24 24" fill="none" aria-label="Radio">
+          <rect x="2" y="10" width="20" height="11" rx="2" stroke="#D97706" strokeWidth="2" fill="none"/>
+          <circle cx="8" cy="15.5" r="2" stroke="#D97706" strokeWidth="1.5" fill="none"/>
+          <path d="M13 13h5M13 16h3" stroke="#D97706" strokeWidth="1.5" strokeLinecap="round"/>
+          <path d="M6.34 6.34A8 8 0 0117.66 6.34" stroke="#D97706" strokeWidth="1.5" strokeLinecap="round"/>
+          <path d="M8.46 8.46a4 4 0 017.07 0" stroke="#D97706" strokeWidth="1.5" strokeLinecap="round"/>
+        </svg>
+      );
+    }
+
+    // Other / generic fallback
+    return (
+      <svg className={className} viewBox="0 0 24 24" fill="none" aria-label="Other">
+        <circle cx="12" cy="12" r="9" stroke="#6B7280" strokeWidth="2" fill="none"/>
+        <path d="M12 8v4l3 3" stroke="#6B7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+      </svg>
+    );
   };
 
   const pageFont: React.CSSProperties = { fontFamily: "'DM Sans', system-ui, sans-serif" };
@@ -668,17 +767,14 @@ export default function LibraryPage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {CHANNEL_OPTIONS.map((option) => {
-                      const Icon = option.icon;
-                      return (
-                        <SelectItem key={option.value} value={option.value}>
-                          <div className="flex items-center gap-2">
-                            <Icon className="w-4 h-4" />
-                            {option.label}
-                          </div>
-                        </SelectItem>
-                      );
-                    })}
+                    {CHANNEL_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        <div className="flex items-center gap-2">
+                          {getChannelIcon(option.value, 'w-4 h-4')}
+                          {option.label}
+                        </div>
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>

@@ -109,14 +109,17 @@ function normalizeChannel(n: string): string {
 }
 function barColor(label: string, type: 'paid' | 'organic') {
   const l = label.toLowerCase();
-  if (l.includes('meta') || l.includes('facebook')) return { bg: 'rgba(24,119,242,0.15)',  border: 'rgba(24,119,242,0.6)',  text: 'rgb(14,82,168)' };
-  if (l.includes('google'))    return { bg: 'rgba(66,133,244,0.15)',  border: 'rgba(66,133,244,0.6)',  text: 'rgb(40,100,210)' };
-  if (l.includes('linkedin'))  return { bg: 'rgba(10,102,194,0.15)',  border: 'rgba(10,102,194,0.6)',  text: 'rgb(10,102,194)' };
-  if (l.includes('tiktok'))    return { bg: 'rgba(105,201,208,0.2)',   border: 'rgba(105,201,208,0.65)', text: 'rgb(0,140,155)' };
-  if (l.includes('youtube'))   return { bg: 'rgba(255,0,0,0.12)',      border: 'rgba(255,0,0,0.45)',    text: 'rgb(180,0,0)' };
-  if (l.includes('pinterest')) return { bg: 'rgba(230,0,35,0.12)',     border: 'rgba(230,0,35,0.45)',   text: 'rgb(170,0,25)' };
-  if (type === 'organic')      return { bg: 'rgba(74,124,89,0.15)',    border: 'rgba(74,124,89,0.55)',  text: 'rgb(50,100,65)' };
-  return                              { bg: 'rgba(74,101,128,0.15)',   border: 'rgba(74,101,128,0.55)', text: 'rgb(50,78,105)' };
+  if (l.includes('meta') || l.includes('facebook')) return { bg: '#DBEAFE', border: '#1877F2',  text: 'rgb(14,82,168)' };
+  if (l.includes('google'))    return { bg: '#FEF9C3', border: '#F59E0B',  text: 'rgb(146,100,0)' };
+  if (l.includes('linkedin'))  return { bg: '#CCEEFF', border: '#0A66C2',  text: 'rgb(10,102,194)' };
+  if (l.includes('tiktok'))    return { bg: '#CCFBF1', border: '#0D9488',  text: 'rgb(0,140,155)' };
+  if (l.includes('youtube'))   return { bg: '#FEE2E2', border: '#FF0000',  text: 'rgb(180,0,0)' };
+  if (l.includes('pinterest')) return { bg: '#FCE7F3', border: '#E60023',  text: 'rgb(170,0,25)' };
+  if (l.includes('instagram')) return { bg: '#FDE8F5', border: '#C13584',  text: 'rgb(160,30,110)' };
+  if (l.includes('snapchat'))  return { bg: '#FEFCE8', border: '#EAB308',  text: 'rgb(130,100,0)' };
+  if (l.includes('twitter') || l.includes(' x ') || l.includes('x-ads')) return { bg: '#E0F2FE', border: '#1DA1F2', text: 'rgb(10,140,200)' };
+  if (type === 'organic')      return { bg: '#DCFCE7', border: '#4A7C59',  text: 'rgb(50,100,65)' };
+  return                              { bg: '#E2E8F0', border: '#4A6580',  text: 'rgb(50,78,105)' };
 }
 
 function apColor(category: string): { text: string; bg: string; border: string } {
@@ -201,9 +204,17 @@ export function FullscreenGanttView({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: apId, client_id: clientId, completed: true }),
       });
-      if (res.ok) onActionPointCompleted?.();
-      else setCompletedIds(prev => { const n = new Set(prev); n.delete(apId); return n; });
-    } catch { setCompletedIds(prev => { const n = new Set(prev); n.delete(apId); return n; }); }
+      if (res.ok) {
+        onActionPointCompleted?.();
+      } else {
+        const errBody = await res.json().catch(() => ({}));
+        console.error('Failed to mark AP complete:', res.status, errBody);
+        setCompletedIds(prev => { const n = new Set(prev); n.delete(apId); return n; });
+      }
+    } catch (err) {
+      console.error('Error marking AP complete:', err);
+      setCompletedIds(prev => { const n = new Set(prev); n.delete(apId); return n; });
+    }
   }, [onActionPointCompleted]);
 
   const handleToggleInProgress = useCallback((apId: string) => {
@@ -557,6 +568,14 @@ export function FullscreenGanttView({
                                           textDecoration: isDone ? 'line-through' : 'none',
                                           paddingTop: 10,
                                         } as React.CSSProperties}>{item.text}</span>
+                                        {/* Category label — bottom */}
+                                        <span style={{
+                                          display: 'block', marginTop: 4,
+                                          fontSize: 7, fontWeight: 700, letterSpacing: '0.4px',
+                                          color: chipCol.text, textTransform: 'uppercase',
+                                        }}>
+                                          {item.category === 'HEALTH CHECK' ? 'Health Check' : item.category === 'SET UP' ? 'Set Up' : item.category}
+                                        </span>
                                       </button>
                                       {/* Shape marker */}
                                       {isHC

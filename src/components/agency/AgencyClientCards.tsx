@@ -137,7 +137,17 @@ function healthLabel(client: ClientCardData, paceVariancePct: number | null): { 
 }
 
 /** Client initials avatar */
-function ClientAvatar({ name }: { name: string }) {
+function ClientAvatar({ name, logo_url }: { name: string; logo_url?: string | null }) {
+  if (logo_url) {
+    return (
+      <img
+        src={logo_url}
+        alt={name}
+        className="w-10 h-10 rounded-full object-cover flex-shrink-0"
+      />
+    );
+  }
+
   const initials = name
     .split(' ')
     .slice(0, 2)
@@ -211,7 +221,7 @@ function ClientCard({ client }: { client: ClientCardData }) {
 
         {/* ── Header: avatar + name + health score + navigate ── */}
         <div className="flex items-center gap-3">
-          <ClientAvatar name={client.name} />
+          <ClientAvatar name={client.name} logo_url={client.logo_url} />
           <div className="flex-1 min-w-0">
             <p className="font-semibold text-sm leading-tight truncate">{client.name}</p>
           </div>

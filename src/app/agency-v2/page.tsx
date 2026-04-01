@@ -111,6 +111,38 @@ export default function AgencyDashboard() {
 
   const [showFullscreenGantt, setShowFullscreenGantt] = useState(false);
 
+  // ── Notes file management ─────────────────────────────────────────────────
+  const [noteFiles, setNoteFiles] = useState<{ id: string; name: string }[]>(() => {
+    try {
+      const stored = localStorage.getItem('note_files_agency');
+      if (stored) return JSON.parse(stored);
+    } catch {}
+    return [{ id: 'default', name: 'General' }];
+  });
+  const [activeFileId, setActiveFileId]   = useState<string>('default');
+  const [showFilesMenu, setShowFilesMenu] = useState(false);
+  const [newFileName, setNewFileName]     = useState('');
+
+  const saveNoteFiles = (files: { id: string; name: string }[]) => {
+    setNoteFiles(files);
+    try { localStorage.setItem('note_files_agency', JSON.stringify(files)); } catch {}
+  };
+  const addNoteFile = () => {
+    const name = newFileName.trim() || 'New File';
+    const id   = `file-${Date.now()}`;
+    const updated = [...noteFiles, { id, name }];
+    saveNoteFiles(updated);
+    setActiveFileId(id);
+    setNewFileName('');
+    setShowFilesMenu(false);
+  };
+  const deleteNoteFile = (id: string) => {
+    const updated = noteFiles.filter(f => f.id !== id);
+    const next    = updated.length > 0 ? updated : [{ id: 'default', name: 'General' }];
+    saveNoteFiles(next);
+    if (activeFileId === id) setActiveFileId(next[0].id);
+  };
+
   const kanbanRef = useRef<KanbanBoardHandle>(null);
   const today = useMemo(() => new Date(), []);
   const monthLabel = `${MONTH_NAMES[today.getMonth()]} ${today.getFullYear()}`;
@@ -395,34 +427,153 @@ export default function AgencyDashboard() {
         })}
       </div>
 
-      {/* ── Main 2-column body ────────────────────────────── */}
+      {/* ── Main body ─────────────────────────────────────── */}
       <div style={{
-        display: 'grid',
-        gridTemplateColumns: '1fr 264px',
-        gap: 14,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 12,
         padding: '0 18px 14px',
         paddingTop: 14,
         maxWidth: 1440,
         margin: '0 auto',
         borderTop: '0.5px solid #E8E4DC',
       }}>
-        {/* ── Left column ─────────────────────────────────── */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
 
-          {/* Today + Notes + Kanban row */}
-          <div style={{ display: 'flex', gap: 12, alignItems: 'stretch' }}>
+        {/* ── Row 1: Today + Notes + Kanban (full width) ─── */}
+        <div style={{ display: 'flex', gap: 12, alignItems: 'stretch' }}>
             <TodayCard clients={filteredClients} today={today} />
 
-            {/* Notes — personal notes, made wider so content isn't cut off */}
+            {/* Notes — dark spine + files panel + content */}
             <div
               style={{
                 width: 360,
                 flexShrink: 0,
                 display: 'flex',
-                flexDirection: 'column',
+                flexDirection: 'row',
+                position: 'relative',
+                borderRadius: 6,
+                overflow: 'hidden',
+                border: '0.5px solid #C8C4BC',
               }}
             >
-              <NotesChecklist filteredClientIds={amFilter === 'All' ? null : filteredIds} />
+              {/* Dark textured left spine */}
+              <div style={{
+                width: 36,
+                flexShrink: 0,
+                background: '#1C1917',
+                backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.035) 1px, transparent 1px)',
+                backgroundSize: '5px 5px',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                paddingTop: 10,
+                gap: 10,
+                position: 'relative',
+                zIndex: 2,
+              }}>
+                {/* Hamburger button */}
+                <button
+                  onClick={() => setShowFilesMenu(v => !v)}
+                  title="Files"
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 0', display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'center' }}
+                >
+                  {[0, 1, 2].map(i => (
+                    <span key={i} style={{ width: 14, height: 1.5, background: showFilesMenu ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.5)', display: 'block', borderRadius: 1, transition: 'background 0.15s' }} />
+                  ))}
+                </button>
+                {/* Active file name — vertical */}
+                <span style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: '#FFFFFF',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.13em',
+                  writingMode: 'vertical-rl',
+                  transform: 'rotate(180deg)',
+                  marginTop: 2,
+                  maxHeight: 120,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}>
+                  {noteFiles.find(f => f.id === activeFileId)?.name ?? 'Notes'}
+                </span>
+              </div>
+
+              {/* Files slide-out panel */}
+              {showFilesMenu && (
+                <div style={{
+                  position: 'absolute', top: 0, left: 36, width: 160, height: '100%',
+                  background: '#2C2925', zIndex: 10,
+                  display: 'flex', flexDirection: 'column',
+                  boxShadow: '2px 0 8px rgba(0,0,0,0.25)',
+                }}>
+                  <div style={{ padding: '10px 12px 8px', borderBottom: '0.5px solid rgba(255,255,255,0.08)' }}>
+                    <div style={{ fontSize: 9, fontWeight: 600, color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>Files</div>
+                  </div>
+                  <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
+                    {noteFiles.map(file => (
+                      <div
+                        key={file.id}
+                        onClick={() => { setActiveFileId(file.id); setShowFilesMenu(false); }}
+                        style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                          padding: '7px 12px', cursor: 'pointer',
+                          background: activeFileId === file.id ? 'rgba(255,255,255,0.09)' : 'transparent',
+                          transition: 'background 0.1s',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                          <svg width="10" height="12" viewBox="0 0 10 12" fill="none" style={{ flexShrink: 0 }}>
+                            <rect x="0.5" y="0.5" width="9" height="11" rx="1.5" stroke={activeFileId === file.id ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.25)'} strokeWidth="0.8" fill="none"/>
+                            <path d="M2.5 4h5M2.5 6h5M2.5 8h3" stroke={activeFileId === file.id ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.18)'} strokeWidth="0.7" strokeLinecap="round"/>
+                          </svg>
+                          <span style={{ fontSize: 11, color: activeFileId === file.id ? '#FFFFFF' : 'rgba(255,255,255,0.5)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {file.name}
+                          </span>
+                        </div>
+                        {noteFiles.length > 1 && (
+                          <button
+                            onClick={e => { e.stopPropagation(); deleteNoteFile(file.id); }}
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.2)', fontSize: 13, padding: 0, lineHeight: 1, flexShrink: 0 }}
+                          >×</button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  {/* Add new file */}
+                  <div style={{ padding: '8px 12px', borderTop: '0.5px solid rgba(255,255,255,0.08)', display: 'flex', gap: 4 }}>
+                    <input
+                      value={newFileName}
+                      onChange={e => setNewFileName(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && addNoteFile()}
+                      placeholder="New file…"
+                      style={{
+                        flex: 1, fontSize: 10,
+                        background: 'rgba(255,255,255,0.06)',
+                        border: '0.5px solid rgba(255,255,255,0.12)',
+                        borderRadius: 3, color: '#fff',
+                        padding: '3px 6px', outline: 'none',
+                        fontFamily: "'DM Sans', system-ui, sans-serif",
+                      }}
+                    />
+                    <button
+                      onClick={addNoteFile}
+                      style={{
+                        background: 'rgba(255,255,255,0.1)', border: 'none',
+                        borderRadius: 3, color: '#fff', fontSize: 15,
+                        width: 22, cursor: 'pointer',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      }}
+                    >+</button>
+                  </div>
+                </div>
+              )}
+
+              {/* Notes content */}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <NotesChecklist activeClientId={`agency:${activeFileId}`} />
+              </div>
             </div>
 
             {/* Kanban container */}
@@ -473,13 +624,24 @@ export default function AgencyDashboard() {
                 />
               </div>
             </div>
-          </div>
+        </div>
 
-          {/* Calendar panel */}
+        {/* ── Row 2: Gantt + Clients side by side ──────────── */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: '1fr 264px',
+          gap: 14,
+          alignItems: 'start',
+          minWidth: 0,
+        }}>
+
+          {/* Gantt */}
           <div style={{
             background: '#E5E0D8',
             border: '0.5px solid #C8C4BC',
             borderRadius: 6,
+            minWidth: 0,
+            overflow: 'hidden',
           }}>
             <CalendarPanel
               clients={filteredClients}
@@ -488,57 +650,57 @@ export default function AgencyDashboard() {
               selectedDay={selectedDay}
               onDaySelect={setSelectedDay}
               currentMonth={today}
+              onOpenTimeline={() => setShowFullscreenGantt(true)}
             />
           </div>
 
-        </div>
+          {/* ── Clients column ────────────────────────────── */}
+          <div style={{ display: 'flex', flexDirection: 'column', maxHeight: 500, minWidth: 0 }}>
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8, flexShrink: 0 }}>
+              <span style={{
+                fontSize: 11, fontWeight: 400, color: '#B5B0A5',
+                textTransform: 'uppercase', letterSpacing: '0.1em',
+              }}>
+                Clients ({filteredClients.length})
+              </span>
+              <div style={{ flex: 1 }} />
+              {dotCounts.red > 0 && (
+                <span style={{ fontSize: 11, color: '#A0442A', marginLeft: 5, opacity: 0.6 }}>● {dotCounts.red}</span>
+              )}
+              {dotCounts.amber > 0 && (
+                <span style={{ fontSize: 11, color: '#B07030', marginLeft: 5, opacity: 0.6 }}>● {dotCounts.amber}</span>
+              )}
+              {dotCounts.green > 0 && (
+                <span style={{ fontSize: 11, color: '#4A7C59', marginLeft: 5, opacity: 0.6 }}>● {dotCounts.green}</span>
+              )}
+            </div>
 
-        {/* ── Right column ─────────────────────────────────── */}
-        <div style={{ display: 'flex', flexDirection: 'column' }}>
-          {/* Client list header */}
-          <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
-            <span style={{
-              fontSize: 11, fontWeight: 400, color: '#B5B0A5',
-              textTransform: 'uppercase', letterSpacing: '0.1em',
+            {/* Scrollable list */}
+            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: 8 }}>
+              {filteredClients.map((client, idx) => (
+                <ClientCardCompact
+                  key={client.id}
+                  client={client}
+                  selected={selectedClientId === client.id}
+                  onClick={() => setSelectedClientId(client.id)}
+                  index={idx}
+                  accountManagers={accountManagers}
+                />
+              ))}
+            </div>
+
+            {/* Add client button */}
+            <button style={{
+              width: '100%', marginTop: 6, padding: '9px 0', flexShrink: 0,
+              border: '0.5px dashed #D5D0C5', borderRadius: 6,
+              background: 'transparent', color: '#B5B0A5', fontSize: 13,
+              cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif",
             }}>
-              Clients ({filteredClients.length})
-            </span>
-            <div style={{ flex: 1 }} />
-            {/* Status dots */}
-            {dotCounts.red > 0 && (
-              <span style={{ fontSize: 11, color: '#A0442A', marginLeft: 5, opacity: 0.6 }}>● {dotCounts.red}</span>
-            )}
-            {dotCounts.amber > 0 && (
-              <span style={{ fontSize: 11, color: '#B07030', marginLeft: 5, opacity: 0.6 }}>● {dotCounts.amber}</span>
-            )}
-            {dotCounts.green > 0 && (
-              <span style={{ fontSize: 11, color: '#4A7C59', marginLeft: 5, opacity: 0.6 }}>● {dotCounts.green}</span>
-            )}
+              + Add Client
+            </button>
           </div>
 
-          {/* Scrollable client list */}
-          <div style={{ flex: 1, overflowY: 'auto', paddingRight: 8 }}>
-            {filteredClients.map((client, idx) => (
-              <ClientCardCompact
-                key={client.id}
-                client={client}
-                selected={selectedClientId === client.id}
-                onClick={() => setSelectedClientId(client.id)}
-                index={idx}
-                accountManagers={accountManagers}
-              />
-            ))}
-          </div>
-
-          {/* Add client button */}
-          <button style={{
-            width: '100%', marginTop: 6, padding: '9px 0',
-            border: '0.5px dashed #D5D0C5', borderRadius: 6,
-            background: 'transparent', color: '#B5B0A5', fontSize: 13,
-            cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif",
-          }}>
-            + Add Client
-          </button>
         </div>
       </div>
 
