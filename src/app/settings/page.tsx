@@ -1,13 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Plus, Trash2, Settings as SettingsIcon } from 'lucide-react';
+import { Plus, Trash2, Upload } from 'lucide-react';
 import type { User as SupabaseUser } from '@supabase/supabase-js';
 
 interface AccountManager {
@@ -16,6 +16,12 @@ interface AccountManager {
   email: string | null;
   created_at: string;
   updated_at: string;
+}
+
+interface Client {
+  id: string;
+  name: string;
+  logo_url: string | null;
 }
 
 export default function SettingsPage() {
@@ -29,9 +35,17 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
+  // Clients state
+  const [clients, setClients] = useState<Client[]>([]);
+  const [clientsLoading, setClientsLoading] = useState(false);
+  const [uploadingClientId, setUploadingClientId] = useState<string | null>(null);
+  const logoInputRef = useRef<HTMLInputElement>(null);
+  const [logoUploadClientId, setLogoUploadClientId] = useState<string | null>(null);
+
   useEffect(() => {
     checkUser();
     fetchAccountManagers();
+    fetchClients();
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -136,6 +150,58 @@ export default function SettingsPage() {
     }
   };
 
+  const fetchClients = async () => {
+    try {
+      setClientsLoading(true);
+      const { data, error: err } = await supabase
+        .from('clients')
+        .select('id, name, logo_url')
+        .order('name', { ascending: true });
+      if (!err) setClients((data as Client[]) || []);
+    } catch (e) {
+      console.error('Error fetching clients:', e);
+    } finally {
+      setClientsLoading(false);
+    }
+  };
+
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !logoUploadClientId) return;
+
+    setUploadingClientId(logoUploadClientId);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch(`/api/clients/${logoUploadClientId}/upload-logo`, {
+        method: 'POST',
+        body: fd,
+      });
+      if (res.ok) {
+        const { url } = await res.json();
+        // Update logo_url in DB
+        await supabase.from('clients').update({ logo_url: url }).eq('id', logoUploadClientId);
+        setClients(prev => prev.map(c => c.id === logoUploadClientId ? { ...c, logo_url: url } : c));
+        setSuccess('Logo updated successfully');
+        setTimeout(() => setSuccess(null), 3000);
+      } else {
+        const { error: uploadErr } = await res.json();
+        setError(uploadErr || 'Logo upload failed');
+      }
+    } catch (e) {
+      setError('Logo upload failed');
+    } finally {
+      setUploadingClientId(null);
+      setLogoUploadClientId(null);
+      if (logoInputRef.current) logoInputRef.current.value = '';
+    }
+  };
+
+  const triggerLogoUpload = (clientId: string) => {
+    setLogoUploadClientId(clientId);
+    logoInputRef.current?.click();
+  };
+
   const pageFont: React.CSSProperties = { fontFamily: "'DM Sans', system-ui, sans-serif" };
   const serifFont: React.CSSProperties = { fontFamily: "'DM Serif Display', Georgia, serif" };
 
@@ -163,10 +229,20 @@ export default function SettingsPage() {
           </div>
         )}
 
+        {/* Hidden file input for logo upload */}
+        <input
+          ref={logoInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={handleLogoUpload}
+        />
+
         <Tabs defaultValue="account" className="w-full">
           <TabsList>
             <TabsTrigger value="account">Account</TabsTrigger>
             <TabsTrigger value="team">Team</TabsTrigger>
+            <TabsTrigger value="clients">Clients</TabsTrigger>
           </TabsList>
 
           <TabsContent value="account" className="mt-6">
@@ -292,6 +368,55 @@ export default function SettingsPage() {
                     </div>
                   )}
                 </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+          <TabsContent value="clients" className="mt-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Client Logos</CardTitle>
+                <CardDescription>Upload or update logos for each client</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {clientsLoading ? (
+                  <div className="text-sm text-muted-foreground py-4">Loading clients...</div>
+                ) : clients.length === 0 ? (
+                  <div className="text-sm text-muted-foreground py-4 border rounded-lg text-center">
+                    No clients found.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {clients.map(client => (
+                      <div key={client.id} className="flex items-center gap-4 p-3 border rounded-lg bg-white">
+                        {/* Logo preview */}
+                        <div className="w-12 h-12 rounded-lg border border-gray-200 bg-gray-50 flex items-center justify-center overflow-hidden flex-shrink-0">
+                          {client.logo_url ? (
+                            <img src={client.logo_url} alt={client.name} className="w-full h-full object-contain p-1" />
+                          ) : (
+                            <span className="text-lg font-bold text-gray-300 select-none">
+                              {client.name.charAt(0).toUpperCase()}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium text-sm" style={{ color: '#1C1917' }}>{client.name}</div>
+                          <div className="text-xs text-muted-foreground mt-0.5">
+                            {client.logo_url ? 'Logo uploaded' : 'No logo'}
+                          </div>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => triggerLogoUpload(client.id)}
+                          disabled={uploadingClientId === client.id}
+                        >
+                          <Upload className="h-3 w-3 mr-2" />
+                          {uploadingClientId === client.id ? 'Uploading...' : client.logo_url ? 'Replace' : 'Upload'}
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>

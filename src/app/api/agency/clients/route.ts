@@ -22,6 +22,7 @@ export interface ClientCardData extends ClientWithHealth {
   totalActionPoints: number;           // total action points for this client
   completedActionPoints: number;       // completed action points for this client
   account_manager: string | null;      // assigned account manager name
+  logo_url: string | null;             // client logo URL
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -288,6 +289,7 @@ export async function GET(request: NextRequest) {
           totalActionPoints: apStats.total,
           completedActionPoints: apStats.completed,
           account_manager: client.account_manager || null,
+          logo_url: client.logo_url || null,
         };
       })
     );

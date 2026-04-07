@@ -90,6 +90,9 @@ const MEDIA_CHANNELS = [
   { name: "EDM / Email", color: "bg-purple-50", textColor: "text-purple-900" },
   { name: "OOH", color: "bg-orange-50", textColor: "text-orange-900" },
   { name: "Radio", color: "bg-amber-50", textColor: "text-amber-900" },
+  { name: "Linear TV", color: "bg-violet-50", textColor: "text-violet-900" },
+  { name: "SVOD", color: "bg-purple-50", textColor: "text-purple-900" },
+  { name: "BVOD", color: "bg-fuchsia-50", textColor: "text-fuchsia-900" },
   { name: "Other", color: "bg-gray-50", textColor: "text-gray-700" },
 ];
 
@@ -123,6 +126,9 @@ const getChannelBudgetColor = (channelName: string): string => {
     "youtube ads": "bg-red-600",
     "snapchat ads": "bg-yellow-500",
     "reddit ads": "bg-orange-600",
+    "linear tv": "bg-violet-600",
+    "svod": "bg-purple-600",
+    "bvod": "bg-fuchsia-600",
   };
   return channelMap[channelName.toLowerCase()] || "bg-gray-500";
 };

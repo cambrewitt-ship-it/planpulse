@@ -66,6 +66,9 @@ const CHANNEL_OPTIONS = [
   { value: 'EDM / Email', label: 'EDM / Email', icon: Radio },
   { value: 'OOH', label: 'OOH', icon: Radio },
   { value: 'Radio', label: 'Radio', icon: Radio },
+  { value: 'Linear TV', label: 'Linear TV', icon: Radio },
+  { value: 'SVOD', label: 'SVOD', icon: Radio },
+  { value: 'BVOD', label: 'BVOD', icon: Radio },
   { value: 'Other', label: 'Other', icon: Radio },
 ];
 

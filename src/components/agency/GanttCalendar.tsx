@@ -63,25 +63,31 @@ export interface GanttCalendarProps {
 
 // ── Palette ───────────────────────────────────────────────────────────────────
 
-// Channel-specific bar colours — solid bg + solid border
+// Channel-specific bar colours — darker solid fill, no border
 function getChannelBarColor(label: string, type: 'paid' | 'organic', status: ChannelStatusSimple): { bg: string; border: string } {
-  if (status === 'completed') return { bg: '#C8D8C4', border: '#6A9E6A' };
-  if (status === 'future')    return { bg: '#D8D8D8', border: '#A0A0A0' };
+  if (status === 'completed') return { bg: '#6A9E6A', border: '#6A9E6A' };
+  if (status === 'future')    return { bg: '#B0B0B0', border: '#B0B0B0' };
 
   const l = label.toLowerCase();
-  if (l.includes('meta') || l.includes('facebook'))  return { bg: '#BFDBFE', border: '#1877F2' };
-  if (l.includes('google'))                           return { bg: '#FDE68A', border: '#D97706' };
-  if (l.includes('linkedin'))                         return { bg: '#BAE6FD', border: '#0A66C2' };
-  if (l.includes('tiktok'))                           return { bg: '#99F6E4', border: '#0D9488' };
-  if (l.includes('instagram'))                        return { bg: '#FBCFE8', border: '#C13584' };
-  if (l.includes('youtube'))                          return { bg: '#FECACA', border: '#EF4444' };
-  if (l.includes('pinterest'))                        return { bg: '#FECDD3', border: '#E60023' };
-  if (l.includes('snapchat'))                         return { bg: '#FEF08A', border: '#CA8A04' };
-  if (l.includes('twitter') || l.includes('x ads') || l.includes('x-ads')) return { bg: '#BAE6FD', border: '#1DA1F2' };
-  if (l.includes('bing') || l.includes('microsoft'))  return { bg: '#DDD6FE', border: '#5C6BC0' };
-  if (l.includes('programmatic') || l.includes('display') || l.includes('dv360')) return { bg: '#C7D2FE', border: '#4F46E5' };
-  if (type === 'organic')                             return { bg: '#BBF7D0', border: '#16A34A' };
-  return                                               { bg: '#CBD5E1', border: '#64748B' };
+  if (l.includes('meta') || l.includes('facebook'))  return { bg: '#1877F2', border: '#1877F2' };
+  if (l.includes('google'))                           return { bg: '#D97706', border: '#D97706' };
+  if (l.includes('linkedin'))                         return { bg: '#0A66C2', border: '#0A66C2' };
+  if (l.includes('tiktok'))                           return { bg: '#0D9488', border: '#0D9488' };
+  if (l.includes('instagram'))                        return { bg: '#C13584', border: '#C13584' };
+  if (l.includes('youtube'))                          return { bg: '#EF4444', border: '#EF4444' };
+  if (l.includes('pinterest'))                        return { bg: '#E60023', border: '#E60023' };
+  if (l.includes('snapchat'))                         return { bg: '#CA8A04', border: '#CA8A04' };
+  if (l.includes('twitter') || l.includes('x ads') || l.includes('x-ads')) return { bg: '#1DA1F2', border: '#1DA1F2' };
+  if (l.includes('bing') || l.includes('microsoft'))  return { bg: '#5C6BC0', border: '#5C6BC0' };
+  if (l.includes('programmatic') || l.includes('display') || l.includes('dv360')) return { bg: '#4F46E5', border: '#4F46E5' };
+  if (l.includes('linear tv') || l.includes('linear-tv')) return { bg: '#7C3AED', border: '#7C3AED' };
+  if (l.includes('svod'))                             return { bg: '#9333EA', border: '#9333EA' };
+  if (l.includes('bvod'))                             return { bg: '#A855F7', border: '#A855F7' };
+  if (l.includes('tv'))                               return { bg: '#7C3AED', border: '#7C3AED' };
+  if (l.includes('radio'))                            return { bg: '#B45309', border: '#B45309' };
+  if (l.includes('ooh'))                              return { bg: '#D97706', border: '#D97706' };
+  if (type === 'organic')                             return { bg: '#16A34A', border: '#16A34A' };
+  return                                               { bg: '#64748B', border: '#64748B' };
 }
 
 type ChannelStatusSimple = 'completed' | 'active' | 'future';
@@ -496,9 +502,8 @@ export function GanttCalendar({
                         left: barLeft,
                         width: barWidth,
                         top: '50%', transform: 'translateY(-50%)',
-                        height: 6,
+                        height: 7,
                         background: barColor.bg,
-                        border: `1px ${ch.type === 'organic' ? 'dashed' : 'solid'} ${barColor.border}`,
                         borderRadius: 3,
                         opacity: barOpacity,
                         zIndex: 4,

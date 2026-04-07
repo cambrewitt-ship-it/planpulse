@@ -97,6 +97,18 @@ export function getChannelLogo(channelType: string, className: string = "w-5 h-5
     );
   }
 
+  if (l.includes('linear tv') || l.includes('linear-tv') || l.includes('svod') || l.includes('bvod') || l === 'tv' || l.includes('television')) {
+    // Pick a shade based on sub-type
+    const tvColor = l.includes('svod') ? '#9333EA' : l.includes('bvod') ? '#A855F7' : '#7C3AED';
+    return (
+      <svg className={className} viewBox="0 0 24 24" fill="none" aria-label="TV">
+        <rect x="2" y="4" width="20" height="14" rx="2" fill={tvColor}/>
+        <path d="M8 22h8M12 18v4" stroke={tvColor} strokeWidth="1.5" strokeLinecap="round"/>
+        <rect x="5" y="7" width="14" height="8" rx="1" fill="white" fillOpacity="0.25"/>
+      </svg>
+    );
+  }
+
   if (l.includes('search') && !l.includes('google') && !l.includes('bing') && !l.includes('microsoft')) {
     return (
       <svg className={className} viewBox="0 0 24 24" fill="none" aria-label="Search">

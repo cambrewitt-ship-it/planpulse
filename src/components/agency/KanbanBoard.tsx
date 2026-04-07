@@ -3,7 +3,7 @@
 
 import { useState, useRef, useEffect, forwardRef, useImperativeHandle, type ForwardedRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Facebook, Search, Linkedin, Music, Radio, Plus, X, Check } from 'lucide-react';
+import { Facebook, Search, Linkedin, Music, Radio, Plus, X, Check, List, LayoutGrid } from 'lucide-react';
 import type { AgencyClientActionPoints } from '@/app/api/agency/action-points/route';
 import { getChannelLogo } from '@/lib/utils/channel-icons';
 
@@ -15,6 +15,9 @@ const COMMON_CHANNELS = [
   'Email',
   'OOH',
   'Radio',
+  'Linear TV',
+  'SVOD',
+  'BVOD',
   'Other',
 ];
 
@@ -218,6 +221,9 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
+  // View mode: kanban (3 columns) or list (1 column)
+  const [listView, setListView] = useState(false);
+
   // Local override map for optimistic assigned_to updates
   const [assignedOverrides, setAssignedOverrides] = useState<Map<string, string | null>>(new Map());
 
@@ -406,8 +412,36 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
     });
   }
 
+  // All cards sorted by urgency (for list view)
+  const allCardsSorted = [...cards].sort((a, b) => {
+    if (a.daysUntilDue === null && b.daysUntilDue === null) return 0;
+    if (a.daysUntilDue === null) return 1;
+    if (b.daysUntilDue === null) return -1;
+    return a.daysUntilDue - b.daysUntilDue;
+  });
+
   return (
     <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {/* View toggle */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: -4 }}>
+        <button
+          onClick={() => setListView(v => !v)}
+          title={listView ? 'Switch to kanban' : 'Switch to list'}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 4,
+            fontSize: 10, color: listView ? '#4A6580' : '#B5B0A5',
+            background: listView ? 'rgba(74,101,128,0.08)' : 'transparent',
+            border: listView ? '0.5px solid rgba(74,101,128,0.3)' : '0.5px solid #E8E4DC',
+            borderRadius: 4, padding: '3px 8px', cursor: 'pointer',
+            fontFamily: "'DM Sans', system-ui, sans-serif",
+            fontWeight: 500,
+          }}
+        >
+          <List size={11} />
+          List
+        </button>
+      </div>
+
       {/* Inline add form — shown when isAdding */}
       {isAdding && (
         <div style={{
@@ -554,6 +588,66 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
         </div>
       )}
 
+    {listView ? (
+      /* ── List view: single sorted column ── */
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {allCardsSorted.map((card) => {
+          const isInProgress = inProgressIds.has(card.id);
+          const colColor = card.status === '1-2' ? '#A0442A' : card.status === '3-4' ? '#B07030' : '#4A6580';
+          return (
+            <div key={card.id} style={{
+              background: isInProgress ? '#FFFBF4' : '#FDFCF8',
+              border: `0.5px solid ${isInProgress ? 'rgba(176,112,48,0.4)' : '#E8E4DC'}`,
+              borderLeft: `2px solid ${isInProgress ? '#B07030' : colColor}`,
+              borderRadius: 5,
+              padding: '6px 8px',
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 8,
+            }}>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); void handleComplete(card); }}
+                title="Mark complete"
+                style={{
+                  flexShrink: 0, marginTop: 2,
+                  width: 14, height: 14, borderRadius: '50%',
+                  border: '1px solid #D5D0C5', background: 'transparent',
+                  cursor: 'pointer', padding: 0,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}
+              />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 4 }}>
+                  <div style={{ flexShrink: 0, marginTop: 1 }}>{getChannelIcon(card.channelType)}</div>
+                  <span style={{ flex: 1, fontSize: 12, fontWeight: 500, color: '#1C1917', lineHeight: 1.35 }}>{card.text}</span>
+                  {card.urgent && (
+                    <span style={{ fontSize: 9, fontWeight: 500, color: '#A0442A', textTransform: 'uppercase', letterSpacing: '0.08em', flexShrink: 0, whiteSpace: 'nowrap' }}>OVERDUE</span>
+                  )}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 6 }}>
+                  <div style={{ width: 5, height: 5, borderRadius: '50%', background: isInProgress ? '#B07030' : colColor, opacity: 0.6, flexShrink: 0 }} />
+                  <span style={{ flex: 1, fontSize: 10, color: '#8A8578', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{card.clientName}</span>
+                  {isInProgress && (
+                    <span style={{ fontSize: 8, fontWeight: 600, color: '#B07030', background: 'rgba(176,112,48,0.12)', border: '0.5px solid rgba(176,112,48,0.3)', borderRadius: 3, padding: '1px 4px', textTransform: 'uppercase', letterSpacing: '0.07em', whiteSpace: 'nowrap' }}>In Progress</span>
+                  )}
+                  <span style={{ fontSize: 9, fontWeight: 400, color: card.tag === 'SET UP' ? '#B07030' : card.tag === 'HEALTH CHECK' ? '#4A7C59' : '#4A6580', textTransform: 'uppercase', letterSpacing: '0.08em', whiteSpace: 'nowrap' }}>{card.tag}</span>
+                  <span style={{ fontSize: 9, fontWeight: 400, color: '#B5B0A5', whiteSpace: 'nowrap' }}>
+                    {card.daysUntilDue === null ? 'no date' : card.daysUntilDue < 0 ? `${Math.abs(card.daysUntilDue)}d overdue` : card.daysUntilDue === 0 ? 'today' : `${card.daysUntilDue}d`}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); handleToggleInProgress(card); }}
+                    style={{ fontSize: 8, fontWeight: 500, padding: '1px 5px', borderRadius: 3, border: isInProgress ? '0.5px solid rgba(176,112,48,0.4)' : '0.5px dashed #D5D0C5', background: isInProgress ? 'rgba(176,112,48,0.1)' : 'transparent', color: isInProgress ? '#B07030' : '#C0BBC0', cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif", whiteSpace: 'nowrap', flexShrink: 0 }}
+                  >{isInProgress ? '▶ in prog.' : '▶'}</button>
+                  <AssignMenu card={card} onAssign={handleAssign} accountManagers={accountManagers} />
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    ) : (
     <div
       style={{
         display: 'grid',
@@ -721,6 +815,7 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
         );
       })}
     </div>
+    )}
     </div>
   );
 });

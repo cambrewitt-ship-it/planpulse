@@ -109,17 +109,23 @@ function normalizeChannel(n: string): string {
 }
 function barColor(label: string, type: 'paid' | 'organic') {
   const l = label.toLowerCase();
-  if (l.includes('meta') || l.includes('facebook')) return { bg: '#DBEAFE', border: '#1877F2',  text: 'rgb(14,82,168)' };
-  if (l.includes('google'))    return { bg: '#FEF9C3', border: '#F59E0B',  text: 'rgb(146,100,0)' };
-  if (l.includes('linkedin'))  return { bg: '#CCEEFF', border: '#0A66C2',  text: 'rgb(10,102,194)' };
-  if (l.includes('tiktok'))    return { bg: '#CCFBF1', border: '#0D9488',  text: 'rgb(0,140,155)' };
-  if (l.includes('youtube'))   return { bg: '#FEE2E2', border: '#FF0000',  text: 'rgb(180,0,0)' };
-  if (l.includes('pinterest')) return { bg: '#FCE7F3', border: '#E60023',  text: 'rgb(170,0,25)' };
-  if (l.includes('instagram')) return { bg: '#FDE8F5', border: '#C13584',  text: 'rgb(160,30,110)' };
-  if (l.includes('snapchat'))  return { bg: '#FEFCE8', border: '#EAB308',  text: 'rgb(130,100,0)' };
-  if (l.includes('twitter') || l.includes(' x ') || l.includes('x-ads')) return { bg: '#E0F2FE', border: '#1DA1F2', text: 'rgb(10,140,200)' };
-  if (type === 'organic')      return { bg: '#DCFCE7', border: '#4A7C59',  text: 'rgb(50,100,65)' };
-  return                              { bg: '#E2E8F0', border: '#4A6580',  text: 'rgb(50,78,105)' };
+  if (l.includes('meta') || l.includes('facebook')) return { bg: '#1877F2', border: '#1877F2', text: '#fff' };
+  if (l.includes('google'))    return { bg: '#D97706', border: '#D97706', text: '#fff' };
+  if (l.includes('linkedin'))  return { bg: '#0A66C2', border: '#0A66C2', text: '#fff' };
+  if (l.includes('tiktok'))    return { bg: '#0D9488', border: '#0D9488', text: '#fff' };
+  if (l.includes('youtube'))   return { bg: '#EF4444', border: '#EF4444', text: '#fff' };
+  if (l.includes('pinterest')) return { bg: '#E60023', border: '#E60023', text: '#fff' };
+  if (l.includes('instagram')) return { bg: '#C13584', border: '#C13584', text: '#fff' };
+  if (l.includes('snapchat'))  return { bg: '#CA8A04', border: '#CA8A04', text: '#fff' };
+  if (l.includes('twitter') || l.includes(' x ') || l.includes('x-ads')) return { bg: '#1DA1F2', border: '#1DA1F2', text: '#fff' };
+  if (l.includes('linear tv') || l.includes('linear-tv')) return { bg: '#7C3AED', border: '#7C3AED', text: '#fff' };
+  if (l.includes('svod'))      return { bg: '#9333EA', border: '#9333EA', text: '#fff' };
+  if (l.includes('bvod'))      return { bg: '#A855F7', border: '#A855F7', text: '#fff' };
+  if (l.includes('tv'))        return { bg: '#7C3AED', border: '#7C3AED', text: '#fff' };
+  if (l.includes('radio'))     return { bg: '#B45309', border: '#B45309', text: '#fff' };
+  if (l.includes('ooh'))       return { bg: '#D97706', border: '#D97706', text: '#fff' };
+  if (type === 'organic')      return { bg: '#16A34A', border: '#16A34A', text: '#fff' };
+  return                              { bg: '#64748B', border: '#64748B', text: '#fff' };
 }
 
 function apColor(category: string): { text: string; bg: string; border: string } {
@@ -499,7 +505,7 @@ export function FullscreenGanttView({
                           {todayIdx !== null && <div style={{ position: 'absolute', left: (todayIdx + 0.5) * dayWidth - 1.5, top: 0, bottom: 0, width: 3, background: TODAY_C, zIndex: Z_AP + 1, pointerEvents: 'none', boxShadow: `0 0 8px ${TODAY_C}55` }} />}
 
                           {/* Bar */}
-                          <div style={{ position: 'absolute', left: bLeft, width: bWidth, top: 10, height: 20, background: col.bg, border: `1px ${ch.type === 'organic' ? 'dashed' : 'solid'} ${col.border}`, borderRadius: 4, zIndex: 2, boxSizing: 'border-box', display: 'flex', alignItems: 'center', paddingLeft: 7, paddingRight: 7, overflow: 'hidden' }}>
+                          <div style={{ position: 'absolute', left: bLeft, width: bWidth, top: 10, height: 20, background: col.bg, borderRadius: 4, zIndex: 2, boxSizing: 'border-box', display: 'flex', alignItems: 'center', paddingLeft: 7, paddingRight: 7, overflow: 'hidden' }}>
                             {ch.start_date && dayWidth > 20 && <span style={{ fontSize: 8, color: col.text, whiteSpace: 'nowrap', opacity: 0.9, flexShrink: 0 }}>{ch.start_date.slice(5).replace('-', '/')}</span>}
                             <span style={{ flex: 1 }} />
                             {ch.end_date && dayWidth > 20 && <span style={{ fontSize: 8, color: col.text, whiteSpace: 'nowrap', opacity: 0.9, flexShrink: 0 }}>{ch.end_date.slice(5).replace('-', '/')}</span>}
