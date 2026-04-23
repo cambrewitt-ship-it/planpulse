@@ -24,7 +24,7 @@ import Link from 'next/link';
 import { MediaPlanGrid, MediaPlanChannel } from '@/components/media-plan-builder/media-plan-grid';
 import { useParams } from 'next/navigation';
 import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
-import { getClients, getMediaPlans, getPlanById, updateClient } from '@/lib/db/plans';
+import { getClients, getMediaPlans, getPlanById, updateClient, updateClientLogoUrl } from '@/lib/db/plans';
 import { fetchAnalyticsData, fetchSpendData, calculateCostPerMetric, SpendDataPoint, CostMetricPoint } from '@/lib/api/analytics-data-integration';
 import { subDays, addDays, format, differenceInDays, parseISO, startOfMonth, endOfMonth, startOfYear } from 'date-fns';
 import { FunnelStage, MediaPlanFunnel, FunnelConfig } from '@/lib/types/funnel';
@@ -39,6 +39,7 @@ import {
 import OrganicSocialCard from '@/components/dashboard-v2/organic-social-card';
 import EdmCard from '@/components/dashboard-v2/edm-card';
 import OohCard from '@/components/dashboard-v2/ooh-card';
+import DisplayNativeCard from '@/components/dashboard-v2/display-native-card';
 import type { OrganicSocialActual, EdmActual, ChannelBenchmark, MetricPreset, ClientChannelPreset } from '@/types/database';
 import { startOfWeek } from 'date-fns';
 import { CACChart } from '@/components/ui/cac-chart';
@@ -167,6 +168,9 @@ export default function DashboardV2() {
   const [selectedChannels, setSelectedChannels] = useState<Set<string>>(new Set());
   const [availableChannels, setAvailableChannels] = useState<Array<{ id: string; name: string }>>([]);
   const [viewMode, setViewMode] = useState<'overview' | 'funnels' | 'media-plan' | 'admin'>('overview');
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
+  const [logoUploadError, setLogoUploadError] = useState<string | null>(null);
+  const logoInputRef = useRef<HTMLInputElement>(null);
   const [ganttSelectedDay, setGanttSelectedDay] = useState<number | null>(null);
   const [showFullscreenGantt, setShowFullscreenGantt] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState<Date>(() => {
@@ -1045,6 +1049,29 @@ export default function DashboardV2() {
     }
   }, [clientId, client]);
 
+  // ── Logo upload handler ──────────────────────────────────────────────────
+  const handleLogoUpload = useCallback(async (file: File) => {
+    if (!clientId) return;
+    setIsUploadingLogo(true);
+    setLogoUploadError(null);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch(`/api/clients/${clientId}/upload-logo`, { method: 'POST', body: fd });
+      if (!res.ok) {
+        const { error } = await res.json().catch(() => ({ error: 'Upload failed' }));
+        throw new Error(error || 'Upload failed');
+      }
+      const { url } = await res.json();
+      await updateClientLogoUrl(clientId, url);
+      if (client) setClient({ ...client, logo_url: url });
+    } catch (err) {
+      setLogoUploadError(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setIsUploadingLogo(false);
+    }
+  }, [clientId, client]);
+
   // ── Adjusted health score with custom weights ────────────────────────────
   const adjustedHealthScore = useMemo(() => {
     if (!healthScore) return null;
@@ -1220,7 +1247,14 @@ export default function DashboardV2() {
           channel: ch,
         };
       }
-      
+
+      if (category === 'display_native') {
+        return {
+          type: 'display_native' as const,
+          channel: ch,
+        };
+      }
+
       // Paid digital - existing logic
       const platform = getPlatformForChannel(ch.channelName);
 
@@ -1477,6 +1511,12 @@ export default function DashboardV2() {
     setMediaPlanBuilderChannels(channels);
   };
 
+  const handleUpdateChannel = (channelId: string, updates: Partial<MediaPlanChannel>) => {
+    setMediaPlanBuilderChannels(prev =>
+      prev.map(ch => ch.id === channelId ? { ...ch, ...updates } : ch)
+    );
+  };
+
   const handleCommissionChange = (value: number) => {
     setCommission(value);
   };
@@ -1519,7 +1559,7 @@ export default function DashboardV2() {
       {/* ── Top nav bar ── */}
       <header className="sticky top-0 z-10 px-6 py-3" style={{ background: '#FDFCF8', borderBottom: '0.5px solid #E8E4DC' }}>
         <div className="max-w-7xl mx-auto flex items-center gap-3">
-          <Link href="/agency-v2" className="flex items-center gap-1 text-xs font-medium px-2 py-1 rounded" style={{ color: '#8A8578', border: '0.5px solid #E8E4DC', background: 'transparent' }}>
+          <Link href="/agency" className="flex items-center gap-1 text-xs font-medium px-2 py-1 rounded" style={{ color: '#8A8578', border: '0.5px solid #E8E4DC', background: 'transparent' }}>
             ← Back
           </Link>
           <span className="text-sm font-medium" style={{ color: '#1C1917' }}>{client?.name ?? 'Loading…'}</span>
@@ -1898,6 +1938,18 @@ export default function DashboardV2() {
                               key={`ooh-${ch.channel.id}`}
                               channel={ch.channel}
                               clientId={clientId}
+                              onUpdateChannel={handleUpdateChannel}
+                            />
+                          );
+                        }
+
+                        if (ch.type === 'display_native') {
+                          return (
+                            <DisplayNativeCard
+                              key={`display-native-${ch.channel.id}`}
+                              channel={ch.channel}
+                              clientId={clientId}
+                              onUpdateChannel={handleUpdateChannel}
                             />
                           );
                         }
@@ -2017,6 +2069,55 @@ export default function DashboardV2() {
             {/* ── Admin view ── */}
             {viewMode === 'admin' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                {/* Client Logo */}
+                <div style={{ background: '#FDFCF8', border: '0.5px solid #E8E4DC', borderRadius: 6, padding: '20px 24px' }}>
+                  <div style={{ marginBottom: 16 }}>
+                    <span style={{ fontSize: 13, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Client Logo</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                    {client?.logo_url ? (
+                      <img src={client.logo_url} alt="Client logo" style={{ width: 56, height: 56, borderRadius: '50%', objectFit: 'cover', border: '0.5px solid #E8E4DC' }} />
+                    ) : (
+                      <div style={{ width: 56, height: 56, borderRadius: '50%', background: '#F0EDE8', border: '0.5px solid #E8E4DC', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <span style={{ fontSize: 22, fontWeight: 700, color: '#B5B0A5' }}>{client?.name?.charAt(0).toUpperCase()}</span>
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <button
+                        onClick={() => logoInputRef.current?.click()}
+                        disabled={isUploadingLogo}
+                        style={{
+                          height: 30, padding: '0 12px', borderRadius: 4,
+                          border: '0.5px solid #D5D0C5', background: '#FDFCF8',
+                          color: '#1C1917', fontSize: 12, fontWeight: 500,
+                          cursor: isUploadingLogo ? 'not-allowed' : 'pointer',
+                          fontFamily: "'DM Sans', system-ui, sans-serif",
+                          opacity: isUploadingLogo ? 0.6 : 1,
+                        }}
+                      >
+                        {isUploadingLogo ? 'Uploading...' : client?.logo_url ? 'Replace Logo' : 'Upload Logo'}
+                      </button>
+                      {client?.logo_url && (
+                        <span style={{ fontSize: 11, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Logo uploaded</span>
+                      )}
+                      {logoUploadError && (
+                        <span style={{ fontSize: 11, color: '#A0442A', fontFamily: "'DM Sans', system-ui, sans-serif" }}>{logoUploadError}</span>
+                      )}
+                    </div>
+                  </div>
+                  <input
+                    ref={logoInputRef}
+                    type="file"
+                    accept="image/*"
+                    style={{ display: 'none' }}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleLogoUpload(file);
+                      e.target.value = '';
+                    }}
+                  />
+                </div>
+
                 {/* Ad Platform Connections */}
                 <div className="rounded-lg p-6" style={{ background: '#FDFCF8', border: '0.5px solid #E8E4DC', borderRadius: 6 }}>
                   <AdPlatformConnector clientId={clientId} />

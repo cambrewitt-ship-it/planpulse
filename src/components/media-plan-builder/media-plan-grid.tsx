@@ -44,7 +44,7 @@ export interface MediaPlanChannel {
   percentOfInvestment: number;
   totalBudget: number;
   flights: MediaFlight[];
-  channelCategory?: 'paid_digital' | 'organic_social' | 'edm' | 'ooh' | 'radio' | 'other';
+  channelCategory?: 'paid_digital' | 'organic_social' | 'edm' | 'ooh' | 'display_native' | 'radio' | 'other';
   channelSubType?: string; // e.g. "Instagram", "Facebook", "LinkedIn"
   postsPerWeek?: number;
   sendFrequency?: string; // e.g. "weekly", "fortnightly", "monthly"
@@ -56,6 +56,11 @@ export interface MediaPlanChannel {
   fees?: number; // production/agency fees
   otherFrequency?: string; // frequency for 'other' channel logging
   otherLogCount?: number; // count per period for 'other' channel
+  // Interactive tracking fields (manual channels)
+  checklistItems?: Record<string, boolean>;
+  campaignNotes?: string;
+  manualActualSpend?: number;
+  campaignStatus?: 'planning' | 'live' | 'paused' | 'complete';
 }
 
 const generateChannelId = (): string => {

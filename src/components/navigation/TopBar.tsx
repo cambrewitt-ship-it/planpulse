@@ -51,8 +51,8 @@ export default function TopBar() {
             </Link>
             
             <div className="flex items-center gap-4">
-              <Link href="/agency-v2">
-                <Button variant={pathname === '/agency-v2' ? 'default' : 'ghost'} size="sm">
+              <Link href="/agency">
+                <Button variant={pathname === '/agency' ? 'default' : 'ghost'} size="sm">
                   <LayoutDashboard className="h-4 w-4 mr-2" />
                   Agency
                 </Button>

@@ -8,7 +8,7 @@ export default function Footer() {
       <div className="container mx-auto px-4 py-6">
         <div className="flex flex-col md:flex-row items-center justify-between gap-4">
           <div className="text-sm text-gray-600">
-            © {new Date().getFullYear()} Marketing Dashboard. All rights reserved.
+            © {new Date().getFullYear()} OneOneThree Digital Ltd. All rights reserved.
           </div>
           <div className="flex items-center gap-6">
             <Link 

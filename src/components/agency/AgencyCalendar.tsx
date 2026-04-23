@@ -290,7 +290,7 @@ function DayDetail({ date, events, clientMap, onClose }: DayDetailProps) {
             <div key={clientId} className="space-y-1">
               <button
                 onClick={() =>
-                  router.push(`/clients/${clientId}/dashboard-v2`)
+                  router.push(`/clients/${clientId}/dashboard`)
                 }
                 className="text-xs font-semibold hover:underline flex items-center gap-2"
                 style={{ color: clientColor }}

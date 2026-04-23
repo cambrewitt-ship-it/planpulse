@@ -207,13 +207,13 @@ function ClientCard({ client }: { client: ClientCardData }) {
           ? 'border-l-amber-500'
           : 'border-l-green-500'
       )}
-      onClick={() => router.push(`/clients/${client.id}/dashboard-v2`)}
+      onClick={() => router.push(`/clients/${client.id}/dashboard`)}
       role="article"
       tabIndex={0}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          router.push(`/clients/${client.id}/dashboard-v2`);
+          router.push(`/clients/${client.id}/dashboard`);
         }
       }}
     >
@@ -354,7 +354,7 @@ function ClientCard({ client }: { client: ClientCardData }) {
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      router.push(`/clients/${client.id}/dashboard-v2`);
+                      router.push(`/clients/${client.id}/dashboard`);
                     }}
                     className="text-xs text-amber-700 hover:text-amber-800 hover:underline mt-1 inline-flex items-center gap-1"
                   >

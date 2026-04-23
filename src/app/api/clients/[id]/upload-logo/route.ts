@@ -25,20 +25,28 @@ export async function POST(
     }
 
     // Prefer service role key for storage (bypasses RLS, can create buckets)
-    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!.replace(/\/$/, '');
     const storageClient = serviceRoleKey
       ? createSupabaseAdmin(supabaseUrl, serviceRoleKey)
       : supabase;
 
-    // Create bucket if it doesn't exist
+    // Ensure bucket exists — create if missing, ignore if already exists
     const { error: bucketError } = await storageClient.storage.createBucket(BUCKET_NAME, {
       public: true,
-      fileSizeLimit: 5 * 1024 * 1024, // 5MB
+      fileSizeLimit: 5 * 1024 * 1024,
     });
-    // Ignore "already exists" errors
-    if (bucketError && !bucketError.message.includes('already exists')) {
-      console.warn('Bucket creation warning:', bucketError.message);
+    const alreadyExists = !bucketError || (
+      bucketError.message.toLowerCase().includes('already exist') ||
+      bucketError.message.toLowerCase().includes('duplicate') ||
+      (bucketError as any).statusCode === '409' ||
+      (bucketError as any).statusCode === 409
+    );
+    if (!alreadyExists) {
+      const hint = !serviceRoleKey
+        ? ' — add SUPABASE_SERVICE_ROLE_KEY to .env.local, or create the "client-logos" bucket manually in Supabase Storage'
+        : '';
+      return NextResponse.json({ error: `Could not create storage bucket: ${bucketError!.message}${hint}` }, { status: 500 });
     }
 
     const ext = file.name.split('.').pop() || 'png';

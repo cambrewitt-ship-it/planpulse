@@ -127,7 +127,7 @@ export default function CreateClientPage() {
   };
 
   const handleFinish = () => {
-    router.push(clientId ? `/clients/${clientId}/dashboard-v2` : '/dashboard');
+    router.push(clientId ? `/clients/${clientId}/dashboard` : '/dashboard');
   };
 
   return (

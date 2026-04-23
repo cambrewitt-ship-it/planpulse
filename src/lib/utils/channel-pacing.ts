@@ -59,12 +59,13 @@ export function getChannelDisplayNameFromPlatform(platform?: string): string {
 }
 
 // Determine channel category from channelName
-export function getChannelCategory(channelName: string): 'paid_digital' | 'organic_social' | 'edm' | 'ooh' {
+export function getChannelCategory(channelName: string): 'paid_digital' | 'organic_social' | 'edm' | 'ooh' | 'display_native' {
   if (!channelName) return 'paid_digital';
   const lower = channelName.toLowerCase();
   if (lower.includes('(organic)')) return 'organic_social';
   if (lower.includes('edm') || lower.includes('email')) return 'edm';
   if (lower.includes('ooh')) return 'ooh';
+  if (lower.includes('display') || lower.includes('native')) return 'display_native';
   return 'paid_digital';
 }
 

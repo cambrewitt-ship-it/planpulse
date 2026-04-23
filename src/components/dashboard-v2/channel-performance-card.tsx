@@ -1068,18 +1068,24 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
 
         {/* ── Right Section: Action Points ── */}
         {clientId && (
-          <div className="flex-shrink-0 w-64 bg-white">
-            <div className="px-4 pt-4 pb-4">
+          <div className="flex-shrink-0 w-64 bg-white flex flex-col self-stretch overflow-hidden">
+            <div className="px-4 pt-4 flex-shrink-0">
               <h3 className="text-sm font-semibold text-gray-900 mb-3" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>Action Points</h3>
-              <InlineActionPoints
-                channelType={normalizeChannelType(channel.name)}
-                clientId={clientId}
-                channelStartDate={channelStartDate}
-                maxVisible={3}
-                showBorder={false}
-                showTitle={false}
-                refetchTrigger={refetchTrigger}
-              />
+            </div>
+            <div className="relative flex-1 min-h-0">
+              <div className={`h-full px-4 pb-6 ${isExpanded ? 'overflow-y-auto' : 'overflow-hidden'}`}>
+                <InlineActionPoints
+                  channelType={normalizeChannelType(channel.name)}
+                  clientId={clientId}
+                  channelStartDate={channelStartDate}
+                  maxVisible={3}
+                  showBorder={false}
+                  showTitle={false}
+                  refetchTrigger={refetchTrigger}
+                />
+              </div>
+              {/* Fade at the bottom — always shown to signal more content */}
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12" style={{ background: 'linear-gradient(to top, white 0%, transparent 100%)' }} />
             </div>
           </div>
         )}

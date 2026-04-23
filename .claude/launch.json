@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "plan-check",
-      "runtimeExecutable": "/usr/local/bin/node",
-      "runtimeArgs": ["/usr/local/bin/npm", "run", "dev"],
+      "runtimeExecutable": "/bin/sh",
+      "runtimeArgs": ["-c", "PATH=/usr/local/bin:$PATH npm run dev"],
       "port": 3001,
       "autoPort": true
     }

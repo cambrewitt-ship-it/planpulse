@@ -3,7 +3,7 @@
 
 import { useState, useRef, useEffect, forwardRef, useImperativeHandle, type ForwardedRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Facebook, Search, Linkedin, Music, Radio, Plus, X, Check, List, LayoutGrid } from 'lucide-react';
+import { Facebook, Search, Linkedin, Music, Radio, Plus, X, Check } from 'lucide-react';
 import type { AgencyClientActionPoints } from '@/app/api/agency/action-points/route';
 import { getChannelLogo } from '@/lib/utils/channel-icons';
 
@@ -212,17 +212,15 @@ interface KanbanBoardProps {
   onActionPointCompleted?: () => void;
   accountManagers?: AccountManager[];
   availableChannels?: string[];
+  view?: 'kanban' | 'list' | 'gantt';
 }
 
 export const KanbanBoard = forwardRef(function KanbanBoard(
-  { actionPointClients, amFilter, onActionPointCompleted, accountManagers = [], availableChannels }: KanbanBoardProps,
+  { actionPointClients, amFilter, onActionPointCompleted, accountManagers = [], availableChannels, view = 'kanban' }: KanbanBoardProps,
   ref: ForwardedRef<KanbanBoardHandle>
 ) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-
-  // View mode: kanban (3 columns) or list (1 column)
-  const [listView, setListView] = useState(false);
 
   // Local override map for optimistic assigned_to updates
   const [assignedOverrides, setAssignedOverrides] = useState<Map<string, string | null>>(new Map());
@@ -238,6 +236,21 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
       return next;
     });
   }
+
+  // Gantt popup state
+  const [ganttPopup, setGanttPopup] = useState<{ card: KanbanCard; x: number; y: number } | null>(null);
+  const ganttPopupRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!ganttPopup) return;
+    function handleClick(e: MouseEvent) {
+      if (ganttPopupRef.current && !ganttPopupRef.current.contains(e.target as Node)) {
+        setGanttPopup(null);
+      }
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [ganttPopup]);
 
   // Add action point form state
   const [isAdding, setIsAdding] = useState(false);
@@ -421,26 +434,8 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
   });
 
   return (
+    <>
     <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {/* View toggle */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: -4 }}>
-        <button
-          onClick={() => setListView(v => !v)}
-          title={listView ? 'Switch to kanban' : 'Switch to list'}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 4,
-            fontSize: 10, color: listView ? '#4A6580' : '#B5B0A5',
-            background: listView ? 'rgba(74,101,128,0.08)' : 'transparent',
-            border: listView ? '0.5px solid rgba(74,101,128,0.3)' : '0.5px solid #E8E4DC',
-            borderRadius: 4, padding: '3px 8px', cursor: 'pointer',
-            fontFamily: "'DM Sans', system-ui, sans-serif",
-            fontWeight: 500,
-          }}
-        >
-          <List size={11} />
-          List
-        </button>
-      </div>
 
       {/* Inline add form — shown when isAdding */}
       {isAdding && (
@@ -588,23 +583,191 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
         </div>
       )}
 
-    {listView ? (
+    {view === 'gantt' ? (
+      /* ── Gantt view: items positioned at their due date ── */
+      (() => {
+        const dueDays = allCardsSorted.filter(c => c.daysUntilDue !== null).map(c => c.daysUntilDue!);
+        const startDay = dueDays.length ? Math.min(-2, Math.min(...dueDays)) : -2;
+        const endDay   = dueDays.length ? Math.max(14, Math.max(...dueDays) + 3) : 14;
+        const dayCount = endDay - startDay + 1;
+        const DAY_W = 30;
+        const ROW_H = 36;
+        const todayMs = today.getTime();
+        const withDue = allCardsSorted.filter(c => c.daysUntilDue !== null);
+        const noDue   = allCardsSorted.filter(c => c.daysUntilDue === null);
+        const totalW  = dayCount * DAY_W;
+
+        // Compute month spans for header
+        const monthSpans: Array<{ label: string; count: number }> = [];
+        for (let i = 0; i < dayCount; i++) {
+          const d = new Date(todayMs + (startDay + i) * 86400000);
+          const label = d.toLocaleDateString('en-NZ', { month: 'long', year: 'numeric' });
+          if (!monthSpans.length || monthSpans[monthSpans.length - 1].label !== label) {
+            monthSpans.push({ label, count: 1 });
+          } else {
+            monthSpans[monthSpans.length - 1].count++;
+          }
+        }
+
+        return (
+          <div style={{ overflowX: 'auto', overflowY: 'auto', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+            {/* Month row */}
+            <div style={{ display: 'flex', position: 'sticky', top: 0, zIndex: 3, background: '#FDFCF8', minWidth: totalW }}>
+              {monthSpans.map((span, i) => (
+                <div key={i} style={{
+                  width: span.count * DAY_W, flexShrink: 0,
+                  padding: '4px 6px', fontSize: 9, fontWeight: 600,
+                  color: '#8A8578', textTransform: 'uppercase', letterSpacing: '0.08em',
+                  borderLeft: i === 0 ? 'none' : '0.5px solid #E8E4DC',
+                  borderBottom: '0.5px solid #E8E4DC',
+                  whiteSpace: 'nowrap', overflow: 'hidden',
+                }}>
+                  {span.label}
+                </div>
+              ))}
+            </div>
+            {/* Day labels row */}
+            <div style={{ display: 'flex', position: 'sticky', top: 21, zIndex: 2, background: '#FDFCF8', borderBottom: '0.5px solid #E8E4DC', minWidth: totalW }}>
+              {Array.from({ length: dayCount }, (_, i) => {
+                const offset = startDay + i;
+                const d = new Date(todayMs + offset * 86400000);
+                const isToday = offset === 0;
+                const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+                return (
+                  <div key={i} style={{
+                    width: DAY_W, flexShrink: 0, textAlign: 'center', padding: '4px 0',
+                    fontSize: 8, fontWeight: isToday ? 700 : 400,
+                    color: isToday ? '#A0442A' : isWeekend ? '#D5D0C5' : '#8A8578',
+                    background: isToday ? 'rgba(160,68,42,0.05)' : 'transparent',
+                    borderLeft: isToday ? '1px solid rgba(160,68,42,0.25)' : '0.5px solid #F0EDE8',
+                  }}>
+                    {isToday ? '▼' : `${d.getDate()}`}
+                  </div>
+                );
+              })}
+            </div>
+            {/* Rows */}
+            {withDue.map(card => {
+              const isInProgress = inProgressIds.has(card.id);
+              const dotColor = card.urgent ? '#A0442A' : card.status === '1-2' ? '#A0442A' : card.status === '3-4' ? '#B07030' : '#4A6580';
+              const dotX = (card.daysUntilDue! - startDay) * DAY_W;
+              return (
+                <div key={card.id} style={{ position: 'relative', height: ROW_H, minWidth: totalW, borderBottom: '0.5px solid #F0EDE8', background: isInProgress ? '#FFFBF4' : 'transparent' }}>
+                  {/* Grid columns */}
+                  <div style={{ position: 'absolute', inset: 0, display: 'flex' }}>
+                    {Array.from({ length: dayCount }, (_, i) => {
+                      const offset = startDay + i;
+                      const d = new Date(todayMs + offset * 86400000);
+                      const isToday = offset === 0;
+                      const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+                      return (
+                        <div key={i} style={{
+                          width: DAY_W, height: '100%', flexShrink: 0,
+                          background: isToday ? 'rgba(160,68,42,0.04)' : isWeekend ? 'rgba(0,0,0,0.01)' : 'transparent',
+                          borderLeft: isToday ? '1px solid rgba(160,68,42,0.2)' : '0.5px solid #F5F3EF',
+                        }} />
+                      );
+                    })}
+                  </div>
+                  {/* Item — tick + dot + text, clickable */}
+                  <div style={{
+                    position: 'absolute', left: dotX, top: '50%', transform: 'translateY(-50%)',
+                    display: 'flex', alignItems: 'center', gap: 4, zIndex: 1,
+                  }}>
+                    {/* Tick to complete */}
+                    <button
+                      type="button"
+                      onClick={e => { e.stopPropagation(); void handleComplete(card); }}
+                      title="Mark complete"
+                      style={{
+                        width: 13, height: 13, borderRadius: '50%', flexShrink: 0,
+                        border: '1px solid #D5D0C5', background: 'transparent',
+                        cursor: 'pointer', padding: 0,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      }}
+                    />
+                    {/* Dot + text — click opens popup */}
+                    <div
+                      style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', maxWidth: 190 }}
+                      onClick={e => setGanttPopup({ card, x: e.clientX, y: e.clientY })}
+                    >
+                      <div style={{
+                        width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+                        background: dotColor, boxShadow: `0 0 0 2px ${dotColor}22`,
+                      }} />
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 9, color: '#B5B0A5', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{card.clientName}</div>
+                        <div style={{ fontSize: 10, fontWeight: 500, color: '#1C1917', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{card.text}</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            {/* No-date items */}
+            {noDue.length > 0 && (
+              <div style={{ padding: '6px 8px', borderTop: '0.5px solid #E8E4DC' }}>
+                <div style={{ fontSize: 9, color: '#B5B0A5', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>No due date</div>
+                {noDue.map(card => {
+                  const dotColor = '#B5B0A5';
+                  return (
+                    <div key={card.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 0' }}>
+                      <button
+                        type="button"
+                        onClick={e => { e.stopPropagation(); void handleComplete(card); }}
+                        title="Mark complete"
+                        style={{
+                          width: 13, height: 13, borderRadius: '50%', flexShrink: 0,
+                          border: '1px solid #D5D0C5', background: 'transparent',
+                          cursor: 'pointer', padding: 0,
+                        }}
+                      />
+                      <div
+                        style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}
+                        onClick={e => setGanttPopup({ card, x: e.clientX, y: e.clientY })}
+                      >
+                        <div style={{ width: 8, height: 8, borderRadius: '50%', background: dotColor, flexShrink: 0 }} />
+                        <span style={{ fontSize: 10, color: '#8A8578' }}>{card.clientName} — {card.text}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {withDue.length === 0 && noDue.length === 0 && (
+              <div style={{ padding: '16px 8px', fontSize: 11, color: '#B5B0A5', textAlign: 'center' }}>No action points</div>
+            )}
+          </div>
+        );
+      })()
+    ) : view === 'list' ? (
       /* ── List view: single sorted column ── */
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         {allCardsSorted.map((card) => {
           const isInProgress = inProgressIds.has(card.id);
           const colColor = card.status === '1-2' ? '#A0442A' : card.status === '3-4' ? '#B07030' : '#4A6580';
+          const clientCol = clientColor(card.clientId);
           return (
             <div key={card.id} style={{
               background: isInProgress ? '#FFFBF4' : '#FDFCF8',
               border: `0.5px solid ${isInProgress ? 'rgba(176,112,48,0.4)' : '#E8E4DC'}`,
               borderLeft: `2px solid ${isInProgress ? '#B07030' : colColor}`,
               borderRadius: 5,
-              padding: '6px 8px',
-              display: 'flex',
-              alignItems: 'flex-start',
-              gap: 8,
+              overflow: 'hidden',
             }}>
+              {/* Client name header */}
+              <div style={{
+                background: clientCol,
+                padding: '3px 8px',
+              }}>
+                <span style={{
+                  fontSize: 9, fontWeight: 600, color: '#fff',
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  display: 'block', letterSpacing: '0.02em',
+                }}>{card.clientName}</span>
+              </div>
+              {/* Card content */}
+              <div style={{ padding: '6px 8px', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); void handleComplete(card); }}
@@ -626,8 +789,6 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                   )}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 6 }}>
-                  <div style={{ width: 5, height: 5, borderRadius: '50%', background: isInProgress ? '#B07030' : colColor, opacity: 0.6, flexShrink: 0 }} />
-                  <span style={{ flex: 1, fontSize: 10, color: '#8A8578', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{card.clientName}</span>
                   {isInProgress && (
                     <span style={{ fontSize: 8, fontWeight: 600, color: '#B07030', background: 'rgba(176,112,48,0.12)', border: '0.5px solid rgba(176,112,48,0.3)', borderRadius: 3, padding: '1px 4px', textTransform: 'uppercase', letterSpacing: '0.07em', whiteSpace: 'nowrap' }}>In Progress</span>
                   )}
@@ -635,19 +796,23 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                   <span style={{ fontSize: 9, fontWeight: 400, color: '#B5B0A5', whiteSpace: 'nowrap' }}>
                     {card.daysUntilDue === null ? 'no date' : card.daysUntilDue < 0 ? `${Math.abs(card.daysUntilDue)}d overdue` : card.daysUntilDue === 0 ? 'today' : `${card.daysUntilDue}d`}
                   </span>
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); handleToggleInProgress(card); }}
-                    style={{ fontSize: 8, fontWeight: 500, padding: '1px 5px', borderRadius: 3, border: isInProgress ? '0.5px solid rgba(176,112,48,0.4)' : '0.5px dashed #D5D0C5', background: isInProgress ? 'rgba(176,112,48,0.1)' : 'transparent', color: isInProgress ? '#B07030' : '#C0BBC0', cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif", whiteSpace: 'nowrap', flexShrink: 0 }}
-                  >{isInProgress ? '▶ in prog.' : '▶'}</button>
-                  <AssignMenu card={card} onAssign={handleAssign} accountManagers={accountManagers} />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flexShrink: 0, alignItems: 'stretch' }}>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); handleToggleInProgress(card); }}
+                      style={{ fontSize: 8, fontWeight: 500, padding: '1px 5px', borderRadius: 3, border: isInProgress ? '0.5px solid rgba(176,112,48,0.4)' : '0.5px dashed #D5D0C5', background: isInProgress ? 'rgba(176,112,48,0.1)' : 'transparent', color: isInProgress ? '#B07030' : '#C0BBC0', cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif", whiteSpace: 'nowrap' }}
+                    >In Progress</button>
+                    <AssignMenu card={card} onAssign={handleAssign} accountManagers={accountManagers} />
+                  </div>
                 </div>
+              </div>
               </div>
             </div>
           );
         })}
       </div>
     ) : (
+    /* ── Kanban view: 3 columns ── */
     <div
       style={{
         display: 'grid',
@@ -694,17 +859,33 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
               }}>
               {colCards.map((card) => {
                 const isInProgress = inProgressIds.has(card.id);
+                const clientCol = clientColor(card.clientId);
                 return (
                 <div key={card.id} style={{
                   background: isInProgress ? '#FFFBF4' : '#FDFCF8',
                   border: `0.5px solid ${isInProgress ? 'rgba(176,112,48,0.4)' : '#E8E4DC'}`,
                   borderLeft: `2px solid ${isInProgress ? '#B07030' : col.color}`,
                   borderRadius: 5,
-                  padding: '6px 8px',
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: 8,
+                  overflow: 'hidden',
+                  flexShrink: 0,
                 }}>
+                  {/* Client name header */}
+                  <div style={{
+                    background: clientCol,
+                    padding: '3px 8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                  }}>
+                    <span style={{
+                      fontSize: 9, fontWeight: 600, color: '#fff',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      letterSpacing: '0.02em',
+                    }}>{card.clientName}</span>
+                  </div>
+
+                  {/* Card content */}
+                  <div style={{ padding: '6px 8px', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
                   {/* Circular checkbox */}
                   <button
                     type="button"
@@ -744,15 +925,8 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                         }}>OVERDUE</span>
                       )}
                     </div>
-                    {/* Bottom row: client dot + name + category tag + date + assignee */}
+                    {/* Bottom row: category tag + date + assignee */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 6 }}>
-                      <div style={{
-                        width: 5, height: 5, borderRadius: '50%',
-                        background: isInProgress ? '#B07030' : col.color, opacity: 0.6, flexShrink: 0,
-                      }} />
-                      <span style={{ flex: 1, fontSize: 10, color: '#8A8578', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {card.clientName}
-                      </span>
                       {isInProgress && (
                         <span style={{
                           fontSize: 8, fontWeight: 600, color: '#B07030',
@@ -783,28 +957,30 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                               ? 'today'
                               : `${card.daysUntilDue}d`}
                       </span>
-                      {/* In Progress toggle button */}
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); handleToggleInProgress(card); }}
-                        title={isInProgress ? 'Clear in progress' : 'Mark as in progress'}
-                        style={{
-                          fontSize: 8, fontWeight: 500,
-                          padding: '1px 5px',
-                          borderRadius: 3,
-                          border: isInProgress ? '0.5px solid rgba(176,112,48,0.4)' : '0.5px dashed #D5D0C5',
-                          background: isInProgress ? 'rgba(176,112,48,0.1)' : 'transparent',
-                          color: isInProgress ? '#B07030' : '#C0BBC0',
-                          cursor: 'pointer',
-                          fontFamily: "'DM Sans', system-ui, sans-serif",
-                          whiteSpace: 'nowrap',
-                          flexShrink: 0,
-                        }}
-                      >
-                        {isInProgress ? '▶ in prog.' : '▶'}
-                      </button>
-                      <AssignMenu card={card} onAssign={handleAssign} accountManagers={accountManagers} />
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flexShrink: 0, alignItems: 'stretch' }}>
+                        {/* In Progress toggle button */}
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); handleToggleInProgress(card); }}
+                          title={isInProgress ? 'Clear in progress' : 'Mark as in progress'}
+                          style={{
+                            fontSize: 8, fontWeight: 500,
+                            padding: '1px 5px',
+                            borderRadius: 3,
+                            border: isInProgress ? '0.5px solid rgba(176,112,48,0.4)' : '0.5px dashed #D5D0C5',
+                            background: isInProgress ? 'rgba(176,112,48,0.1)' : 'transparent',
+                            color: isInProgress ? '#B07030' : '#C0BBC0',
+                            cursor: 'pointer',
+                            fontFamily: "'DM Sans', system-ui, sans-serif",
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          In Progress
+                        </button>
+                        <AssignMenu card={card} onAssign={handleAssign} accountManagers={accountManagers} />
+                      </div>
                     </div>
+                  </div>
                   </div>
                 </div>
                 );
@@ -817,5 +993,79 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
     </div>
     )}
     </div>
+
+    {/* Gantt popup — portal, positioned at click coordinates */}
+    {ganttPopup && typeof document !== 'undefined' && createPortal(
+      <div
+        ref={ganttPopupRef}
+        style={{
+          position: 'fixed',
+          left: Math.min(ganttPopup.x + 8, window.innerWidth - 260),
+          top: Math.min(ganttPopup.y + 8, window.innerHeight - 200),
+          width: 248,
+          background: '#FDFCF8',
+          border: '0.5px solid #D5D0C5',
+          borderRadius: 8,
+          boxShadow: '0 4px 20px rgba(0,0,0,0.12)',
+          zIndex: 9999,
+          fontFamily: "'DM Sans', system-ui, sans-serif",
+          overflow: 'hidden',
+        }}
+      >
+        {/* Client colour header */}
+        <div style={{ background: clientColor(ganttPopup.card.clientId), padding: '6px 12px' }}>
+          <span style={{ fontSize: 10, fontWeight: 600, color: '#fff', letterSpacing: '0.02em' }}>
+            {ganttPopup.card.clientName}
+          </span>
+        </div>
+        {/* Body */}
+        <div style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {/* Channel + tag row */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {getChannelIcon(ganttPopup.card.channelType)}
+            <span style={{ fontSize: 10, color: '#8A8578' }}>{ganttPopup.card.channelType}</span>
+            <span style={{
+              fontSize: 9, fontWeight: 500, marginLeft: 'auto',
+              color: ganttPopup.card.tag === 'SET UP' ? '#B07030' : '#4A7C59',
+              textTransform: 'uppercase', letterSpacing: '0.08em',
+            }}>{ganttPopup.card.tag}</span>
+          </div>
+          {/* Text */}
+          <div style={{ fontSize: 12, fontWeight: 500, color: '#1C1917', lineHeight: 1.4 }}>
+            {ganttPopup.card.text}
+          </div>
+          {/* Due date */}
+          <div style={{ fontSize: 10, color: ganttPopup.card.urgent ? '#A0442A' : '#8A8578' }}>
+            {ganttPopup.card.daysUntilDue === null
+              ? 'No due date'
+              : ganttPopup.card.daysUntilDue === 0
+              ? 'Due today'
+              : ganttPopup.card.daysUntilDue < 0
+              ? `${Math.abs(ganttPopup.card.daysUntilDue)}d overdue`
+              : `Due in ${ganttPopup.card.daysUntilDue}d`}
+          </div>
+          {/* Actions */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 4, borderTop: '0.5px solid #E8E4DC' }}>
+            <button
+              type="button"
+              onClick={() => { void handleComplete(ganttPopup.card); setGanttPopup(null); }}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 5,
+                fontSize: 11, fontWeight: 500, padding: '4px 10px',
+                background: '#1C1917', color: '#fff',
+                border: 'none', borderRadius: 5, cursor: 'pointer',
+                fontFamily: "'DM Sans', system-ui, sans-serif",
+              }}
+            >
+              <Check size={11} />
+              Complete
+            </button>
+            <AssignMenu card={ganttPopup.card} onAssign={(card, am) => { handleAssign(card, am); }} accountManagers={accountManagers} />
+          </div>
+        </div>
+      </div>,
+      document.body
+    )}
+    </>
   );
 });

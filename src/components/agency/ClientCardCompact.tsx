@@ -207,7 +207,7 @@ export function ClientCardCompact({ client, selected, onClick, index = 0, onAcco
   ];
 
   return (
-    <div style={cardStyle} onClick={() => { onClick(); router.push(`/clients/${client.id}/dashboard-v2`); }}>
+    <div style={cardStyle} onClick={() => { onClick(); router.push(`/clients/${client.id}/dashboard`); }}>
       {/* Row 1: Avatar + Name + Health ring */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <div style={{

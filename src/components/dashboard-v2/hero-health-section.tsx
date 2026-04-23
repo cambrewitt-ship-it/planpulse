@@ -109,51 +109,76 @@ function Badge({ status, label }: { status: string; label: string }) {
 // ---------------------------------------------------------------------------
 
 function HealthRing({ score, status }: { score: number; status: HealthScoreResult['status'] }) {
-  const size = 112;
-  const strokeWidth = 8;
-  const radius = (size - strokeWidth) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const filled = (score / 100) * circumference;
+  const W = 144, H = 96;
+  const sw = 10;        // stroke width
+  const r = 62;         // arc radius
+  const cx = W / 2;
+  const cy = 70;        // needle pivot — bottom area
+
   const ringColor = STATUS_COLORS[status]?.ring ?? '#f59e0b';
-  const label =
-    status === 'healthy' ? 'Healthy'
-    : status === 'caution' ? 'Caution'
-    : 'At Risk';
+  const label = status === 'healthy' ? 'Healthy' : status === 'caution' ? 'Caution' : 'At Risk';
+
+  // Clamp to avoid degenerate arcs at 0 and 100
+  const s = Math.min(0.998, Math.max(0.002, score / 100));
+  // Math angle: π = left (score 0) → 0 = right (score 100)
+  const rad = Math.PI * (1 - s);
+  const ex = cx + r * Math.cos(rad);
+  const ey = cy - r * Math.sin(rad);
+
+  // Needle tip (stops just inside the track)
+  const nLen = r - sw / 2 - 4;
+  const nx = cx + nLen * Math.cos(rad);
+  const ny = cy - nLen * Math.sin(rad);
+
+  // Zone ticks at 0%, 33%, 67%, 100%
+  const ticks = [0, 33, 67, 100].map(v => {
+    const tr = Math.PI * (1 - Math.min(0.999, Math.max(0.001, v / 100)));
+    const inner = r - sw / 2 - 2;
+    const outer = r + sw / 2 + 3;
+    return {
+      x1: cx + inner * Math.cos(tr), y1: cy - inner * Math.sin(tr),
+      x2: cx + outer * Math.cos(tr), y2: cy - outer * Math.sin(tr),
+    };
+  });
 
   return (
-    <div className="flex flex-col items-center gap-1">
-      <div className="relative" style={{ width: size, height: size }}>
-        {/* Track */}
-        <svg width={size} height={size} className="rotate-[-90deg]">
-          <circle
-            cx={size / 2}
-            cy={size / 2}
-            r={radius}
-            fill="none"
-            stroke="#e5e7eb"
-            strokeWidth={strokeWidth}
-          />
-          {/* Progress */}
-          <circle
-            cx={size / 2}
-            cy={size / 2}
-            r={radius}
-            fill="none"
-            stroke={ringColor}
-            strokeWidth={strokeWidth}
-            strokeLinecap="round"
-            strokeDasharray={`${filled} ${circumference - filled}`}
-            style={{ transition: 'stroke-dasharray 0.6s ease' }}
-          />
-        </svg>
-        {/* Centre label */}
-        <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <span className="text-xl font-bold text-gray-900 leading-none">{Math.round(score)}</span>
-          <span className="text-xs text-gray-500 leading-none mt-0.5">/ 100</span>
-        </div>
-      </div>
-      <Badge status={status} label={label} />
-    </div>
+    <svg
+      width={W} height={H}
+      viewBox={`0 0 ${W} ${H}`}
+      style={{ fontFamily: "'DM Sans', system-ui, sans-serif", display: 'block' }}
+    >
+      {/* Track (full semicircle, sweep=1 = CW in SVG = goes through top) */}
+      <path
+        d={`M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}`}
+        fill="none" stroke="#e5e7eb" strokeWidth={sw} strokeLinecap="round"
+      />
+      {/* Coloured fill */}
+      {score > 0.5 && (
+        <path
+          d={`M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${ex} ${ey}`}
+          fill="none" stroke={ringColor} strokeWidth={sw} strokeLinecap="round"
+          style={{ transition: 'all 0.5s ease' }}
+        />
+      )}
+      {/* Zone tick marks */}
+      {ticks.map((t, i) => (
+        <line key={i} x1={t.x1} y1={t.y1} x2={t.x2} y2={t.y2} stroke="#d1d5db" strokeWidth={1.5} strokeLinecap="round" />
+      ))}
+      {/* End labels */}
+      <text x={cx - r - 6} y={cy + 12} textAnchor="end" fontSize={8} fill="#9ca3af">0</text>
+      <text x={cx + r + 6} y={cy + 12} textAnchor="start" fontSize={8} fill="#9ca3af">100</text>
+      {/* Needle */}
+      <line x1={cx} y1={cy} x2={nx} y2={ny} stroke="#374151" strokeWidth={2} strokeLinecap="round" />
+      <circle cx={cx} cy={cy} r={4.5} fill="#374151" />
+      {/* Score number */}
+      <text x={cx} y={cy + 24} textAnchor="middle" fontSize={20} fontWeight="700" fill="#1C1917">{Math.round(score)}</text>
+      {/* Status label */}
+      <text
+        x={cx} y={cy + 33}
+        textAnchor="middle" fontSize={9} fontWeight="600" fill={ringColor}
+        style={{ textTransform: 'uppercase', letterSpacing: '0.08em' }}
+      >{label}</text>
+    </svg>
   );
 }
 
@@ -259,11 +284,13 @@ export default function HeroHealthSection({
 
   const urgentTotal = actionItemsCount.urgent + actionItemsCount.thisWeek;
 
+  const hasGantt = !!(gantt && gantt.clients.length > 0 && gantt.channels.length > 0);
+
   return (
     <div className="space-y-5">
-      {/* ── Top row: client identity + Gantt (middle) + health ring/pills ── */}
-      <div className="bg-white rounded-xl border border-gray-200 px-7 py-6 flex flex-col gap-7 xl:grid xl:grid-cols-[minmax(0,1.8fr)_minmax(0,2.8fr)_minmax(0,1fr)] xl:items-start">
-        {/* Left: avatar + name/notes + Spend pacing */}
+      {/* ── Top row: [client identity + spend + speedometer] | Gantt ── */}
+      <div className={`bg-white rounded-xl border border-gray-200 px-7 py-6 flex flex-col gap-7 xl:grid ${hasGantt ? 'xl:grid-cols-[minmax(0,1.8fr)_minmax(0,2.4fr)]' : ''} xl:items-start`}>
+        {/* Col 1: avatar + name/notes + spend row (spend text + speedometer inline) */}
         <div className="flex items-start gap-4 min-w-0 order-1">
           <div className="flex flex-col items-center gap-3 flex-shrink-0">
             {client.logo_url ? (
@@ -291,7 +318,6 @@ export default function HeroHealthSection({
                   ? 'Campaign completed'
                   : `${formatPct(completionPercentage, 0)} completed`}
               </span>
-              {/* Account Manager selector */}
               {onAccountManagerChange && (
                 <div className="relative" ref={menuRef}>
                   <button
@@ -334,68 +360,62 @@ export default function HeroHealthSection({
                 </div>
               )}
             </div>
-            {/* Inline Spend summary / pre-launch banner */}
+            {/* Pre-launch banner */}
             {completionPercentage <= 0 && daysUntilStart > 0 ? (
               <div className="mt-3 flex items-center gap-2">
                 <span className="text-sm font-medium text-gray-500">Starting in</span>
                 <span className="text-sm font-bold text-blue-600">{daysUntilStart} day{daysUntilStart !== 1 ? 's' : ''}</span>
               </div>
             ) : null}
-            <div className="mt-3 space-y-1.5" style={{ display: completionPercentage <= 0 ? 'none' : undefined }}>
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-sm font-semibold text-gray-600 uppercase tracking-wide">
-                  Spend
-                </span>
-                <Badge status={pacingStatus.status} label={pacingLabel} />
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-2xl font-bold text-gray-900">
-                  {formatCurrency(currentSpend)}
-                </span>
-                <span className="text-sm text-gray-500">
-                  {formatPct(spendPct, 0)} of {formatCurrency(totalBudget)} budget
-                </span>
-              </div>
-              <div className="mt-1">
-                <div className="h-1.5 w-full rounded-full bg-gray-100 overflow-hidden">
-                  <div
-                    className="h-full rounded-full transition-all duration-500"
-                    style={{
-                      width: `${Math.min(100, (currentSpend / Math.max(totalBudget, 1)) * 100)}%`,
-                      backgroundColor: spendColor,
-                    }}
-                  />
+            {/* Spend + speedometer side-by-side */}
+            <div className="mt-3 flex items-center gap-6" style={{ display: completionPercentage <= 0 ? 'none' : 'flex' }}>
+              <div className="flex-1 space-y-1.5">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Spend</span>
+                  <Badge status={pacingStatus.status} label={pacingLabel} />
                 </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-2xl font-bold text-gray-900">{formatCurrency(currentSpend)}</span>
+                  <span className="text-sm text-gray-500">{formatPct(spendPct, 0)} of {formatCurrency(totalBudget)} budget</span>
+                </div>
+                <div className="mt-1">
+                  <div className="h-1.5 w-full rounded-full bg-gray-100 overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all duration-500"
+                      style={{
+                        width: `${Math.min(100, (currentSpend / Math.max(totalBudget, 1)) * 100)}%`,
+                        backgroundColor: spendColor,
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+              <div className="flex-shrink-0">
+                <HealthRing score={healthScore.overallScore} status={healthScore.status} />
               </div>
             </div>
           </div>
         </div>
 
-        {/* Middle: Gantt calendar (only when data exists) */}
-        {gantt && gantt.clients.length > 0 && gantt.channels.length > 0 && (
-          <div className="w-full min-w-0 order-2 pl-10">
+        {/* Col 2: Gantt calendar (only when data exists) */}
+        {hasGantt && (
+          <div className="w-full min-w-0 order-2">
             <div className="w-full max-h-64 overflow-x-auto overflow-y-hidden border border-gray-100 rounded-lg bg-gray-50/80 px-3 py-2">
               <GanttCalendar
-                clients={gantt.clients}
-                channels={gantt.channels}
-                healthChecks={gantt.healthChecks ?? []}
-                setupPoints={gantt.setupPoints ?? []}
+                clients={gantt!.clients}
+                channels={gantt!.channels}
+                healthChecks={gantt!.healthChecks ?? []}
+                setupPoints={gantt!.setupPoints ?? []}
                 pointEvents={[]}
-                selectedDay={gantt.selectedDay}
-                onDaySelect={gantt.onDaySelect}
-                filteredClientIds={gantt.filteredClientIds}
-                currentMonth={gantt.currentMonth}
+                selectedDay={gantt!.selectedDay}
+                onDaySelect={gantt!.onDaySelect}
+                filteredClientIds={gantt!.filteredClientIds}
+                currentMonth={gantt!.currentMonth}
               />
             </div>
           </div>
         )}
 
-        {/* Right: health ring */}
-        <div className="flex flex-col gap-4 order-3 xl:items-end">
-          <div className="flex items-center xl:self-end">
-            <HealthRing score={healthScore.overallScore} status={healthScore.status} />
-          </div>
-        </div>
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-// src/app/agency-v2/page.tsx
+// src/app/agency/page.tsx
 'use client';
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -144,6 +144,7 @@ export default function AgencyDashboard() {
   };
 
   const kanbanRef = useRef<KanbanBoardHandle>(null);
+  const [kanbanView, setKanbanView] = useState<'kanban' | 'list' | 'gantt'>('kanban');
   const today = useMemo(() => new Date(), []);
   const monthLabel = `${MONTH_NAMES[today.getMonth()]} ${today.getFullYear()}`;
 
@@ -610,6 +611,22 @@ export default function AgencyDashboard() {
                   <Plus size={9} />
                   Add action point
                 </button>
+                <div style={{ marginLeft: 8, display: 'flex', border: '0.5px solid #E8E4DC', borderRadius: 4, overflow: 'hidden' }}>
+                  {(['kanban', 'list', 'gantt'] as const).map(v => (
+                    <button
+                      key={v}
+                      onClick={() => setKanbanView(v)}
+                      style={{
+                        fontSize: 10, padding: '3px 8px', cursor: 'pointer',
+                        fontFamily: "'DM Sans', system-ui, sans-serif", fontWeight: 500,
+                        color: kanbanView === v ? '#4A6580' : '#B5B0A5',
+                        background: kanbanView === v ? 'rgba(74,101,128,0.08)' : 'transparent',
+                        border: 'none', borderLeft: v === 'kanban' ? 'none' : '0.5px solid #E8E4DC',
+                        textTransform: 'capitalize',
+                      }}
+                    >{v}</button>
+                  ))}
+                </div>
                 <span style={{ marginLeft: 'auto', fontSize: 11, color: '#B5B0A5' }}>
                   {filteredActionPointClients.reduce((sum, c) => sum + c.totalOutstanding, 0)} total
                 </span>
@@ -621,6 +638,7 @@ export default function AgencyDashboard() {
                   amFilter={amFilter}
                   onActionPointCompleted={() => fetchData(true)}
                   accountManagers={accountManagers}
+                  view={kanbanView}
                 />
               </div>
             </div>
