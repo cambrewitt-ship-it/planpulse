@@ -59,6 +59,8 @@ export async function GET(
     let metaSpend = 0;
     let metaImpressions = 0;
     let metaClicks = 0;
+    let metaLinkClicks = 0;
+    const metaConversionEventMap = new Map<string, number>();
 
     let googleSpend = 0;
     let googleImpressions = 0;
@@ -66,7 +68,7 @@ export async function GET(
 
     let metaQuery = supabase
       .from('ad_performance_metrics')
-      .select('spend, impressions, clicks')
+      .select('*')
       .eq('user_id', userId)
       .eq('platform', 'meta-ads')
       .gte('date', startDate)
@@ -97,7 +99,18 @@ export async function GET(
       metaSpend += Number(row.spend) || 0;
       metaImpressions += Number(row.impressions) || 0;
       metaClicks += Number(row.clicks) || 0;
+      metaLinkClicks += Number(row.link_clicks) || 0;
+
+      // Aggregate conversion events from stored actions JSON
+      if (row.meta_actions && Array.isArray(row.meta_actions)) {
+        for (const action of row.meta_actions as Array<{ action_type: string; value: string }>) {
+          const current = metaConversionEventMap.get(action.action_type) || 0;
+          metaConversionEventMap.set(action.action_type, current + (parseInt(action.value, 10) || 0));
+        }
+      }
     }
+
+    const metaConversionEvents = Array.from(metaConversionEventMap.entries()).map(([name, count]) => ({ name, count }));
 
     for (const row of googleResult.data || []) {
       googleSpend += Number(row.spend) || 0;
@@ -280,8 +293,9 @@ export async function GET(
       metaMetrics: {
         impressions: metaImpressions,
         clicks: metaClicks,
-        link_clicks: 0, // not stored in ad_performance_metrics
+        link_clicks: metaLinkClicks,
         spend: metaSpend,
+        conversionEvents: metaConversionEvents,
       },
       googleMetrics: {
         impressions: googleImpressions,

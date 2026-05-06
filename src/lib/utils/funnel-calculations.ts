@@ -1,7 +1,7 @@
 import { FunnelStage, FunnelConfig, CombinedMetric } from '@/lib/types/funnel';
 
 interface RawFunnelData {
-  metaMetrics?: { impressions: number; clicks: number; spend: number };
+  metaMetrics?: { impressions: number; clicks: number; link_clicks: number; spend: number; conversionEvents?: Array<{ name: string; count: number }> };
   googleMetrics?: { impressions: number; clicks: number; spend: number };
   ga4Metrics?: {
     standardMetrics?: {
@@ -36,8 +36,13 @@ export function calculateFunnelMetrics(
     } else {
       // Single metric (original behavior)
       if (stage.source === 'meta' && rawData.metaMetrics) {
-        value = rawData.metaMetrics[stage.metricKey as keyof typeof rawData.metaMetrics] || 0;
-      } 
+        if (stage.metricKey === 'conversions' && stage.eventName && rawData.metaMetrics.conversionEvents) {
+          const event = rawData.metaMetrics.conversionEvents.find(e => e.name === stage.eventName);
+          value = event?.count || 0;
+        } else {
+          value = (rawData.metaMetrics as Record<string, any>)[stage.metricKey] || 0;
+        }
+      }
       else if (stage.source === 'google' && rawData.googleMetrics) {
         value = rawData.googleMetrics[stage.metricKey as keyof typeof rawData.googleMetrics] || 0;
       }
@@ -75,7 +80,11 @@ export function calculateFunnelMetrics(
 // Helper to calculate value for a single combined metric
 function calculateCombinedMetricValue(combinedMetric: CombinedMetric, rawData: RawFunnelData): number {
   if (combinedMetric.source === 'meta' && rawData.metaMetrics) {
-    return rawData.metaMetrics[combinedMetric.metricKey as keyof typeof rawData.metaMetrics] || 0;
+    if (combinedMetric.metricKey === 'conversions' && combinedMetric.eventName && rawData.metaMetrics.conversionEvents) {
+      const event = rawData.metaMetrics.conversionEvents.find(e => e.name === combinedMetric.eventName);
+      return event?.count || 0;
+    }
+    return (rawData.metaMetrics as Record<string, any>)[combinedMetric.metricKey] || 0;
   }
   if (combinedMetric.source === 'google' && rawData.googleMetrics) {
     return rawData.googleMetrics[combinedMetric.metricKey as keyof typeof rawData.googleMetrics] || 0;
@@ -103,7 +112,11 @@ function calculateValue(stage: FunnelStage, rawData: RawFunnelData): number {
   
   // Single metric (original behavior)
   if (stage.source === 'meta' && rawData.metaMetrics) {
-    return rawData.metaMetrics[stage.metricKey as keyof typeof rawData.metaMetrics] || 0;
+    if (stage.metricKey === 'conversions' && stage.eventName && rawData.metaMetrics.conversionEvents) {
+      const event = rawData.metaMetrics.conversionEvents.find(e => e.name === stage.eventName);
+      return event?.count || 0;
+    }
+    return (rawData.metaMetrics as Record<string, any>)[stage.metricKey] || 0;
   }
   if (stage.source === 'google' && rawData.googleMetrics) {
     return rawData.googleMetrics[stage.metricKey as keyof typeof rawData.googleMetrics] || 0;

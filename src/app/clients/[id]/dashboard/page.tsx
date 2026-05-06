@@ -1680,7 +1680,7 @@ export default function DashboardV2() {
           </div>
         )}
 
-        {loading ? (
+        {(loading || isLoadingMediaPlanBuilder) ? (
           /* ── Loading skeletons ── */
           <div className="space-y-6">
             {/* Hero skeleton */}

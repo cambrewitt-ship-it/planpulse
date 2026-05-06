@@ -367,6 +367,8 @@ export interface Database {
             cpc: number | null;
             cpm: number | null;
             frequency: number | null;
+            link_clicks: number | null;
+            meta_actions: Array<{ action_type: string; value: string }> | null;
             created_at: string;
             updated_at: string;
           };
@@ -391,6 +393,8 @@ export interface Database {
             cpc?: number | null;
             cpm?: number | null;
             frequency?: number | null;
+            link_clicks?: number | null;
+            meta_actions?: Array<{ action_type: string; value: string }> | null;
             created_at?: string;
             updated_at?: string;
           };
@@ -415,6 +419,8 @@ export interface Database {
             cpc?: number | null;
             cpm?: number | null;
             frequency?: number | null;
+            link_clicks?: number | null;
+            meta_actions?: Array<{ action_type: string; value: string }> | null;
             updated_at?: string;
           };
           Relationships: [];

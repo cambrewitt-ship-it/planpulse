@@ -89,32 +89,39 @@ export async function saveMetaAdsMetrics(
     cpm: number;
     frequency: number;
     currency: string;
+    actions?: Array<{ action_type: string; value: string }>;
   }>
 ) {
   const supabase = await createClient();
 
-  const metricsToInsert: AdPerformanceMetricInsert[] = metrics.map(metric => ({
-    user_id: userId,
-    client_id: clientId,
-    platform: 'meta-ads',
-    account_id: metric.accountId,
-    account_name: metric.accountName,
-    campaign_id: metric.campaignId,
-    campaign_name: metric.campaignName,
-    date: metric.dateStart, // Use dateStart as the primary date
-    spend: metric.spend,
-    currency: metric.currency,
-    impressions: metric.impressions,
-    clicks: metric.clicks,
-    ctr: metric.ctr,
-    reach: metric.reach,
-    cpc: metric.cpc,
-    cpm: metric.cpm,
-    frequency: metric.frequency,
-    // Google Ads specific fields are null for Meta Ads
-    average_cpc: null,
-    conversions: null,
-  }));
+  const metricsToInsert: AdPerformanceMetricInsert[] = metrics.map(metric => {
+    const linkClickAction = (metric.actions || []).find(a => a.action_type === 'link_click');
+    const linkClicks = linkClickAction ? parseInt(linkClickAction.value, 10) : null;
+
+    return {
+      user_id: userId,
+      client_id: clientId,
+      platform: 'meta-ads',
+      account_id: metric.accountId,
+      account_name: metric.accountName,
+      campaign_id: metric.campaignId,
+      campaign_name: metric.campaignName,
+      date: metric.dateStart,
+      spend: metric.spend,
+      currency: metric.currency,
+      impressions: metric.impressions,
+      clicks: metric.clicks,
+      ctr: metric.ctr,
+      reach: metric.reach,
+      cpc: metric.cpc,
+      cpm: metric.cpm,
+      frequency: metric.frequency,
+      link_clicks: linkClicks,
+      meta_actions: metric.actions && metric.actions.length > 0 ? metric.actions : null,
+      average_cpc: null,
+      conversions: null,
+    };
+  });
 
   const { data, error } = await supabase
     .from('ad_performance_metrics')

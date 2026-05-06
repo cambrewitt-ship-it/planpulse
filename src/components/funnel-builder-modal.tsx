@@ -110,7 +110,7 @@ const SOURCE_METRICS = {
     { value: 'impressions', label: 'Impressions' },
     { value: 'clicks', label: 'Clicks' },
     { value: 'link_clicks', label: 'Link Clicks' },
-    { value: 'conversions', label: 'Conversions' },
+    { value: 'conversions', label: 'Conversion Event (specify below)' },
     { value: 'spend', label: 'Spend' },
   ],
   google: [
@@ -152,6 +152,8 @@ function SortableStageRow({
   onDelete,
   ga4Events,
   isLoadingEvents,
+  metaConversionEvents,
+  isLoadingMetaEvents,
   availableChannels,
 }: {
   stage: StageConfig;
@@ -160,6 +162,8 @@ function SortableStageRow({
   onDelete: (index: number) => void;
   ga4Events: Array<{ name: string; count: number }>;
   isLoadingEvents: boolean;
+  metaConversionEvents: Array<{ name: string; count: number }>;
+  isLoadingMetaEvents: boolean;
   availableChannels: MediaChannel[];
 }) {
   const {
@@ -178,6 +182,8 @@ function SortableStageRow({
 
   const [eventSearch, setEventSearch] = useState(stage.eventName || '');
   const [isEventPopoverOpen, setIsEventPopoverOpen] = useState(false);
+  const [metaEventSearch, setMetaEventSearch] = useState(stage.eventName || '');
+  const [isMetaEventPopoverOpen, setIsMetaEventPopoverOpen] = useState(false);
   const [isCombineDialogOpen, setIsCombineDialogOpen] = useState(false);
   const [selectedMetricsForCombine, setSelectedMetricsForCombine] = useState<Array<{
     source: 'meta' | 'google' | 'ga4';
@@ -303,6 +309,97 @@ function SortableStageRow({
               </Select>
             </div>
           </div>
+
+          {/* Meta Conversion Event (shown when conversions is selected for Meta) */}
+          {stage.source === 'meta' && stage.metricKey === 'conversions' && (
+            <div>
+              <Label htmlFor={`stage-meta-event-${index}`}>Conversion Event</Label>
+              <Popover open={isMetaEventPopoverOpen} onOpenChange={setIsMetaEventPopoverOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={isMetaEventPopoverOpen}
+                    className="w-full justify-between"
+                  >
+                    {stage.eventName || 'Select event or type custom...'}
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-full p-0" align="start">
+                  <Command>
+                    <CommandInput
+                      placeholder="Search events or type custom..."
+                      value={metaEventSearch}
+                      onValueChange={setMetaEventSearch}
+                    />
+                    <CommandEmpty>
+                      <div className="p-2 text-sm">
+                        {isLoadingMetaEvents ? (
+                          <p className="text-slate-500">Loading events...</p>
+                        ) : metaEventSearch ? (
+                          <div>
+                            <p className="text-slate-600 mb-2">No matching events found in stored data.</p>
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              className="w-full"
+                              onClick={() => {
+                                onUpdate(index, { eventName: metaEventSearch });
+                                setIsMetaEventPopoverOpen(false);
+                              }}
+                            >
+                              Use custom: &ldquo;{metaEventSearch}&rdquo;
+                            </Button>
+                          </div>
+                        ) : (
+                          <p className="text-slate-500">
+                            {metaConversionEvents.length === 0
+                              ? 'No stored conversion events yet — sync Meta spend first, or type a custom event name'
+                              : 'Start typing to search'}
+                          </p>
+                        )}
+                      </div>
+                    </CommandEmpty>
+                    <CommandGroup>
+                      {metaConversionEvents
+                        .filter(e => e.name.toLowerCase().includes(metaEventSearch.toLowerCase()))
+                        .slice(0, 50)
+                        .map((event) => (
+                          <CommandItem
+                            key={event.name}
+                            value={event.name}
+                            onSelect={(currentValue) => {
+                              onUpdate(index, { eventName: currentValue });
+                              setMetaEventSearch(currentValue);
+                              setIsMetaEventPopoverOpen(false);
+                            }}
+                          >
+                            <Check
+                              className={cn(
+                                'mr-2 h-4 w-4',
+                                stage.eventName === event.name ? 'opacity-100' : 'opacity-0'
+                              )}
+                            />
+                            <div className="flex-1">
+                              <div className="font-medium text-xs">{event.name}</div>
+                              <div className="text-xs text-slate-500">
+                                {event.count.toLocaleString()} total actions
+                              </div>
+                            </div>
+                          </CommandItem>
+                        ))}
+                    </CommandGroup>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+              {stage.eventName && (
+                <p className="text-xs text-slate-500 mt-1">
+                  Selected: <span className="font-mono">{stage.eventName}</span>
+                </p>
+              )}
+            </div>
+          )}
 
           {/* GA4 Event Name (shown when eventCount is selected) */}
           {stage.source === 'ga4' && stage.metricKey === 'eventCount' && (
@@ -474,7 +571,8 @@ function SortableStageRow({
               value={stage.displayName}
               onChange={(e) => onUpdate(index, { displayName: e.target.value })}
               placeholder={
-                stage.source === 'ga4' && stage.metricKey === 'eventCount' && stage.eventName
+                ((stage.source === 'meta' && stage.metricKey === 'conversions') ||
+                  (stage.source === 'ga4' && stage.metricKey === 'eventCount')) && stage.eventName
                   ? stage.eventName
                   : SOURCE_METRICS[stage.source].find(m => m.value === stage.metricKey)?.label || 'Stage name'
               }
@@ -633,6 +731,7 @@ export function FunnelBuilderModal({
   onSave,
   initialConfig,
   availableChannels,
+  clientId,
 }: FunnelBuilderModalProps) {
   const modalOpen = open ?? isOpen;
   const handleOpenChange = onOpenChange ?? ((open: boolean) => !open && onClose());
@@ -655,6 +754,8 @@ export function FunnelBuilderModal({
   const [isSaving, setIsSaving] = useState(false);
   const [ga4Events, setGa4Events] = useState<Array<{ name: string; count: number }>>([]);
   const [isLoadingEvents, setIsLoadingEvents] = useState(true);
+  const [metaConversionEvents, setMetaConversionEvents] = useState<Array<{ name: string; count: number }>>([]);
+  const [isLoadingMetaEvents, setIsLoadingMetaEvents] = useState(false);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -682,12 +783,13 @@ export function FunnelBuilderModal({
     setErrors([]);
   }, [initialConfig, modalOpen]);
 
-  // Fetch GA4 events for autocomplete
+  // Fetch events for autocomplete when modal opens
   useEffect(() => {
     if (modalOpen) {
       fetchGA4Events();
+      fetchMetaConversionEvents();
     }
-  }, [isOpen]);
+  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchGA4Events = async () => {
     setIsLoadingEvents(true);
@@ -712,6 +814,27 @@ export function FunnelBuilderModal({
       console.error('Failed to fetch GA4 events:', error);
     } finally {
       setIsLoadingEvents(false);
+    }
+  };
+
+  const fetchMetaConversionEvents = async () => {
+    setIsLoadingMetaEvents(true);
+    try {
+      const response = await fetch('/api/ads/meta/list-conversion-events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientId }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.events) {
+          setMetaConversionEvents(data.events);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to fetch Meta conversion events:', error);
+    } finally {
+      setIsLoadingMetaEvents(false);
     }
   };
 
@@ -805,6 +928,9 @@ export function FunnelBuilderModal({
         });
       } else {
         // Validate single metric (original behavior)
+        if (stage.source === 'meta' && stage.metricKey === 'conversions' && !stage.eventName) {
+          newErrors.push(`Stage ${i + 1}: Conversion event name is required for Meta conversions`);
+        }
         if (stage.source === 'ga4' && stage.metricKey === 'eventCount' && !stage.eventName) {
           newErrors.push(`Stage ${i + 1}: Event name is required for custom events`);
         }
@@ -850,6 +976,8 @@ export function FunnelBuilderModal({
               const platformName = cm.platformName || getPlatformName(cm.source, undefined, availableChannels);
               return idx > 0 ? ` + ${platformName} - ${metricLabel}` : `${platformName} - ${metricLabel}`;
             }).join('');
+          } else if (s.source === 'meta' && s.metricKey === 'conversions' && s.eventName) {
+            displayName = s.eventName;
           } else if (s.source === 'ga4' && s.metricKey === 'eventCount' && s.eventName) {
             displayName = s.eventName;
           } else {
@@ -1056,6 +1184,8 @@ export function FunnelBuilderModal({
                       onDelete={deleteStage}
                       ga4Events={ga4Events}
                       isLoadingEvents={isLoadingEvents}
+                      metaConversionEvents={metaConversionEvents}
+                      isLoadingMetaEvents={isLoadingMetaEvents}
                       availableChannels={availableChannels}
                     />
                   ))}
