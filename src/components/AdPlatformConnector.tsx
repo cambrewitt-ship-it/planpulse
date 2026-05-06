@@ -150,6 +150,7 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
   const [isDiscoveringMetaAccounts, setIsDiscoveringMetaAccounts] = useState(false);
   const [isSavingMetaAccounts, setIsSavingMetaAccounts] = useState(false);
   const [metaAccountMessage, setMetaAccountMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [metaAccountSearch, setMetaAccountSearch] = useState('');
 
   // Google Analytics account management state
   const [googleAnalyticsAccounts, setGoogleAnalyticsAccounts] = useState<GoogleAnalyticsAccount[]>([]);
@@ -248,7 +249,8 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
                 console.log('Connection synced successfully:', syncData);
                 // Refresh connection status to show the saved connection
                 await fetchConnectionStatus();
-                // Keep modal open so user can manage accounts
+                // Open the platform modal so the user can manage accounts immediately
+                setOpenModal(platformId);
               }
             } catch (syncError) {
               console.error('Sync error:', syncError);
@@ -451,6 +453,7 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
     }
     if (openModal === 'facebook' && connectionStatus['facebook']) {
       fetchMetaAdsAccounts();
+      handleDiscoverMetaAccounts();
     }
     if (openModal === 'google-analytics' && connectionStatus['google-analytics']) {
       fetchGoogleAnalyticsAccounts();
@@ -479,6 +482,7 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
   const handleDiscoverMetaAccounts = async () => {
     setIsDiscoveringMetaAccounts(true);
     setMetaAccountMessage(null);
+    setMetaAccountSearch('');
 
     try {
       const response = await fetch('/api/ads/meta/accounts');
@@ -829,7 +833,13 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
       {/* Connection Modal */}
       {openModal && (
         <Dialog open={!!openModal} onOpenChange={(open) => !open && setOpenModal(null)}>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto font-[family-name:var(--font-inter)]">
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto font-[family-name:var(--font-inter)] relative">
+            {openModal === 'facebook' && isDiscoveringMetaAccounts && (
+              <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-white/90 rounded-lg">
+                <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mb-4"></div>
+                <p className="text-sm font-medium text-gray-700">Loading Ad Accounts</p>
+              </div>
+            )}
             <DialogHeader>
               <DialogTitle className="flex items-center gap-3">
                 <PlatformLogo platformId={openModal} />
@@ -1064,7 +1074,7 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
                           disabled={isDiscoveringMetaAccounts}
                           className="w-full bg-blue-600 hover:bg-blue-700 text-white"
                         >
-                          {isDiscoveringMetaAccounts ? 'Discovering...' : '🔍 Discover My Ad Accounts'}
+                          {isDiscoveringMetaAccounts ? 'Loading...' : 'Load Ad Accounts'}
                         </Button>
 
                         {discoveredMetaAccounts.length > 0 && (
@@ -1072,8 +1082,18 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
                             <p className="text-xs text-gray-600 font-medium">
                               Select accounts to add:
                             </p>
+                            <Input
+                              type="text"
+                              placeholder="Search accounts..."
+                              value={metaAccountSearch}
+                              onChange={(e) => setMetaAccountSearch(e.target.value)}
+                              className="text-sm"
+                            />
                             <div className="max-h-48 overflow-y-auto space-y-2 border border-gray-200 rounded p-2">
-                              {discoveredMetaAccounts.map((account) => (
+                              {discoveredMetaAccounts.filter(acc =>
+                                acc.accountName.toLowerCase().includes(metaAccountSearch.toLowerCase()) ||
+                                acc.accountId.includes(metaAccountSearch)
+                              ).map((account) => (
                                 <label
                                   key={account.accountId}
                                   className="flex items-center space-x-3 p-2 hover:bg-gray-100 rounded cursor-pointer"

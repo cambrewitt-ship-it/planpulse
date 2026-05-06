@@ -67,6 +67,19 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized - Please log in to connect ad platforms" }, { status: 401 });
   }
 
+  // Verify the requesting user owns this client
+  const { data: clientOwner, error: ownerError } = await supabase
+    .from('clients')
+    .select('id')
+    .eq('id', clientId)
+    .eq('user_id', user.id)
+    .single();
+
+  if (ownerError || !clientOwner) {
+    console.error("Client ownership check failed:", ownerError);
+    return NextResponse.json({ error: "Forbidden: client not found" }, { status: 403 });
+  }
+
   console.log("Authenticated user:", { id: user.id, email: user.email });
 
   const nango = new Nango({ secretKey });

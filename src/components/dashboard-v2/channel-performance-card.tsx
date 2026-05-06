@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { AlertTriangle, ChevronDown, ExternalLink, FileText } from 'lucide-react';
 import InlineActionPoints from './inline-action-points';
 import type { ChannelBenchmark, MetricPreset, ClientChannelPreset } from '@/types/database';
@@ -23,8 +23,8 @@ import {
 // Types
 // ---------------------------------------------------------------------------
 
-type MetricKey = 'impressions' | 'clicks' | 'ctr' | 'cpc' | 'conversions';
-const ALL_METRIC_KEYS: MetricKey[] = ['impressions', 'clicks', 'ctr', 'cpc', 'conversions'];
+type MetricKey = 'impressions' | 'clicks' | 'ctr' | 'cpc' | 'conversions' | 'conv_events';
+const ALL_METRIC_KEYS: MetricKey[] = ['impressions', 'clicks', 'ctr', 'cpc', 'conv_events'];
 
 export interface ChannelCardProps {
   channel: {
@@ -58,6 +58,8 @@ export interface ChannelCardProps {
       conversions: number;
     }>;
     isMultiMonth?: boolean;
+    campaigns?: Array<{ id: string; name: string }>;
+    rawSpendPoints?: any[];
   };
   selectedMonth?: Date;
   /** When provided (multi-month ranges), skips the single-month filter and enables multi-month axis labels. */
@@ -146,6 +148,14 @@ const METRIC_CONFIG: Record<MetricKey, {
     formatAxis:    (v) => String(Math.round(v)),
     formatTooltip: (v) => fmt(v, 'decimal', 0),
   },
+  conv_events: {
+    label: 'Conv. Events',
+    shortLabel: 'Conv',
+    color: '#10b981',
+    formatValue:   (v) => fmt(v, 'decimal', 0),
+    formatAxis:    (v) => String(Math.round(v)),
+    formatTooltip: (v) => fmt(v, 'decimal', 0),
+  },
 };
 
 // Map platform/channel name to benchmark channel_name used in the DB
@@ -160,14 +170,15 @@ function inferBenchmarkChannelName(platform: string, channelName: string): strin
 // Real metric values keyed by metric_key (matches benchmark seed keys)
 function getRealValue(
   metricKey: string,
-  metrics: ChannelCardProps['channel']['metrics']
+  metrics: ChannelCardProps['channel']['metrics'] & { conv_events?: number }
 ): number | null {
   switch (metricKey) {
-    case 'ctr':         return metrics.ctr * 100;  // stored as 0-1, benchmark is %
+    case 'ctr':         return metrics.ctr * 100;
     case 'cpc':         return metrics.cpc;
     case 'impressions': return metrics.impressions;
     case 'clicks':      return metrics.clicks;
     case 'conversions': return metrics.conversions;
+    case 'conv_events': return metrics.conv_events ?? null;
     default:            return null;
   }
 }
@@ -317,6 +328,9 @@ function MetricSlot({
   availableSwaps,
   onChart,
   onSwap,
+  actionTypes,
+  selectedActionType,
+  onActionTypeChange,
 }: {
   metricKey: MetricKey;
   displayValue: string;
@@ -327,6 +341,9 @@ function MetricSlot({
   availableSwaps: MetricKey[];
   onChart: () => void;
   onSwap: (newKey: MetricKey) => void;
+  actionTypes?: string[];
+  selectedActionType?: string;
+  onActionTypeChange?: (type: string) => void;
 }) {
   const [swapOpen, setSwapOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -349,6 +366,17 @@ function MetricSlot({
     return () => document.removeEventListener('mousedown', handleClick);
   }, [swapOpen]);
 
+  const [actionOpen, setActionOpen] = useState(false);
+  const actionRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!actionOpen) return;
+    function handleClick(e: MouseEvent) {
+      if (actionRef.current && !actionRef.current.contains(e.target as Node)) setActionOpen(false);
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [actionOpen]);
+
   return (
     <div ref={ref} style={{ flex: 1, minWidth: 60, position: 'relative' }}>
       {/* Label + swap trigger */}
@@ -367,6 +395,54 @@ function MetricSlot({
           >▾</button>
         )}
       </div>
+
+      {/* Action-type picker for conv_events */}
+      {metricKey === 'conv_events' && (
+        <div ref={actionRef} style={{ position: 'relative', marginBottom: 3 }}>
+          <button
+            onClick={(e) => { e.stopPropagation(); setActionOpen(v => !v); }}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 2,
+              background: '#f3f4f6', border: '1px solid #e5e7eb', borderRadius: 4,
+              padding: '1px 5px', cursor: 'pointer', maxWidth: 110, overflow: 'hidden',
+            }}
+          >
+            <span style={{ fontSize: 9, color: '#374151', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 90 }}>
+              {selectedActionType ? actionTypeLabel(selectedActionType) : 'Select event'}
+            </span>
+            <span style={{ color: '#9ca3af', fontSize: 8, flexShrink: 0 }}>▾</span>
+          </button>
+          {actionOpen && (
+            <div style={{
+              position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: 2,
+              background: 'white', border: '1px solid #e5e7eb', borderRadius: 6,
+              boxShadow: '0 4px 12px rgba(0,0,0,0.12)', minWidth: 180, maxHeight: 200,
+              overflowY: 'auto',
+            }}>
+              {(actionTypes ?? []).length === 0 ? (
+                <div style={{ padding: '8px 10px', fontSize: 11, color: '#9ca3af' }}>No events found</div>
+              ) : (actionTypes ?? []).map(type => (
+                <button
+                  key={type}
+                  onClick={() => { onActionTypeChange?.(type); setActionOpen(false); }}
+                  style={{
+                    display: 'block', width: '100%', textAlign: 'left',
+                    padding: '6px 10px', fontSize: 11,
+                    color: type === selectedActionType ? '#2563eb' : '#374151',
+                    fontWeight: type === selectedActionType ? 600 : 400,
+                    background: type === selectedActionType ? '#eff6ff' : 'transparent',
+                    border: 'none', cursor: 'pointer',
+                  }}
+                  onMouseEnter={e => { if (type !== selectedActionType) (e.currentTarget as HTMLElement).style.background = '#f9fafb'; }}
+                  onMouseLeave={e => { if (type !== selectedActionType) (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+                >
+                  {actionTypeLabel(type)}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Value */}
       {hasMetrics ? (
@@ -435,6 +511,29 @@ function MetricSlot({
 // Main component
 // ---------------------------------------------------------------------------
 
+// Human-readable labels for common Meta action types
+const ACTION_TYPE_LABELS: Record<string, string> = {
+  'lead':                                              'Leads',
+  'offsite_conversion.fb_pixel_purchase':              'Purchases',
+  'offsite_conversion.fb_pixel_add_to_cart':           'Add to Cart',
+  'offsite_conversion.fb_pixel_initiate_checkout':     'Checkout Started',
+  'offsite_conversion.fb_pixel_complete_registration': 'Registrations',
+  'offsite_conversion.fb_pixel_lead':                  'Pixel Leads',
+  'offsite_conversion.fb_pixel_view_content':          'Content Views',
+  'offsite_conversion.fb_pixel_search':                'Searches',
+  'link_click':                                        'Link Clicks',
+  'landing_page_view':                                 'Landing Page Views',
+  'post_engagement':                                   'Post Engagement',
+  'page_engagement':                                   'Page Engagement',
+  'video_view':                                        'Video Views',
+  'omni_purchase':                                     'Omni Purchases',
+  'omni_add_to_cart':                                  'Omni Add to Cart',
+};
+
+function actionTypeLabel(type: string): string {
+  return ACTION_TYPE_LABELS[type] ?? type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
 // Helper to normalize channel name to channel_type format
 function normalizeChannelType(channelName: string): string {
   // Convert to title case: "META ADS" -> "Meta Ads"
@@ -452,6 +551,153 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
   const [presetOpen, setPresetOpen] = useState(false);
   const [savingPreset, setSavingPreset] = useState(false);
   const [displayedMetrics, setDisplayedMetrics] = useState<MetricKey[]>(ALL_METRIC_KEYS);
+  const [selectedCampaignIds, setSelectedCampaignIds] = useState<Set<string>>(new Set()); // empty = all
+  const [campaignDropdownOpen, setCampaignDropdownOpen] = useState(false);
+  const campaignDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!campaignDropdownOpen) return;
+    function handleClick(e: MouseEvent) {
+      if (campaignDropdownRef.current && !campaignDropdownRef.current.contains(e.target as Node)) {
+        setCampaignDropdownOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [campaignDropdownOpen]);
+
+  const toggleCampaign = (id: string) => {
+    setSelectedCampaignIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const campaignSubtitle = (() => {
+    const campaigns = channel.campaigns;
+    if (!campaigns || campaigns.length === 0) return null;
+    if (selectedCampaignIds.size === 0 || selectedCampaignIds.size === campaigns.length) return 'ALL CAMPAIGNS';
+    const selected = campaigns.filter(c => selectedCampaignIds.has(c.id));
+    if (selected.length === 1) return selected[0].name.toUpperCase();
+    return selected.map(c => c.name.toUpperCase()).join(' + ');
+  })();
+
+  // For 3+ selected campaigns, split into two display lines at the midpoint
+  const campaignLines = (() => {
+    if (!campaignSubtitle || selectedCampaignIds.size < 3) return null;
+    const campaigns = channel.campaigns ?? [];
+    const selected = campaigns.filter(c => selectedCampaignIds.has(c.id));
+    if (selected.length < 3) return null;
+    const mid = Math.ceil(selected.length / 2);
+    const line1 = selected.slice(0, mid).map(c => c.name.toUpperCase()).join(' + ');
+    const line2 = '+ ' + selected.slice(mid).map(c => c.name.toUpperCase()).join(' + ');
+    return [line1, line2];
+  })();
+
+  const [selectedActionType, setSelectedActionType] = useState<string>('');
+  const [actionDropdownOpen, setActionDropdownOpen] = useState(false);
+  const actionDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!actionDropdownOpen) return;
+    function handleClick(e: MouseEvent) {
+      if (actionDropdownRef.current && !actionDropdownRef.current.contains(e.target as Node)) {
+        setActionDropdownOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [actionDropdownOpen]);
+
+  // Derive unique action types from raw spend points
+  const availableActionTypes = useMemo(() => {
+    const pts = selectedCampaignIds.size === 0
+      ? (channel.rawSpendPoints ?? [])
+      : (channel.rawSpendPoints ?? []).filter((p: any) => selectedCampaignIds.has(p.campaignId));
+    const seen = new Set<string>();
+    pts.forEach((p: any) => {
+      (p.actions ?? []).forEach((a: any) => {
+        if (a.action_type) seen.add(a.action_type);
+      });
+    });
+    return Array.from(seen).sort();
+  }, [selectedCampaignIds, channel.rawSpendPoints]);
+
+  // Auto-select first action type when available types change
+  useEffect(() => {
+    if (availableActionTypes.length > 0 && !availableActionTypes.includes(selectedActionType)) {
+      setSelectedActionType(availableActionTypes[0]);
+    }
+  }, [availableActionTypes]);
+
+  // Helper: sum action value for a given type across a set of raw points
+  const sumActionType = (pts: any[], actionType: string): number =>
+    pts.reduce((s: number, p: any) => {
+      const found = (p.actions ?? []).find((a: any) => a.action_type === actionType);
+      return s + (found ? parseFloat(found.value || '0') : 0);
+    }, 0);
+
+  const filteredMetrics = useMemo(() => {
+    const pts = selectedCampaignIds.size === 0
+      ? (channel.rawSpendPoints ?? [])
+      : (channel.rawSpendPoints ?? []).filter((p: any) => selectedCampaignIds.has(p.campaignId));
+
+    if (!pts.length) return { ...channel.metrics, conv_events: 0 };
+
+    const impressions = pts.reduce((s: number, p: any) => s + (p.impressions ?? 0), 0);
+    const clicks = pts.reduce((s: number, p: any) => s + (p.clicks ?? 0), 0);
+    const spend = pts.reduce((s: number, p: any) => s + (p.spend ?? 0), 0);
+    const conversions = pts.reduce((s: number, p: any) => s + (p.conversions ?? 0), 0);
+    const conv_events = selectedActionType ? sumActionType(pts, selectedActionType) : 0;
+
+    return {
+      impressions,
+      clicks,
+      ctr: impressions > 0 ? clicks / impressions : 0,
+      cpc: clicks > 0 ? spend / clicks : 0,
+      conversions,
+      conv_events,
+    };
+  }, [selectedCampaignIds, selectedActionType, channel.rawSpendPoints, channel.metrics]);
+
+  const filteredMetricsChartData = useMemo(() => {
+    const pts = selectedCampaignIds.size === 0
+      ? (channel.rawSpendPoints ?? [])
+      : (channel.rawSpendPoints ?? []).filter((p: any) => selectedCampaignIds.has(p.campaignId));
+
+    if (!pts.length) return channel.metricsChartData;
+
+    const byDate = new Map<string, { impressions: number; clicks: number; spend: number; conversions: number; conv_events: number }>();
+    pts.forEach((p: any) => {
+      const existing = byDate.get(p.date) ?? { impressions: 0, clicks: 0, spend: 0, conversions: 0, conv_events: 0 };
+      const eventVal = selectedActionType
+        ? parseFloat((p.actions ?? []).find((a: any) => a.action_type === selectedActionType)?.value || '0')
+        : 0;
+      byDate.set(p.date, {
+        impressions: existing.impressions + (p.impressions ?? 0),
+        clicks: existing.clicks + (p.clicks ?? 0),
+        spend: existing.spend + (p.spend ?? 0),
+        conversions: existing.conversions + (p.conversions ?? 0),
+        conv_events: existing.conv_events + eventVal,
+      });
+    });
+    return Array.from(byDate.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([date, vals]) => ({
+        date,
+        impressions: vals.impressions,
+        clicks: vals.clicks,
+        ctr: vals.impressions > 0 ? vals.clicks / vals.impressions : 0,
+        cpc: vals.clicks > 0 ? vals.spend / vals.clicks : 0,
+        conversions: vals.conversions,
+        conv_events: vals.conv_events,
+      }));
+  }, [selectedCampaignIds, selectedActionType, channel.rawSpendPoints, channel.metricsChartData]);
 
   // Benchmark / preset derived values
   const benchmarkChannelName = inferBenchmarkChannelName(channel.platform, channel.name);
@@ -513,7 +759,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
   const hasIssues     = (channel.issues?.length ?? 0) > 0;
   const hasChartData  = (channel.chartData?.length ?? 0) > 0;
   // hasMetrics is true only when there's at least one day with real data (not all zeros)
-  const hasMetrics    = (channel.metricsChartData ?? []).some(
+  const hasMetrics    = (filteredMetricsChartData ?? []).some(
     p => p.impressions > 0 || p.clicks > 0 || p.conversions > 0
   );
   const canExpand     = hasChartData || hasMetrics;
@@ -631,8 +877,58 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
               {/* Channel name + status */}
               <div className="row-start-1 col-start-2 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <h3 className="text-sm font-bold truncate" style={{ color: '#1C1917', fontFamily: "'Inter', system-ui, sans-serif" }}>{channel.name}</h3>
-                  <StatusBadge status={channel.status} />
+                  {channel.campaigns && channel.campaigns.length > 0 ? (
+                    <div ref={campaignDropdownRef} className="relative min-w-0 flex-shrink-0">
+                      <button
+                        onClick={() => setCampaignDropdownOpen(v => !v)}
+                        className="flex flex-col items-start gap-0 text-left min-w-0"
+                      >
+                        <div className="flex items-center gap-1">
+                          <h3 className="text-sm font-bold" style={{ color: '#1C1917', fontFamily: "'Inter', system-ui, sans-serif" }}>
+                            {channel.name.toUpperCase()}
+                            {campaignSubtitle && (
+                              <span className="text-gray-500"> — {campaignLines ? campaignLines[0] : campaignSubtitle}</span>
+                            )}
+                          </h3>
+                          <ChevronDown className="w-3 h-3 flex-shrink-0 text-gray-400" />
+                        </div>
+                        {campaignLines?.[1] && (
+                          <div className="text-sm font-bold text-gray-500 leading-snug">{campaignLines[1]}</div>
+                        )}
+                      </button>
+                      {campaignDropdownOpen && (
+                        <div className="absolute top-full left-0 mt-1 z-30 bg-white border border-gray-200 rounded-lg shadow-lg py-1 min-w-[220px] max-w-[300px] max-h-64 overflow-y-auto">
+                          {/* Select All / Clear */}
+                          <button
+                            onClick={() => setSelectedCampaignIds(new Set())}
+                            className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors border-b border-gray-100 ${selectedCampaignIds.size === 0 ? 'font-semibold text-blue-600 bg-blue-50' : 'text-gray-600 hover:bg-gray-50'}`}
+                          >
+                            <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0 ${selectedCampaignIds.size === 0 ? 'bg-blue-600 border-blue-600' : 'border-gray-300'}`}>
+                              {selectedCampaignIds.size === 0 && <span className="text-white text-[8px] leading-none">✓</span>}
+                            </span>
+                            All Campaigns
+                          </button>
+                          {channel.campaigns.map(c => {
+                            const checked = selectedCampaignIds.has(c.id);
+                            return (
+                              <button
+                                key={c.id}
+                                onClick={() => toggleCampaign(c.id)}
+                                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors hover:bg-gray-50 text-gray-700"
+                              >
+                                <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0 ${checked ? 'bg-blue-600 border-blue-600' : 'border-gray-300'}`}>
+                                  {checked && <span className="text-white text-[8px] leading-none">✓</span>}
+                                </span>
+                                <span className="truncate text-left">{c.name}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <h3 className="text-sm font-bold truncate" style={{ color: '#1C1917', fontFamily: "'Inter', system-ui, sans-serif" }}>{channel.name}</h3>
+                  )}
                 </div>
                 {channel.format && (
                   <p className="text-xs text-gray-500 mt-0.5 uppercase tracking-wide">{channel.format}</p>
@@ -696,27 +992,33 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
             {/* Metric slots — shown metrics with benchmarks inline */}
             <div style={{ display: 'flex', gap: 4 }}>
               {displayedMetrics.map((key, slotIdx) => {
-                const rawValue = channel.metrics[key];
-                const displayValue = key === 'ctr'
+                // 'conversions' slots are remapped to conv_events so they share data and chart toggle
+                const effectiveKey: MetricKey = key === 'conversions' ? 'conv_events' : key;
+                const rawValue = (filteredMetrics as any)[effectiveKey] ?? 0;
+                const displayValue = effectiveKey === 'ctr'
                   ? fmt(rawValue * 100, 'percent', 2)
-                  : key === 'cpc'
+                  : effectiveKey === 'cpc'
                     ? fmt(rawValue, 'currency', 2)
                     : fmt(rawValue, 'decimal', 0);
-                const benchmark = channelBenchmarks.find(b => b.metric_key === key);
-                const realValue = getRealValue(key, channel.metrics);
-                const availableSwaps = ALL_METRIC_KEYS.filter(k => k !== key && !displayedMetrics.includes(k));
+                const benchmark = channelBenchmarks.find(b => b.metric_key === effectiveKey);
+                const realValue = getRealValue(effectiveKey, filteredMetrics);
+                const effectiveDisplayed = displayedMetrics.map(k => k === 'conversions' ? 'conv_events' : k);
+                const availableSwaps = ALL_METRIC_KEYS.filter(k => k !== effectiveKey && !effectiveDisplayed.includes(k));
                 return (
                   <MetricSlot
-                    key={`${slotIdx}-${key}`}
-                    metricKey={key}
+                    key={`${slotIdx}-${effectiveKey}`}
+                    metricKey={effectiveKey}
                     displayValue={displayValue}
                     benchmark={benchmark}
                     realValue={realValue}
-                    isActive={isMetricsView && selectedMetrics.has(key)}
+                    isActive={isMetricsView && selectedMetrics.has(effectiveKey)}
                     hasMetrics={hasMetrics}
                     availableSwaps={availableSwaps}
-                    onChart={() => handleMetricClick(key)}
+                    onChart={() => handleMetricClick(effectiveKey)}
                     onSwap={(newKey) => handleSwapMetric(slotIdx, newKey)}
+                    actionTypes={effectiveKey === 'conv_events' ? availableActionTypes : undefined}
+                    selectedActionType={effectiveKey === 'conv_events' ? selectedActionType : undefined}
+                    onActionTypeChange={effectiveKey === 'conv_events' ? setSelectedActionType : undefined}
                   />
                 );
               })}
@@ -907,7 +1209,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
               {chartType === 'metrics' && isExpanded && (
                 <>
                   <div className="flex items-center gap-1.5 mb-4 flex-wrap">
-                    {(Object.keys(METRIC_CONFIG) as MetricKey[]).map((key) => {
+                    {(Object.keys(METRIC_CONFIG) as MetricKey[]).filter(k => k !== 'conversions').map((key) => {
                       const cfg = METRIC_CONFIG[key];
                       const isActive = selectedMetrics.has(key);
                       return (
@@ -933,7 +1235,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                       selectedKeys.length === 1 ? 'single'
                       : selectedKeys.length === 2 ? 'dual'
                       : 'hidden';
-                    const dataLen = channel.metricsChartData?.length ?? 0;
+                    const dataLen = filteredMetricsChartData?.length ?? 0;
 
                     return (
                       <>
@@ -945,7 +1247,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                         <div className="h-64">
                           <ResponsiveContainer width="100%" height="100%">
                             <ComposedChart
-                              data={channel.metricsChartData}
+                              data={filteredMetricsChartData}
                               margin={{ top: 10, right: axisMode === 'dual' ? 64 : 16, left: 0, bottom: 8 }}
                             >
                               <defs>

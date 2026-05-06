@@ -1172,14 +1172,36 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
           <tbody>
             {channels.length === 0 ? (
               // Empty state
-              <tr>
-                <td
-                  colSpan={3 + customColumns.length + weeks.length}
-                  className="border border-gray-300 bg-white px-3 py-8 text-center text-gray-500"
-                >
-                  No channels added yet
-                </td>
-              </tr>
+              <>
+                <tr>
+                  <td
+                    colSpan={3 + customColumns.length + weeks.length}
+                    className="border border-gray-300 bg-white px-3 py-8 text-center text-gray-500"
+                  >
+                    No channels added yet
+                  </td>
+                </tr>
+                {/* Add Channel button row */}
+                <tr>
+                  <td className="border border-gray-300 px-3 py-2 sticky left-0 mr-[-1px] z-20 bg-gray-50 w-[200px] min-w-[200px] border-r-2 border-gray-400 shadow-[2px_0_4px_rgba(0,0,0,0.1)]">
+                    <Button
+                      onClick={handleAddChannel}
+                      variant="outline"
+                      size="sm"
+                      className="h-7 px-2 text-xs"
+                    >
+                      <Plus className="h-3 w-3 mr-1" />
+                      Add Channel
+                    </Button>
+                  </td>
+                  <td
+                    colSpan={2 + customColumns.length + weeks.length}
+                    className="border border-gray-300 bg-white"
+                  >
+                    {/* Empty space */}
+                  </td>
+                </tr>
+              </>
             ) : (
               // Channel rows
               channels.map((channel, channelIndex) => {

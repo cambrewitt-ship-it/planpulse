@@ -46,6 +46,9 @@ export interface SpendDataPoint {
   ctr?: number;
   cpc?: number;
   conversions?: number;
+  campaignId?: string;
+  campaignName?: string;
+  actions?: Array<{ action_type: string; value: string }>;
 }
 
 export interface FetchAnalyticsDataOptions {
@@ -181,17 +184,18 @@ export async function fetchSpendData(
       }),
     });
 
+    const metaData = await metaResponse.json().catch(() => ({}));
+    console.log('[fetchSpendData] Meta response status:', metaResponse.status, 'success:', metaData.success, 'data count:', metaData.data?.length, 'errors:', metaData.errors);
     if (metaResponse.ok) {
-      const metaData = await metaResponse.json();
       if (metaData.success && metaData.data) {
         metaData.data.forEach((item: any) => {
           // Meta returns dateStart/dateStop, use dateStart
           // Normalize date format to YYYY-MM-DD
           const dateStr = item.dateStart || item.dateStop || '';
-          const normalizedDate = dateStr.includes('T') 
-            ? dateStr.split('T')[0] 
+          const normalizedDate = dateStr.includes('T')
+            ? dateStr.split('T')[0]
             : dateStr;
-          
+
           spendData.push({
             date: normalizedDate,
             spend: item.spend || 0,
@@ -202,9 +206,22 @@ export async function fetchSpendData(
             ctr: item.ctr || 0,
             cpc: item.cpc || 0,
             conversions: item.conversions || 0,
+            campaignId: item.campaignId || '',
+            campaignName: item.campaignName || '',
+            actions: item.actions || [],
           });
         });
+        // Surface per-account errors even when overall request succeeded
+        if (metaData.errors && metaData.errors.length > 0) {
+          metaData.errors.forEach((err: any) => {
+            errors.push(`Meta Ads (${err.accountName || err.accountId}): ${err.error}`);
+          });
+        }
+      } else if (!metaData.success) {
+        errors.push(`Meta Ads: ${metaData.error || 'Unknown error'}`);
       }
+    } else {
+      errors.push(`Meta Ads: ${metaData.error || `HTTP ${metaResponse.status}`}`);
     }
   } catch (error: any) {
     errors.push(`Meta Ads: ${error.message}`);
@@ -245,6 +262,8 @@ export async function fetchSpendData(
             ctr: item.ctr || 0,
             cpc: item.cpc || 0,
             conversions: item.conversions || 0,
+            campaignId: item.campaignId || '',
+            campaignName: item.campaignName || '',
           });
         });
       }

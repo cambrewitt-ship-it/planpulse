@@ -5,11 +5,15 @@ import { MediaPlan, Channel } from '@/types/database';
 import { addWeeks, format, parseISO } from 'date-fns';
 
 export async function getClients() {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not authenticated');
+
   const { data, error } = await supabase
     .from('clients')
     .select('*')
+    .eq('user_id', user.id)
     .order('name');
-  
+
   if (error) throw error;
   return data;
 }

@@ -58,18 +58,22 @@ export default function ClientActionPointsList({ actionPoints, onToggle }: Props
       daysFromToday(a.due_date) - daysFromToday(b.due_date);
 
     if (filterMode === 'priority') {
-      const buckets: ActionPoint[][] = [[], [], []];
+      const buckets: ActionPoint[][] = [[], [], [], []];
       [...actionPoints].sort(sortByDue).forEach(ap => {
         const days = daysFromToday(ap.due_date);
-        if (days <= 2) buckets[0].push(ap);
-        else if (days <= 4) buckets[1].push(ap);
-        else buckets[2].push(ap);
+        if (days < 0) buckets[0].push(ap);
+        else if (days <= 2) buckets[1].push(ap);
+        else if (days <= 4) buckets[2].push(ap);
+        else buckets[3].push(ap);
       });
-      return [
-        { label: '1–2 Days', items: buckets[0] },
-        { label: '2–4 Days', items: buckets[1] },
-        { label: '5+ Days', items: buckets[2] },
-      ];
+      const cols: Column[] = [];
+      if (buckets[0].length > 0) cols.push({ label: 'Overdue', items: buckets[0] });
+      cols.push(
+        { label: '1–2 Days', items: buckets[1] },
+        { label: '2–4 Days', items: buckets[2] },
+        { label: '5+ Days', items: buckets[3] },
+      );
+      return cols;
     } else {
       const channels = Array.from(
         new Set(actionPoints.map(ap => ap.channel_type).filter((c): c is string => !!c))
@@ -178,7 +182,8 @@ export default function ClientActionPointsList({ actionPoints, onToggle }: Props
                 borderBottom: '0.5px solid #E8E4DC',
                 fontSize: 9,
                 fontWeight: 600,
-                color: '#8A8578',
+                color: col.label === 'Overdue' ? '#fff' : '#8A8578',
+                background: col.label === 'Overdue' ? '#7F1D1D' : 'transparent',
                 textTransform: 'uppercase',
                 letterSpacing: '0.1em',
                 flexShrink: 0,
@@ -189,8 +194,8 @@ export default function ClientActionPointsList({ actionPoints, onToggle }: Props
                 {col.label}
                 {colIncomplete.length > 0 && (
                   <span style={{
-                    background: '#E8E4DC',
-                    color: '#8A8578',
+                    background: col.label === 'Overdue' ? 'rgba(255,255,255,0.25)' : '#E8E4DC',
+                    color: col.label === 'Overdue' ? '#fff' : '#8A8578',
                     borderRadius: 99,
                     padding: '0px 5px',
                     fontSize: 8,

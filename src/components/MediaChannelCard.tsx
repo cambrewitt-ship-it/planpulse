@@ -901,10 +901,17 @@ export default function MediaChannelCard({ channel, onToggleAction, onActualSpen
                 {channel.icon}
               </div>
               <div className="flex-1">
-                <div className="flex items-center gap-2 mb-1">
+                <div className="flex items-center gap-2 mb-1 flex-wrap">
                   <h3 className="text-lg font-semibold text-[#0f172a]">
                     {channel.name}
                   </h3>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs px-2"
+                  >
+                    Connect
+                  </Button>
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
                   <Badge className={`${getStatusColor(channel.status)} text-white font-medium`}>

@@ -22,6 +22,7 @@ interface MetaAdMetrics {
   cpm: number;
   frequency: number;
   currency: string;
+  actions?: Array<{ action_type: string; value: string }>;
 }
 
 export async function POST(request: NextRequest) {
@@ -157,8 +158,9 @@ export async function POST(request: NextRequest) {
               clientAccountIds.has(String(acc.account_id).replace(/^act_/, ''))
             );
           } else {
-            // No stored metrics for this client — don't show other clients' accounts
-            metaAdsAccounts = [];
+            // No stored metrics for this client yet — use all active accounts
+            // on first fetch so data can be seeded into ad_performance_metrics.
+            metaAdsAccounts = allAccounts;
           }
         } else {
           metaAdsAccounts = allAccounts;
@@ -203,13 +205,14 @@ export async function POST(request: NextRequest) {
         try {
           // Build query params - fetch at campaign level to get campaign data
           const params = new URLSearchParams({
-            fields: 'spend,impressions,reach,clicks,ctr,cpc,cpm,frequency,account_name,campaign_id,campaign_name,date_start,date_stop',
+            fields: 'spend,impressions,reach,clicks,ctr,cpc,cpm,frequency,account_name,campaign_id,campaign_name,date_start,date_stop,actions',
             time_range: JSON.stringify({
               since: startDate,
               until: endDate
             }),
-            time_increment: '1', // Get daily breakdown
-            level: 'campaign', // Changed from 'account' to 'campaign' to get campaign-level data
+            time_increment: '1',
+            level: 'campaign',
+            limit: '100', // Max allowed — reduces pagination round trips
             access_token: accessToken
           });
 
@@ -275,13 +278,14 @@ export async function POST(request: NextRequest) {
                   console.log('Token was refreshed, retrying API call...');
                   // Retry the API call with the refreshed token
                   const retryParams = new URLSearchParams({
-                    fields: 'spend,impressions,reach,clicks,ctr,cpc,cpm,frequency,account_name,campaign_id,campaign_name,date_start,date_stop',
+                    fields: 'spend,impressions,reach,clicks,ctr,cpc,cpm,frequency,account_name,campaign_id,campaign_name,date_start,date_stop,actions',
                     time_range: JSON.stringify({
                       since: startDate,
                       until: endDate
                     }),
                     time_increment: '1',
                     level: 'campaign',
+                    limit: '100',
                     access_token: refreshedToken
                   });
                   
@@ -295,9 +299,8 @@ export async function POST(request: NextRequest) {
                   
                   if (retryResponse.ok) {
                     console.log('✓ Retry successful after token refresh');
-                    const retryData = await retryResponse.json();
-                    if (retryData.data && Array.isArray(retryData.data)) {
-                      for (const result of retryData.data) {
+                    const pushRetryResults = (results: any[]) => {
+                      for (const result of results) {
                         allSpendData.push({
                           accountId: accountId,
                           accountName: result.account_name || account.account_name,
@@ -313,8 +316,21 @@ export async function POST(request: NextRequest) {
                           cpc: parseFloat(result.cpc || '0'),
                           cpm: parseFloat(result.cpm || '0'),
                           frequency: parseFloat(result.frequency || '0'),
-                          currency: account.currency || 'USD'
+                          currency: account.currency || 'USD',
+                          actions: result.actions || [],
                         });
+                      }
+                    };
+                    let retryPageData = await retryResponse.json();
+                    if (retryPageData.data && Array.isArray(retryPageData.data)) {
+                      pushRetryResults(retryPageData.data);
+                    }
+                    while (retryPageData.paging?.next) {
+                      const nextRetryResponse = await fetch(retryPageData.paging.next);
+                      if (!nextRetryResponse.ok) break;
+                      retryPageData = await nextRetryResponse.json();
+                      if (retryPageData.data && Array.isArray(retryPageData.data)) {
+                        pushRetryResults(retryPageData.data);
                       }
                     }
                     continue; // Skip to next account
@@ -329,12 +345,8 @@ export async function POST(request: NextRequest) {
             throw new Error(errorMessage);
           }
 
-          const data = await response.json();
-          console.log(`✓ Success! Got ${data.data?.length || 0} results`);
-
-          // Process results
-          if (data.data && Array.isArray(data.data)) {
-            for (const result of data.data) {
+          const pushResults = (results: any[]) => {
+            for (const result of results) {
               allSpendData.push({
                 accountId: accountId,
                 accountName: result.account_name || account.account_name,
@@ -350,10 +362,35 @@ export async function POST(request: NextRequest) {
                 cpc: parseFloat(result.cpc || '0'),
                 cpm: parseFloat(result.cpm || '0'),
                 frequency: parseFloat(result.frequency || '0'),
-                currency: account.currency || 'USD'
+                currency: account.currency || 'USD',
+                actions: result.actions || [],
               });
             }
+          };
+
+          let pageData = await response.json();
+          let pageCount = 1;
+          console.log(`✓ Page ${pageCount}: Got ${pageData.data?.length || 0} results`);
+
+          if (pageData.data && Array.isArray(pageData.data)) {
+            pushResults(pageData.data);
           }
+
+          while (pageData.paging?.next) {
+            const nextResponse = await fetch(pageData.paging.next);
+            if (!nextResponse.ok) {
+              console.error(`Pagination fetch failed on page ${pageCount + 1}: ${nextResponse.status}`);
+              break;
+            }
+            pageData = await nextResponse.json();
+            pageCount++;
+            console.log(`✓ Page ${pageCount}: Got ${pageData.data?.length || 0} results`);
+            if (pageData.data && Array.isArray(pageData.data)) {
+              pushResults(pageData.data);
+            }
+          }
+
+          console.log(`✓ Total pages fetched: ${pageCount}`);
 
         } catch (error: any) {
           console.error(`Failed for account ${accountId}:`, error.message);

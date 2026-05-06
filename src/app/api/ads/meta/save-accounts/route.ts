@@ -28,15 +28,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get user's Meta Ads connection
-    const { data: connection, error: connectionError } = await supabase
+    // Verify the user has at least one active Meta Ads connection
+    const { data: connections, error: connectionError } = await supabase
       .from('ad_platform_connections')
       .select('connection_id')
       .eq('user_id', user.id)
       .eq('platform', 'meta-ads')
-      .single();
+      .eq('connection_status', 'active')
+      .limit(1);
 
-    if (connectionError || !connection) {
+    if (connectionError || !connections?.length) {
       console.error('Connection lookup error:', connectionError);
       return NextResponse.json(
         { error: 'No active Meta Ads connection found. Please connect your Meta Ads account first.' },

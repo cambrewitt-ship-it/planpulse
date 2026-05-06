@@ -50,10 +50,11 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // --- 1. Fetch clients ---
+    // --- 1. Fetch clients (scoped to current user) ---
     const { data: clients, error: clientsError } = await supabase
       .from('clients')
       .select('id, name')
+      .eq('user_id', session.user.id)
       .order('name', { ascending: true });
 
     if (clientsError || !clients) {

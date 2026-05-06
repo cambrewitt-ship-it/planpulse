@@ -1,4 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { createHmac, timingSafeEqual } from 'crypto';
 
 type NangoWebhookPayload = {
   type?: string;
@@ -111,31 +112,39 @@ async function handleDeletion(payload: NangoWebhookPayload) {
 export async function POST(request: Request) {
   console.log('=== WEBHOOK RECEIVED ===');
 
-  // Security: Verify webhook signature if WEBHOOK_SECRET is configured
-  const webhookSecret = process.env.WEBHOOK_SECRET;
-  if (webhookSecret) {
-    const signature = request.headers.get('x-nango-signature');
-    if (!signature) {
-      console.error('Missing webhook signature');
-      return new Response('Unauthorized: Missing signature', { status: 401 });
-    }
+  const rawBody = await request.text();
 
-    // Note: Nango webhook signature verification would go here
-    // For now, we're checking that the header exists
-    // In production, implement proper HMAC verification
+  // Verify Nango webhook signature using HMAC-SHA256
+  const webhookSecret = process.env.NANGO_WEBHOOK_SECRET;
+  if (!webhookSecret) {
+    console.error('NANGO_WEBHOOK_SECRET is not configured — rejecting webhook');
+    return new Response('Server misconfiguration', { status: 500 });
   }
 
-  // Security: Rate limiting check - reject if too many requests
-  const forwardedFor = request.headers.get('x-forwarded-for');
-  const ip = forwardedFor ? forwardedFor.split(',')[0] : 'unknown';
-  console.log('Webhook from IP:', ip);
+  const signature = request.headers.get('x-nango-signature');
+  if (!signature) {
+    console.error('Missing x-nango-signature header');
+    return new Response('Unauthorized: Missing signature', { status: 401 });
+  }
+
+  const expected = createHmac('sha256', webhookSecret).update(rawBody).digest('hex');
+  try {
+    const sigBuffer = Buffer.from(signature, 'hex');
+    const expectedBuffer = Buffer.from(expected, 'hex');
+    if (sigBuffer.length !== expectedBuffer.length || !timingSafeEqual(sigBuffer, expectedBuffer)) {
+      console.error('Invalid webhook signature');
+      return new Response('Unauthorized: Invalid signature', { status: 401 });
+    }
+  } catch {
+    console.error('Webhook signature comparison failed');
+    return new Response('Unauthorized: Invalid signature', { status: 401 });
+  }
 
   let payload: NangoWebhookPayload | null = null;
 
   try {
-    const text = await request.text();
-    console.log('Raw webhook body (truncated):', text.substring(0, 200));
-    payload = JSON.parse(text);
+    payload = JSON.parse(rawBody);
+    console.log('Raw webhook body (truncated):', rawBody.substring(0, 200));
   } catch (error) {
     console.error('Failed to parse Nango webhook payload', error);
     return new Response('Bad Request: Invalid JSON', { status: 400 });

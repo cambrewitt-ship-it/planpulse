@@ -7,6 +7,7 @@ export interface Database {
             id: string;
             name: string;
             logo_url: string | null;
+            user_id: string | null;
             created_at: string;
             updated_at: string;
           };
@@ -14,11 +15,13 @@ export interface Database {
             id?: string;
             name: string;
             logo_url?: string | null;
+            user_id?: string | null;
           };
           Update: {
             id?: string;
             name?: string;
             logo_url?: string | null;
+            user_id?: string | null;
           };
           Relationships: [];
         };
@@ -27,6 +30,7 @@ export interface Database {
             id: string;
             name: string;
             email: string | null;
+            user_id: string | null;
             created_at: string;
             updated_at: string;
           };
@@ -34,6 +38,7 @@ export interface Database {
             id?: string;
             name: string;
             email?: string | null;
+            user_id?: string | null;
             created_at?: string;
             updated_at?: string;
           };
@@ -41,6 +46,7 @@ export interface Database {
             id?: string;
             name?: string;
             email?: string | null;
+            user_id?: string | null;
             updated_at?: string;
           };
           Relationships: [];

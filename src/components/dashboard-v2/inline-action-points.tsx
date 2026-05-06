@@ -586,7 +586,7 @@ export default function InlineActionPoints({
                         )}
                         {ap.days_before_live_due !== null && (
                           <span className="text-xs text-gray-400">
-                            ({ap.days_before_live_due} days before)
+                            ({ap.days_before_live_due} days before live)
                           </span>
                         )}
                       </>

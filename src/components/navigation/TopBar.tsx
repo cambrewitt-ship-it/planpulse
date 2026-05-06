@@ -83,6 +83,10 @@ export default function TopBar() {
                         Settings
                       </Button>
                     </Link>
+                    <Button onClick={handleLogout} variant="ghost" size="sm">
+                      <LogOut className="h-4 w-4 mr-2" />
+                      Sign out
+                    </Button>
                   </>
                 ) : (
                   <Link href="/auth/login">

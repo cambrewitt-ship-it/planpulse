@@ -21,11 +21,12 @@ export async function DELETE(
       return NextResponse.json({ error: 'Account manager ID is required' }, { status: 400 });
     }
 
-    // First, get the account manager name to check clients
+    // First, get the account manager name to check clients (must belong to current user)
     const { data: amData } = await supabase
       .from('account_managers')
       .select('name')
       .eq('id', id)
+      .eq('user_id', session.user.id)
       .single();
     const accountManager = amData as { name: string } | null;
 
@@ -48,7 +49,8 @@ export async function DELETE(
     const { error: deleteError } = await supabase
       .from('account_managers')
       .delete()
-      .eq('id', id);
+      .eq('id', id)
+      .eq('user_id', session.user.id);
 
     if (deleteError) {
       console.error('Error deleting account manager:', deleteError);

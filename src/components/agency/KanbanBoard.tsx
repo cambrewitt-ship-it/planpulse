@@ -35,7 +35,7 @@ function clientColor(id: string): string {
   return COLORS[Math.abs(hash) % COLORS.length];
 }
 
-type KanbanStatus = '1-2' | '3-4' | '5+';
+type KanbanStatus = 'overdue' | '1-2' | '3-4' | '5+';
 
 interface KanbanCard {
   id: string;
@@ -57,7 +57,7 @@ function getChannelIcon(channelType: string) {
 const COLUMNS: { key: KanbanStatus; label: string; color: string }[] = [
   { key: '1-2', label: '1–2 days', color: '#A0442A' },
   { key: '3-4', label: '3–4 days', color: '#B07030' },
-  { key: '5+', label: '5+ days', color: '#4A6580' },
+  { key: '5+', label: '5+ days', color: '#4A7C59' },
 ];
 
 interface AssignMenuProps {
@@ -290,7 +290,9 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
           daysUntilDue = Math.ceil((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
         }
 
-        if (daysUntilDue === null || daysUntilDue >= 5) {
+        if (daysUntilDue !== null && daysUntilDue < 0) {
+          status = 'overdue';
+        } else if (daysUntilDue === null || daysUntilDue >= 5) {
           status = '5+';
         } else if (daysUntilDue >= 3) {
           status = '3-4';
@@ -409,10 +411,15 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
 
   // Group by column and sort by days until due (ascending - soonest first)
   const byStatus = new Map<KanbanStatus, KanbanCard[]>();
+  byStatus.set('overdue', []);
   for (const col of COLUMNS) byStatus.set(col.key, []);
   for (const card of cards) {
     byStatus.get(card.status)?.push(card);
   }
+
+  // Sort overdue cards: most overdue first (most negative daysUntilDue first)
+  const overdueCards = byStatus.get('overdue') || [];
+  overdueCards.sort((a, b) => (a.daysUntilDue ?? 0) - (b.daysUntilDue ?? 0));
 
   // Sort cards within each column by days until due (nulls last)
   for (const col of COLUMNS) {
@@ -424,6 +431,8 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
       return a.daysUntilDue - b.daysUntilDue;
     });
   }
+
+  const hasOverdue = overdueCards.length > 0;
 
   // All cards sorted by urgency (for list view)
   const allCardsSorted = [...cards].sort((a, b) => {
@@ -812,15 +821,65 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
         })}
       </div>
     ) : (
-    /* ── Kanban view: 3 columns ── */
+    /* ── Kanban view: 3–4 columns ── */
     <div
       style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+        gridTemplateColumns: `repeat(${hasOverdue ? 4 : 3}, minmax(0, 1fr))`,
         gap: 6,
         width: '100%',
       }}
     >
+      {/* Overdue column — only shown when there are overdue cards */}
+      {hasOverdue && (() => {
+        const OVERDUE_COLOR = '#7F1D1D';
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, background: OVERDUE_COLOR, borderRadius: 5, padding: '5px 9px' }}>
+              <div style={{ width: 5, height: 5, borderRadius: '50%', background: 'rgba(255,255,255,0.5)', flexShrink: 0 }} />
+              <span style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', color: '#FFFFFF', letterSpacing: '0.08em' }}>Overdue</span>
+              <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.7)', marginLeft: 'auto' }}>{overdueCards.length}</span>
+            </div>
+            <div style={{ position: 'relative' }}>
+              <div style={{ overflowY: 'auto', maxHeight: 340, display: 'flex', flexDirection: 'column', gap: 5, paddingBottom: overdueCards.length > 3 ? 10 : 2 }}>
+                {overdueCards.map((card) => {
+                  const isInProgress = inProgressIds.has(card.id);
+                  const clientCol = clientColor(card.clientId);
+                  return (
+                    <div key={card.id} style={{ background: isInProgress ? '#FFFBF4' : '#FDFCF8', border: `0.5px solid ${isInProgress ? 'rgba(176,112,48,0.4)' : '#E8E4DC'}`, borderLeft: `2px solid ${isInProgress ? '#B07030' : OVERDUE_COLOR}`, borderRadius: 5, overflow: 'hidden', flexShrink: 0 }}>
+                      <div style={{ background: clientCol, padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <span style={{ fontSize: 9, fontWeight: 600, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '0.02em' }}>{card.clientName}</span>
+                      </div>
+                      <div style={{ padding: '6px 8px', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                        <button type="button" onClick={(e) => { e.stopPropagation(); void handleComplete(card); }} title="Mark complete" style={{ flexShrink: 0, marginTop: 2, width: 14, height: 14, borderRadius: '50%', border: `1px solid #D5D0C5`, background: 'transparent', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 4 }}>
+                            <div style={{ flexShrink: 0, marginTop: 1 }}>{getChannelIcon(card.channelType)}</div>
+                            <span style={{ flex: 1, fontSize: 12, fontWeight: 500, color: '#1C1917', lineHeight: 1.35 }}>{card.text}</span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 6 }}>
+                            {isInProgress && (
+                              <span style={{ fontSize: 8, fontWeight: 600, color: '#B07030', background: 'rgba(176,112,48,0.12)', border: '0.5px solid rgba(176,112,48,0.3)', borderRadius: 3, padding: '1px 4px', textTransform: 'uppercase', letterSpacing: '0.07em', whiteSpace: 'nowrap' }}>In Progress</span>
+                            )}
+                            <span style={{ fontSize: 9, fontWeight: 400, color: card.tag === 'SET UP' ? '#B07030' : card.tag === 'HEALTH CHECK' ? '#4A7C59' : '#4A6580', textTransform: 'uppercase', letterSpacing: '0.08em', whiteSpace: 'nowrap' }}>{card.tag}</span>
+                            <span style={{ fontSize: 9, fontWeight: 500, color: OVERDUE_COLOR, whiteSpace: 'nowrap' }}>
+                              {Math.abs(card.daysUntilDue!)}d overdue
+                            </span>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flexShrink: 0, alignItems: 'stretch' }}>
+                              <button type="button" onClick={(e) => { e.stopPropagation(); handleToggleInProgress(card); }} title={isInProgress ? 'Clear in progress' : 'Mark as in progress'} style={{ fontSize: 8, fontWeight: 500, padding: '1px 5px', borderRadius: 3, border: isInProgress ? '0.5px solid rgba(176,112,48,0.4)' : '0.5px dashed #D5D0C5', background: isInProgress ? 'rgba(176,112,48,0.1)' : 'transparent', color: isInProgress ? '#B07030' : '#C0BBC0', cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif", whiteSpace: 'nowrap' }}>In Progress</button>
+                              <AssignMenu card={card} onAssign={handleAssign} accountManagers={accountManagers} />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
       {COLUMNS.map(col => {
         const colCards = byStatus.get(col.key) || [];
         return (

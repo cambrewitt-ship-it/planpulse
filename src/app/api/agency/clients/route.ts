@@ -72,11 +72,12 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Fetch all clients with left join to health status
+    // Fetch only clients belonging to the current user
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: clientsData, error: clientsError } = await (supabase as any)
       .from('clients')
       .select(`*, client_health_status (*)`)
+      .eq('user_id', session.user.id)
       .order('name', { ascending: true });
 
     if (clientsError) {

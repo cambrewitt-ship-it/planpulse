@@ -28,10 +28,11 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // 1. Count total clients
+    // 1. Count total clients (scoped to current user)
     const { count: totalClients, error: clientsError } = await supabase
       .from('clients')
-      .select('*', { count: 'exact', head: true });
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', session.user.id);
 
     if (clientsError) {
       return NextResponse.json({ error: 'Failed to count clients' }, { status: 500 });

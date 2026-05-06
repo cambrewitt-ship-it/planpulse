@@ -28,6 +28,7 @@ export async function PATCH(
       .from('clients')
       .update({ account_manager: account_manager ?? null, updated_at: new Date().toISOString() })
       .eq('id', id)
+      .eq('user_id', session.user.id)
       .select('id, name, account_manager')
       .single();
 

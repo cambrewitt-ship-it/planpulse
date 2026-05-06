@@ -27,6 +27,7 @@ export async function GET() {
     const { data, error } = await supabase
       .from('account_managers')
       .select('*')
+      .eq('user_id', session.user.id)
       .order('name', { ascending: true });
 
     if (error) {
@@ -66,6 +67,7 @@ export async function POST(request: NextRequest) {
       .insert({
         name: name.trim(),
         email: email && typeof email === 'string' ? email.trim() || null : null,
+        user_id: session.user.id,
         updated_at: new Date().toISOString(),
       } as any)
       .select()

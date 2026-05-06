@@ -199,6 +199,7 @@ export default function DashboardV2() {
   const [dashboardError, setDashboardError] = useState<string | null>(null);
   // Spend data scoped to the visible analytics period — fetched independently for channel cards.
   const [channelMonthSpendData, setChannelMonthSpendData] = useState<SpendDataPoint[]>([]);
+  const [spendApiErrors, setSpendApiErrors] = useState<string[]>([]);
   // Non-digital channel actuals
   const [organicSocialActuals, setOrganicSocialActuals] = useState<OrganicSocialActual[]>([]);
   const [edmActuals, setEdmActuals] = useState<EdmActual[]>([]);
@@ -391,6 +392,19 @@ export default function DashboardV2() {
         const spendResult = await fetchSpendData(rangeStart, rangeEnd, clientId);
 
         if (cancelled) return;
+
+        console.log('[fetchMonthSpend] spendResult:', {
+          dataCount: spendResult.data?.length,
+          errors: spendResult.errors,
+          sample: spendResult.data?.slice(0, 3),
+        });
+
+        if (spendResult.errors?.length) {
+          console.warn('[fetchMonthSpend] Spend API errors:', spendResult.errors);
+          setSpendApiErrors(spendResult.errors);
+        } else {
+          setSpendApiErrors([]);
+        }
 
         const enhanced = (spendResult.data || []).map((point: any) => ({
           ...point,
@@ -1371,13 +1385,38 @@ export default function DashboardV2() {
           cpc:         aggregatedCpc,
           conversions: totalConversions,
         },
-        issues:          detectIssues(currentSpend, plannedSpend, selectedMonth),
+        issues: (() => {
+          const base = detectIssues(currentSpend, plannedSpend, selectedMonth);
+          // Surface any platform-level API errors (e.g. expired token)
+          const platformPrefix = platform === 'meta-ads' ? 'Meta Ads' : platform === 'google-ads' ? 'Google Ads' : null;
+          if (platformPrefix) {
+            const platformErrors = spendApiErrors
+              .filter(e => e.startsWith(platformPrefix))
+              .map(e => {
+                // Strip the account prefix, keep the core message
+                const match = e.match(/\): (.+)$/);
+                return match ? match[1] : e;
+              });
+            if (platformErrors.length > 0) base.push(...platformErrors);
+          }
+          return base;
+        })(),
         chartData:       chartData.length > 0 ? chartData : undefined,
         metricsChartData: metricsChartData.length > 0 ? metricsChartData : undefined,
         isMultiMonth,
+        campaigns: (() => {
+          const seen = new Map<string, string>();
+          chMetricPoints.forEach((p: any) => {
+            if (p.campaignId && p.campaignName && !seen.has(p.campaignId)) {
+              seen.set(p.campaignId, p.campaignName);
+            }
+          });
+          return Array.from(seen.entries()).map(([id, name]) => ({ id, name }));
+        })(),
+        rawSpendPoints: chMetricPoints,
       };
     });
-  }, [mediaPlanBuilderChannels, channelMonthSpendData, selectedMonth, commission, analyticsDateRange.startDate, analyticsDateRange.endDate]);
+  }, [mediaPlanBuilderChannels, channelMonthSpendData, spendApiErrors, selectedMonth, commission, analyticsDateRange.startDate, analyticsDateRange.endDate]);
 
   // ── Calculate health score whenever the relevant inputs change ────────────
   useEffect(() => {
@@ -1455,6 +1494,29 @@ export default function DashboardV2() {
     if (daysUntilDue <= 2) return 'urgent';
     return 'this-week';
   };
+
+  // Enrich action points with effective due dates (SET UP points use campaign_start - days_before_live_due)
+  const enrichedActionPoints = useMemo(() => {
+    return allActionPoints.map((ap: any) => {
+      if (ap.due_date) return ap;
+      if (ap.category === 'SET UP' && ap.days_before_live_due != null) {
+        const matchedChannel = ganttChannels.find(
+          ch => ch.label.toLowerCase().trim() === (ap.channel_type ?? '').toLowerCase().trim() ||
+                ch.label.toLowerCase().includes((ap.channel_type ?? '').toLowerCase()) ||
+                (ap.channel_type ?? '').toLowerCase().includes(ch.label.toLowerCase())
+        );
+        const refDate = matchedChannel?.start_date
+          ? new Date(matchedChannel.start_date)
+          : (campaignDates?.start ?? null);
+        if (refDate) {
+          const d = new Date(refDate);
+          d.setDate(d.getDate() - (ap.days_before_live_due as number));
+          return { ...ap, due_date: d.toISOString().slice(0, 10) };
+        }
+      }
+      return ap;
+    });
+  }, [allActionPoints, ganttChannels, campaignDates]);
 
   const actionItemsForSection = useMemo(() => {
     return allActionPoints.map((item: any) => ({
@@ -1548,6 +1610,26 @@ export default function DashboardV2() {
     } finally {
       setIsFunnelBuilderOpen(false);
       setEditingFunnel(null);
+    }
+  };
+
+  const handleDeleteFunnel = async (funnelId: string) => {
+    if (!confirm('Are you sure you want to delete this funnel? This action cannot be undone.')) return;
+    try {
+      const response = await fetch(`/api/funnels/${funnelId}`, { method: 'DELETE' });
+      const data = await response.json();
+      if (data.success) {
+        setFunnels(prev => prev.filter(f => f.id !== funnelId));
+        if (selectedFunnelId === funnelId) {
+          setSelectedFunnelId(null);
+          setFunnelStages([]);
+        }
+      } else {
+        alert(data.error || 'Failed to delete funnel');
+      }
+    } catch (error) {
+      console.error('Error deleting funnel:', error);
+      alert('Failed to delete funnel. Please try again.');
     }
   };
 
@@ -1897,7 +1979,7 @@ export default function DashboardV2() {
                   {/* Action Points — fills remaining space */}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <ClientActionPointsList
-                      actionPoints={allActionPoints}
+                      actionPoints={enrichedActionPoints}
                       onToggle={handleToggleActionPoint}
                     />
                   </div>
@@ -1967,7 +2049,7 @@ export default function DashboardV2() {
 
                         return (
                             <ChannelPerformanceCard
-                            key={`paid-${ch.name || idx}`}
+                            key={`paid-${idx}-${ch.name}`}
                             channel={ch}
                             selectedMonth={selectedMonth}
                             dateRange={ch.isMultiMonth ? analyticsDateRange : undefined}
@@ -2003,6 +2085,68 @@ export default function DashboardV2() {
             {/* ── Funnels view ── */}
             {viewMode === 'funnels' && (
               <>
+                {/* Funnel selector */}
+                <div style={{ background: '#FDFCF8', border: '0.5px solid #E8E4DC', borderRadius: 6, padding: '20px 24px', marginBottom: 14 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                    <span style={{ fontSize: 14, fontWeight: 600, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Funnels</span>
+                    <button
+                      onClick={() => { setEditingFunnel(null); setIsFunnelBuilderOpen(true); }}
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 6, border: '0.5px solid #D5D0C5', background: '#FDFCF8', color: '#4A6580', fontSize: 13, fontWeight: 500, cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif" }}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                      Create Funnel
+                    </button>
+                  </div>
+                  {loadingFunnels && funnels.length === 0 ? (
+                    <p style={{ fontSize: 13, color: '#A0998F', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Loading funnels...</p>
+                  ) : funnels.length === 0 ? (
+                    <p style={{ fontSize: 13, color: '#A0998F', fontFamily: "'DM Sans', system-ui, sans-serif" }}>No funnels created yet. Click &quot;Create Funnel&quot; to get started.</p>
+                  ) : (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                      {funnels.map((funnel) => (
+                        <div
+                          key={funnel.id}
+                          style={{
+                            padding: '10px 14px', borderRadius: 6,
+                            border: selectedFunnelId === funnel.id ? '1.5px solid #4A6580' : '0.5px solid #E8E4DC',
+                            background: selectedFunnelId === funnel.id ? '#EEF2F6' : '#FAFAF8',
+                            display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer',
+                          }}
+                        >
+                          <button
+                            onClick={async () => {
+                              if (loadingFunnels) return;
+                              setSelectedFunnelId(funnel.id);
+                              await calculateFunnel(funnel.id);
+                            }}
+                            disabled={loadingFunnels}
+                            style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 13, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}
+                          >
+                            {funnel.name}
+                          </button>
+                          <span style={{ fontSize: 11, color: '#A0998F', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+                            {(funnel.config as FunnelConfig).stages.length} stages
+                          </span>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setEditingFunnel(funnel); setIsFunnelBuilderOpen(true); }}
+                            title="Edit funnel"
+                            style={{ background: 'none', border: 'none', padding: '2px 4px', cursor: 'pointer', color: '#A0998F', display: 'flex', alignItems: 'center' }}
+                          >
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleDeleteFunnel(funnel.id); }}
+                            title="Delete funnel"
+                            style={{ background: 'none', border: 'none', padding: '2px 4px', cursor: 'pointer', color: '#C97B6A', display: 'flex', alignItems: 'center' }}
+                          >
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 space-y-8">
                   {selectedFunnelId && (
                     <FunnelChart
