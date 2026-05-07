@@ -262,7 +262,7 @@ export default function HeroHealthSection({
     onAccountManagerChange?.(am);
   };
   const spendPct = totalBudget > 0 ? (currentSpend / totalBudget) * 100 : 0;
-  const spendColor = STATUS_COLORS[healthScore.breakdown.budgetPacing.score >= 80 ? 'healthy' : healthScore.breakdown.budgetPacing.score >= 60 ? 'caution' : 'at-risk'].ring;
+  const spendColor = spendPct > 100 ? STATUS_COLORS['at-risk'].ring : STATUS_COLORS[healthScore.breakdown.budgetPacing.score >= 80 ? 'healthy' : healthScore.breakdown.budgetPacing.score >= 60 ? 'caution' : 'at-risk'].ring;
 
   const pacingVarianceLabel =
     pacingStatus.variance >= 0

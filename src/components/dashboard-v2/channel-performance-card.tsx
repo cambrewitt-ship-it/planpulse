@@ -28,6 +28,7 @@ const ALL_METRIC_KEYS: MetricKey[] = ['impressions', 'clicks', 'ctr', 'cpc', 'co
 
 export interface ChannelCardProps {
   channel: {
+    id?: string;
     name: string;
     platform: 'meta-ads' | 'google-ads' | string;
     status: 'healthy' | 'attention' | 'excellent';
@@ -551,7 +552,13 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
   const [presetOpen, setPresetOpen] = useState(false);
   const [savingPreset, setSavingPreset] = useState(false);
   const [displayedMetrics, setDisplayedMetrics] = useState<MetricKey[]>(ALL_METRIC_KEYS);
-  const [selectedCampaignIds, setSelectedCampaignIds] = useState<Set<string>>(new Set()); // empty = all
+  const [selectedCampaignIds, setSelectedCampaignIds] = useState<Set<string>>(() => {
+    if (typeof window === 'undefined' || !clientId) return new Set();
+    try {
+      const saved = localStorage.getItem(`channel-campaigns-${clientId}-${channel.id ?? channel.name}`);
+      return saved ? new Set(JSON.parse(saved) as string[]) : new Set();
+    } catch { return new Set(); }
+  });
   const [campaignDropdownOpen, setCampaignDropdownOpen] = useState(false);
   const campaignDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -573,6 +580,9 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
         next.delete(id);
       } else {
         next.add(id);
+      }
+      if (clientId) {
+        try { localStorage.setItem(`channel-campaigns-${clientId}-${channel.id ?? channel.name}`, JSON.stringify([...next])); } catch {}
       }
       return next;
     });
@@ -647,7 +657,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
       ? (channel.rawSpendPoints ?? [])
       : (channel.rawSpendPoints ?? []).filter((p: any) => selectedCampaignIds.has(p.campaignId));
 
-    if (!pts.length) return { ...channel.metrics, conv_events: 0 };
+    if (!pts.length) return { ...channel.metrics, spend: channel.currentSpend, conv_events: 0 };
 
     const impressions = pts.reduce((s: number, p: any) => s + (p.impressions ?? 0), 0);
     const clicks = pts.reduce((s: number, p: any) => s + (p.clicks ?? 0), 0);
@@ -658,6 +668,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
     return {
       impressions,
       clicks,
+      spend,
       ctr: impressions > 0 ? clicks / impressions : 0,
       cpc: clicks > 0 ? spend / clicks : 0,
       conversions,
@@ -698,6 +709,25 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
         conv_events: vals.conv_events,
       }));
   }, [selectedCampaignIds, selectedActionType, channel.rawSpendPoints, channel.metricsChartData]);
+
+  // Filtered spend chart data — rebuilds actualSpend from rawSpendPoints when campaigns are selected
+  const filteredSpendChartData = useMemo(() => {
+    if (selectedCampaignIds.size === 0) return channel.chartData ?? [];
+    const pts = (channel.rawSpendPoints ?? []).filter((p: any) => selectedCampaignIds.has(p.campaignId));
+    if (!pts.length) return channel.chartData ?? [];
+
+    // Sum actual spend per date from filtered campaigns
+    const spendByDate = new Map<string, number>();
+    pts.forEach((p: any) => {
+      spendByDate.set(p.date, (spendByDate.get(p.date) ?? 0) + (p.spend ?? 0));
+    });
+
+    // Overlay onto the original chart data (preserving plannedSpend / projectedSpend shape)
+    return (channel.chartData ?? []).map(point => ({
+      ...point,
+      actualSpend: spendByDate.has(point.date) ? spendByDate.get(point.date)! : null,
+    }));
+  }, [selectedCampaignIds, channel.rawSpendPoints, channel.chartData]);
 
   // Benchmark / preset derived values
   const benchmarkChannelName = inferBenchmarkChannelName(channel.platform, channel.name);
@@ -785,7 +815,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
   // Derive the visible window of chart data. For single-month mode, restrict
   // to the selectedMonth so the chart doesn't spill into adjacent months.
   // For multi-month mode (dateRange provided), trust the pre-scoped chart data.
-  let baseChartData = channel.chartData ?? [];
+  let baseChartData = filteredSpendChartData;
   if (!dateRange && selectedMonth instanceof Date) {
     const targetMonth = selectedMonth.getMonth();
     const targetYear  = selectedMonth.getFullYear();
@@ -900,7 +930,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                         <div className="absolute top-full left-0 mt-1 z-30 bg-white border border-gray-200 rounded-lg shadow-lg py-1 min-w-[220px] max-w-[300px] max-h-64 overflow-y-auto">
                           {/* Select All / Clear */}
                           <button
-                            onClick={() => setSelectedCampaignIds(new Set())}
+                            onClick={() => { setSelectedCampaignIds(new Set()); if (clientId) { try { localStorage.removeItem(`channel-campaigns-${clientId}-${channel.id ?? channel.name}`); } catch {} } }}
                             className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors border-b border-gray-100 ${selectedCampaignIds.size === 0 ? 'font-semibold text-blue-600 bg-blue-50' : 'text-gray-600 hover:bg-gray-50'}`}
                           >
                             <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0 ${selectedCampaignIds.size === 0 ? 'bg-blue-600 border-blue-600' : 'border-gray-300'}`}>
@@ -941,7 +971,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
               {/* Spend summary */}
               <div className="row-start-1 col-start-3 text-right flex-shrink-0">
                 <p className="text-sm font-bold text-gray-900">
-                  {fmt(channel.currentSpend, 'currency', 0)}
+                  {fmt(filteredMetrics.spend ?? channel.currentSpend, 'currency', 0)}
                 </p>
                 <p className="text-xs text-gray-400">
                   of {fmt(channel.plannedSpend, 'currency', 0)}
@@ -952,7 +982,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
               <div className="row-start-2 col-start-1 col-end-4">
                 <PacingBar
                   pacingPercentage={channel.pacingPercentage}
-                  currentSpend={channel.currentSpend}
+                  currentSpend={filteredMetrics.spend ?? channel.currentSpend}
                   plannedSpend={channel.plannedSpend}
                   status={channel.status}
                 />

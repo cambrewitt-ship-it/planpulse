@@ -61,7 +61,7 @@ export default function ClientActionPointsList({ actionPoints, onToggle }: Props
       const buckets: ActionPoint[][] = [[], [], [], []];
       [...actionPoints].sort(sortByDue).forEach(ap => {
         const days = daysFromToday(ap.due_date);
-        if (days < 0) buckets[0].push(ap);
+        if (days < 0 && !ap.completed) buckets[0].push(ap);
         else if (days <= 2) buckets[1].push(ap);
         else if (days <= 4) buckets[2].push(ap);
         else buckets[3].push(ap);

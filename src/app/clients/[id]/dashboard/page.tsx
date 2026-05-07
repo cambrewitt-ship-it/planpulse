@@ -1156,7 +1156,7 @@ export default function DashboardV2() {
       },
       healthScore: adjustedHealthScore,
       currentSpend: totalActualSpend,
-      totalBudget: plannedBudget,
+      totalBudget: campaignDates.totalBudget,
       daysRemaining: campaignDates.daysRemaining,
       completionPercentage,
       daysUntilStart,
@@ -1371,6 +1371,7 @@ export default function DashboardV2() {
 
       return {
         type: 'paid_digital' as const,
+        id:               String(ch.id ?? ch.channelName),
         name:             ch.channelName,
         format:           ch.format || undefined,
         platform,
@@ -1444,7 +1445,8 @@ export default function DashboardV2() {
 
       const totalDays   = Math.max(1, Math.ceil((campaignEnd.getTime() - campaignStart.getTime()) / (1000 * 60 * 60 * 24)));
       const daysElapsed = Math.max(0, Math.ceil((now.getTime() - campaignStart.getTime()) / (1000 * 60 * 60 * 24)));
-      const plannedSpend = Math.min(totalBudget, totalBudget * (daysElapsed / totalDays));
+      // Use month-accurate planned budget (prorated to analytics period) rather than a linear day interpolation
+      const plannedSpend = plannedBudget > 0 ? plannedBudget : Math.min(totalBudget, totalBudget * (daysElapsed / totalDays));
 
       // Compute benchmark-based performance score
       const paidCards = (channelCards as Array<{ type: string; name?: string; platform?: string; metrics?: { impressions: number; clicks: number; ctr: number; cpc: number; conversions: number } }>)
@@ -1478,7 +1480,7 @@ export default function DashboardV2() {
       console.error('Health score calculation failed:', err);
       setDashboardError('Health score could not be calculated. Other data is still available below.');
     }
-  }, [mediaPlanBuilderChannels, totalActualSpend, actionPointsStats, channelCards, allBenchmarks, allPresets, clientChannelPresets]);
+  }, [mediaPlanBuilderChannels, totalActualSpend, plannedBudget, actionPointsStats, channelCards, allBenchmarks, allPresets, clientChannelPresets]);
 
   // ── Action points data pipeline ─────────────────────────────────────────
   const handleActionPointsUpdate = useCallback((actionPoints: any[]) => {
