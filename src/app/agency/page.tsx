@@ -8,6 +8,7 @@ import type { ClientCardData } from '@/app/api/agency/clients/route';
 import type { AgencyClientActionPoints } from '@/app/api/agency/action-points/route';
 import { ClientCardCompact } from '@/components/agency/ClientCardCompact';
 import { TodayCard } from '@/components/agency/TodayCard';
+import { AgencyChat } from '@/components/agency/AgencyChat';
 import { KanbanBoard, type KanbanBoardHandle } from '@/components/agency/KanbanBoard';
 import { NotesChecklist } from '@/components/agency/NotesChecklist';
 import { CalendarPanel } from '@/components/agency/CalendarPanel';
@@ -431,24 +432,66 @@ export default function AgencyDashboard() {
       {/* ── Main body ─────────────────────────────────────── */}
       <div style={{
         display: 'flex',
-        flexDirection: 'column',
+        flexDirection: 'row',
         gap: 12,
-        padding: '0 18px 14px',
-        paddingTop: 14,
+        padding: '14px 18px 14px',
         maxWidth: 1440,
         margin: '0 auto',
         borderTop: '0.5px solid #E8E4DC',
+        alignItems: 'stretch',
       }}>
 
-        {/* ── Row 1: Today + Notes + Kanban (full width) ─── */}
-        <div style={{ display: 'flex', gap: 12, alignItems: 'stretch' }}>
-            <TodayCard clients={filteredClients} today={today} />
+        {/* ── Column 1: Today + Clients ────────────────── */}
+        <div style={{ width: 240, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <TodayCard clients={filteredClients} today={today} />
 
-            {/* Notes — dark spine + files panel + content */}
+          {/* Clients list */}
+          <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8, flexShrink: 0 }}>
+              <span style={{ fontSize: 11, fontWeight: 400, color: '#B5B0A5', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                Clients ({filteredClients.length})
+              </span>
+              <div style={{ flex: 1 }} />
+              {dotCounts.red > 0 && (
+                <span style={{ fontSize: 11, color: '#A0442A', marginLeft: 5, opacity: 0.6 }}>● {dotCounts.red}</span>
+              )}
+              {dotCounts.amber > 0 && (
+                <span style={{ fontSize: 11, color: '#B07030', marginLeft: 5, opacity: 0.6 }}>● {dotCounts.amber}</span>
+              )}
+              {dotCounts.green > 0 && (
+                <span style={{ fontSize: 11, color: '#4A7C59', marginLeft: 5, opacity: 0.6 }}>● {dotCounts.green}</span>
+              )}
+            </div>
+            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: 4 }}>
+              {filteredClients.map((client, idx) => (
+                <ClientCardCompact
+                  key={client.id}
+                  client={client}
+                  selected={selectedClientId === client.id}
+                  onClick={() => setSelectedClientId(client.id)}
+                  index={idx}
+                  accountManagers={accountManagers}
+                />
+              ))}
+            </div>
+            <button style={{
+              width: '100%', marginTop: 6, padding: '9px 0', flexShrink: 0,
+              border: '0.5px dashed #D5D0C5', borderRadius: 6,
+              background: 'transparent', color: '#B5B0A5', fontSize: 13,
+              cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif",
+            }}>
+              + Add Client
+            </button>
+          </div>
+        </div>
+
+        {/* ── Column 2: Chat + Notes ────────────────────── */}
+        <div style={{ width: 380, flexShrink: 0, alignSelf: 'stretch', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          <AgencyChat notesSlot={
+            /* Notes — dark spine + files panel + content */
             <div
               style={{
-                width: 360,
-                flexShrink: 0,
+                height: '100%',
                 display: 'flex',
                 flexDirection: 'row',
                 position: 'relative',
@@ -459,20 +502,13 @@ export default function AgencyDashboard() {
             >
               {/* Dark textured left spine */}
               <div style={{
-                width: 36,
-                flexShrink: 0,
+                width: 36, flexShrink: 0,
                 background: '#1C1917',
                 backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.035) 1px, transparent 1px)',
                 backgroundSize: '5px 5px',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                paddingTop: 10,
-                gap: 10,
-                position: 'relative',
-                zIndex: 2,
+                display: 'flex', flexDirection: 'column', alignItems: 'center',
+                paddingTop: 10, gap: 10, position: 'relative', zIndex: 2,
               }}>
-                {/* Hamburger button */}
                 <button
                   onClick={() => setShowFilesMenu(v => !v)}
                   title="Files"
@@ -482,20 +518,12 @@ export default function AgencyDashboard() {
                     <span key={i} style={{ width: 14, height: 1.5, background: showFilesMenu ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.5)', display: 'block', borderRadius: 1, transition: 'background 0.15s' }} />
                   ))}
                 </button>
-                {/* Active file name — vertical */}
                 <span style={{
-                  fontSize: 11,
-                  fontWeight: 700,
-                  color: '#FFFFFF',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.13em',
-                  writingMode: 'vertical-rl',
-                  transform: 'rotate(180deg)',
-                  marginTop: 2,
-                  maxHeight: 120,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
+                  fontSize: 11, fontWeight: 700, color: '#FFFFFF',
+                  textTransform: 'uppercase', letterSpacing: '0.13em',
+                  writingMode: 'vertical-rl', transform: 'rotate(180deg)',
+                  marginTop: 2, maxHeight: 120, overflow: 'hidden',
+                  textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                 }}>
                   {noteFiles.find(f => f.id === activeFileId)?.name ?? 'Notes'}
                 </span>
@@ -542,7 +570,6 @@ export default function AgencyDashboard() {
                       </div>
                     ))}
                   </div>
-                  {/* Add new file */}
                   <div style={{ padding: '8px 12px', borderTop: '0.5px solid rgba(255,255,255,0.08)', display: 'flex', gap: 4 }}>
                     <input
                       value={newFileName}
@@ -576,84 +603,78 @@ export default function AgencyDashboard() {
                 <NotesChecklist activeClientId={`agency:${activeFileId}`} />
               </div>
             </div>
-
-            {/* Kanban container */}
-            <div style={{
-              flex: 1,
-              maxHeight: 600,
-              background: '#FDFCF8',
-              border: '0.5px solid #E8E4DC',
-              borderRadius: 6,
-              padding: '15px 17px',
-              minWidth: 0,
-              display: 'flex',
-              flexDirection: 'column',
-              overflow: 'hidden',
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12, flexShrink: 0 }}>
-                <span style={{
-                  fontSize: 11, fontWeight: 400, color: '#B5B0A5',
-                  textTransform: 'uppercase', letterSpacing: '0.1em',
-                }}>
-                  Action Points
-                </span>
-                <button
-                  onClick={() => kanbanRef.current?.startAdding()}
-                  style={{
-                    marginLeft: 8,
-                    display: 'flex', alignItems: 'center', gap: 3,
-                    fontSize: 10, color: '#8A8578',
-                    background: 'transparent', border: '0.5px dashed #D5D0C5',
-                    borderRadius: 4, padding: '2px 7px', cursor: 'pointer',
-                    fontFamily: "'DM Sans', system-ui, sans-serif",
-                  }}
-                >
-                  <Plus size={9} />
-                  Add action point
-                </button>
-                <div style={{ marginLeft: 8, display: 'flex', border: '0.5px solid #E8E4DC', borderRadius: 4, overflow: 'hidden' }}>
-                  {(['kanban', 'list', 'gantt'] as const).map(v => (
-                    <button
-                      key={v}
-                      onClick={() => setKanbanView(v)}
-                      style={{
-                        fontSize: 10, padding: '3px 8px', cursor: 'pointer',
-                        fontFamily: "'DM Sans', system-ui, sans-serif", fontWeight: 500,
-                        color: kanbanView === v ? '#4A6580' : '#B5B0A5',
-                        background: kanbanView === v ? 'rgba(74,101,128,0.08)' : 'transparent',
-                        border: 'none', borderLeft: v === 'kanban' ? 'none' : '0.5px solid #E8E4DC',
-                        textTransform: 'capitalize',
-                      }}
-                    >{v}</button>
-                  ))}
-                </div>
-                <span style={{ marginLeft: 'auto', fontSize: 11, color: '#B5B0A5' }}>
-                  {filteredActionPointClients.reduce((sum, c) => sum + c.totalOutstanding, 0)} total
-                </span>
-              </div>
-              <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
-                <KanbanBoard
-                  ref={kanbanRef}
-                  actionPointClients={filteredActionPointClients}
-                  amFilter={amFilter}
-                  onActionPointCompleted={() => fetchData(true)}
-                  accountManagers={accountManagers}
-                  view={kanbanView}
-                />
-              </div>
-            </div>
+          } />
         </div>
 
-        {/* ── Row 2: Gantt + Clients side by side ──────────── */}
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 264px',
-          gap: 14,
-          alignItems: 'start',
-          minWidth: 0,
-        }}>
+        {/* ── Column 3: Kanban + Gantt stacked ─────────── */}
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
 
-          {/* Gantt */}
+          {/* Kanban container */}
+          <div style={{
+            background: '#FDFCF8',
+            border: '0.5px solid #E8E4DC',
+            borderRadius: 6,
+            padding: '15px 17px',
+            minWidth: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            height: 360,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12, flexShrink: 0 }}>
+              <span style={{
+                fontSize: 11, fontWeight: 400, color: '#B5B0A5',
+                textTransform: 'uppercase', letterSpacing: '0.1em',
+              }}>
+                Action Points
+              </span>
+              <button
+                onClick={() => kanbanRef.current?.startAdding()}
+                style={{
+                  marginLeft: 8,
+                  display: 'flex', alignItems: 'center', gap: 3,
+                  fontSize: 10, color: '#8A8578',
+                  background: 'transparent', border: '0.5px dashed #D5D0C5',
+                  borderRadius: 4, padding: '2px 7px', cursor: 'pointer',
+                  fontFamily: "'DM Sans', system-ui, sans-serif",
+                }}
+              >
+                <Plus size={9} />
+                Add action point
+              </button>
+              <div style={{ marginLeft: 8, display: 'flex', border: '0.5px solid #E8E4DC', borderRadius: 4, overflow: 'hidden' }}>
+                {(['kanban', 'list', 'gantt'] as const).map(v => (
+                  <button
+                    key={v}
+                    onClick={() => setKanbanView(v)}
+                    style={{
+                      fontSize: 10, padding: '3px 8px', cursor: 'pointer',
+                      fontFamily: "'DM Sans', system-ui, sans-serif", fontWeight: 500,
+                      color: kanbanView === v ? '#4A6580' : '#B5B0A5',
+                      background: kanbanView === v ? 'rgba(74,101,128,0.08)' : 'transparent',
+                      border: 'none', borderLeft: v === 'kanban' ? 'none' : '0.5px solid #E8E4DC',
+                      textTransform: 'capitalize',
+                    }}
+                  >{v}</button>
+                ))}
+              </div>
+              <span style={{ marginLeft: 'auto', fontSize: 11, color: '#B5B0A5' }}>
+                {filteredActionPointClients.reduce((sum, c) => sum + c.totalOutstanding, 0)} total
+              </span>
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+              <KanbanBoard
+                ref={kanbanRef}
+                actionPointClients={filteredActionPointClients}
+                amFilter={amFilter}
+                onActionPointCompleted={() => fetchData(true)}
+                accountManagers={accountManagers}
+                view={kanbanView}
+              />
+            </div>
+          </div>
+
+          {/* Gantt / Calendar */}
           <div style={{
             background: '#E5E0D8',
             border: '0.5px solid #C8C4BC',
@@ -672,54 +693,9 @@ export default function AgencyDashboard() {
             />
           </div>
 
-          {/* ── Clients column ────────────────────────────── */}
-          <div style={{ display: 'flex', flexDirection: 'column', maxHeight: 500, minWidth: 0 }}>
-            {/* Header */}
-            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8, flexShrink: 0 }}>
-              <span style={{
-                fontSize: 11, fontWeight: 400, color: '#B5B0A5',
-                textTransform: 'uppercase', letterSpacing: '0.1em',
-              }}>
-                Clients ({filteredClients.length})
-              </span>
-              <div style={{ flex: 1 }} />
-              {dotCounts.red > 0 && (
-                <span style={{ fontSize: 11, color: '#A0442A', marginLeft: 5, opacity: 0.6 }}>● {dotCounts.red}</span>
-              )}
-              {dotCounts.amber > 0 && (
-                <span style={{ fontSize: 11, color: '#B07030', marginLeft: 5, opacity: 0.6 }}>● {dotCounts.amber}</span>
-              )}
-              {dotCounts.green > 0 && (
-                <span style={{ fontSize: 11, color: '#4A7C59', marginLeft: 5, opacity: 0.6 }}>● {dotCounts.green}</span>
-              )}
-            </div>
-
-            {/* Scrollable list */}
-            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: 8 }}>
-              {filteredClients.map((client, idx) => (
-                <ClientCardCompact
-                  key={client.id}
-                  client={client}
-                  selected={selectedClientId === client.id}
-                  onClick={() => setSelectedClientId(client.id)}
-                  index={idx}
-                  accountManagers={accountManagers}
-                />
-              ))}
-            </div>
-
-            {/* Add client button */}
-            <button style={{
-              width: '100%', marginTop: 6, padding: '9px 0', flexShrink: 0,
-              border: '0.5px dashed #D5D0C5', borderRadius: 6,
-              background: 'transparent', color: '#B5B0A5', fontSize: 13,
-              cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif",
-            }}>
-              + Add Client
-            </button>
-          </div>
-
         </div>
+
+
       </div>
 
       {/* Spin keyframe */}

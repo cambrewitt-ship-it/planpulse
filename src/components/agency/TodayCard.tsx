@@ -35,8 +35,7 @@ export function TodayCard({ clients, today }: TodayCardProps) {
 
   return (
     <div style={{
-      width: 176,
-      flexShrink: 0,
+      width: '100%',
       background: '#1C1917',
       borderRadius: 6,
       padding: '14px 16px',
@@ -67,41 +66,43 @@ export function TodayCard({ clients, today }: TodayCardProps) {
         Live Channels
       </span>
 
-      {/* Scrollable live-channel list — shows ~12 lines; half of 13th visible as scroll hint */}
+      {/* Scrollable live-channel list — last item fades out as scroll hint */}
       <div style={{ position: 'relative' }}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, overflowY: 'auto', maxHeight: 213 }}>
-        {activeClients.length === 0 ? (
-          <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)', fontFamily: sansFont }}>No active channels today</span>
-        ) : (
-          activeClients.map(client => (
-            <div key={client.id}>
-              {/* Client row */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <div style={{
-                  width: 5, height: 5, borderRadius: '50%',
-                  background: 'rgba(74,124,89,0.6)',
-                  flexShrink: 0,
-                }} />
-                <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.85)', fontFamily: sansFont }}>
-                  {client.name}
-                </span>
-              </div>
-              {/* Channels */}
-              {client.liveChannels.map(ch => (
-                <div key={ch.channelName} style={{ display: 'flex', alignItems: 'center', gap: 4, paddingLeft: 11, marginTop: 3 }}>
-                  <div style={{ width: 12, height: 12, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    {getChannelLogo(ch.channelName, "w-3 h-3")}
-                  </div>
-                  <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.6)', fontFamily: sansFont }}>{ch.channelName}</span>
-                </div>
-              ))}
-            </div>
-          ))
-        )}
-      </div>
-        {/* Gradient fade — signals more content below */}
         <div style={{
-          position: 'absolute', bottom: 0, left: 0, right: 0, height: 28,
+          display: 'flex', flexDirection: 'column', gap: 8,
+          overflowY: 'auto', maxHeight: 180,
+          paddingBottom: 28,
+          scrollbarWidth: 'none',
+        }}>
+          {activeClients.length === 0 ? (
+            <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)', fontFamily: sansFont }}>No active channels today</span>
+          ) : (
+            activeClients.map(client => (
+              <div key={client.id}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <div style={{
+                    width: 5, height: 5, borderRadius: '50%',
+                    background: 'rgba(74,124,89,0.6)', flexShrink: 0,
+                  }} />
+                  <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.85)', fontFamily: sansFont }}>
+                    {client.name}
+                  </span>
+                </div>
+                {client.liveChannels.map(ch => (
+                  <div key={ch.channelName} style={{ display: 'flex', alignItems: 'center', gap: 4, paddingLeft: 11, marginTop: 3 }}>
+                    <div style={{ width: 12, height: 12, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      {getChannelLogo(ch.channelName, "w-3 h-3")}
+                    </div>
+                    <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.6)', fontFamily: sansFont }}>{ch.channelName}</span>
+                  </div>
+                ))}
+              </div>
+            ))
+          )}
+        </div>
+        {/* Gradient fade — always visible, paddingBottom ensures last item scrolls above it */}
+        <div style={{
+          position: 'absolute', bottom: 0, left: 0, right: 0, height: 32,
           background: 'linear-gradient(to bottom, transparent, #1C1917)',
           pointerEvents: 'none',
         }} />
