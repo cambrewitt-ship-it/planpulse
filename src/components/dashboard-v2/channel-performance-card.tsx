@@ -1002,7 +1002,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                     : fmt(rawValue, 'decimal', 0);
                 const benchmark = channelBenchmarks.find(b => b.metric_key === effectiveKey);
                 const realValue = getRealValue(effectiveKey, filteredMetrics);
-                const effectiveDisplayed = displayedMetrics.map(k => k === 'conversions' ? 'conv_events' : k);
+                const effectiveDisplayed: string[] = displayedMetrics.map(k => k === 'conversions' ? 'conv_events' : k);
                 const availableSwaps = ALL_METRIC_KEYS.filter(k => k !== effectiveKey && !effectiveDisplayed.includes(k));
                 return (
                   <MetricSlot
