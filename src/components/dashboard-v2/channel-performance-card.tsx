@@ -404,7 +404,7 @@ function MetricSlot({
             onClick={(e) => { e.stopPropagation(); setActionOpen(v => !v); }}
             style={{
               display: 'flex', alignItems: 'center', gap: 2,
-              background: '#f3f4f6', border: '1px solid #e5e7eb', borderRadius: 4,
+              background: '#f3f4f6', border: '1px solid #e5e7eb', borderRadius: 8,
               padding: '1px 5px', cursor: 'pointer', maxWidth: 110, overflow: 'hidden',
             }}
           >
@@ -452,7 +452,7 @@ function MetricSlot({
           style={{
             display: 'block', width: '100%', textAlign: 'left',
             background: isActive ? `${cfg.color}12` : 'transparent',
-            border: 'none', borderRadius: 4, padding: '1px 3px', cursor: 'pointer',
+            border: 'none', borderRadius: 8, padding: '1px 3px', cursor: 'pointer',
             fontSize: 13, fontWeight: 600,
             color: isActive ? cfg.color : '#1f2937',
             transition: 'background 0.15s',

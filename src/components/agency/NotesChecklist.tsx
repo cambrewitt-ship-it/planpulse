@@ -185,7 +185,7 @@ export function NotesChecklist({ filteredClientIds, activeClientId }: NotesCheck
       flexDirection: 'column',
       height: '100%',
       background: '#FFFFFF',
-      borderRadius: 4,
+      borderRadius: '0 18px 18px 0',
       border: '0.5px solid #D8D4CE',
       boxShadow: '0 2px 6px rgba(0,0,0,0.07)',
       overflow: 'hidden',

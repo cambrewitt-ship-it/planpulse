@@ -293,7 +293,7 @@ export default function CreateClientPage() {
             </div>
             <div
               className="rounded-lg p-6"
-              style={{ background: '#FDFCF8', border: '0.5px solid #E8E4DC', borderRadius: 6 }}
+              style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)' }}
             >
               <MediaPlanGrid
                 channels={channels}

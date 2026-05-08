@@ -363,16 +363,16 @@ export function FullscreenGanttView({
         <span style={{ fontSize: 17, fontWeight: 700, color: '#1C1917', fontFamily: "'Inter', system-ui, sans-serif", whiteSpace: 'nowrap' }}>Agency Timeline</span>
         <div style={{ width: '0.5px', height: 18, background: '#E8E4DC', flexShrink: 0 }} />
 
-        <button onClick={jumpToToday} style={{ display: 'flex', alignItems: 'center', gap: 5, height: 28, padding: '0 10px', flexShrink: 0, border: `1px solid ${TODAY_C}55`, borderRadius: 4, background: `${TODAY_C}10`, color: TODAY_C, fontSize: 12, fontWeight: 500, cursor: 'pointer' }}>
+        <button onClick={jumpToToday} style={{ display: 'flex', alignItems: 'center', gap: 5, height: 28, padding: '0 10px', flexShrink: 0, border: `1px solid ${TODAY_C}55`, borderRadius: 8, background: `${TODAY_C}10`, color: TODAY_C, fontSize: 12, fontWeight: 500, cursor: 'pointer' }}>
           <Target size={12} />Today
         </button>
         <div style={{ width: '0.5px', height: 18, background: '#E8E4DC', flexShrink: 0 }} />
 
         {/* Zoom */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-          <button onClick={zoomIn} disabled={!canZoomIn} style={{ width: 28, height: 28, border: '0.5px solid #E8E4DC', borderRadius: 4, background: canZoomIn ? '#FDFCF8' : '#F5F3EF', cursor: canZoomIn ? 'pointer' : 'default', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: canZoomIn ? 1 : 0.4 }}><ZoomIn size={13} color="#4C4840" /></button>
+          <button onClick={zoomIn} disabled={!canZoomIn} style={{ width: 28, height: 28, border: '0.5px solid #E8E4DC', borderRadius: 12, background: canZoomIn ? '#FDFCF8' : '#F5F3EF', cursor: canZoomIn ? 'pointer' : 'default', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: canZoomIn ? 1 : 0.4 }}><ZoomIn size={13} color="#4C4840" /></button>
           <span style={{ fontSize: 11, color: '#4C4840', fontWeight: 500, minWidth: 60, textAlign: 'center' }}>{ZOOM_LABELS[daysVisible] ?? `${daysVisible}d`}</span>
-          <button onClick={zoomOut} disabled={!canZoomOut} style={{ width: 28, height: 28, border: '0.5px solid #E8E4DC', borderRadius: 4, background: canZoomOut ? '#FDFCF8' : '#F5F3EF', cursor: canZoomOut ? 'pointer' : 'default', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: canZoomOut ? 1 : 0.4 }}><ZoomOut size={13} color="#4C4840" /></button>
+          <button onClick={zoomOut} disabled={!canZoomOut} style={{ width: 28, height: 28, border: '0.5px solid #E8E4DC', borderRadius: 12, background: canZoomOut ? '#FDFCF8' : '#F5F3EF', cursor: canZoomOut ? 'pointer' : 'default', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: canZoomOut ? 1 : 0.4 }}><ZoomOut size={13} color="#4C4840" /></button>
         </div>
         <div style={{ width: '0.5px', height: 18, background: '#E8E4DC', flexShrink: 0 }} />
 
@@ -382,7 +382,7 @@ export function FullscreenGanttView({
           ))}
         </div>
         <div style={{ flex: 1 }} />
-        <button onClick={onClose} style={{ width: 32, height: 32, flexShrink: 0, border: '0.5px solid #E8E4DC', borderRadius: 6, background: '#FDFCF8', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><X size={16} color="#8A8578" /></button>
+        <button onClick={onClose} style={{ width: 32, height: 32, flexShrink: 0, border: '0.5px solid #E8E4DC', borderRadius: 12, background: '#FDFCF8', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><X size={16} color="#8A8578" /></button>
       </div>
 
       {/* ── Scroll area ─────────────────────────────────────── */}
@@ -726,7 +726,7 @@ function APModal({ ap, clients, todayStr, accountManagers, isInProgress, onAssig
             </span>
             <button
               onClick={onClose}
-              style={{ marginLeft: 'auto', width: 24, height: 24, border: '0.5px solid #E8E4DC', borderRadius: 5, background: '#F5F3EF', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+              style={{ marginLeft: 'auto', width: 24, height: 24, border: '0.5px solid #E8E4DC', borderRadius: 8, background: '#F5F3EF', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
             >
               <X size={12} color="#8A8578" />
             </button>
@@ -761,7 +761,7 @@ function APModal({ ap, clients, todayStr, accountManagers, isInProgress, onAssig
             <select
               value={ap.assigned_to ?? ''}
               onChange={e => onAssign(e.target.value || null)}
-              style={{ flex: 1, fontSize: 11, fontWeight: 500, color: '#1C1917', background: '#F5F3EF', border: '0.5px solid #DDD9D1', borderRadius: 5, padding: '3px 7px', cursor: 'pointer', outline: 'none', fontFamily: 'inherit' }}
+              style={{ flex: 1, fontSize: 11, fontWeight: 500, color: '#1C1917', background: '#F5F3EF', border: '0.5px solid #DDD9D1', borderRadius: 8, padding: '3px 7px', cursor: 'pointer', outline: 'none', fontFamily: 'inherit' }}
             >
               <option value=''>Unassigned</option>
               {accountManagers.map(am => (
@@ -779,7 +779,7 @@ function APModal({ ap, clients, todayStr, accountManagers, isInProgress, onAssig
             style={{
               flex: 1, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
               border: isInProgress ? '1px solid #4A6580' : '0.5px solid #DDD9D1',
-              borderRadius: 6, background: isInProgress ? 'rgba(74,101,128,0.1)' : '#F5F3EF',
+              borderRadius: 8, background: isInProgress ? 'rgba(74,101,128,0.1)' : '#F5F3EF',
               color: isInProgress ? '#4A6580' : '#6C6860', fontSize: 11, fontWeight: 500, cursor: 'pointer',
             }}
           >
@@ -793,7 +793,7 @@ function APModal({ ap, clients, todayStr, accountManagers, isInProgress, onAssig
               onClick={onComplete}
               style={{
                 flex: 1, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                border: '1px solid #4A7C59', borderRadius: 6, background: 'rgba(74,124,89,0.08)',
+                border: '1px solid #4A7C59', borderRadius: 8, background: 'rgba(74,124,89,0.08)',
                 color: '#4A7C59', fontSize: 11, fontWeight: 500, cursor: 'pointer',
               }}
             >

@@ -92,7 +92,7 @@ function getChannelBarColor(label: string, type: 'paid' | 'organic', status: Cha
 
 type ChannelStatusSimple = 'completed' | 'active' | 'future';
 
-const ROW_COLORS = ['#FAF9F8', '#F4F1EE'] as const;
+const ROW_COLORS = ['#FDFCF8', '#F4F1EE'] as const;
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
 
@@ -205,7 +205,7 @@ export function GanttCalendar({
   // Layout constants
   const LABEL_COL = 130;
   const DAY_WIDTH = 38;
-  const RULER_BG  = '#E5E0D8';
+  const RULER_BG  = '#3E3C3A';
   const Z_STICKY  = 20; // above all timeline z-indices (bars=4, dots=5, markers=6)
 
   const filteredSet = useMemo(() => new Set(filteredClientIds), [filteredClientIds]);
@@ -287,7 +287,7 @@ export function GanttCalendar({
   return (
     <div
       ref={containerRef}
-      style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 394, width: '100%', minWidth: 0, background: '#FAF9F8', borderRadius: 4, fontFamily: "'DM Sans', system-ui, sans-serif" }}
+      style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 394, width: '100%', minWidth: 0, background: '#FDFCF8', borderRadius: 4, fontFamily: "'DM Sans', system-ui, sans-serif" }}
     >
       <div style={{ width: LABEL_COL + totalW, position: 'relative' }}>
 
@@ -314,7 +314,7 @@ export function GanttCalendar({
                   overflow: 'hidden',
                 }}
               >
-                <span style={{ fontSize: 8, fontWeight: 600, color: '#5C5650', textTransform: 'uppercase', letterSpacing: '0.08em', whiteSpace: 'nowrap' }}>
+                <span style={{ fontSize: 8, fontWeight: 600, color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: '0.08em', whiteSpace: 'nowrap' }}>
                   {grp.label}
                 </span>
               </div>
@@ -330,7 +330,7 @@ export function GanttCalendar({
             position: 'sticky', left: 0, zIndex: Z_STICKY,
             background: RULER_BG,
           }}>
-            <span style={{ fontSize: 9, color: '#1C1917', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+            <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.7)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
               Client
             </span>
           </div>
@@ -364,13 +364,13 @@ export function GanttCalendar({
                   <div style={{
                     width: dotSize, height: dotSize,
                     borderRadius: '50%',
-                    background: dotCount > 0 ? '#B5B0A5' : 'transparent',
+                    background: dotCount > 0 ? 'rgba(255,255,255,0.35)' : 'transparent',
                     flexShrink: 0, marginBottom: 1,
                   }} />
                   <span style={{
                     fontSize: isToday ? 9 : 7.5,
                     fontWeight: isToday ? 600 : 400,
-                    color: isToday ? '#1C1917' : '#4C4840',
+                    color: isToday ? '#ffffff' : 'rgba(255,255,255,0.65)',
                     lineHeight: 1,
                     fontFamily: "'DM Sans', system-ui, sans-serif",
                   }}>
@@ -416,7 +416,7 @@ export function GanttCalendar({
                   </span>
                 </div>
 
-                <div style={{ position: 'relative', background: rowBg, height: 24 }}>
+                <div style={{ position: 'relative', background: '#FDFCF8', height: 24 }}>
                   {todayPx !== null && <TodayOverlay px={todayPx} dayWidth={DAY_WIDTH} />}
                   {/* Month dividers */}
                   {monthGroups.slice(1).map(grp => (
@@ -477,13 +477,13 @@ export function GanttCalendar({
                       <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         {getChannelIcon(ch.label, ch.type)}
                       </div>
-                      <span style={{ fontSize: 9, color: '#1C1917', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <span style={{ fontSize: 9, fontWeight: 600, color: '#1C1917', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {ch.label}
                       </span>
                     </div>
 
                     {/* Timeline area */}
-                    <div style={{ position: 'relative', overflow: 'visible', background: rowBg }}>
+                    <div style={{ position: 'relative', overflow: 'visible', background: '#FDFCF8' }}>
                       {/* Today overlay */}
                       {todayPx !== null && <TodayOverlay px={todayPx} dayWidth={DAY_WIDTH} />}
 

@@ -485,7 +485,7 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                 fontSize: 11,
                 padding: '3px 6px',
                 border: '0.5px solid #D5D0C5',
-                borderRadius: 4,
+                borderRadius: 8,
                 background: '#fff',
                 fontFamily: "'DM Sans', system-ui, sans-serif",
                 color: '#1C1917',
@@ -503,7 +503,7 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                 fontSize: 11,
                 padding: '3px 6px',
                 border: '0.5px solid #D5D0C5',
-                borderRadius: 4,
+                borderRadius: 8,
                 background: '#fff',
                 fontFamily: "'DM Sans', system-ui, sans-serif",
                 color: '#1C1917',
@@ -565,7 +565,7 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
               style={{
                 display: 'flex', alignItems: 'center', gap: 3,
                 fontSize: 11, padding: '3px 10px',
-                borderRadius: 4, border: 'none',
+                borderRadius: 8, border: 'none',
                 background: isSaving || !addText.trim() || !addChannel ? '#D5D0C5' : '#4A6580',
                 color: '#fff', cursor: isSaving || !addText.trim() || !addChannel ? 'default' : 'pointer',
                 fontFamily: "'DM Sans', system-ui, sans-serif",
@@ -579,7 +579,7 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
               style={{
                 display: 'flex', alignItems: 'center', gap: 3,
                 fontSize: 11, padding: '3px 8px',
-                borderRadius: 4, border: '0.5px solid #D5D0C5',
+                borderRadius: 8, border: '0.5px solid #D5D0C5',
                 background: 'transparent', color: '#8A8578',
                 cursor: 'pointer',
                 fontFamily: "'DM Sans', system-ui, sans-serif",
@@ -809,7 +809,7 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); handleToggleInProgress(card); }}
-                      style={{ fontSize: 8, fontWeight: 500, padding: '1px 5px', borderRadius: 3, border: isInProgress ? '0.5px solid rgba(176,112,48,0.4)' : '0.5px dashed #D5D0C5', background: isInProgress ? 'rgba(176,112,48,0.1)' : 'transparent', color: isInProgress ? '#B07030' : '#C0BBC0', cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif", whiteSpace: 'nowrap' }}
+                      style={{ fontSize: 8, fontWeight: 500, padding: '1px 5px', borderRadius: 6, border: isInProgress ? '0.5px solid rgba(176,112,48,0.4)' : '0.5px dashed #D5D0C5', background: isInProgress ? 'rgba(176,112,48,0.1)' : 'transparent', color: isInProgress ? '#B07030' : '#C0BBC0', cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif", whiteSpace: 'nowrap' }}
                     >In Progress</button>
                     <AssignMenu card={card} onAssign={handleAssign} accountManagers={accountManagers} />
                   </div>
@@ -866,7 +866,7 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                               {Math.abs(card.daysUntilDue!)}d overdue
                             </span>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flexShrink: 0, alignItems: 'stretch' }}>
-                              <button type="button" onClick={(e) => { e.stopPropagation(); handleToggleInProgress(card); }} title={isInProgress ? 'Clear in progress' : 'Mark as in progress'} style={{ fontSize: 8, fontWeight: 500, padding: '1px 5px', borderRadius: 3, border: isInProgress ? '0.5px solid rgba(176,112,48,0.4)' : '0.5px dashed #D5D0C5', background: isInProgress ? 'rgba(176,112,48,0.1)' : 'transparent', color: isInProgress ? '#B07030' : '#C0BBC0', cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif", whiteSpace: 'nowrap' }}>In Progress</button>
+                              <button type="button" onClick={(e) => { e.stopPropagation(); handleToggleInProgress(card); }} title={isInProgress ? 'Clear in progress' : 'Mark as in progress'} style={{ fontSize: 8, fontWeight: 500, padding: '1px 5px', borderRadius: 6, border: isInProgress ? '0.5px solid rgba(176,112,48,0.4)' : '0.5px dashed #D5D0C5', background: isInProgress ? 'rgba(176,112,48,0.1)' : 'transparent', color: isInProgress ? '#B07030' : '#C0BBC0', cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif", whiteSpace: 'nowrap' }}>In Progress</button>
                               <AssignMenu card={card} onAssign={handleAssign} accountManagers={accountManagers} />
                             </div>
                           </div>

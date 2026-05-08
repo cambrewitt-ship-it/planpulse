@@ -56,7 +56,7 @@ export default function PlansPage() {
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {plans.map(plan => (
-            <Card key={plan.id} className="transition-shadow" style={{ background: '#FDFCF8', border: '0.5px solid #E8E4DC', borderRadius: 6 }}>
+            <Card key={plan.id} className="transition-shadow" style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)' }}>
               <CardHeader>
                 <CardTitle className="text-lg" style={{ color: '#1C1917' }}>
                   {plan.clients?.name || 'Unknown Client'}

@@ -1,6 +1,7 @@
 // src/components/agency/TodayCard.tsx
 'use client';
 
+import { useState, useEffect } from 'react';
 import type { ClientCardData } from '@/app/api/agency/clients/route';
 import { getChannelLogo } from '@/lib/utils/channel-icons';
 
@@ -30,6 +31,13 @@ export function TodayCard({ clients, today }: TodayCardProps) {
     }))
     .filter(c => c.liveChannels.length > 0);
 
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const timeStr = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+
   const serifFont = "'DM Serif Display', Georgia, serif";
   const sansFont = "'DM Sans', system-ui, sans-serif";
 
@@ -37,11 +45,12 @@ export function TodayCard({ clients, today }: TodayCardProps) {
     <div style={{
       width: '100%',
       background: '#1C1917',
-      borderRadius: 6,
+      borderRadius: 18,
       padding: '14px 16px',
       display: 'flex',
       flexDirection: 'column',
       fontFamily: sansFont,
+      boxShadow: '0 4px 20px rgba(0,0,0,0.12), 0 1px 6px rgba(0,0,0,0.08)',
     }}>
       {/* TODAY label */}
       <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.65)', textTransform: 'uppercase', letterSpacing: '0.1em', fontFamily: sansFont }}>
@@ -53,10 +62,15 @@ export function TodayCard({ clients, today }: TodayCardProps) {
         {month} {day}
       </span>
 
-      {/* Day of week */}
-      <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)', marginTop: 2, fontFamily: sansFont }}>
-        {dayName}
-      </span>
+      {/* Day of week + time */}
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginTop: 2 }}>
+        <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)', fontFamily: sansFont }}>
+          {dayName}
+        </span>
+        <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.9)', fontFamily: sansFont, fontWeight: 500, letterSpacing: '0.02em' }}>
+          {timeStr}
+        </span>
+      </div>
 
       {/* Divider */}
       <div style={{ height: '0.5px', background: 'rgba(255,255,255,0.08)', margin: '12px 0' }} />

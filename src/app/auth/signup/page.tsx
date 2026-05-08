@@ -12,6 +12,7 @@ import Link from 'next/link';
 
 export default function SignupPage() {
   const router = useRouter();
+  const [firstName, setFirstName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -43,6 +44,7 @@ export default function SignupPage() {
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
+        options: { data: { first_name: firstName.trim() } },
       });
 
       if (error) throw error;
@@ -69,7 +71,7 @@ export default function SignupPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8" style={{ background: '#F5F3EF', ...pageFont }}>
-      <Card className="w-full max-w-md" style={{ background: '#FDFCF8', border: '0.5px solid #E8E4DC', borderRadius: 6 }}>
+      <Card className="w-full max-w-md" style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)' }}>
         <CardHeader>
           <CardTitle className="text-2xl font-bold text-center" style={{ color: '#1C1917', ...serifFont }}>
             Create your account
@@ -78,7 +80,7 @@ export default function SignupPage() {
         <CardContent>
           {success ? (
             <div className="text-center space-y-4">
-              <div className="px-4 py-3 rounded" style={{ background: '#EAF0EB', border: '0.5px solid rgba(74,124,89,0.25)', color: '#4A7C59', borderRadius: 4 }}>
+              <div className="px-4 py-3 rounded" style={{ background: '#EAF0EB', border: '0.5px solid rgba(74,124,89,0.25)', color: '#4A7C59', borderRadius: 10 }}>
                 Account created successfully! Please check your email to confirm your account.
               </div>
               <Link href="/auth/login">
@@ -94,11 +96,24 @@ export default function SignupPage() {
                   background: error.includes('check your email') ? '#E8EDF2' : '#F5EDE9',
                   border: error.includes('check your email') ? '0.5px solid rgba(74,101,128,0.25)' : '0.5px solid rgba(160,68,42,0.25)',
                   color: error.includes('check your email') ? '#4A6580' : '#A0442A',
-                  borderRadius: 4
+                  borderRadius: 10
                 }}>
                   {error}
                 </div>
               )}
+
+              <div>
+                <Label htmlFor="firstName">First name</Label>
+                <Input
+                  id="firstName"
+                  type="text"
+                  required
+                  value={firstName}
+                  onChange={(e) => setFirstName(e.target.value)}
+                  placeholder="Jane"
+                  className="mt-1"
+                />
+              </div>
 
               <div>
                 <Label htmlFor="email">Email address</Label>

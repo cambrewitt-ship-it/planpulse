@@ -62,7 +62,7 @@ export default function Home() {
             
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8 max-w-6xl mx-auto">
               {/* Feature 1 */}
-              <div className="p-6 rounded-lg transition-shadow" style={{ background: '#FDFCF8', border: '0.5px solid #E8E4DC', borderRadius: 6 }}>
+              <div className="p-6 rounded-lg transition-shadow" style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)' }}>
                 <div className="w-12 h-12 rounded-lg flex items-center justify-center mb-4" style={{ background: '#E8EDF2' }}>
                   <Users className="w-6 h-6" style={{ color: '#4A6580' }} />
                 </div>
@@ -73,7 +73,7 @@ export default function Home() {
               </div>
 
               {/* Feature 2 */}
-              <div className="p-6 rounded-lg transition-shadow" style={{ background: '#FDFCF8', border: '0.5px solid #E8E4DC', borderRadius: 6 }}>
+              <div className="p-6 rounded-lg transition-shadow" style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)' }}>
                 <div className="w-12 h-12 rounded-lg flex items-center justify-center mb-4" style={{ background: '#E8EDF2' }}>
                   <Target className="w-6 h-6" style={{ color: '#4A6580' }} />
                 </div>
@@ -84,7 +84,7 @@ export default function Home() {
               </div>
 
               {/* Feature 3 */}
-              <div className="p-6 rounded-lg transition-shadow" style={{ background: '#FDFCF8', border: '0.5px solid #E8E4DC', borderRadius: 6 }}>
+              <div className="p-6 rounded-lg transition-shadow" style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)' }}>
                 <div className="w-12 h-12 rounded-lg flex items-center justify-center mb-4" style={{ background: '#EAF0EB' }}>
                   <CheckCircle2 className="w-6 h-6" style={{ color: '#4A7C59' }} />
                 </div>
@@ -95,7 +95,7 @@ export default function Home() {
               </div>
 
               {/* Feature 4 */}
-              <div className="p-6 rounded-lg transition-shadow" style={{ background: '#FDFCF8', border: '0.5px solid #E8E4DC', borderRadius: 6 }}>
+              <div className="p-6 rounded-lg transition-shadow" style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)' }}>
                 <div className="w-12 h-12 rounded-lg flex items-center justify-center mb-4" style={{ background: '#E8EDF2' }}>
                   <BarChart3 className="w-6 h-6" style={{ color: '#4A6580' }} />
                 </div>
@@ -106,7 +106,7 @@ export default function Home() {
               </div>
 
               {/* Feature 5 */}
-              <div className="p-6 rounded-lg transition-shadow" style={{ background: '#FDFCF8', border: '0.5px solid #E8E4DC', borderRadius: 6 }}>
+              <div className="p-6 rounded-lg transition-shadow" style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)' }}>
                 <div className="w-12 h-12 rounded-lg flex items-center justify-center mb-4" style={{ background: '#E8EDF2' }}>
                   <Calendar className="w-6 h-6" style={{ color: '#4A6580' }} />
                 </div>
@@ -117,7 +117,7 @@ export default function Home() {
               </div>
 
               {/* Feature 6 */}
-              <div className="p-6 rounded-lg transition-shadow" style={{ background: '#FDFCF8', border: '0.5px solid #E8E4DC', borderRadius: 6 }}>
+              <div className="p-6 rounded-lg transition-shadow" style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)' }}>
                 <div className="w-12 h-12 rounded-lg flex items-center justify-center mb-4" style={{ background: '#EAF0EB' }}>
                   <TrendingUp className="w-6 h-6" style={{ color: '#4A7C59' }} />
                 </div>

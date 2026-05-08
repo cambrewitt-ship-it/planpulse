@@ -172,12 +172,13 @@ export function ClientCardCompact({ client, selected, onClick, index = 0, onAcco
 
   const cardStyle: React.CSSProperties = {
     background: '#FDFCF8',
-    border: selected ? '1.5px solid rgba(74,101,128,0.5)' : '1px solid #B8B4AE',
-    borderRadius: 6,
+    border: selected ? '1.5px solid rgba(74,101,128,0.5)' : '1px solid #E0DCD4',
+    borderRadius: 18,
     padding: '14px',
     marginBottom: 6,
     cursor: 'pointer',
     fontFamily: "'DM Sans', system-ui, sans-serif",
+    boxShadow: selected ? '0 2px 12px rgba(74,101,128,0.15)' : '0 2px 8px rgba(0,0,0,0.06)',
   };
   const subTextColor = '#8A8578';
 
@@ -211,12 +212,12 @@ export function ClientCardCompact({ client, selected, onClick, index = 0, onAcco
       {/* Row 1: Avatar + Name + Health ring */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <div style={{
-          width: 34, height: 34, borderRadius: 5,
+          width: 34, height: 34, borderRadius: 10,
           background: '#E8E5DE', display: 'flex', alignItems: 'center', justifyContent: 'center',
           flexShrink: 0, overflow: 'hidden',
         }}>
           {client.logo_url ? (
-            <img src={client.logo_url} alt={client.name} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 5 }} />
+            <img src={client.logo_url} alt={client.name} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 10 }} />
           ) : (
             <span style={{ color: '#8A8578', fontWeight: 500, fontSize: 13 }}>{initials}</span>
           )}
@@ -248,7 +249,7 @@ export function ClientCardCompact({ client, selected, onClick, index = 0, onAcco
             style={{
               fontSize: 10, fontWeight: 500,
               padding: '2px 6px',
-              borderRadius: 3,
+              borderRadius: 12,
               border: currentAm ? '0.5px solid rgba(74,101,128,0.3)' : '0.5px dashed #D5D0C5',
               background: currentAm ? 'rgba(74,101,128,0.08)' : 'transparent',
               color: currentAm ? '#4A6580' : '#B5B0A5',
@@ -267,7 +268,7 @@ export function ClientCardCompact({ client, selected, onClick, index = 0, onAcco
               marginTop: 4,
               background: '#FDFCF8',
               border: '0.5px solid #E8E4DC',
-              borderRadius: 5,
+              borderRadius: 10,
               boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
               zIndex: 50,
               minWidth: 90,

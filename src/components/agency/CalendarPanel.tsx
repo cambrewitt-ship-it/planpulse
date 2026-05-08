@@ -217,11 +217,11 @@ export function CalendarPanel({
       {/* Header */}
       <div style={{
         display: 'flex', alignItems: 'center',
-        background: '#E5E0D8',
-        borderRadius: '6px 6px 0 0',
+        background: 'transparent',
+        borderRadius: '18px 18px 0 0',
         padding: '8px 16px',
       }}>
-        <span style={{ fontSize: 12, fontWeight: 600, color: '#1C1917', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.9)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
           {view === 'gantt' ? 'Timeline' : `Calendar — ${monthLabel}`}
         </span>
         <div style={{ flex: 1 }} />
@@ -233,7 +233,7 @@ export function CalendarPanel({
             style={{
               height: 22, padding: '0 8px', border: 'none',
               background: 'transparent',
-              color: 'rgba(0,0,0,0.45)',
+              color: 'rgba(255,255,255,0.45)',
               fontSize: 11, fontWeight: 400,
               cursor: 'pointer',
               fontFamily: "'DM Sans', system-ui, sans-serif",
@@ -249,7 +249,7 @@ export function CalendarPanel({
         )}
         {/* Divider */}
         {onOpenTimeline && (
-          <div style={{ width: '0.5px', height: 14, background: 'rgba(0,0,0,0.15)', alignSelf: 'center', marginRight: 6 }} />
+          <div style={{ width: '0.5px', height: 14, background: 'rgba(255,255,255,0.15)', alignSelf: 'center', marginRight: 6 }} />
         )}
         {(['gantt', 'month'] as const).map(v => (
           <button
@@ -258,11 +258,11 @@ export function CalendarPanel({
             style={{
               height: 22, padding: '0 8px', border: 'none',
               background: 'transparent',
-              color: view === v ? '#1C1917' : 'rgba(0,0,0,0.45)',
+              color: view === v ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.4)',
               fontSize: 11, fontWeight: view === v ? 600 : 400,
               cursor: 'pointer',
               fontFamily: "'DM Sans', system-ui, sans-serif",
-              borderBottom: view === v ? '1px solid rgba(0,0,0,0.5)' : '1px solid transparent',
+              borderBottom: view === v ? '1px solid rgba(255,255,255,0.5)' : '1px solid transparent',
               borderRadius: 0,
             }}
           >
@@ -270,7 +270,7 @@ export function CalendarPanel({
           </button>
         ))}
       </div>
-      <div style={{ padding: '12px 16px', background: '#E5E0D8' }}>
+      <div style={{ padding: '12px 16px', background: 'transparent' }}>
 
       {view === 'gantt' ? (
         <GanttCalendar

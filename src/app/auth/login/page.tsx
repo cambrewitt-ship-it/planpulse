@@ -47,7 +47,7 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8" style={{ background: '#F5F3EF', ...pageFont }}>
-      <Card className="w-full max-w-md" style={{ background: '#FDFCF8', border: '0.5px solid #E8E4DC', borderRadius: 6 }}>
+      <Card className="w-full max-w-md" style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)' }}>
         <CardHeader>
           <CardTitle className="text-2xl font-bold text-center" style={{ color: '#1C1917', ...serifFont }}>
             Sign in to Plan Check
@@ -56,7 +56,7 @@ export default function LoginPage() {
         <CardContent>
           <form onSubmit={handleLogin} className="space-y-6">
             {error && (
-              <div className="px-4 py-3 rounded" style={{ background: '#F5EDE9', border: '0.5px solid rgba(160,68,42,0.25)', color: '#A0442A', borderRadius: 4 }}>
+              <div className="px-4 py-3 rounded" style={{ background: '#F5EDE9', border: '0.5px solid rgba(160,68,42,0.25)', color: '#A0442A', borderRadius: 10 }}>
                 {error}
               </div>
             )}

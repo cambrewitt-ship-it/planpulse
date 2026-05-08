@@ -814,7 +814,7 @@ export default function LibraryPage() {
       </div>
 
       {/* Tab toggle */}
-      <div className="flex gap-1 mb-6" style={{ background: '#EEECE8', padding: 4, borderRadius: 8, display: 'inline-flex' }}>
+      <div className="flex gap-1 mb-6" style={{ background: '#EEECE8', padding: 4, borderRadius: 12, display: 'inline-flex' }}>
         <Button
           size="sm"
           variant={activeTab === 'channels' ? 'default' : 'ghost'}
@@ -836,7 +836,7 @@ export default function LibraryPage() {
       {activeTab === 'benchmarks' && <MetricsBenchmarksPanel />}
 
       {activeTab === 'channels' ? (libraryEntries.length === 0 ? (
-        <Card style={{ background: '#FDFCF8', border: '0.5px solid #E8E4DC', borderRadius: 6 }}>
+        <Card style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)' }}>
           <CardContent className="text-center py-12">
             <p style={{ color: '#8A8578', marginBottom: 16 }}>No media channels in library yet</p>
             <Button onClick={() => setIsDialogOpen(true)}>
@@ -854,7 +854,7 @@ export default function LibraryPage() {
             const isEditing = editingId === entry.id;
 
             return (
-              <Card key={entry.id} className="transition-shadow" style={{ background: '#FDFCF8', border: '0.5px solid #E8E4DC', borderRadius: 6 }}>
+              <Card key={entry.id} className="transition-shadow" style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)' }}>
                 <CardHeader>
                   <div className="flex items-start justify-between">
                     <div className="flex items-start gap-3 flex-1">

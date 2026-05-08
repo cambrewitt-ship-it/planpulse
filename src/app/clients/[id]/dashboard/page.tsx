@@ -1676,7 +1676,7 @@ export default function DashboardV2() {
 
         {/* ── Error banner ── */}
         {dashboardError && (
-          <div className="rounded-lg px-4 py-3 text-sm flex items-start gap-2" style={{ background: '#F5EDE0', border: '0.5px solid rgba(176,112,48,0.25)', color: '#B07030', borderRadius: 6 }}>
+          <div className="rounded-lg px-4 py-3 text-sm flex items-start gap-2" style={{ background: '#F5EDE0', border: '0.5px solid rgba(176,112,48,0.25)', color: '#B07030', borderRadius: 12 }}>
             <span className="mt-0.5">⚠</span>
             {dashboardError}
           </div>
@@ -1780,7 +1780,7 @@ export default function DashboardV2() {
                     onClick={() => setShowFullscreenGantt(true)}
                     style={{
                       display: 'flex', alignItems: 'center', gap: 6,
-                      padding: '8px 14px', borderRadius: 8, border: '0.5px solid #D5D0C5',
+                      padding: '8px 14px', borderRadius: 12, border: '0.5px solid #D5D0C5',
                       background: '#FDFCF8', color: '#4A6580',
                       fontSize: 14, fontWeight: 500, cursor: 'pointer',
                       fontFamily: "'DM Sans', system-ui, sans-serif",
@@ -1825,7 +1825,7 @@ export default function DashboardV2() {
                     position: 'relative',
                     overflow: 'hidden',
                     display: 'flex',
-                    borderRadius: 6,
+                    borderRadius: 12,
                   }}>
                     {notesCollapsed ? (
                       /* Collapsed pill */
@@ -1834,7 +1834,7 @@ export default function DashboardV2() {
                         style={{
                           height: '100%', width: '100%',
                           background: '#1C1917',
-                          borderRadius: 6,
+                          borderRadius: 12,
                           cursor: 'pointer',
                           display: 'flex',
                           flexDirection: 'column',
@@ -1848,7 +1848,7 @@ export default function DashboardV2() {
                         <span style={{ fontSize: 14, color: 'rgba(255,255,255,0.4)' }}>›</span>
                       </div>
                     ) : (
-                      <div style={{ display: 'flex', width: '100%', height: '100%', position: 'relative', borderRadius: 6, overflow: 'hidden' }}>
+                      <div style={{ display: 'flex', width: '100%', height: '100%', position: 'relative', borderRadius: 12, overflow: 'hidden' }}>
                         {/* Dark textured left spine */}
                         <div style={{
                           width: 36,
@@ -2088,12 +2088,12 @@ export default function DashboardV2() {
             {viewMode === 'funnels' && (
               <>
                 {/* Funnel selector */}
-                <div style={{ background: '#FDFCF8', border: '0.5px solid #E8E4DC', borderRadius: 6, padding: '20px 24px', marginBottom: 14 }}>
+                <div style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', padding: '20px 24px', marginBottom: 14 }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
                     <span style={{ fontSize: 14, fontWeight: 600, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Funnels</span>
                     <button
                       onClick={() => { setEditingFunnel(null); setIsFunnelBuilderOpen(true); }}
-                      style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 6, border: '0.5px solid #D5D0C5', background: '#FDFCF8', color: '#4A6580', fontSize: 13, fontWeight: 500, cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif" }}
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 12, border: '0.5px solid #D5D0C5', background: '#FDFCF8', color: '#4A6580', fontSize: 13, fontWeight: 500, cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif" }}
                     >
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                       Create Funnel
@@ -2109,7 +2109,7 @@ export default function DashboardV2() {
                         <div
                           key={funnel.id}
                           style={{
-                            padding: '10px 14px', borderRadius: 6,
+                            padding: '10px 14px', borderRadius: 12,
                             border: selectedFunnelId === funnel.id ? '1.5px solid #4A6580' : '0.5px solid #E8E4DC',
                             background: selectedFunnelId === funnel.id ? '#EEF2F6' : '#FAFAF8',
                             display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer',
@@ -2201,7 +2201,7 @@ export default function DashboardV2() {
             {/* ── Media Plan view ── */}
             {viewMode === 'media-plan' && (
               <>
-                <div className="rounded-lg p-6" style={{ background: '#FDFCF8', border: '0.5px solid #E8E4DC', borderRadius: 6 }}>
+                <div className="rounded-lg p-6" style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)' }}>
                 <MediaPlanGrid
                   channels={mediaPlanBuilderChannels}
                   onChannelsChange={handleChannelsChange}
@@ -2216,7 +2216,7 @@ export default function DashboardV2() {
             {viewMode === 'admin' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                 {/* Client Logo */}
-                <div style={{ background: '#FDFCF8', border: '0.5px solid #E8E4DC', borderRadius: 6, padding: '20px 24px' }}>
+                <div style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', padding: '20px 24px' }}>
                   <div style={{ marginBottom: 16 }}>
                     <span style={{ fontSize: 13, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Client Logo</span>
                   </div>
@@ -2233,7 +2233,7 @@ export default function DashboardV2() {
                         onClick={() => logoInputRef.current?.click()}
                         disabled={isUploadingLogo}
                         style={{
-                          height: 30, padding: '0 12px', borderRadius: 4,
+                          height: 30, padding: '0 12px', borderRadius: 12,
                           border: '0.5px solid #D5D0C5', background: '#FDFCF8',
                           color: '#1C1917', fontSize: 12, fontWeight: 500,
                           cursor: isUploadingLogo ? 'not-allowed' : 'pointer',
@@ -2265,13 +2265,13 @@ export default function DashboardV2() {
                 </div>
 
                 {/* Ad Platform Connections */}
-                <div className="rounded-lg p-6" style={{ background: '#FDFCF8', border: '0.5px solid #E8E4DC', borderRadius: 6 }}>
+                <div className="rounded-lg p-6" style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)' }}>
                   <AdPlatformConnector clientId={clientId} />
                 </div>
 
                 {/* Health Score Configuration */}
                 {healthScore && (
-                  <div style={{ background: '#FDFCF8', border: '0.5px solid #E8E4DC', borderRadius: 6, padding: '20px 24px' }}>
+                  <div style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', padding: '20px 24px' }}>
                     <div style={{ marginBottom: 16 }}>
                       <span style={{ fontSize: 13, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Health Score</span>
                       <span style={{ fontSize: 11, color: '#B5B0A5', marginLeft: 8, fontFamily: "'DM Sans', system-ui, sans-serif" }}>Adjust component weightings — will be normalised to 100%</span>
@@ -2285,10 +2285,10 @@ export default function DashboardV2() {
                         const s = score >= 80 ? '#4A7C59' : score >= 60 ? '#B07030' : '#A0442A';
                         const bg = score >= 80 ? '#EAF0EB' : score >= 60 ? '#F5EDE0' : '#F5EDE9';
                         return (
-                          <div key={key} style={{ padding: '12px 14px', borderRadius: 4, border: '0.5px solid #E8E4DC', background: '#FAFAF8' }}>
+                          <div key={key} style={{ padding: '12px 14px', borderRadius: 10, border: '0.5px solid #E8E4DC', background: '#FAFAF8' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                               <span style={{ flex: 1, fontSize: 13, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}>{label}</span>
-                              <span style={{ fontSize: 13, fontWeight: 700, color: s, background: bg, padding: '2px 8px', borderRadius: 4 }}>{score}</span>
+                              <span style={{ fontSize: 13, fontWeight: 700, color: s, background: bg, padding: '2px 8px', borderRadius: 8 }}>{score}</span>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                                 <span style={{ fontSize: 11, color: '#8A8578', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Weight</span>
                                 <input
@@ -2303,7 +2303,7 @@ export default function DashboardV2() {
                                     try { localStorage.setItem(`health-weights-${clientId}`, JSON.stringify(updated)); } catch {}
                                   }}
                                   style={{
-                                    width: 52, height: 28, borderRadius: 4, border: '0.5px solid #D5D0C5',
+                                    width: 52, height: 28, borderRadius: 10, border: '0.5px solid #D5D0C5',
                                     background: '#FDFCF8', textAlign: 'center', fontSize: 13, color: '#1C1917',
                                     fontFamily: "'DM Sans', system-ui, sans-serif", outline: 'none',
                                   }}
@@ -2334,13 +2334,13 @@ export default function DashboardV2() {
                 )}
 
                 {/* Invoices section */}
-                <div style={{ background: '#FDFCF8', border: '0.5px solid #E8E4DC', borderRadius: 6, padding: '20px 24px' }}>
+                <div style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', padding: '20px 24px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
                     <span style={{ fontSize: 13, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Invoices</span>
                     <button
                       onClick={() => setIsInvoiceModalOpen(true)}
                       style={{
-                        height: 30, padding: '0 12px', borderRadius: 4,
+                        height: 30, padding: '0 12px', borderRadius: 12,
                         border: '0.5px solid #D5D0C5', background: '#FDFCF8',
                         color: '#1C1917', fontSize: 12, fontWeight: 500,
                         cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif",
@@ -2362,7 +2362,7 @@ export default function DashboardV2() {
                         return (
                           <div key={inv.id} style={{
                             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                            padding: '9px 12px', borderRadius: 4, border: '0.5px solid #E8E4DC',
+                            padding: '9px 12px', borderRadius: 10, border: '0.5px solid #E8E4DC',
                             background: '#FAFAF8', fontFamily: "'DM Sans', system-ui, sans-serif",
                           }}>
                             <span style={{ fontSize: 13, color: '#1C1917', fontWeight: 500 }}>{label}</span>

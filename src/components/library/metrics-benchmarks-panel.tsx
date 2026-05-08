@@ -177,7 +177,7 @@ function ChannelBenchmarkCard({
   const [expanded, setExpanded] = useState(true);
 
   return (
-    <Card style={{ background: '#FDFCF8', border: '0.5px solid #E8E4DC', borderRadius: 6 }}>
+    <Card style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)' }}>
       <CardHeader className="pb-2">
         <button
           className="flex items-center gap-2 w-full text-left"
@@ -312,7 +312,7 @@ export function MetricsBenchmarksPanel() {
       </div>
 
       {Object.keys(grouped).length === 0 ? (
-        <Card style={{ background: '#FDFCF8', border: '0.5px solid #E8E4DC', borderRadius: 6 }}>
+        <Card style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)' }}>
           <CardContent className="text-center py-12">
             <p style={{ color: '#8A8578' }}>
               No benchmarks found. Run <code className="text-xs bg-gray-100 px-1 py-0.5 rounded">npm run seed:benchmarks</code> to populate defaults.

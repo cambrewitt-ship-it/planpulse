@@ -82,10 +82,10 @@ function computeBriefing(clients: ClientCardData[], actionPointClients: AgencyCl
 }
 
 const CHIP_STYLES: Record<string, React.CSSProperties> = {
-  red: { background: '#F5EDE9', color: '#A0442A', border: '0.5px solid rgba(160,68,42,0.25)', borderRadius: 4 },
-  amber: { background: '#F5EDE0', color: '#B07030', border: '0.5px solid rgba(176,112,48,0.25)', borderRadius: 4 },
-  blue: { background: '#E8EDF2', color: '#4A6580', border: '0.5px solid rgba(74,101,128,0.25)', borderRadius: 4 },
-  green: { background: '#EAF0EB', color: '#4A7C59', border: '0.5px solid rgba(74,124,89,0.25)', borderRadius: 4 },
+  red: { background: '#F5EDE9', color: '#A0442A', border: '0.5px solid rgba(160,68,42,0.25)', borderRadius: 8 },
+  amber: { background: '#F5EDE0', color: '#B07030', border: '0.5px solid rgba(176,112,48,0.25)', borderRadius: 8 },
+  blue: { background: '#E8EDF2', color: '#4A6580', border: '0.5px solid rgba(74,101,128,0.25)', borderRadius: 8 },
+  green: { background: '#EAF0EB', color: '#4A7C59', border: '0.5px solid rgba(74,124,89,0.25)', borderRadius: 8 },
 };
 
 // ── Main page ────────────────────────────────────────────────────────────────
@@ -328,7 +328,7 @@ export default function AgencyDashboard() {
           onClick={handleRefresh}
           disabled={refreshing}
           style={{
-            width: 28, height: 28, borderRadius: 4, border: '0.5px solid #E8E4DC',
+            width: 28, height: 28, borderRadius: 12, border: '0.5px solid #E8E4DC',
             background: '#FDFCF8', display: 'flex', alignItems: 'center', justifyContent: 'center',
             cursor: 'pointer', flexShrink: 0,
           }}
@@ -336,7 +336,7 @@ export default function AgencyDashboard() {
           <RefreshCw size={13} color="#8A8578" style={{ animation: refreshing ? 'spin 1s linear infinite' : 'none' }} />
         </button>
         <span style={{ fontSize: 13, color: '#8A8578', flexShrink: 0 }}>{monthLabel}</span>
-        <div style={{ width: '0.5px', height: 16, background: '#E8E4DC', flexShrink: 0 }} />
+        <div style={{ width: '0.5px', height: 16, background: '#F5F3EF', flexShrink: 0 }} />
         {/* Briefing chips — scrollable with right fade */}
         <div style={{ position: 'relative', flex: 1, overflow: 'hidden', minWidth: 0 }}>
           <div style={{ display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none' }}>
@@ -369,7 +369,7 @@ export default function AgencyDashboard() {
           onClick={() => setShowFullscreenGantt(true)}
           style={{
             height: 28, padding: '0 10px',
-            border: '0.5px solid #D5D0C5', borderRadius: 4,
+            border: '0.5px solid #D5D0C5', borderRadius: 12,
             background: '#FDFCF8', color: '#4A6580',
             fontSize: 12, fontWeight: 500, cursor: 'pointer',
             display: 'flex', alignItems: 'center', gap: 5,
@@ -394,7 +394,7 @@ export default function AgencyDashboard() {
               onClick={() => setAmFilter('All')}
               style={{
                 padding: '7px 16px',
-                borderRadius: '6px 6px 0 0',
+                borderRadius: '12px 12px 0 0',
                 border: `0.5px solid ${isActive ? '#D5D0C5' : 'transparent'}`,
                 borderBottom: isActive ? `0.5px solid #F5F3EF` : '0.5px solid #E8E4DC',
                 background: isActive ? '#F5F3EF' : '#FDFCF8',
@@ -415,7 +415,7 @@ export default function AgencyDashboard() {
               onClick={() => setAmFilter(am.name)}
               style={{
                 padding: '7px 16px',
-                borderRadius: '6px 6px 0 0',
+                borderRadius: '12px 12px 0 0',
                 border: `0.5px solid ${isActive ? palette.active : 'transparent'}`,
                 borderBottom: isActive ? `0.5px solid #F5F3EF` : `0.5px solid ${palette.active}22`,
                 background: isActive ? palette.active : palette.light,
@@ -476,7 +476,7 @@ export default function AgencyDashboard() {
             </div>
             <button style={{
               width: '100%', marginTop: 6, padding: '9px 0', flexShrink: 0,
-              border: '0.5px dashed #D5D0C5', borderRadius: 6,
+              border: '0.5px dashed #D5D0C5', borderRadius: 12,
               background: 'transparent', color: '#B5B0A5', fontSize: 13,
               cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif",
             }}>
@@ -495,7 +495,7 @@ export default function AgencyDashboard() {
                 display: 'flex',
                 flexDirection: 'row',
                 position: 'relative',
-                borderRadius: 6,
+                borderRadius: 18,
                 overflow: 'hidden',
                 border: '0.5px solid #C8C4BC',
               }}
@@ -612,9 +612,10 @@ export default function AgencyDashboard() {
           {/* Kanban container */}
           <div style={{
             background: '#FDFCF8',
-            border: '0.5px solid #E8E4DC',
-            borderRadius: 6,
+            border: '1px solid rgba(232,228,220,0.7)',
+            borderRadius: 18,
             padding: '15px 17px',
+            boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)',
             minWidth: 0,
             display: 'flex',
             flexDirection: 'column',
@@ -623,8 +624,7 @@ export default function AgencyDashboard() {
           }}>
             <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12, flexShrink: 0 }}>
               <span style={{
-                fontSize: 11, fontWeight: 400, color: '#B5B0A5',
-                textTransform: 'uppercase', letterSpacing: '0.1em',
+                fontSize: 14, fontWeight: 700, color: '#1C1917',
               }}>
                 Action Points
               </span>
@@ -633,16 +633,16 @@ export default function AgencyDashboard() {
                 style={{
                   marginLeft: 8,
                   display: 'flex', alignItems: 'center', gap: 3,
-                  fontSize: 10, color: '#8A8578',
-                  background: 'transparent', border: '0.5px dashed #D5D0C5',
-                  borderRadius: 4, padding: '2px 7px', cursor: 'pointer',
+                  fontSize: 10, color: '#FFFFFF',
+                  background: '#1C1917', border: 'none',
+                  borderRadius: 12, padding: '3px 8px', cursor: 'pointer',
                   fontFamily: "'DM Sans', system-ui, sans-serif",
                 }}
               >
                 <Plus size={9} />
                 Add action point
               </button>
-              <div style={{ marginLeft: 8, display: 'flex', border: '0.5px solid #E8E4DC', borderRadius: 4, overflow: 'hidden' }}>
+              <div style={{ marginLeft: 8, display: 'flex', border: '0.5px solid #E8E4DC', borderRadius: 10, overflow: 'hidden' }}>
                 {(['kanban', 'list', 'gantt'] as const).map(v => (
                   <button
                     key={v}
@@ -676,10 +676,11 @@ export default function AgencyDashboard() {
 
           {/* Gantt / Calendar */}
           <div style={{
-            background: '#E5E0D8',
-            border: '0.5px solid #C8C4BC',
-            borderRadius: 6,
+            background: '#353432',
+            border: '1px solid rgba(80,78,76,0.7)',
+            borderRadius: 18,
             minWidth: 0,
+            boxShadow: '0 4px 24px rgba(0,0,0,0.15), 0 1px 6px rgba(0,0,0,0.1)',
             overflow: 'hidden',
           }}>
             <CalendarPanel
