@@ -25,10 +25,6 @@ const PROTECTED_API_ROUTES = [
 ];
 
 export async function middleware(req: NextRequest) {
-  if (process.env.NODE_ENV === 'development' && process.env.DEV_BYPASS_AUTH === 'true') {
-    return NextResponse.next({ request: req });
-  }
-
   let res = NextResponse.next({ request: req });
 
   const supabase = createServerClient<Database>(

@@ -30,6 +30,7 @@ interface WeekRange {
 
 interface ParsedChannel {
   channelName: string;
+  customChannelName?: string;
   format: string;
   totalBudget: number;
   percentOfInvestment: number;
@@ -212,29 +213,102 @@ function toNearestMonday(dateStr: string): Date {
 
 function parsedToMediaPlanChannels(parsed: ParsedChannel[]): MediaPlanChannel[] {
   const total = parsed.reduce((s, c) => s + (c.totalBudget || 0), 0);
+  const currentYear = new Date().getFullYear();
+
+  // Replace the year in a YYYY-MM-DD date string with currentYear
+  const fixYear = (dateStr: string, fallback: string): string => {
+    if (!dateStr) return fallback;
+    const m = dateStr.match(/^(\d{4})(-\d{2}-\d{2})$/);
+    if (m) return `${currentYear}${m[2]}`;
+    return fallback;
+  };
+
   return parsed.map(ch => {
     const color = getFlightHexColor(ch.channelName);
-    const flights: MediaFlight[] = ch.flights.map(f => {
-      const startWeek = toNearestMonday(f.startDate);
-      const endWeek = new Date(startWeek);
-      // endWeek = Sunday of the week containing endDate
-      const endMonday = toNearestMonday(f.endDate);
-      endWeek.setTime(endMonday.getTime());
+    const targetBudget = ch.totalBudget || 0;
+    let rawFlights = ch.flights || [];
+
+    // Always ensure at least one flight
+    if (rawFlights.length === 0) {
+      rawFlights = [{ startDate: `${currentYear}-01-06`, endDate: `${currentYear}-12-28`, monthlySpend: {} }];
+    }
+
+    const normalisedFlights = rawFlights.map(f => {
+      // Force dates to currentYear — AI often returns 2025 or placeholder "YYYY"
+      const startDate = fixYear(f.startDate, `${currentYear}-01-06`);
+      const endDate   = fixYear(f.endDate,   `${currentYear}-12-28`);
+
+      // Remap monthlySpend keys to currentYear too
+      const remappedSpend: Record<string, number> = {};
+      for (const [k, v] of Object.entries(f.monthlySpend || {})) {
+        const parts = k.split('-');
+        if (parts.length >= 2) {
+          remappedSpend[`${currentYear}-${parts.slice(1).join('-')}`] = v || 0;
+        }
+      }
+
+      const spendSum = Object.values(remappedSpend).reduce((s, v) => s + v, 0);
+      let normalisedSpend = remappedSpend;
+
+      if (spendSum > 0 && Math.abs(spendSum - targetBudget) > 1) {
+        const scale = targetBudget / spendSum;
+        normalisedSpend = Object.fromEntries(
+          Object.entries(remappedSpend).map(([k, v]) => [k, Math.round(v * scale)])
+        );
+        const keys = Object.keys(normalisedSpend);
+        if (keys.length > 0) {
+          const normSum = Object.values(normalisedSpend).reduce((s, v) => s + v, 0);
+          normalisedSpend[keys[keys.length - 1]] += targetBudget - normSum;
+        }
+      } else if (spendSum === 0 && targetBudget > 0) {
+        // Distribute evenly across months in the flight range
+        const start = new Date(startDate + 'T00:00:00');
+        const end   = new Date(endDate   + 'T00:00:00');
+        const months: string[] = [];
+        const cur = new Date(start.getFullYear(), start.getMonth(), 1);
+        while (cur <= end) {
+          months.push(`${cur.getFullYear()}-${cur.getMonth() + 1}`);
+          cur.setMonth(cur.getMonth() + 1);
+        }
+        if (months.length > 0) {
+          const perMonth = Math.round(targetBudget / months.length);
+          months.forEach((m, i) => {
+            normalisedSpend[m] = i === months.length - 1
+              ? targetBudget - perMonth * (months.length - 1)
+              : perMonth;
+          });
+        }
+      }
+
+      return { startDate, endDate, monthlySpend: normalisedSpend };
+    });
+
+    const flights: MediaFlight[] = normalisedFlights.map(f => {
+      let startWeek = toNearestMonday(f.startDate);
+      let endMonday = toNearestMonday(f.endDate);
+
+      if (isNaN(startWeek.getTime())) startWeek = new Date(currentYear, 0, 5);
+      if (isNaN(endMonday.getTime())) endMonday = new Date(currentYear, 11, 28);
+
+      const endWeek = new Date(endMonday);
       endWeek.setDate(endWeek.getDate() + 6);
+
       return {
         id: `flight-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         startWeek,
         endWeek,
-        monthlySpend: f.monthlySpend || {},
+        monthlySpend: f.monthlySpend,
         color,
       };
     });
+
     return {
       id: `channel-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       channelName: ch.channelName,
+      customChannelName: ch.customChannelName || '',
       format: ch.format || '',
-      totalBudget: ch.totalBudget || 0,
-      percentOfInvestment: total > 0 ? Math.round((ch.totalBudget / total) * 100) : (ch.percentOfInvestment || 0),
+      totalBudget: targetBudget,
+      percentOfInvestment: total > 0 ? Math.round((targetBudget / total) * 100) : (ch.percentOfInvestment || 0),
       flights,
       channelCategory: getChannelCategory(ch.channelName),
     };
@@ -339,6 +413,10 @@ export function MediaPlanGrid({ channels: externalChannels, onChannelsChange, co
   const [openFlightMenu, setOpenFlightMenu] = useState<string | null>(null);
   const [flightMenuPos, setFlightMenuPos] = useState<{ top: number; right: number } | null>(null);
   const [flightStatusMap, setFlightStatusMap] = useState<Map<string, 'in_progress' | 'booked'>>(new Map());
+
+  // 3-dots channel menu state
+  const [openChannelMenu, setOpenChannelMenu] = useState<string | null>(null);
+  const [channelMenuPos, setChannelMenuPos] = useState<{ top: number; left: number } | null>(null);
 
   // Flight resize ("Change Dates") state
   const [resizingFlight, setResizingFlight] = useState<{ channelId: string; flightId: string } | null>(null);
@@ -1001,6 +1079,14 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
     return () => document.removeEventListener('click', close);
   }, [openFlightMenu]);
 
+  // Close channel menu on outside click
+  useEffect(() => {
+    if (!openChannelMenu) return;
+    const close = () => { setOpenChannelMenu(null); setChannelMenuPos(null); };
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [openChannelMenu]);
+
   // Dismiss resize mode on Escape
   useEffect(() => {
     if (!resizingFlight) return;
@@ -1377,6 +1463,26 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                   >
                     {/* Channel Name */}
                     <td className="border border-gray-300 px-3 py-2 sticky left-0 mr-[-1px] z-20 bg-gray-50 w-[200px] min-w-[200px] border-r-2 border-gray-400 shadow-[2px_0_4px_rgba(0,0,0,0.1)]">
+                      <div className="flex items-center gap-1">
+                        <button
+                          className="flex-shrink-0 p-0.5 rounded hover:bg-gray-200"
+                          style={{ lineHeight: 0 }}
+                          onMouseDown={e => e.stopPropagation()}
+                          onClick={e => {
+                            e.stopPropagation();
+                            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                            if (openChannelMenu === channel.id) {
+                              setOpenChannelMenu(null);
+                              setChannelMenuPos(null);
+                            } else {
+                              setOpenChannelMenu(channel.id);
+                              setChannelMenuPos({ top: rect.bottom + 4, left: rect.left });
+                            }
+                          }}
+                        >
+                          <MoreHorizontal className="w-3.5 h-3.5 text-gray-400" />
+                        </button>
+                        <div className="flex-1 min-w-0">
                       <Select
                         value={channel.channelName || ""}
                         onValueChange={(value) => {
@@ -1442,6 +1548,18 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                           ))}
                         </SelectContent>
                       </Select>
+                        </div>
+                        {channel.status && (
+                          <span style={{
+                            fontSize: 9, fontWeight: 700, letterSpacing: '0.04em',
+                            padding: '1px 5px', borderRadius: 10, flexShrink: 0,
+                            background: channel.status === 'booked' ? '#D1FAE5' : '#FEF3C7',
+                            color: channel.status === 'booked' ? '#065F46' : '#92400E',
+                          }}>
+                            {channel.status === 'booked' ? 'BOOKED' : 'IN PROG'}
+                          </span>
+                        )}
+                      </div>
                     </td>
 
                     {/* Format/Detail */}
@@ -2486,6 +2604,70 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
         </table>
       </div>
 
+
+      {/* Channel 3-dots portal dropdown */}
+      {openChannelMenu && channelMenuPos && typeof window !== 'undefined' && createPortal(
+        <div
+          style={{
+            position: 'fixed',
+            top: channelMenuPos.top,
+            left: channelMenuPos.left,
+            background: '#FDFCF8',
+            border: '0.5px solid #E8E4DC',
+            borderRadius: 5,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.12)',
+            zIndex: 99999,
+            minWidth: 150,
+            overflow: 'hidden',
+            fontFamily: "'DM Sans', system-ui, sans-serif",
+          }}
+          onClick={e => e.stopPropagation()}
+        >
+          {(['in_progress', 'booked'] as const).map((status, i) => {
+            const ch = channels.find(c => c.id === openChannelMenu);
+            const active = ch?.status === status;
+            return (
+              <button
+                key={status}
+                onClick={e => {
+                  e.stopPropagation();
+                  handleUpdateChannel(openChannelMenu, { status: active ? undefined : status });
+                  setOpenChannelMenu(null);
+                  setChannelMenuPos(null);
+                }}
+                style={{
+                  display: 'block', width: '100%', textAlign: 'left',
+                  padding: '7px 12px', fontSize: 12,
+                  color: active ? (status === 'booked' ? '#065F46' : '#92400E') : '#1C1917',
+                  fontWeight: active ? 600 : 400,
+                  background: active ? (status === 'booked' ? '#F0FDF4' : '#FFFBEB') : 'transparent',
+                  border: 'none', cursor: 'pointer',
+                  borderBottom: i === 0 ? '0.5px solid #F0EDE8' : 'none',
+                }}
+              >
+                {status === 'in_progress' ? '▶  In Progress' : '✓  Booked'}
+              </button>
+            );
+          })}
+          <div style={{ borderTop: '0.5px solid #E8E4DC' }} />
+          <button
+            onClick={e => {
+              e.stopPropagation();
+              handleDeleteChannel(openChannelMenu);
+              setOpenChannelMenu(null);
+              setChannelMenuPos(null);
+            }}
+            style={{
+              display: 'block', width: '100%', textAlign: 'left',
+              padding: '7px 12px', fontSize: 12, color: '#A0442A',
+              background: 'transparent', border: 'none', cursor: 'pointer',
+            }}
+          >
+            🗑  Delete Channel
+          </button>
+        </div>,
+        document.body
+      )}
 
       {/* Flight 3-dots portal dropdown — renders outside overflow:hidden containers */}
       {openFlightMenu && flightMenuPos && typeof window !== 'undefined' && createPortal(

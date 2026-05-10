@@ -62,29 +62,34 @@ export default function ClientNotesSection({ clientId, onNotesChange }: ClientNo
       const { data: { session } } = await supabase.auth.getSession();
       const uid = session?.user?.id ?? null;
       setUserId(uid);
-      if (!uid) return;
+
+      if (uid) {
+        try {
+          const { data, error } = await (supabase as any)
+            .from('agency_notes')
+            .select('id, text, done, due_date, client_id')
+            .eq('user_id', uid)
+            .eq('client_id', clientId)
+            .order('created_at', { ascending: true });
+          if (error) throw error;
+          const loaded = (data || []) as ClientNote[];
+          setNotes(loaded);
+          onNotesChange?.(loaded);
+          return;
+        } catch {
+          setUseLocal(true);
+        }
+      } else {
+        setUseLocal(true);
+      }
 
       try {
-        const { data, error } = await (supabase as any)
-          .from('agency_notes')
-          .select('id, text, done, due_date, client_id')
-          .eq('user_id', uid)
-          .eq('client_id', clientId)
-          .order('created_at', { ascending: true });
-        if (error) throw error;
-        const loaded = (data || []) as ClientNote[];
+        const raw = localStorage.getItem(LOCAL_KEY(clientId));
+        const loaded = raw ? JSON.parse(raw) : [];
         setNotes(loaded);
         onNotesChange?.(loaded);
       } catch {
-        setUseLocal(true);
-        try {
-          const raw = localStorage.getItem(LOCAL_KEY(clientId));
-          const loaded = raw ? JSON.parse(raw) : [];
-          setNotes(loaded);
-          onNotesChange?.(loaded);
-        } catch {
-          setNotes([]);
-        }
+        setNotes([]);
       }
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -108,7 +113,7 @@ export default function ClientNotesSection({ clientId, onNotesChange }: ClientNo
 
   async function addNote() {
     const text = newText.trim();
-    if (!text || !userId) return;
+    if (!text) return;
     setNewText('');
     setNewDate('');
     setAddingNote(false);

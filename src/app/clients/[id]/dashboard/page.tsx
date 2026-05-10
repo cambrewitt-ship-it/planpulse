@@ -1719,7 +1719,25 @@ export default function DashboardV2() {
         ) : (
           <>
             {/* ── Hero: health score + quick metrics ── */}
-            {heroProps ? (
+            {loadingAnalytics ? (
+              <div className="bg-white rounded-xl border border-gray-200 px-7 py-6 animate-pulse">
+                <div className="flex items-start gap-4">
+                  <div className="w-14 h-14 rounded-full bg-gray-200 flex-shrink-0" />
+                  <div className="flex-1 space-y-3">
+                    <div className="h-7 w-48 bg-gray-200 rounded" />
+                    <div className="h-3 w-32 bg-gray-100 rounded" />
+                    <div className="flex items-center gap-6 mt-3">
+                      <div className="flex-1 space-y-2">
+                        <div className="h-3 w-16 bg-gray-100 rounded" />
+                        <div className="h-7 w-28 bg-gray-200 rounded" />
+                        <div className="h-2 w-full bg-gray-100 rounded-full" />
+                      </div>
+                      <div className="w-28 h-28 rounded-full bg-gray-100 flex-shrink-0" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : heroProps ? (
               <HeroHealthSection {...heroProps} />
             ) : (
               /* Edge case: no media plan channels set up yet */
@@ -1987,7 +2005,33 @@ export default function DashboardV2() {
                   </div>
                 </div>
 
-                {channelCards.length > 0 ? (
+                {loadingAnalytics ? (
+                  <div className="bg-white rounded-xl border border-gray-200 p-6 animate-pulse">
+                    <div className="h-4 w-40 bg-gray-200 rounded mb-4" />
+                    <div className="space-y-4">
+                      {[...Array(2)].map((_, i) => (
+                        <div key={i} className="rounded-xl border border-gray-100 p-4 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className="w-9 h-9 rounded-lg bg-gray-200" />
+                              <div className="space-y-1.5">
+                                <div className="h-4 w-28 bg-gray-200 rounded" />
+                                <div className="h-3 w-16 bg-gray-100 rounded" />
+                              </div>
+                            </div>
+                            <div className="h-6 w-16 bg-gray-100 rounded" />
+                          </div>
+                          <div className="h-2 w-full bg-gray-100 rounded-full" />
+                          <div className="grid grid-cols-4 gap-2">
+                            {[...Array(4)].map((_, j) => (
+                              <div key={j} className="h-12 bg-gray-100 rounded-lg" />
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : channelCards.length > 0 ? (
                   <div className="bg-white rounded-xl border border-gray-200 p-6">
                     <h3 className="text-base font-bold mb-4" style={{ color: '#1C1917', fontFamily: "'Inter', system-ui, sans-serif" }}>Channel Performance</h3>
                     <div className="space-y-4">
@@ -2215,6 +2259,47 @@ export default function DashboardV2() {
             {/* ── Admin view ── */}
             {viewMode === 'admin' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                {/* Invoices section */}
+                <div style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', padding: '20px 24px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                    <span style={{ fontSize: 13, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Invoices</span>
+                    <button
+                      onClick={() => setIsInvoiceModalOpen(true)}
+                      style={{
+                        height: 30, padding: '0 12px', borderRadius: 12,
+                        border: '0.5px solid #D5D0C5', background: '#FDFCF8',
+                        color: '#1C1917', fontSize: 12, fontWeight: 500,
+                        cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif",
+                        display: 'flex', alignItems: 'center', gap: 5,
+                      }}
+                    >
+                      + New Invoice
+                    </button>
+                  </div>
+                  {invoiceHistory.length === 0 ? (
+                    <p style={{ fontSize: 13, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>No invoices generated yet.</p>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {invoiceHistory.map((inv) => {
+                        const start = inv.dateRange.startDate;
+                        const end = inv.dateRange.endDate;
+                        const label = `${start} → ${end}`;
+                        const generated = new Date(inv.generatedAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
+                        return (
+                          <div key={inv.id} style={{
+                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                            padding: '9px 12px', borderRadius: 10, border: '0.5px solid #E8E4DC',
+                            background: '#FAFAF8', fontFamily: "'DM Sans', system-ui, sans-serif",
+                          }}>
+                            <span style={{ fontSize: 13, color: '#1C1917', fontWeight: 500 }}>{label}</span>
+                            <span style={{ fontSize: 11, color: '#B5B0A5' }}>Generated {generated}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
                 {/* Client Logo */}
                 <div style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', padding: '20px 24px' }}>
                   <div style={{ marginBottom: 16 }}>
@@ -2333,46 +2418,6 @@ export default function DashboardV2() {
                   </div>
                 )}
 
-                {/* Invoices section */}
-                <div style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', padding: '20px 24px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-                    <span style={{ fontSize: 13, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Invoices</span>
-                    <button
-                      onClick={() => setIsInvoiceModalOpen(true)}
-                      style={{
-                        height: 30, padding: '0 12px', borderRadius: 12,
-                        border: '0.5px solid #D5D0C5', background: '#FDFCF8',
-                        color: '#1C1917', fontSize: 12, fontWeight: 500,
-                        cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif",
-                        display: 'flex', alignItems: 'center', gap: 5,
-                      }}
-                    >
-                      + New Invoice
-                    </button>
-                  </div>
-                  {invoiceHistory.length === 0 ? (
-                    <p style={{ fontSize: 13, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>No invoices generated yet.</p>
-                  ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      {invoiceHistory.map((inv) => {
-                        const start = inv.dateRange.startDate;
-                        const end = inv.dateRange.endDate;
-                        const label = `${start} → ${end}`;
-                        const generated = new Date(inv.generatedAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
-                        return (
-                          <div key={inv.id} style={{
-                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                            padding: '9px 12px', borderRadius: 10, border: '0.5px solid #E8E4DC',
-                            background: '#FAFAF8', fontFamily: "'DM Sans', system-ui, sans-serif",
-                          }}>
-                            <span style={{ fontSize: 13, color: '#1C1917', fontWeight: 500 }}>{label}</span>
-                            <span style={{ fontSize: 11, color: '#B5B0A5' }}>Generated {generated}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
               </div>
             )}
           </>

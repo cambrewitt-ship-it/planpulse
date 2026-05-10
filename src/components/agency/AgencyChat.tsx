@@ -616,22 +616,6 @@ export function AgencyChat({ notesSlot }: AgencyChatProps) {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 12, fontWeight: 600, color: '#1C1917', lineHeight: 1.2 }}>Agency Assistant</div>
               </div>
-              {isLoading && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
-                  <span style={{ fontSize: 10, color: '#A0998F', maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {toolInProgress ?? 'Thinking…'}
-                  </span>
-                  <span style={{ display: 'flex', gap: 2 }}>
-                    {[0, 1, 2].map(i => (
-                      <span key={i} style={{
-                        width: 3.5, height: 3.5, borderRadius: '50%', background: '#CC785C',
-                        animation: `chatBounce 1.2s ease-in-out ${i * 0.2}s infinite`,
-                        display: 'inline-block',
-                      }} />
-                    ))}
-                  </span>
-                </div>
-              )}
               {/* New chat button */}
               <button
                 onClick={() => { setMessages([]); setInput(''); setIsLoading(false); setToolInProgress(null); setNotesOpen(false); }}
@@ -660,7 +644,7 @@ export function AgencyChat({ notesSlot }: AgencyChatProps) {
               <div style={{
                 position: 'absolute', inset: 0,
                 overflowY: 'auto',
-                padding: '12px 13px 120px',
+                padding: '12px 13px 160px',
                 display: 'flex', flexDirection: 'column', gap: 10,
               }}>
                 {messages.map((msg, i) => (
@@ -733,6 +717,24 @@ export function AgencyChat({ notesSlot }: AgencyChatProps) {
                     </div>
                   </div>
                 ))}
+                {isLoading && (
+                  <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 2px' }}>
+                      <span style={{ fontSize: 11, color: '#A0998F' }}>
+                        {toolInProgress ?? 'Thinking…'}
+                      </span>
+                      <span style={{ display: 'flex', gap: 2 }}>
+                        {[0, 1, 2].map(i => (
+                          <span key={i} style={{
+                            width: 3.5, height: 3.5, borderRadius: '50%', background: '#CC785C',
+                            animation: `chatBounce 1.2s ease-in-out ${i * 0.2}s infinite`,
+                            display: 'inline-block',
+                          }} />
+                        ))}
+                      </span>
+                    </div>
+                  </div>
+                )}
                 <div ref={bottomRef} />
               </div>
 

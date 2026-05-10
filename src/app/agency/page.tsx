@@ -676,11 +676,11 @@ export default function AgencyDashboard() {
 
           {/* Gantt / Calendar */}
           <div style={{
-            background: '#353432',
-            border: '1px solid rgba(80,78,76,0.7)',
+            background: 'linear-gradient(135deg, #2F3439 0%, #4B5057 100%)',
+            border: '1px solid rgba(107,114,128,0.75)',
             borderRadius: 18,
             minWidth: 0,
-            boxShadow: '0 4px 24px rgba(0,0,0,0.15), 0 1px 6px rgba(0,0,0,0.1)',
+            boxShadow: '0 4px 24px rgba(0,0,0,0.18), 0 1px 8px rgba(0,0,0,0.12)',
             overflow: 'hidden',
           }}>
             <CalendarPanel

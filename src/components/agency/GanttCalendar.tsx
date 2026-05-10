@@ -93,6 +93,7 @@ function getChannelBarColor(label: string, type: 'paid' | 'organic', status: Cha
 type ChannelStatusSimple = 'completed' | 'active' | 'future';
 
 const ROW_COLORS = ['#FDFCF8', '#F4F1EE'] as const;
+const RULER_BG = '#374151';
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
 
@@ -205,7 +206,7 @@ export function GanttCalendar({
   // Layout constants
   const LABEL_COL = 130;
   const DAY_WIDTH = 38;
-  const RULER_BG  = '#3E3C3A';
+  const RULER_BG  = '#374151';
   const Z_STICKY  = 20; // above all timeline z-indices (bars=4, dots=5, markers=6)
 
   const filteredSet = useMemo(() => new Set(filteredClientIds), [filteredClientIds]);
@@ -287,7 +288,7 @@ export function GanttCalendar({
   return (
     <div
       ref={containerRef}
-      style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 394, width: '100%', minWidth: 0, background: '#FDFCF8', borderRadius: 4, fontFamily: "'DM Sans', system-ui, sans-serif" }}
+      style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 394, width: '100%', minWidth: 0, background: '#1F2937', borderRadius: 4, fontFamily: "'DM Sans', system-ui, sans-serif" }}
     >
       <div style={{ width: LABEL_COL + totalW, position: 'relative' }}>
 
@@ -296,9 +297,9 @@ export function GanttCalendar({
           <div style={{
             position: 'sticky', left: 0, zIndex: Z_STICKY,
             background: RULER_BG,
-            borderBottom: '0.5px solid rgba(0,0,0,0.08)',
+            borderBottom: '0.5px solid rgba(255,255,255,0.08)',
           }} />
-          <div style={{ position: 'relative', background: RULER_BG, borderBottom: '0.5px solid rgba(0,0,0,0.08)' }}>
+          <div style={{ position: 'relative', background: RULER_BG, borderBottom: '0.5px solid rgba(255,255,255,0.08)' }}>
             {monthGroups.map(grp => (
               <div
                 key={grp.label}
@@ -394,7 +395,7 @@ export function GanttCalendar({
 
           return (
             <div key={client.id}>
-              <div style={{ height: '0.5px', background: 'rgba(0,0,0,0.06)' }} />
+              <div style={{ height: '0.5px', background: 'rgba(255,255,255,0.08)' }} />
 
               {/* Client header row */}
               <div style={{ display: 'grid', gridTemplateColumns: `${LABEL_COL}px ${totalW}px`, height: 24 }}>
@@ -406,12 +407,12 @@ export function GanttCalendar({
                 }}>
                   <div style={{
                     width: 15, height: 15, borderRadius: 3,
-                    background: 'rgba(0,0,0,0.06)',
+                    background: 'rgba(255,255,255,0.08)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
                   }}>
-                    <span style={{ fontSize: 8, fontWeight: 500, color: '#8A8578' }}>{client.initials}</span>
+                    <span style={{ fontSize: 8, fontWeight: 500, color: '#E6F0FF' }}>{client.initials}</span>
                   </div>
-                  <span style={{ fontSize: 11, fontWeight: 500, color: '#1C1917', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <span style={{ fontSize: 11, fontWeight: 500, color: '#000000', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {client.name}
                   </span>
                 </div>
@@ -423,7 +424,7 @@ export function GanttCalendar({
                     <div key={grp.label} style={{
                       position: 'absolute', left: grp.startIdx * DAY_WIDTH,
                       top: 0, bottom: 0, width: '0.5px',
-                      background: 'rgba(0,0,0,0.06)', pointerEvents: 'none',
+                      background: 'rgba(255,255,255,0.08)', pointerEvents: 'none',
                     }} />
                   ))}
                 </div>
@@ -472,7 +473,7 @@ export function GanttCalendar({
                       paddingLeft: 18, overflow: 'hidden',
                       position: 'sticky', left: 0, zIndex: Z_STICKY,
                       background: rowBg,
-                      boxShadow: 'inset -1px 0 0 rgba(0,0,0,0.06)',
+                      boxShadow: 'inset -1px 0 0 rgba(255,255,255,0.08)',
                     }}>
                       <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         {getChannelIcon(ch.label, ch.type)}
@@ -492,7 +493,7 @@ export function GanttCalendar({
                         <div key={grp.label} style={{
                           position: 'absolute', left: grp.startIdx * DAY_WIDTH,
                           top: 0, bottom: 0, width: '0.5px',
-                          background: 'rgba(0,0,0,0.06)', pointerEvents: 'none',
+                          background: 'rgba(255,255,255,0.08)', pointerEvents: 'none',
                         }} />
                       ))}
 
@@ -544,8 +545,8 @@ export function GanttCalendar({
                               top: '50%',
                               transform: 'translate(-50%, -50%) rotate(45deg)',
                               width: 7, height: 7,
-                              background: '#FDFCF8',
-                              border: '1px solid rgba(176, 112, 48, 0.60)',
+                              background: '#ABC7FF',
+                              border: '1px solid rgba(147, 197, 253, 0.60)',
                               zIndex: 6,
                             }}
                           />
@@ -585,7 +586,7 @@ export function GanttCalendar({
           display: 'grid',
           gridTemplateColumns: `${LABEL_COL}px ${totalW}px`,
           height: 18, marginTop: 4,
-          borderTop: '0.5px solid rgba(0,0,0,0.06)',
+          borderTop: '0.5px solid rgba(255,255,255,0.08)',
         }}>
           <div style={{
             display: 'flex', alignItems: 'flex-end',
@@ -593,7 +594,7 @@ export function GanttCalendar({
             position: 'sticky', left: 0, zIndex: Z_STICKY,
             background: RULER_BG,
           }}>
-            <span style={{ fontSize: 7, color: '#8A8070', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+            <span style={{ fontSize: 7, color: '#D8E4FF', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
               Activity
             </span>
           </div>
@@ -629,15 +630,15 @@ export function GanttCalendar({
         <div style={{
           display: 'flex', alignItems: 'center', gap: 12,
           padding: '5px 10px', flexWrap: 'wrap',
-          borderTop: '0.5px solid rgba(0,0,0,0.06)',
+          borderTop: '0.5px solid rgba(255,255,255,0.08)',
         }}>
           {[
-            { color: '#BFDBFE', border: '#1877F2', label: 'Active (Paid)' },
-            { color: '#BBF7D0', border: '#16A34A', label: 'Active (Organic)' },
-            { color: '#C8D8C4', border: '#6A9E6A', label: 'Completed' },
-            { color: '#D8D8D8', border: '#A0A0A0', label: 'Upcoming' },
+            { color: '#1E40AF', border: '#60A5FA', label: 'Active (Paid)' },
+            { color: '#0F766E', border: '#7DD3FC', label: 'Active (Organic)' },
+            { color: '#2563EB', border: '#60A5FA', label: 'Completed' },
+            { color: '#1E3A8A', border: '#93C5FD', label: 'Upcoming' },
           ].map(item => (
-            <span key={item.label} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 8, color: '#8A8070', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+            <span key={item.label} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 8, color: '#D8E4FF', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
               <span style={{
                 display: 'inline-block', width: 16, height: 5, borderRadius: 2,
                 background: item.color,
@@ -647,12 +648,12 @@ export function GanttCalendar({
               {item.label}
             </span>
           ))}
-          <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 8, color: '#8A8070' }}>
-            <span style={{ display: 'inline-block', width: 7, height: 7, background: '#FDFCF8', border: '1px solid rgba(176,112,48,0.60)', transform: 'rotate(45deg)', verticalAlign: 'middle' }} />
+          <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 8, color: '#D8E4FF' }}>
+            <span style={{ display: 'inline-block', width: 7, height: 7, background: '#ABC7FF', border: '1px solid rgba(147,197,253,0.80)', transform: 'rotate(45deg)', verticalAlign: 'middle' }} />
             Health Check
           </span>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 8, color: '#8A8070' }}>
-            <span style={{ display: 'inline-block', width: 5, height: 5, borderRadius: '50%', background: 'rgba(160,68,42,0.70)', verticalAlign: 'middle' }} />
+          <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 8, color: '#D8E4FF' }}>
+            <span style={{ display: 'inline-block', width: 5, height: 5, borderRadius: '50%', background: '#60A5FA', verticalAlign: 'middle' }} />
             Set Up
           </span>
         </div>
@@ -671,14 +672,14 @@ function TodayOverlay({ px, dayWidth }: { px: number; dayWidth: number }) {
         position: 'absolute',
         left: px, width: dayWidth,
         top: 0, bottom: 0,
-        background: 'rgba(180, 140, 50, 0.08)',
+        background: 'rgba(148, 163, 184, 0.08)',
         pointerEvents: 'none', zIndex: 1,
       }} />
       <div style={{
         position: 'absolute',
         left: px + dayWidth / 2,
         top: 0, bottom: 0, width: '1px',
-        background: 'rgba(180, 140, 50, 0.45)',
+        background: 'rgba(148, 163, 184, 0.45)',
         pointerEvents: 'none', zIndex: 2,
       }} />
     </>

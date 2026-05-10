@@ -833,7 +833,7 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
       {/* Connection Modal */}
       {openModal && (
         <Dialog open={!!openModal} onOpenChange={(open) => !open && setOpenModal(null)}>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto font-[family-name:var(--font-inter)] relative">
+          <DialogContent className="max-w-2xl font-[family-name:var(--font-inter)] relative">
             {openModal === 'facebook' && isDiscoveringMetaAccounts && (
               <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-white/90 rounded-lg">
                 <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mb-4"></div>

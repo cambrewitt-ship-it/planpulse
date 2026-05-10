@@ -4,24 +4,28 @@ import { createClient } from '@/lib/supabase/server';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-const EXTRACTION_PROMPT = `You are a media planning expert. Analyze this media plan screenshot and extract all channels, budgets, and flight dates.
+function buildExtractionPrompt(): string {
+  const year = new Date().getFullYear();
+  const exampleMonthly = Array.from({ length: 12 }, (_, i) => `"${year}-${i + 1}": 1250`).join(',\n            ');
+  return `You are a media planning expert. Analyze this media plan screenshot and extract all channels, budgets, and flight dates.
 
-Return ONLY a valid JSON object (no markdown, no explanation) with this exact structure:
+CRITICAL: Look at the year shown in the column headers of the screenshot. Use that exact year in every date and every monthlySpend key. If you cannot read the year clearly, default to ${year}.
+
+Return ONLY a valid JSON object — no markdown fences, no explanation text, nothing before or after the JSON. Use this exact structure:
 {
   "channels": [
     {
       "channelName": "Meta Ads",
-      "format": "Social Media",
+      "customChannelName": "",
+      "format": "Feed + Stories",
       "totalBudget": 15000,
       "percentOfInvestment": 30,
       "flights": [
         {
-          "startDate": "2025-01-06",
-          "endDate": "2025-03-30",
+          "startDate": "${year}-01-06",
+          "endDate": "${year}-12-28",
           "monthlySpend": {
-            "2025-1": 5000,
-            "2025-2": 5000,
-            "2025-3": 5000
+            ${exampleMonthly}
           }
         }
       ]
@@ -30,18 +34,22 @@ Return ONLY a valid JSON object (no markdown, no explanation) with this exact st
 }
 
 Rules:
-- channelName must match one of these if possible: "Meta Ads", "Google Ads", "Display Ads", "Native Ads", "LinkedIn Ads", "TikTok Ads", "Instagram Ads", "YouTube Ads", "Snapchat Ads", "Reddit Ads", "Instagram (Organic)", "Facebook (Organic)", "LinkedIn (Organic)", "EDM / Email", "OOH", "Radio", "Linear TV", "SVOD", "BVOD", "Other"
-- format: a short description of the ad format (e.g. "Feed + Stories", "Search + Display", "EDM Campaign")
-- totalBudget: total budget across all flights for this channel (number, no currency symbol)
-- percentOfInvestment: percentage of total media budget (number, 0-100)
-- flights: date ranges when this channel is active. Use Monday dates for startDate (YYYY-MM-DD format)
-- monthlySpend: budget split by month. Keys are "YYYY-M" (e.g. "2025-1" for January 2025). Values are numbers.
-- If exact dates are unclear, infer from visible week columns or month headers
-- If monthly breakdown is not visible, distribute totalBudget evenly across months in the date range
-- If percentOfInvestment is not visible, calculate from totalBudget relative to the sum of all channels`;
+- channelName must match one of: "Meta Ads", "Google Ads", "Display Ads", "Native Ads", "LinkedIn Ads", "TikTok Ads", "Instagram Ads", "YouTube Ads", "Snapchat Ads", "Reddit Ads", "Instagram (Organic)", "Facebook (Organic)", "LinkedIn (Organic)", "EDM / Email", "OOH", "Radio", "Linear TV", "SVOD", "BVOD", "Other"
+- If the channel doesn't match any above name (e.g. "Influencers", "Podcast", "Sponsorship"), set channelName to "Other" and put the real name in customChannelName
+- customChannelName: real channel name when channelName is "Other". Empty string otherwise.
+- format: short description of ad format or campaign type
+- totalBudget: total spend for this channel as a plain number (no $ or commas)
+- percentOfInvestment: percentage of total media budget (0-100)
+- flights: active date ranges. startDate must be a Monday. ALL dates must use the year from the screenshot headers.
+- EVERY channel must have at least one flight. If dates are not visible, use "${year}-01-06" to "${year}-12-28".
+- monthlySpend keys must be "YEAR-MONTH" using the actual year (e.g. "${year}-1" for January ${year})
+- monthlySpend values must sum exactly to totalBudget. Distribute evenly if no breakdown is visible.
+- percentOfInvestment: calculate from totalBudget vs sum of all channels if not shown`;
+}
 
 export interface ParsedChannel {
   channelName: string;
+  customChannelName?: string;
   format: string;
   totalBudget: number;
   percentOfInvestment: number;
@@ -94,7 +102,7 @@ export async function POST(request: NextRequest) {
             },
             {
               type: 'text',
-              text: EXTRACTION_PROMPT,
+              text: buildExtractionPrompt(),
             },
           ],
         },
@@ -103,18 +111,31 @@ export async function POST(request: NextRequest) {
 
     const text = response.content.find(b => b.type === 'text')?.text ?? '';
 
-    // Strip markdown code fences if Claude wrapped the JSON
-    const cleaned = text.replace(/^```(?:json)?\n?/i, '').replace(/\n?```$/i, '').trim();
+    let parsed: { channels: ParsedChannel[] } | null = null;
 
-    let parsed: { channels: ParsedChannel[] };
-    try {
-      parsed = JSON.parse(cleaned);
-    } catch {
-      return NextResponse.json({ error: 'Failed to parse Claude response as JSON', raw: text }, { status: 500 });
+    // 1. Try direct parse first
+    try { parsed = JSON.parse(text.trim()); } catch { /* fall through */ }
+
+    // 2. Strip any code fences and try again
+    if (!parsed) {
+      const stripped = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+      try { parsed = JSON.parse(stripped); } catch { /* fall through */ }
     }
 
-    if (!Array.isArray(parsed.channels)) {
-      return NextResponse.json({ error: 'Unexpected response structure from Claude' }, { status: 500 });
+    // 3. Find the first {...} block in the text and try to parse that
+    if (!parsed) {
+      const match = text.match(/\{[\s\S]*\}/);
+      if (match) {
+        try { parsed = JSON.parse(match[0]); } catch { /* fall through */ }
+      }
+    }
+
+    if (!parsed || !Array.isArray(parsed.channels)) {
+      console.error('Could not parse Claude response:', text.slice(0, 500));
+      return NextResponse.json(
+        { error: 'Could not extract media plan data from screenshot. Please try a clearer image.', raw: text.slice(0, 500) },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({ channels: parsed.channels });

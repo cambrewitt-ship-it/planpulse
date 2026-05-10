@@ -46,19 +46,26 @@ function dueDateColor(dateStr: string | null): string {
 }
 
 interface NotesChecklistProps {
-  /** When set, only show notes linked to these client IDs (or notes with no client_id) */
   filteredClientIds?: string[] | null;
-  /** When set, new notes are tagged to this client and only this client's notes are shown */
   activeClientId?: string | null;
 }
 
+const DRAFT_ID = '__draft__';
+
 export function NotesChecklist({ filteredClientIds, activeClientId }: NotesChecklistProps = {}) {
   const [notes, setNotes] = useState<Note[]>([]);
-  const [input, setInput] = useState('');
   const [userId, setUserId] = useState<string | null>(null);
   const [useLocal, setUseLocal] = useState(false);
-  const [newDate, setNewDate] = useState('');
-  const inputRef = useRef<HTMLInputElement>(null);
+  // inline text edits: noteId → current text (including the DRAFT_ID sentinel)
+  const [editTexts, setEditTexts] = useState<Record<string, string>>({ [DRAFT_ID]: '' });
+  // inline due-date edits keyed same way
+  const [editDates, setEditDates] = useState<Record<string, string>>({});
+
+  // refs for every input row, keyed by id (includes DRAFT_ID)
+  const inputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const listRef = useRef<HTMLDivElement>(null);
+
+  const sansFont = "'DM Sans', system-ui, sans-serif";
 
   useEffect(() => {
     (async () => {
@@ -74,13 +81,21 @@ export function NotesChecklist({ filteredClientIds, activeClientId }: NotesCheck
           .eq('user_id', uid)
           .order('created_at', { ascending: true });
         if (error) throw error;
-        setNotes(data || []);
+        const loaded: Note[] = data || [];
+        setNotes(loaded);
+        // seed editTexts with all note texts so inputs are controlled
+        const texts: Record<string, string> = { [DRAFT_ID]: '' };
+        loaded.forEach(n => { texts[n.id] = n.text; });
+        setEditTexts(texts);
       } catch {
         setUseLocal(true);
         try {
           const raw = localStorage.getItem(LOCAL_KEY(uid));
-          const parsed = raw ? JSON.parse(raw) : [];
+          const parsed: Note[] = raw ? JSON.parse(raw) : [];
           setNotes(parsed);
+          const texts: Record<string, string> = { [DRAFT_ID]: '' };
+          parsed.forEach(n => { texts[n.id] = n.text; });
+          setEditTexts(texts);
         } catch {
           setNotes([]);
         }
@@ -105,32 +120,89 @@ export function NotesChecklist({ filteredClientIds, activeClientId }: NotesCheck
     }
   }
 
-  async function addNote() {
-    const text = input.trim();
-    if (!text || !userId) return;
-    setInput('');
-    const due_date = newDate || null;
-    const client_id = activeClientId ?? null;
-    setNewDate('');
+  async function saveNoteText(id: string, text: string) {
+    const trimmed = text.trim();
+    const updated = notes.map(n => n.id === id ? { ...n, text: trimmed } : n);
+    setNotes(updated);
+    if (!useLocal && userId) {
+      try {
+        await (supabase as any).from('agency_notes').update({ text: trimmed }).eq('id', id);
+      } catch {
+        setUseLocal(true);
+        persistLocal(updated);
+      }
+    } else {
+      persistLocal(updated);
+    }
+  }
 
-    if (!useLocal) {
+  // Synchronous optimistic creation — adds to state immediately, persists in background.
+  function createNote(text: string, due_date: string | null, insertAfterIndex: number): string {
+    const tempId = genId();
+    const client_id = activeClientId ?? null;
+    const trimmed = text.trim();
+    const newNote: Note = { id: tempId, text: trimmed, done: false, due_date, client_id: client_id ?? undefined };
+
+    const insertIntoList = (prev: Note[]): Note[] => {
+      const visible = getVisibleNotes(prev);
+      const insertAfterNote = visible[insertAfterIndex];
+      if (!insertAfterNote) return [...prev, newNote];
+      const globalIdx = prev.findIndex(n => n.id === insertAfterNote.id);
+      const next = [...prev];
+      next.splice(globalIdx + 1, 0, newNote);
+      return next;
+    };
+
+    // Update state immediately — note appears before any network call
+    setNotes(insertIntoList);
+    setEditTexts(prev => ({ ...prev, [tempId]: trimmed }));
+
+    if (!userId) return tempId;
+
+    if (useLocal) {
+      persistLocal(insertIntoList(notes));
+      return tempId;
+    }
+
+    // Save to Supabase in background; swap temp ID for real DB ID when done
+    ;(async () => {
       try {
         const { data, error } = await (supabase as any)
           .from('agency_notes')
-          .insert({ text, done: false, user_id: userId, due_date, client_id })
+          .insert({ text: trimmed, done: false, user_id: userId, due_date, client_id })
           .select('id, text, done, due_date, client_id')
           .single();
         if (error) throw error;
-        setNotes(prev => [...prev, data]);
-        return;
+        setNotes(prev => prev.map(n => n.id === tempId ? data : n));
+        setEditTexts(prev => {
+          const c = { ...prev };
+          c[data.id] = c[tempId] ?? data.text;
+          delete c[tempId];
+          return c;
+        });
       } catch {
         setUseLocal(true);
+        persistLocal(insertIntoList(notes));
       }
-    }
+    })();
 
-    const updated = [...notes, { id: genId(), text, done: false, due_date }];
+    return tempId;
+  }
+
+  async function deleteNote(id: string) {
+    const updated = notes.filter(n => n.id !== id);
     setNotes(updated);
-    persistLocal(updated);
+    setEditTexts(prev => { const c = { ...prev }; delete c[id]; return c; });
+    if (!useLocal && userId) {
+      try {
+        await (supabase as any).from('agency_notes').delete().eq('id', id);
+      } catch {
+        setUseLocal(true);
+        persistLocal(updated);
+      }
+    } else {
+      persistLocal(updated);
+    }
   }
 
   async function updateNoteDate(id: string, due_date: string | null) {
@@ -138,10 +210,7 @@ export function NotesChecklist({ filteredClientIds, activeClientId }: NotesCheck
     setNotes(updated);
     if (!useLocal && userId) {
       try {
-        await (supabase as any)
-          .from('agency_notes')
-          .update({ due_date })
-          .eq('id', id);
+        await (supabase as any).from('agency_notes').update({ due_date }).eq('id', id);
       } catch {
         setUseLocal(true);
         persistLocal(updated);
@@ -151,46 +220,88 @@ export function NotesChecklist({ filteredClientIds, activeClientId }: NotesCheck
     }
   }
 
-  async function deleteNote(id: string) {
-    const updated = notes.filter(n => n.id !== id);
-    setNotes(updated);
-    if (!useLocal && userId) {
-      try {
-        await (supabase as any)
-          .from('agency_notes')
-          .delete()
-          .eq('id', id);
-      } catch {
-        setUseLocal(true);
-        persistLocal(updated);
+  function getVisibleNotes(notesList: Note[]) {
+    if (activeClientId) return notesList.filter(n => n.client_id === activeClientId);
+    if (filteredClientIds) return notesList.filter(n => n.client_id != null && filteredClientIds.includes(n.client_id));
+    return notesList;
+  }
+
+  const visibleNotes = getVisibleNotes(notes);
+
+  // Focus a specific input after React re-renders
+  function focusAfterRender(id: string) {
+    requestAnimationFrame(() => {
+      const el = inputRefs.current[id];
+      if (el) {
+        el.focus();
+        // place cursor at end
+        const len = el.value.length;
+        el.setSelectionRange(len, len);
       }
-    } else {
-      persistLocal(updated);
+    });
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>, id: string, visibleIdx: number) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const text = editTexts[id] ?? '';
+
+      if (id === DRAFT_ID) {
+        if (!text.trim()) return;
+        createNote(text, editDates[DRAFT_ID] ?? null, visibleNotes.length - 1);
+        setEditTexts(prev => ({ ...prev, [DRAFT_ID]: '' }));
+        setEditDates(prev => { const c = { ...prev }; delete c[DRAFT_ID]; return c; });
+        focusAfterRender(DRAFT_ID);
+      } else {
+        // Fire-and-forget any pending text change on the current row
+        const note = notes.find(n => n.id === id);
+        if (note && text.trim() !== note.text) {
+          saveNoteText(id, text);
+        }
+        const newId = createNote('', null, visibleIdx);
+        focusAfterRender(newId);
+      }
+    }
+
+    if (e.key === 'Backspace') {
+      const text = editTexts[id] ?? '';
+      if (text === '' && id !== DRAFT_ID) {
+        e.preventDefault();
+        const prevNote = visibleNotes[visibleIdx - 1];
+        const focusId = prevNote ? prevNote.id : DRAFT_ID;
+        deleteNote(id);
+        focusAfterRender(focusId);
+      }
     }
   }
 
-  const sansFont = "'DM Sans', system-ui, sans-serif";
-
-  // Single-client mode: only show notes tagged to that client
-  // Multi-client/agency mode: show notes for those clients + untagged notes
-  const visibleNotes = activeClientId
-    ? notes.filter(n => n.client_id === activeClientId)
-    : filteredClientIds
-      ? notes.filter(n => n.client_id != null && filteredClientIds.includes(n.client_id))
-      : notes;
+  function handleBlur(id: string) {
+    if (id === DRAFT_ID) return; // draft is only committed on Enter
+    const note = notes.find(n => n.id === id);
+    const text = editTexts[id] ?? '';
+    if (note && text.trim() !== note.text) {
+      if (!text.trim()) {
+        deleteNote(id);
+      } else {
+        saveNoteText(id, text);
+      }
+    }
+  }
 
   return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      height: '100%',
-      background: '#FFFFFF',
-      borderRadius: '0 18px 18px 0',
-      border: '0.5px solid #D8D4CE',
-      boxShadow: '0 2px 6px rgba(0,0,0,0.07)',
-      overflow: 'hidden',
-      fontFamily: sansFont,
-    }}>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        background: '#FFFFFF',
+        borderRadius: '0 18px 18px 0',
+        border: '0.5px solid #D8D4CE',
+        boxShadow: '0 2px 6px rgba(0,0,0,0.07)',
+        overflow: 'hidden',
+        fontFamily: sansFont,
+      }}
+    >
       {/* Header */}
       <div style={{
         padding: '10px 13px 8px',
@@ -202,253 +313,272 @@ export function NotesChecklist({ filteredClientIds, activeClientId }: NotesCheck
       </div>
 
       {/* Notes list — scrollable, moleskine-ruled */}
-      <div style={{
-        flex: 1,
-        overflowY: 'auto',
-        padding: '4px 0',
-        backgroundImage: [
-          'repeating-linear-gradient(transparent, transparent 27px, rgba(160,200,240,0.55) 27px, rgba(160,200,240,0.55) 28px)',
-          'linear-gradient(to right, transparent 28px, rgba(220,90,90,0.28) 28px, rgba(220,90,90,0.28) 29.5px, transparent 29.5px)',
-        ].join(', '),
-        backgroundPositionY: '4px',
-        backgroundPositionX: '0px',
-      }}>
-        {visibleNotes.length === 0 ? (
-          <div style={{ padding: '10px 13px', fontSize: 10, color: '#B5B0A5', fontStyle: 'italic' }}>
-            No notes yet…
-          </div>
-        ) : (
-          visibleNotes.map((note, idx) => (
-            <div
-              key={note.id}
-              style={{
-                display: 'flex',
-                alignItems: 'flex-start',
-                gap: 7,
-                padding: '7px 13px',
-                cursor: 'default',
-                borderBottom: 'none',
-              }}
-            >
-              {/* Circle checkbox */}
-              <div
-                style={{
-                  marginTop: 1,
-                  width: 13,
-                  height: 13,
-                  borderRadius: '50%',
-                  flexShrink: 0,
-                  border: note.done ? '0.5px solid #4A7C59' : '0.5px solid #D5D0C5',
-                  background: note.done ? '#4A7C59' : 'transparent',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  cursor: 'pointer',
-                }}
-                onClick={() => toggleNote(note.id)}
-              >
-                {note.done && (
-                  <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
-                    <path
-                      d="M1.5 4L3 5.5L6.5 2"
-                      stroke="#fff"
-                      strokeWidth="1.3"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                )}
-              </div>
-              <div
-                style={{
-                  flex: 1,
-                  minWidth: 0,
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: 6,
-                }}
-              >
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <span
-                    onClick={() => toggleNote(note.id)}
-                    style={{
-                      fontSize: 12,
-                      lineHeight: 1.4,
-                      color: note.done ? '#B5B0A5' : '#1C1917',
-                      textDecoration: note.done ? 'line-through' : 'none',
-                      wordBreak: 'break-word',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {note.text}
-                  </span>
-                  {note.due_date && (
-                    <div
-                      style={{
-                        marginTop: 2,
-                        fontSize: 9,
-                        color: note.done ? '#B5B0A5' : dueDateColor(note.due_date),
-                      }}
-                    >
-                      {formatDueDate(note.due_date)}
-                    </div>
-                  )}
-                </div>
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 4,
-                    flexShrink: 0,
-                  }}
-                >
-                  {/* Hidden date input triggered by calendar icon */}
-                  <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 3 }}>
-                    <input
-                      type="date"
-                      value={note.due_date ?? ''}
-                      onChange={e => updateNoteDate(note.id, e.target.value || null)}
-                      style={{
-                        position: 'absolute',
-                        opacity: 0,
-                        width: 0,
-                        height: 0,
-                        pointerEvents: 'none',
-                      }}
-                      id={`date-${note.id}`}
-                    />
-                    <button
-                      onClick={() => (document.getElementById(`date-${note.id}`) as HTMLInputElement)?.showPicker?.()}
-                      title={note.due_date ? `Due: ${note.due_date}` : 'Set due date'}
-                      style={{
-                        background: 'none',
-                        border: 'none',
-                        padding: 0,
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        color: note.due_date ? dueDateColor(note.due_date) : '#D5D0C5',
-                      }}
-                    >
-                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                        <rect x="1" y="2" width="10" height="9" rx="1.5" stroke="currentColor" strokeWidth="0.8"/>
-                        <path d="M4 1v2M8 1v2" stroke="currentColor" strokeWidth="0.8" strokeLinecap="round"/>
-                        <path d="M1 5h10" stroke="currentColor" strokeWidth="0.8"/>
-                      </svg>
-                    </button>
-                    {note.due_date && (
-                      <span style={{
-                        fontSize: 9,
-                        color: note.done ? '#B5B0A5' : dueDateColor(note.due_date),
-                        whiteSpace: 'nowrap',
-                        lineHeight: 1,
-                      }}>
-                        {formatDueDate(note.due_date)}
-                      </span>
-                    )}
-                  </div>
-                  <button
-                    onClick={() => deleteNote(note.id)}
-                    style={{
-                      width: 16,
-                      height: 16,
-                      borderRadius: '50%',
-                      border: 'none',
-                      background: '#F5EDE9',
-                      color: '#A0442A',
-                      fontSize: 10,
-                      lineHeight: 1,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                    aria-label="Delete note"
-                  >
-                    ×
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))
+      <div
+        ref={listRef}
+        style={{
+          flex: 1,
+          overflowY: 'auto',
+          padding: '4px 0',
+          backgroundImage: [
+            'repeating-linear-gradient(transparent, transparent 27px, rgba(160,200,240,0.55) 27px, rgba(160,200,240,0.55) 28px)',
+            'linear-gradient(to right, transparent 28px, rgba(220,90,90,0.28) 28px, rgba(220,90,90,0.28) 29.5px, transparent 29.5px)',
+          ].join(', '),
+          backgroundPositionY: '4px',
+          backgroundPositionX: '0px',
+        }}
+        onClick={e => {
+          // Clicking empty space in the list focuses the draft input
+          if (e.target === e.currentTarget) {
+            inputRefs.current[DRAFT_ID]?.focus();
+          }
+        }}
+      >
+        {visibleNotes.map((note, idx) => (
+          <NoteRow
+            key={note.id}
+            note={note}
+            text={editTexts[note.id] ?? note.text}
+            dateValue={editDates[note.id] !== undefined ? editDates[note.id] : (note.due_date ?? '')}
+            inputRef={el => { inputRefs.current[note.id] = el; }}
+            onToggle={() => toggleNote(note.id)}
+            onTextChange={v => setEditTexts(prev => ({ ...prev, [note.id]: v }))}
+            onDateChange={v => {
+              setEditDates(prev => ({ ...prev, [note.id]: v }));
+              updateNoteDate(note.id, v || null);
+            }}
+            onBlur={() => handleBlur(note.id)}
+            onKeyDown={e => handleKeyDown(e, note.id, idx)}
+            onDelete={() => deleteNote(note.id)}
+            sansFont={sansFont}
+          />
+        ))}
+
+        {/* Draft row — always visible at bottom for new entries */}
+        <DraftRow
+          text={editTexts[DRAFT_ID] ?? ''}
+          dateValue={editDates[DRAFT_ID] ?? ''}
+          inputRef={el => { inputRefs.current[DRAFT_ID] = el; }}
+          onTextChange={v => setEditTexts(prev => ({ ...prev, [DRAFT_ID]: v }))}
+          onDateChange={v => setEditDates(prev => ({ ...prev, [DRAFT_ID]: v }))}
+          onKeyDown={e => handleKeyDown(e, DRAFT_ID, visibleNotes.length)}
+          hasNotes={visibleNotes.length > 0}
+          autoFocus={visibleNotes.length === 0}
+          sansFont={sansFont}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ── Sub-components ──────────────────────────────────────────────────────────
+
+interface NoteRowProps {
+  note: Note;
+  text: string;
+  dateValue: string;
+  inputRef: (el: HTMLInputElement | null) => void;
+  onToggle: () => void;
+  onTextChange: (v: string) => void;
+  onDateChange: (v: string) => void;
+  onBlur: () => void;
+  onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+  onDelete: () => void;
+  sansFont: string;
+}
+
+function NoteRow({ note, text, dateValue, inputRef, onToggle, onTextChange, onDateChange, onBlur, onKeyDown, onDelete, sansFont }: NoteRowProps) {
+  const dateInputId = `date-${note.id}`;
+  const activeDateStr = dateValue || note.due_date;
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: 7,
+        padding: '5px 13px',
+      }}
+    >
+      {/* Circle checkbox */}
+      <div
+        onClick={onToggle}
+        style={{
+          marginTop: 3,
+          width: 13,
+          height: 13,
+          borderRadius: '50%',
+          flexShrink: 0,
+          border: note.done ? '0.5px solid #4A7C59' : '0.5px solid #D5D0C5',
+          background: note.done ? '#4A7C59' : 'transparent',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: 'pointer',
+        }}
+      >
+        {note.done && (
+          <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
+            <path d="M1.5 4L3 5.5L6.5 2" stroke="#fff" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
         )}
       </div>
 
-      {/* Input — pinned at bottom */}
-      <div style={{
-        borderTop: '1.5px solid #E0E8F4',
-        padding: '7px 9px',
-        display: 'flex',
-        gap: 4,
-        alignItems: 'center',
-        background: '#FFFFFF',
-      }}>
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
         <input
           ref={inputRef}
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && addNote()}
-          placeholder="New note…"
+          value={text}
+          onChange={e => onTextChange(e.target.value)}
+          onBlur={onBlur}
+          onKeyDown={onKeyDown}
           style={{
-            flex: 1, fontSize: 11, border: 'none', outline: 'none',
-            background: 'transparent', color: '#1C1917', fontFamily: sansFont,
+            width: '100%',
+            fontSize: 12,
+            lineHeight: '1.4',
+            color: note.done ? '#B5B0A5' : '#1C1917',
+            textDecoration: note.done ? 'line-through' : 'none',
+            background: 'transparent',
+            border: 'none',
+            outline: 'none',
+            fontFamily: 'inherit',
+            padding: 0,
           }}
         />
-        {/* Hidden date input for new note, triggered by calendar icon */}
-        <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0 }}>
+        {activeDateStr && (
+          <div style={{ fontSize: 9, color: note.done ? '#B5B0A5' : dueDateColor(activeDateStr) }}>
+            {formatDueDate(activeDateStr)}
+          </div>
+        )}
+      </div>
+
+      {/* Actions */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, marginTop: 2 }}>
+        <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 3 }}>
           <input
             type="date"
-            value={newDate}
-            onChange={e => setNewDate(e.target.value)}
-            style={{
-              position: 'absolute',
-              opacity: 0,
-              width: 0,
-              height: 0,
-              pointerEvents: 'none',
-            }}
-            id="new-note-date"
+            value={dateValue || note.due_date || ''}
+            onChange={e => onDateChange(e.target.value)}
+            style={{ position: 'absolute', opacity: 0, width: 0, height: 0, pointerEvents: 'none' }}
+            id={dateInputId}
           />
           <button
-            onClick={() => (document.getElementById('new-note-date') as HTMLInputElement)?.showPicker?.()}
-            title={newDate ? `Due: ${newDate}` : 'Set due date'}
+            onClick={() => (document.getElementById(dateInputId) as HTMLInputElement)?.showPicker?.()}
+            title={activeDateStr ? `Due: ${activeDateStr}` : 'Set due date'}
             style={{
-              background: 'none',
-              border: 'none',
-              padding: 0,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              color: newDate ? '#8A8578' : '#D5D0C5',
+              background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+              display: 'flex', alignItems: 'center',
+              color: activeDateStr ? dueDateColor(activeDateStr) : '#D5D0C5',
             }}
           >
             <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-              <rect x="1" y="2" width="10" height="9" rx="1.5" stroke="currentColor" strokeWidth="0.8"/>
-              <path d="M4 1v2M8 1v2" stroke="currentColor" strokeWidth="0.8" strokeLinecap="round"/>
-              <path d="M1 5h10" stroke="currentColor" strokeWidth="0.8"/>
+              <rect x="1" y="2" width="10" height="9" rx="1.5" stroke="currentColor" strokeWidth="0.8" />
+              <path d="M4 1v2M8 1v2" stroke="currentColor" strokeWidth="0.8" strokeLinecap="round" />
+              <path d="M1 5h10" stroke="currentColor" strokeWidth="0.8" />
             </svg>
           </button>
-          {newDate && (
-            <span style={{
-              fontSize: 9,
-              color: '#8A8578',
-              whiteSpace: 'nowrap',
-              lineHeight: 1,
-            }}>
-              {formatDueDate(newDate)}
-            </span>
-          )}
         </div>
         <button
-          onClick={addNote}
+          onClick={onDelete}
           style={{
-            width: 20, height: 20, borderRadius: '50%', border: 'none',
-            background: '#8A8578', color: '#fff',
-            fontSize: 14, lineHeight: 1, cursor: 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            flexShrink: 0, fontWeight: 300,
+            width: 16, height: 16, borderRadius: '50%', border: 'none',
+            background: '#F5EDE9', color: '#A0442A', fontSize: 10,
+            lineHeight: 1, cursor: 'pointer', display: 'flex',
+            alignItems: 'center', justifyContent: 'center',
           }}
-        >+</button>
+          aria-label="Delete note"
+        >
+          ×
+        </button>
+      </div>
+    </div>
+  );
+}
+
+interface DraftRowProps {
+  text: string;
+  dateValue: string;
+  inputRef: (el: HTMLInputElement | null) => void;
+  onTextChange: (v: string) => void;
+  onDateChange: (v: string) => void;
+  onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+  hasNotes: boolean;
+  sansFont: string;
+  autoFocus?: boolean;
+}
+
+function DraftRow({ text, dateValue, inputRef, onTextChange, onDateChange, onKeyDown, hasNotes, sansFont, autoFocus }: DraftRowProps) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: 7,
+        padding: '5px 13px',
+      }}
+    >
+      {/* Hollow circle — will become real checkbox once saved */}
+      <div
+        style={{
+          marginTop: 3,
+          width: 13,
+          height: 13,
+          borderRadius: '50%',
+          flexShrink: 0,
+          border: '0.5px dashed #D5D0C5',
+          background: 'transparent',
+        }}
+      />
+
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+        <input
+          ref={inputRef}
+          value={text}
+          onChange={e => onTextChange(e.target.value)}
+          onKeyDown={onKeyDown}
+          autoFocus={autoFocus}
+          placeholder={hasNotes ? 'New note…' : 'Start typing…'}
+          style={{
+            width: '100%',
+            fontSize: 12,
+            lineHeight: '1.4',
+            color: '#1C1917',
+            background: 'transparent',
+            border: 'none',
+            outline: 'none',
+            fontFamily: 'inherit',
+            padding: 0,
+          }}
+        />
+        {dateValue && (
+          <div style={{ fontSize: 9, color: '#8A8578' }}>
+            {formatDueDate(dateValue)}
+          </div>
+        )}
+      </div>
+
+      {/* Date picker for draft */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0, marginTop: 2 }}>
+        <input
+          type="date"
+          value={dateValue}
+          onChange={e => onDateChange(e.target.value)}
+          style={{ position: 'absolute', opacity: 0, width: 0, height: 0, pointerEvents: 'none' }}
+          id="draft-note-date"
+        />
+        <button
+          onClick={() => (document.getElementById('draft-note-date') as HTMLInputElement)?.showPicker?.()}
+          title={dateValue ? `Due: ${dateValue}` : 'Set due date'}
+          style={{
+            background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+            display: 'flex', alignItems: 'center',
+            color: dateValue ? '#8A8578' : '#D5D0C5',
+          }}
+        >
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+            <rect x="1" y="2" width="10" height="9" rx="1.5" stroke="currentColor" strokeWidth="0.8" />
+            <path d="M4 1v2M8 1v2" stroke="currentColor" strokeWidth="0.8" strokeLinecap="round" />
+            <path d="M1 5h10" stroke="currentColor" strokeWidth="0.8" />
+          </svg>
+        </button>
       </div>
     </div>
   );
