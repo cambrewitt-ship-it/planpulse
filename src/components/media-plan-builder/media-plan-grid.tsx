@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { Plus, Trash2, ChevronLeft, ChevronRight, MoreHorizontal } from "lucide-react";
+import { Plus, Trash2, ChevronLeft, ChevronRight, MoreHorizontal, Upload, X, CheckCircle, AlertCircle, Loader2 } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,6 +26,18 @@ interface WeekRange {
   weekStart: Date;
   weekEnd: Date;
   month: string;
+}
+
+interface ParsedChannel {
+  channelName: string;
+  format: string;
+  totalBudget: number;
+  percentOfInvestment: number;
+  flights: Array<{
+    startDate: string;
+    endDate: string;
+    monthlySpend: Record<string, number>;
+  }>;
 }
 
 export interface MediaFlight {
@@ -162,6 +174,72 @@ const getChannelCategory = (channelName: string): 'paid_digital' | 'organic_soci
   if (lower === 'other') return 'other';
   return 'paid_digital';
 };
+
+const CHANNEL_HEX_COLORS: Record<string, string> = {
+  'meta ads': '#3B82F6',
+  'google ads': '#EF4444',
+  'display ads': '#06B6D4',
+  'native ads': '#14B8A6',
+  'linkedin ads': '#6366F1',
+  'tiktok ads': '#6B7280',
+  'instagram ads': '#EC4899',
+  'twitter ads': '#0EA5E9',
+  'youtube ads': '#DC2626',
+  'snapchat ads': '#EAB308',
+  'reddit ads': '#EA580C',
+  'instagram (organic)': '#F472B6',
+  'facebook (organic)': '#60A5FA',
+  'linkedin (organic)': '#22D3EE',
+  'edm / email': '#A855F7',
+  'ooh': '#F97316',
+  'radio': '#F59E0B',
+  'linear tv': '#7C3AED',
+  'svod': '#9333EA',
+  'bvod': '#D946EF',
+};
+
+function getFlightHexColor(channelName: string): string {
+  return CHANNEL_HEX_COLORS[channelName.toLowerCase()] ?? '#6B7280';
+}
+
+function toNearestMonday(dateStr: string): Date {
+  const d = new Date(dateStr + 'T00:00:00');
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  return d;
+}
+
+function parsedToMediaPlanChannels(parsed: ParsedChannel[]): MediaPlanChannel[] {
+  const total = parsed.reduce((s, c) => s + (c.totalBudget || 0), 0);
+  return parsed.map(ch => {
+    const color = getFlightHexColor(ch.channelName);
+    const flights: MediaFlight[] = ch.flights.map(f => {
+      const startWeek = toNearestMonday(f.startDate);
+      const endWeek = new Date(startWeek);
+      // endWeek = Sunday of the week containing endDate
+      const endMonday = toNearestMonday(f.endDate);
+      endWeek.setTime(endMonday.getTime());
+      endWeek.setDate(endWeek.getDate() + 6);
+      return {
+        id: `flight-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        startWeek,
+        endWeek,
+        monthlySpend: f.monthlySpend || {},
+        color,
+      };
+    });
+    return {
+      id: `channel-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      channelName: ch.channelName,
+      format: ch.format || '',
+      totalBudget: ch.totalBudget || 0,
+      percentOfInvestment: total > 0 ? Math.round((ch.totalBudget / total) * 100) : (ch.percentOfInvestment || 0),
+      flights,
+      channelCategory: getChannelCategory(ch.channelName),
+    };
+  });
+}
 
 /**
  * Generates weekly date ranges between start and end dates.
@@ -307,6 +385,13 @@ export function MediaPlanGrid({ channels: externalChannels, onChannelsChange, co
   const isDraggingRef = useRef(false);
   const budgetInputRef = useRef<HTMLInputElement>(null);
   const hasFocusedInputRef = useRef(false);
+
+  // Screenshot upload state
+  const [isParsingScreenshot, setIsParsingScreenshot] = useState(false);
+  const [screenshotError, setScreenshotError] = useState<string | null>(null);
+  const [reviewChannels, setReviewChannels] = useState<MediaPlanChannel[] | null>(null);
+  const [reviewImagePreview, setReviewImagePreview] = useState<string | null>(null);
+  const screenshotInputRef = useRef<HTMLInputElement>(null);
   
   // Focus budget input when activeSelection changes (only once per selection)
   useEffect(() => {
@@ -1000,6 +1085,53 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
     handleUpdateChannel(channelId, { flights: updatedFlights, totalBudget: calculateTotalBudgetFromFlights(updatedFlights) });
   };
 
+  const handleScreenshotUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+
+    const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    if (!validTypes.includes(file.type)) {
+      setScreenshotError('Please upload a PNG, JPG, GIF or WEBP image.');
+      return;
+    }
+    if (file.size > 20 * 1024 * 1024) {
+      setScreenshotError('Image must be smaller than 20 MB.');
+      return;
+    }
+
+    setIsParsingScreenshot(true);
+    setScreenshotError(null);
+    setReviewChannels(null);
+    setReviewImagePreview(null);
+
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      const dataUrl = ev.target?.result as string;
+      const base64 = dataUrl.split(',')[1];
+
+      setReviewImagePreview(dataUrl);
+
+      try {
+        const res = await fetch('/api/media-plan/parse-screenshot', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: base64, mimeType: file.type }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? 'Failed to parse screenshot');
+        const converted = parsedToMediaPlanChannels(data.channels);
+        setReviewChannels(converted);
+      } catch (err: any) {
+        setScreenshotError(err.message ?? 'Failed to analyse screenshot. Please try again.');
+        setReviewImagePreview(null);
+      } finally {
+        setIsParsingScreenshot(false);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
   return (
     <div className="w-full overflow-hidden border border-gray-300 rounded-lg relative">
       {/* Year Navigation and Commission Header */}
@@ -1042,6 +1174,37 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
           <Button variant="outline" size="icon" className="h-7 w-7 text-base" onClick={() => setCellWidth(w => Math.max(20, w - 8))} title="Zoom out">−</Button>
           <span className="text-xs text-gray-500 w-8 text-center">{Math.round((cellWidth / 40) * 100)}%</span>
           <Button variant="outline" size="icon" className="h-7 w-7 text-base" onClick={() => setCellWidth(w => Math.min(60, w + 8))} title="Zoom in">+</Button>
+        </div>
+
+        {/* Upload Screenshot */}
+        <div className="flex items-center gap-2">
+          <input
+            ref={screenshotInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/gif,image/webp"
+            className="hidden"
+            onChange={handleScreenshotUpload}
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 gap-1.5 text-xs"
+            onClick={() => screenshotInputRef.current?.click()}
+            disabled={isParsingScreenshot}
+            title="Upload a media plan screenshot and let AI extract the channels and budgets"
+          >
+            {isParsingScreenshot ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Upload className="h-3.5 w-3.5" />
+            )}
+            {isParsingScreenshot ? 'Analysing…' : 'Upload Screenshot'}
+          </Button>
+          {screenshotError && (
+            <span className="text-xs text-red-500 flex items-center gap-1">
+              <AlertCircle className="h-3 w-3" /> {screenshotError}
+            </span>
+          )}
         </div>
 
         {/* Commission Input */}
@@ -2375,6 +2538,111 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
               </>
             ) : null;
           })()}
+        </div>,
+        document.body
+      )}
+
+      {/* Screenshot review modal */}
+      {reviewChannels && createPortal(
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 999999,
+            background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: 24, fontFamily: "'DM Sans', system-ui, sans-serif",
+          }}
+          onClick={() => { setReviewChannels(null); setReviewImagePreview(null); }}
+        >
+          <div
+            style={{
+              background: '#FDFCF8', borderRadius: 16, maxWidth: 680, width: '100%',
+              maxHeight: '85vh', overflow: 'hidden', display: 'flex', flexDirection: 'column',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Modal header */}
+            <div style={{ padding: '20px 24px 16px', borderBottom: '0.5px solid #E8E4DC', display: 'flex', alignItems: 'center', gap: 10 }}>
+              <CheckCircle style={{ color: '#22C55E', width: 20, height: 20, flexShrink: 0 }} />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 15, fontWeight: 600, color: '#1C1917' }}>Plan Extracted</div>
+                <div style={{ fontSize: 12, color: '#8A8578', marginTop: 1 }}>
+                  {reviewChannels.length} channel{reviewChannels.length !== 1 ? 's' : ''} found — review and accept to load into the plan builder
+                </div>
+              </div>
+              <button
+                onClick={() => { setReviewChannels(null); setReviewImagePreview(null); }}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#8A8578', padding: 4 }}
+              >
+                <X style={{ width: 18, height: 18 }} />
+              </button>
+            </div>
+
+            {/* Scrollable content */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '16px 24px' }}>
+              {reviewImagePreview && (
+                <div style={{ marginBottom: 16, borderRadius: 8, overflow: 'hidden', border: '0.5px solid #E8E4DC', maxHeight: 180 }}>
+                  <img src={reviewImagePreview} alt="Uploaded plan" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                </div>
+              )}
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {reviewChannels.map((ch, i) => {
+                  const startDate = ch.flights[0]?.startWeek;
+                  const endDate = ch.flights[ch.flights.length - 1]?.endWeek;
+                  const dateRange = startDate && endDate
+                    ? `${startDate.toLocaleDateString('en-AU', { month: 'short', year: 'numeric' })} – ${endDate.toLocaleDateString('en-AU', { month: 'short', year: 'numeric' })}`
+                    : 'No dates';
+                  const color = ch.flights[0]?.color ?? '#6B7280';
+                  return (
+                    <div key={i} style={{
+                      display: 'flex', alignItems: 'center', gap: 12,
+                      padding: '10px 14px', borderRadius: 10,
+                      background: '#F5F3EF', border: '0.5px solid #E8E4DC',
+                    }}>
+                      <div style={{ width: 10, height: 10, borderRadius: '50%', background: color, flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: '#1C1917' }}>{ch.channelName}</div>
+                        {ch.format && <div style={{ fontSize: 11, color: '#8A8578', marginTop: 1 }}>{ch.format}</div>}
+                      </div>
+                      <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: '#1C1917' }}>
+                          ${ch.totalBudget.toLocaleString()}
+                        </div>
+                        <div style={{ fontSize: 11, color: '#8A8578', marginTop: 1 }}>{dateRange}</div>
+                      </div>
+                      <div style={{
+                        fontSize: 11, fontWeight: 600, color: '#8A8578',
+                        background: '#E8E4DC', borderRadius: 20, padding: '2px 8px', flexShrink: 0,
+                      }}>
+                        {ch.percentOfInvestment}%
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div style={{ padding: '16px 24px', borderTop: '0.5px solid #E8E4DC', display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <Button
+                variant="outline"
+                onClick={() => { setReviewChannels(null); setReviewImagePreview(null); }}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  setChannels(reviewChannels);
+                  setReviewChannels(null);
+                  setReviewImagePreview(null);
+                }}
+                style={{ background: '#1C1917', color: '#FDFCF8', border: 'none' }}
+              >
+                Accept & Load Plan
+              </Button>
+            </div>
+          </div>
         </div>,
         document.body
       )}
