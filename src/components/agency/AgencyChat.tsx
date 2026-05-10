@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { Send } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -37,6 +37,7 @@ function channelColor(name: string): string {
 
 const QUICK_ACTIONS = [
   { label: 'Daily briefing', prompt: 'Give me a daily briefing — how are all our clients doing today?' },
+  { label: 'Topline results', prompt: 'Give me a topline results check across all clients — for each client summarise their actual spend vs planned spend, key performance highlights, and flag any significant variances or issues I should be aware of.' },
   { label: 'Channel health', prompt: 'Do a channel health check — for each client show me channel pacing, spend vs plan, and flag any channels that are over or under pacing.' },
   { label: 'Overdue tasks', prompt: 'What action points are overdue right now?' },
   { label: 'Red clients', prompt: 'Which clients have red health status and why?' },
@@ -147,11 +148,15 @@ function renderInline(text: string): React.ReactNode {
   });
 }
 
+export interface AgencyChatHandle {
+  sendMessage: (text: string) => void;
+}
+
 interface AgencyChatProps {
   notesSlot?: React.ReactNode;
 }
 
-export function AgencyChat({ notesSlot }: AgencyChatProps) {
+export const AgencyChat = forwardRef<AgencyChatHandle, AgencyChatProps>(function AgencyChat({ notesSlot }, ref) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -422,6 +427,10 @@ export function AgencyChat({ notesSlot }: AgencyChatProps) {
       setToolInProgress(null);
     }
   }, [messages, isLoading]);
+
+  useImperativeHandle(ref, () => ({
+    sendMessage: (text: string) => { send(text); },
+  }), [send]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -1038,4 +1047,4 @@ export function AgencyChat({ notesSlot }: AgencyChatProps) {
       `}</style>
     </div>
   );
-}
+});

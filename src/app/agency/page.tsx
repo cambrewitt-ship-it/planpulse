@@ -8,7 +8,7 @@ import type { ClientCardData } from '@/app/api/agency/clients/route';
 import type { AgencyClientActionPoints } from '@/app/api/agency/action-points/route';
 import { ClientCardCompact } from '@/components/agency/ClientCardCompact';
 import { TodayCard } from '@/components/agency/TodayCard';
-import { AgencyChat } from '@/components/agency/AgencyChat';
+import { AgencyChat, type AgencyChatHandle } from '@/components/agency/AgencyChat';
 import { KanbanBoard, type KanbanBoardHandle } from '@/components/agency/KanbanBoard';
 import { NotesChecklist } from '@/components/agency/NotesChecklist';
 import { CalendarPanel } from '@/components/agency/CalendarPanel';
@@ -145,6 +145,7 @@ export default function AgencyDashboard() {
   };
 
   const kanbanRef = useRef<KanbanBoardHandle>(null);
+  const chatRef = useRef<AgencyChatHandle>(null);
   const [kanbanView, setKanbanView] = useState<'kanban' | 'list' | 'gantt'>('kanban');
   const today = useMemo(() => new Date(), []);
   const monthLabel = `${MONTH_NAMES[today.getMonth()]} ${today.getFullYear()}`;
@@ -315,10 +316,10 @@ export default function AgencyDashboard() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: '#F5F3EF', ...pageFont }}>
+    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#F5F3EF', ...pageFont }}>
       {/* ── Subheader ──────────────────────────────────────── */}
       <div style={{
-        height: 48, background: '#FDFCF8', borderBottom: '0.5px solid #E8E4DC',
+        height: 48, flexShrink: 0, background: '#FDFCF8', borderBottom: '0.5px solid #E8E4DC',
         display: 'flex', alignItems: 'center', paddingLeft: 16, paddingRight: 16, gap: 9,
         overflow: 'hidden',
       }}>
@@ -385,6 +386,7 @@ export default function AgencyDashboard() {
       <div style={{
         display: 'flex', alignItems: 'flex-end', gap: 4,
         padding: '12px 18px 0', maxWidth: 1440, margin: '0 auto',
+        flexShrink: 0,
       }}>
         {/* "All" tab */}
         {(() => {
@@ -439,10 +441,15 @@ export default function AgencyDashboard() {
         margin: '0 auto',
         borderTop: '0.5px solid #E8E4DC',
         alignItems: 'stretch',
+        flex: 1,
+        minHeight: 0,
+        overflow: 'hidden',
+        width: '100%',
+        boxSizing: 'border-box',
       }}>
 
         {/* ── Column 1: Today + Clients ────────────────── */}
-        <div style={{ width: 240, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ width: 240, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 12, minHeight: 0 }}>
           <TodayCard clients={filteredClients} today={today} />
 
           {/* Clients list */}
@@ -487,7 +494,7 @@ export default function AgencyDashboard() {
 
         {/* ── Column 2: Chat + Notes ────────────────────── */}
         <div style={{ width: 380, flexShrink: 0, alignSelf: 'stretch', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-          <AgencyChat notesSlot={
+          <AgencyChat ref={chatRef} notesSlot={
             /* Notes — dark spine + files panel + content */
             <div
               style={{
@@ -607,7 +614,7 @@ export default function AgencyDashboard() {
         </div>
 
         {/* ── Column 3: Kanban + Gantt stacked ─────────── */}
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
 
           {/* Kanban container */}
           <div style={{
@@ -670,6 +677,7 @@ export default function AgencyDashboard() {
                 onActionPointCompleted={() => fetchData(true)}
                 accountManagers={accountManagers}
                 view={kanbanView}
+                onAskAI={(prompt) => chatRef.current?.sendMessage(prompt)}
               />
             </div>
           </div>
@@ -682,6 +690,8 @@ export default function AgencyDashboard() {
             minWidth: 0,
             boxShadow: '0 4px 24px rgba(0,0,0,0.18), 0 1px 8px rgba(0,0,0,0.12)',
             overflow: 'hidden',
+            flex: 1,
+            minHeight: 0,
           }}>
             <CalendarPanel
               clients={filteredClients}

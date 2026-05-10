@@ -213,10 +213,11 @@ interface KanbanBoardProps {
   accountManagers?: AccountManager[];
   availableChannels?: string[];
   view?: 'kanban' | 'list' | 'gantt';
+  onAskAI?: (prompt: string) => void;
 }
 
 export const KanbanBoard = forwardRef(function KanbanBoard(
-  { actionPointClients, amFilter, onActionPointCompleted, accountManagers = [], availableChannels, view = 'kanban' }: KanbanBoardProps,
+  { actionPointClients, amFilter, onActionPointCompleted, accountManagers = [], availableChannels, view = 'kanban', onAskAI }: KanbanBoardProps,
   ref: ForwardedRef<KanbanBoardHandle>
 ) {
   const today = new Date();
@@ -227,6 +228,9 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
 
   // In-progress state (local UI state)
   const [inProgressIds, setInProgressIds] = useState<Set<string>>(new Set());
+
+  // Completing state — optimistic scratch-out before card disappears
+  const [completingIds, setCompletingIds] = useState<Set<string>>(new Set());
 
   function handleToggleInProgress(card: KanbanCard) {
     setInProgressIds(prev => {
@@ -321,7 +325,65 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
     }
   }
 
-  async function handleComplete(card: KanbanCard) {
+  function fireConfetti(originX: number, originY: number) {
+    try {
+      if (typeof window === 'undefined') return;
+      const canvas = document.createElement('canvas');
+      canvas.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:99999;';
+      document.body.appendChild(canvas);
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { canvas.remove(); return; }
+      const COLORS = ['#4A7C59', '#4A6580', '#B07030', '#A0442A', '#F5F0E8', '#D5D0C5'];
+      const pieces = Array.from({ length: 60 }, () => ({
+        x: originX,
+        y: originY,
+        vx: (Math.random() - 0.5) * 10,
+        vy: -(Math.random() * 8 + 3),
+        gravity: 0.3,
+        color: COLORS[Math.floor(Math.random() * COLORS.length)],
+        w: Math.random() * 7 + 4,
+        h: Math.random() * 4 + 3,
+        angle: Math.random() * Math.PI * 2,
+        spin: (Math.random() - 0.5) * 0.25,
+        opacity: 1,
+      }));
+      let frame = 0;
+      function animate() {
+        ctx!.clearRect(0, 0, canvas.width, canvas.height);
+        let alive = false;
+        for (const p of pieces) {
+          p.vy += p.gravity;
+          p.x += p.vx;
+          p.y += p.vy;
+          p.angle += p.spin;
+          if (frame > 30) p.opacity -= 0.025;
+          if (p.opacity > 0 && p.y < canvas.height + 20) {
+            alive = true;
+            ctx!.save();
+            ctx!.globalAlpha = Math.max(0, p.opacity);
+            ctx!.translate(p.x, p.y);
+            ctx!.rotate(p.angle);
+            ctx!.fillStyle = p.color;
+            ctx!.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+            ctx!.restore();
+          }
+        }
+        frame++;
+        if (alive) requestAnimationFrame(animate);
+        else canvas.remove();
+      }
+      requestAnimationFrame(animate);
+    } catch {
+      // never block completion
+    }
+  }
+
+  async function handleComplete(card: KanbanCard, e?: React.MouseEvent) {
+    if (e) fireConfetti(e.clientX, e.clientY);
+    // Immediately show scratch-out
+    setCompletingIds(prev => new Set(prev).add(card.id));
     try {
       const res = await fetch('/api/action-points', {
         method: 'PUT',
@@ -334,11 +396,14 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
       });
       if (!res.ok) {
         console.error('Failed to complete action point from Kanban');
+        setCompletingIds(prev => { const next = new Set(prev); next.delete(card.id); return next; });
         return;
       }
-      onActionPointCompleted?.();
+      // Let the animation play for 900ms before refreshing
+      setTimeout(() => { onActionPointCompleted?.(); }, 900);
     } catch (err) {
       console.error('Error completing action point from Kanban:', err);
+      setCompletingIds(prev => { const next = new Set(prev); next.delete(card.id); return next; });
     }
   }
 
@@ -444,6 +509,12 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
 
   return (
     <>
+    <style>{`
+      @keyframes strike {
+        from { width: 0%; }
+        to   { width: 100%; }
+      }
+    `}</style>
     <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 10 }}>
 
       {/* Inline add form — shown when isAdding */}
@@ -686,7 +757,7 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                     {/* Tick to complete */}
                     <button
                       type="button"
-                      onClick={e => { e.stopPropagation(); void handleComplete(card); }}
+                      onClick={e => { e.stopPropagation(); void handleComplete(card, e); }}
                       title="Mark complete"
                       style={{
                         width: 13, height: 13, borderRadius: '50%', flexShrink: 0,
@@ -723,7 +794,7 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                     <div key={card.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 0' }}>
                       <button
                         type="button"
-                        onClick={e => { e.stopPropagation(); void handleComplete(card); }}
+                        onClick={e => { e.stopPropagation(); void handleComplete(card, e); }}
                         title="Mark complete"
                         style={{
                           width: 13, height: 13, borderRadius: '50%', flexShrink: 0,
@@ -754,6 +825,7 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         {allCardsSorted.map((card) => {
           const isInProgress = inProgressIds.has(card.id);
+          const isCompleting = completingIds.has(card.id);
           const colColor = card.status === '1-2' ? '#A0442A' : card.status === '3-4' ? '#B07030' : '#4A6580';
           const clientCol = clientColor(card.clientId);
           return (
@@ -763,6 +835,8 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
               borderLeft: `2px solid ${isInProgress ? '#B07030' : colColor}`,
               borderRadius: 5,
               overflow: 'hidden',
+              opacity: isCompleting ? 0 : 1,
+              transition: isCompleting ? 'opacity 0.7s ease 0.2s' : undefined,
             }}>
               {/* Client name header */}
               <div style={{
@@ -779,7 +853,7 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
               <div style={{ padding: '6px 8px', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
               <button
                 type="button"
-                onClick={(e) => { e.stopPropagation(); void handleComplete(card); }}
+                onClick={(e) => { e.stopPropagation(); void handleComplete(card, e); }}
                 title="Mark complete"
                 style={{
                   flexShrink: 0, marginTop: 2,
@@ -792,8 +866,8 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 4 }}>
                   <div style={{ flexShrink: 0, marginTop: 1 }}>{getChannelIcon(card.channelType)}</div>
-                  <span style={{ flex: 1, fontSize: 12, fontWeight: 500, color: '#1C1917', lineHeight: 1.35 }}>{card.text}</span>
-                  {card.urgent && (
+                  <span style={{ flex: 1, fontSize: 12, fontWeight: 500, color: isCompleting ? '#B5B0A5' : '#1C1917', lineHeight: 1.35, textDecoration: isCompleting ? 'line-through' : 'none', transition: 'color 0.2s' }}>{card.text}</span>
+                  {card.urgent && !isCompleting && (
                     <span style={{ fontSize: 9, fontWeight: 500, color: '#A0442A', textTransform: 'uppercase', letterSpacing: '0.08em', flexShrink: 0, whiteSpace: 'nowrap' }}>OVERDUE</span>
                   )}
                 </div>
@@ -812,6 +886,9 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                       style={{ fontSize: 8, fontWeight: 500, padding: '1px 5px', borderRadius: 6, border: isInProgress ? '0.5px solid rgba(176,112,48,0.4)' : '0.5px dashed #D5D0C5', background: isInProgress ? 'rgba(176,112,48,0.1)' : 'transparent', color: isInProgress ? '#B07030' : '#C0BBC0', cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif", whiteSpace: 'nowrap' }}
                     >In Progress</button>
                     <AssignMenu card={card} onAssign={handleAssign} accountManagers={accountManagers} />
+                    {onAskAI && (
+                      <button type="button" onClick={(e) => { e.stopPropagation(); onAskAI(`Help me with this action point for ${card.clientName} (${card.channelType}): ${card.text}`); }} style={{ fontSize: 8, fontWeight: 500, padding: '1px 5px', borderRadius: 3, border: '0.5px solid rgba(74,101,128,0.35)', background: 'rgba(74,101,128,0.07)', color: '#4A6580', cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif", whiteSpace: 'nowrap' }}>Ask AI</button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -844,18 +921,21 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
               <div style={{ overflowY: 'auto', maxHeight: 340, display: 'flex', flexDirection: 'column', gap: 5, paddingBottom: overdueCards.length > 3 ? 10 : 2 }}>
                 {overdueCards.map((card) => {
                   const isInProgress = inProgressIds.has(card.id);
+                  const isCompleting = completingIds.has(card.id);
                   const clientCol = clientColor(card.clientId);
                   return (
-                    <div key={card.id} style={{ background: isInProgress ? '#FFFBF4' : '#FDFCF8', border: `0.5px solid ${isInProgress ? 'rgba(176,112,48,0.4)' : '#E8E4DC'}`, borderLeft: `2px solid ${isInProgress ? '#B07030' : OVERDUE_COLOR}`, borderRadius: 5, overflow: 'hidden', flexShrink: 0 }}>
+                    <div key={card.id} style={{ display: 'grid', gridTemplateRows: isCompleting ? '0fr' : '1fr', transition: isCompleting ? 'grid-template-rows 0.45s ease 0.35s' : undefined, overflow: 'hidden', flexShrink: 0 }}>
+                    <div style={{ overflow: 'hidden' }}>
+                    <div style={{ background: isInProgress ? '#FFFBF4' : '#FDFCF8', border: `0.5px solid ${isInProgress ? 'rgba(176,112,48,0.4)' : '#E8E4DC'}`, borderLeft: `2px solid ${isInProgress ? '#B07030' : OVERDUE_COLOR}`, borderRadius: 5, overflow: 'hidden' }}>
                       <div style={{ background: clientCol, padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 4 }}>
                         <span style={{ fontSize: 9, fontWeight: 600, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '0.02em' }}>{card.clientName}</span>
                       </div>
                       <div style={{ padding: '6px 8px', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                        <button type="button" onClick={(e) => { e.stopPropagation(); void handleComplete(card); }} title="Mark complete" style={{ flexShrink: 0, marginTop: 2, width: 14, height: 14, borderRadius: '50%', border: `1px solid #D5D0C5`, background: 'transparent', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }} />
+                        <button type="button" onClick={(e) => { e.stopPropagation(); void handleComplete(card, e); }} title="Mark complete" style={{ flexShrink: 0, marginTop: 2, width: 14, height: 14, borderRadius: '50%', border: `1px solid #D5D0C5`, background: 'transparent', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }} />
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 4 }}>
                             <div style={{ flexShrink: 0, marginTop: 1 }}>{getChannelIcon(card.channelType)}</div>
-                            <span style={{ flex: 1, fontSize: 12, fontWeight: 500, color: '#1C1917', lineHeight: 1.35 }}>{card.text}</span>
+                            <span style={{ flex: 1, fontSize: 12, fontWeight: 500, color: isCompleting ? '#B5B0A5' : '#1C1917', lineHeight: 1.35, transition: 'color 0.2s', position: 'relative' }}>{card.text}{isCompleting && <span style={{ position: 'absolute', left: 0, top: '50%', height: '1.5px', background: '#6B7280', width: 0, animation: 'strike 0.35s ease forwards' }} />}</span>
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 6 }}>
                             {isInProgress && (
@@ -868,10 +948,15 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flexShrink: 0, alignItems: 'stretch' }}>
                               <button type="button" onClick={(e) => { e.stopPropagation(); handleToggleInProgress(card); }} title={isInProgress ? 'Clear in progress' : 'Mark as in progress'} style={{ fontSize: 8, fontWeight: 500, padding: '1px 5px', borderRadius: 6, border: isInProgress ? '0.5px solid rgba(176,112,48,0.4)' : '0.5px dashed #D5D0C5', background: isInProgress ? 'rgba(176,112,48,0.1)' : 'transparent', color: isInProgress ? '#B07030' : '#C0BBC0', cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif", whiteSpace: 'nowrap' }}>In Progress</button>
                               <AssignMenu card={card} onAssign={handleAssign} accountManagers={accountManagers} />
+                              {onAskAI && (
+                                <button type="button" onClick={(e) => { e.stopPropagation(); onAskAI(`Help me with this action point for ${card.clientName} (${card.channelType}): ${card.text}`); }} style={{ fontSize: 8, fontWeight: 500, padding: '1px 5px', borderRadius: 3, border: '0.5px solid rgba(74,101,128,0.35)', background: 'rgba(74,101,128,0.07)', color: '#4A6580', cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif", whiteSpace: 'nowrap' }}>Ask AI</button>
+                              )}
                             </div>
                           </div>
                         </div>
                       </div>
+                    </div>
+                    </div>
                     </div>
                   );
                 })}
@@ -918,15 +1003,17 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
               }}>
               {colCards.map((card) => {
                 const isInProgress = inProgressIds.has(card.id);
+                const isCompleting = completingIds.has(card.id);
                 const clientCol = clientColor(card.clientId);
                 return (
-                <div key={card.id} style={{
+                <div key={card.id} style={{ display: 'grid', gridTemplateRows: isCompleting ? '0fr' : '1fr', transition: isCompleting ? 'grid-template-rows 0.45s ease 0.35s' : undefined, overflow: 'hidden', flexShrink: 0, marginBottom: isCompleting ? 0 : undefined }}>
+                <div style={{ overflow: 'hidden' }}>
+                <div style={{
                   background: isInProgress ? '#FFFBF4' : '#FDFCF8',
                   border: `0.5px solid ${isInProgress ? 'rgba(176,112,48,0.4)' : '#E8E4DC'}`,
                   borderLeft: `2px solid ${isInProgress ? '#B07030' : col.color}`,
                   borderRadius: 5,
                   overflow: 'hidden',
-                  flexShrink: 0,
                 }}>
                   {/* Client name header */}
                   <div style={{
@@ -948,7 +1035,7 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                   {/* Circular checkbox */}
                   <button
                     type="button"
-                    onClick={(e) => { e.stopPropagation(); void handleComplete(card); }}
+                    onClick={(e) => { e.stopPropagation(); void handleComplete(card, e); }}
                     title="Mark complete"
                     style={{
                       flexShrink: 0,
@@ -973,8 +1060,9 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                       <div style={{ flexShrink: 0, marginTop: 1 }}>
                         {getChannelIcon(card.channelType)}
                       </div>
-                      <span style={{ flex: 1, fontSize: 12, fontWeight: 500, color: '#1C1917', lineHeight: 1.35 }}>
+                      <span style={{ flex: 1, fontSize: 12, fontWeight: 500, color: isCompleting ? '#B5B0A5' : '#1C1917', lineHeight: 1.35, transition: 'color 0.2s', position: 'relative' }}>
                         {card.text}
+                        {isCompleting && <span style={{ position: 'absolute', left: 0, top: '50%', height: '1.5px', background: '#6B7280', width: 0, animation: 'strike 0.35s ease forwards' }} />}
                       </span>
                       {card.urgent && (
                         <span style={{
@@ -1037,10 +1125,29 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                           In Progress
                         </button>
                         <AssignMenu card={card} onAssign={handleAssign} accountManagers={accountManagers} />
+                        {onAskAI && (
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); onAskAI(`Help me with this action point for ${card.clientName} (${card.channelType}): ${card.text}`); }}
+                            style={{
+                              fontSize: 8, fontWeight: 500,
+                              padding: '1px 5px',
+                              borderRadius: 3,
+                              border: '0.5px solid rgba(74,101,128,0.35)',
+                              background: 'rgba(74,101,128,0.07)',
+                              color: '#4A6580',
+                              cursor: 'pointer',
+                              fontFamily: "'DM Sans', system-ui, sans-serif",
+                              whiteSpace: 'nowrap',
+                            }}
+                          >Ask AI</button>
+                        )}
                       </div>
                     </div>
                   </div>
                   </div>
+                </div>
+                </div>
                 </div>
                 );
               })}
@@ -1107,7 +1214,7 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 4, borderTop: '0.5px solid #E8E4DC' }}>
             <button
               type="button"
-              onClick={() => { void handleComplete(ganttPopup.card); setGanttPopup(null); }}
+              onClick={(e) => { void handleComplete(ganttPopup.card, e); setGanttPopup(null); }}
               style={{
                 display: 'flex', alignItems: 'center', gap: 5,
                 fontSize: 11, fontWeight: 500, padding: '4px 10px',
@@ -1120,6 +1227,18 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
               Complete
             </button>
             <AssignMenu card={ganttPopup.card} onAssign={(card, am) => { handleAssign(card, am); }} accountManagers={accountManagers} />
+            {onAskAI && (
+              <button
+                type="button"
+                onClick={() => { onAskAI(`Help me with this action point for ${ganttPopup.card.clientName} (${ganttPopup.card.channelType}): ${ganttPopup.card.text}`); setGanttPopup(null); }}
+                style={{
+                  fontSize: 10, fontWeight: 500, padding: '4px 8px',
+                  background: 'rgba(74,101,128,0.08)', color: '#4A6580',
+                  border: '0.5px solid rgba(74,101,128,0.35)', borderRadius: 5, cursor: 'pointer',
+                  fontFamily: "'DM Sans', system-ui, sans-serif", whiteSpace: 'nowrap',
+                }}
+              >Ask AI</button>
+            )}
           </div>
         </div>
       </div>,
