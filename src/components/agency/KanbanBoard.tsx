@@ -879,7 +879,7 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                   <span style={{ fontSize: 9, fontWeight: 400, color: '#B5B0A5', whiteSpace: 'nowrap' }}>
                     {card.daysUntilDue === null ? 'no date' : card.daysUntilDue < 0 ? `${Math.abs(card.daysUntilDue)}d overdue` : card.daysUntilDue === 0 ? 'today' : `${card.daysUntilDue}d`}
                   </span>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flexShrink: 0, alignItems: 'stretch' }}>
+                  <div style={{ marginLeft: 'auto', display: 'flex', gap: 3, alignItems: 'center', flexShrink: 0 }}>
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); handleToggleInProgress(card); }}
@@ -887,7 +887,7 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                     >In Progress</button>
                     <AssignMenu card={card} onAssign={handleAssign} accountManagers={accountManagers} />
                     {onAskAI && (
-                      <button type="button" onClick={(e) => { e.stopPropagation(); onAskAI(`Help me with this action point for ${card.clientName} (${card.channelType}): ${card.text}`); }} style={{ fontSize: 8, fontWeight: 500, padding: '1px 5px', borderRadius: 3, border: '0.5px solid rgba(74,101,128,0.35)', background: 'rgba(74,101,128,0.07)', color: '#4A6580', cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif", whiteSpace: 'nowrap' }}>Ask AI</button>
+                      <button type="button" onClick={(e) => { e.stopPropagation(); onAskAI(`Help me with this action point for ${card.clientName} (${card.channelType}): ${card.text}`); }} style={{ fontSize: 9, fontWeight: 600, padding: '2px 6px', borderRadius: 3, border: '0.5px solid rgba(74,101,128,0.5)', background: 'rgba(74,101,128,0.12)', color: '#4A6580', cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif", whiteSpace: 'nowrap' }}>Ask AI</button>
                     )}
                   </div>
                 </div>
@@ -945,11 +945,11 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                             <span style={{ fontSize: 9, fontWeight: 500, color: OVERDUE_COLOR, whiteSpace: 'nowrap' }}>
                               {Math.abs(card.daysUntilDue!)}d overdue
                             </span>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flexShrink: 0, alignItems: 'stretch' }}>
+                            <div style={{ marginLeft: 'auto', display: 'flex', gap: 3, alignItems: 'center', flexShrink: 0 }}>
                               <button type="button" onClick={(e) => { e.stopPropagation(); handleToggleInProgress(card); }} title={isInProgress ? 'Clear in progress' : 'Mark as in progress'} style={{ fontSize: 8, fontWeight: 500, padding: '1px 5px', borderRadius: 6, border: isInProgress ? '0.5px solid rgba(176,112,48,0.4)' : '0.5px dashed #D5D0C5', background: isInProgress ? 'rgba(176,112,48,0.1)' : 'transparent', color: isInProgress ? '#B07030' : '#C0BBC0', cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif", whiteSpace: 'nowrap' }}>In Progress</button>
                               <AssignMenu card={card} onAssign={handleAssign} accountManagers={accountManagers} />
                               {onAskAI && (
-                                <button type="button" onClick={(e) => { e.stopPropagation(); onAskAI(`Help me with this action point for ${card.clientName} (${card.channelType}): ${card.text}`); }} style={{ fontSize: 8, fontWeight: 500, padding: '1px 5px', borderRadius: 3, border: '0.5px solid rgba(74,101,128,0.35)', background: 'rgba(74,101,128,0.07)', color: '#4A6580', cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif", whiteSpace: 'nowrap' }}>Ask AI</button>
+                                <button type="button" onClick={(e) => { e.stopPropagation(); onAskAI(`Help me with this action point for ${card.clientName} (${card.channelType}): ${card.text}`); }} style={{ fontSize: 9, fontWeight: 600, padding: '2px 6px', borderRadius: 3, border: '0.5px solid rgba(74,101,128,0.5)', background: 'rgba(74,101,128,0.12)', color: '#4A6580', cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif", whiteSpace: 'nowrap' }}>Ask AI</button>
                               )}
                             </div>
                           </div>
@@ -1073,7 +1073,7 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                       )}
                     </div>
                     {/* Bottom row: category tag + date + assignee */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 6 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 6, flexWrap: 'wrap' }}>
                       {isInProgress && (
                         <span style={{
                           fontSize: 8, fontWeight: 600, color: '#B07030',
@@ -1104,8 +1104,7 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                               ? 'today'
                               : `${card.daysUntilDue}d`}
                       </span>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flexShrink: 0, alignItems: 'stretch' }}>
-                        {/* In Progress toggle button */}
+                      <div style={{ marginLeft: 'auto', display: 'flex', gap: 3, alignItems: 'center', flexShrink: 0 }}>
                         <button
                           type="button"
                           onClick={(e) => { e.stopPropagation(); handleToggleInProgress(card); }}
@@ -1130,11 +1129,11 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                             type="button"
                             onClick={(e) => { e.stopPropagation(); onAskAI(`Help me with this action point for ${card.clientName} (${card.channelType}): ${card.text}`); }}
                             style={{
-                              fontSize: 8, fontWeight: 500,
-                              padding: '1px 5px',
+                              fontSize: 9, fontWeight: 600,
+                              padding: '2px 6px',
                               borderRadius: 3,
-                              border: '0.5px solid rgba(74,101,128,0.35)',
-                              background: 'rgba(74,101,128,0.07)',
+                              border: '0.5px solid rgba(74,101,128,0.5)',
+                              background: 'rgba(74,101,128,0.12)',
                               color: '#4A6580',
                               cursor: 'pointer',
                               fontFamily: "'DM Sans', system-ui, sans-serif",
