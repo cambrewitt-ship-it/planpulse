@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import TopBar from "@/components/navigation/TopBar";
+import { FloatingAIChat } from "@/components/FloatingAIChat";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -37,6 +38,7 @@ export default function RootLayout({
       >
         <TopBar />
         {children}
+        <FloatingAIChat />
       </body>
     </html>
   );
