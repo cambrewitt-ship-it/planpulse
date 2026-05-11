@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { Monitor, ChevronDown, ChevronUp, StickyNote, DollarSign } from 'lucide-react';
+import { Monitor, ChevronDown, ChevronUp, StickyNote } from 'lucide-react';
+import ManualSpendSlider from './manual-spend-slider';
 import { MediaPlanChannel } from '@/components/media-plan-builder/media-plan-grid';
 import { format } from 'date-fns';
 import InlineActionPoints from './inline-action-points';
@@ -48,8 +49,7 @@ export default function DisplayNativeCard({ channel, clientId, onUpdateChannel }
   const [checklist, setChecklist] = useState<Record<string, boolean>>(channel.checklistItems || {});
   const [notes, setNotes] = useState(channel.campaignNotes || '');
   const [showNotes, setShowNotes] = useState(!!(channel.campaignNotes));
-  const [showSpend, setShowSpend] = useState(false);
-  const [manualSpend, setManualSpend] = useState(channel.manualActualSpend?.toString() || '');
+  const [manualActualSpend, setManualActualSpend] = useState(channel.manualActualSpend ?? 0);
   const [isSavingNotes, setIsSavingNotes] = useState(false);
   const [showStatusMenu, setShowStatusMenu] = useState(false);
 
@@ -88,12 +88,10 @@ export default function DisplayNativeCard({ channel, clientId, onUpdateChannel }
     setTimeout(() => setIsSavingNotes(false), 600);
   };
 
-  const handleSaveSpend = () => {
-    const parsed = parseFloat(manualSpend.replace(/[^0-9.]/g, ''));
-    if (!isNaN(parsed)) {
-      onUpdateChannel?.(channel.id, { manualActualSpend: parsed });
-    }
-  };
+  function handleSpendChange(val: number) {
+    setManualActualSpend(val);
+    onUpdateChannel?.(channel.id, { manualActualSpend: val });
+  }
 
   const dotColor = {
     cyan: { icon: 'bg-cyan-100 text-cyan-600', accent: 'bg-cyan-500', bar: 'bg-cyan-400', ring: 'focus:ring-cyan-300 focus:border-cyan-300', check: 'bg-cyan-500 border-cyan-500', checkHover: 'hover:border-cyan-400', textBtn: 'text-cyan-600 hover:text-cyan-700' },
@@ -212,39 +210,6 @@ export default function DisplayNativeCard({ channel, clientId, onUpdateChannel }
               </div>
             </div>
 
-            {/* ── Manual spend entry ─────────────────────── */}
-            <div>
-              <button
-                onClick={() => setShowSpend(v => !v)}
-                className={`flex items-center gap-1 text-xs transition-colors ${dotColor.textBtn}`}
-              >
-                <DollarSign className="w-3 h-3" />
-                {showSpend ? 'Hide spend' : 'Log actual spend'}
-                {showSpend ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-              </button>
-              {showSpend && (
-                <div className="mt-2 flex items-center gap-2">
-                  <div className="relative flex-1">
-                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-xs">$</span>
-                    <input
-                      type="number"
-                      value={manualSpend}
-                      onChange={e => setManualSpend(e.target.value)}
-                      onBlur={handleSaveSpend}
-                      placeholder="0"
-                      className={`w-full text-xs border border-gray-200 rounded-lg pl-6 pr-2.5 py-1.5 text-gray-700 focus:outline-none focus:ring-1 ${dotColor.ring}`}
-                    />
-                  </div>
-                  <button
-                    onClick={handleSaveSpend}
-                    className={`text-xs font-medium transition-colors ${dotColor.textBtn}`}
-                  >
-                    Save
-                  </button>
-                </div>
-              )}
-            </div>
-
             {/* ── Notes ─────────────────────────────────── */}
             <div>
               <button
@@ -291,6 +256,14 @@ export default function DisplayNativeCard({ channel, clientId, onUpdateChannel }
           />
         </div>
       </div>
+
+      {/* ── Spend slider — full width ─────────────────────── */}
+      <ManualSpendSlider
+        planned={plannedSpend}
+        actual={manualActualSpend}
+        onChange={handleSpendChange}
+        accentColor={isDisplay ? '#0891b2' : '#0d9488'}
+      />
     </div>
   );
 }

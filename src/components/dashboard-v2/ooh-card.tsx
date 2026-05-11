@@ -5,6 +5,7 @@ import { MapPin, ChevronDown, ChevronUp, StickyNote } from 'lucide-react';
 import { MediaPlanChannel } from '@/components/media-plan-builder/media-plan-grid';
 import { format } from 'date-fns';
 import InlineActionPoints from './inline-action-points';
+import ManualSpendSlider from './manual-spend-slider';
 
 interface OOHCardProps {
   channel: MediaPlanChannel;
@@ -30,12 +31,19 @@ const OOH_MILESTONES: { key: string; label: string }[] = [
 ];
 
 export default function OOHCard({ channel, clientId, onUpdateChannel }: OOHCardProps) {
-  const totalSpend = channel.totalUpfrontSpend || 0;
+  const plannedSpend = channel.flights?.reduce((sum, f) =>
+    sum + Object.values(f.monthlySpend).reduce((a, b) => a + b, 0), 0) || channel.totalUpfrontSpend || 0;
+  const [manualActualSpend, setManualActualSpend] = useState(channel.manualActualSpend ?? 0);
   const [isConfirmed, setIsConfirmed] = useState(channel.oohConfirmed || false);
   const [checklist, setChecklist] = useState<Record<string, boolean>>(channel.checklistItems || {});
   const [notes, setNotes] = useState(channel.campaignNotes || '');
   const [showNotes, setShowNotes] = useState(!!(channel.campaignNotes));
   const [isSavingNotes, setIsSavingNotes] = useState(false);
+
+  function handleSpendChange(val: number) {
+    setManualActualSpend(val);
+    onUpdateChannel?.(channel.id, { manualActualSpend: val });
+  }
 
   // Get flight dates
   const flights = channel.flights || [];
@@ -118,7 +126,7 @@ export default function OOHCard({ channel, clientId, onUpdateChannel }: OOHCardP
             {/* Total spend */}
             <div>
               <p className="text-xs text-gray-500 font-medium mb-0.5">Total Spend</p>
-              <p className="text-sm font-semibold text-gray-900">{formatCurrency(totalSpend)}</p>
+              <p className="text-sm font-semibold text-gray-900">{formatCurrency(plannedSpend)}</p>
             </div>
 
             {/* ── Milestones checklist ───────────────────── */}
@@ -215,6 +223,14 @@ export default function OOHCard({ channel, clientId, onUpdateChannel }: OOHCardP
           />
         </div>
       </div>
+
+      {/* ── Spend slider — full width ─────────────────────── */}
+      <ManualSpendSlider
+        planned={plannedSpend}
+        actual={manualActualSpend}
+        onChange={handleSpendChange}
+        accentColor="#EA8A50"
+      />
     </div>
   );
 }

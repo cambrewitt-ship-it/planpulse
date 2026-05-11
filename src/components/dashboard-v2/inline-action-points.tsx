@@ -104,6 +104,50 @@ interface InlineActionPointsProps {
   sideBySide?: boolean;
 }
 
+function fireConfetti(originX: number, originY: number) {
+  try {
+    if (typeof window === 'undefined') return;
+    const canvas = document.createElement('canvas');
+    canvas.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:99999;';
+    document.body.appendChild(canvas);
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) { canvas.remove(); return; }
+    const COLORS = ['#4A7C59', '#4A6580', '#B07030', '#A0442A', '#F5F0E8', '#D5D0C5'];
+    const pieces = Array.from({ length: 60 }, () => ({
+      x: originX, y: originY,
+      vx: (Math.random() - 0.5) * 10,
+      vy: -(Math.random() * 8 + 3),
+      gravity: 0.3,
+      color: COLORS[Math.floor(Math.random() * COLORS.length)],
+      w: Math.random() * 7 + 4, h: Math.random() * 4 + 3,
+      angle: Math.random() * Math.PI * 2,
+      spin: (Math.random() - 0.5) * 0.25,
+      opacity: 1,
+    }));
+    let frame = 0;
+    function animate() {
+      ctx!.clearRect(0, 0, canvas.width, canvas.height);
+      let alive = false;
+      for (const p of pieces) {
+        p.vy += p.gravity; p.x += p.vx; p.y += p.vy; p.angle += p.spin;
+        if (frame > 30) p.opacity -= 0.025;
+        if (p.opacity > 0 && p.y < canvas.height + 20) {
+          alive = true;
+          ctx!.save(); ctx!.globalAlpha = Math.max(0, p.opacity);
+          ctx!.translate(p.x, p.y); ctx!.rotate(p.angle);
+          ctx!.fillStyle = p.color; ctx!.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+          ctx!.restore();
+        }
+      }
+      frame++;
+      if (alive) requestAnimationFrame(animate); else canvas.remove();
+    }
+    requestAnimationFrame(animate);
+  } catch { /* never block completion */ }
+}
+
 export default function InlineActionPoints({
   channelType,
   clientId,
@@ -117,6 +161,7 @@ export default function InlineActionPoints({
 }: InlineActionPointsProps) {
   const [actionPoints, setActionPoints] = useState<InlineActionPoint[]>([]);
   const [loading, setLoading] = useState(false);
+  const [completingIds, setCompletingIds] = useState<Set<string>>(new Set());
   const [showAllSetup, setShowAllSetup] = useState(false);
   const [showAllOngoing, setShowAllOngoing] = useState(false);
   const [completedSetupOpen, setCompletedSetupOpen] = useState(false);
@@ -186,22 +231,32 @@ export default function InlineActionPoints({
     fetchActionPoints();
   }, [channelType, clientId, refetchTrigger]);
 
-  const handleToggle = async (id: string, completed: boolean) => {
+  const handleToggle = async (id: string, completed: boolean, e?: React.MouseEvent) => {
+    if (completed && e) fireConfetti(e.clientX, e.clientY);
+    if (completed) setCompletingIds(prev => new Set(prev).add(id));
     try {
       const response = await fetch('/api/action-points', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, completed, client_id: clientId }),
       });
-      
       if (response.ok) {
-        setActionPoints(prev =>
-          prev.map(ap => (ap.id === id ? { ...ap, completed } : ap))
-        );
-        onToggleComplete?.(id, completed);
+        if (completed) {
+          setTimeout(() => {
+            setActionPoints(prev => prev.map(ap => ap.id === id ? { ...ap, completed } : ap));
+            setCompletingIds(prev => { const n = new Set(prev); n.delete(id); return n; });
+            onToggleComplete?.(id, completed);
+          }, 700);
+        } else {
+          setActionPoints(prev => prev.map(ap => ap.id === id ? { ...ap, completed } : ap));
+          onToggleComplete?.(id, completed);
+        }
+      } else {
+        setCompletingIds(prev => { const n = new Set(prev); n.delete(id); return n; });
       }
     } catch (error) {
       console.error('Error toggling action point:', error);
+      setCompletingIds(prev => { const n = new Set(prev); n.delete(id); return n; });
     }
   };
 
@@ -458,10 +513,13 @@ export default function InlineActionPoints({
     if (items.length === 0) return null;
 
     return (
-      <div className="space-y-1.5">
+      <>
+        <style>{`@keyframes strike { from { width: 0% } to { width: 100% } }`}</style>
+        <div className="space-y-1.5">
         {items.map((ap) => {
-          const dueDate = ap.category === 'SET UP' && ap.days_before_live_due 
-            ? calculateDueDate(ap.days_before_live_due) 
+          const isCompleting = completingIds.has(ap.id);
+          const dueDate = ap.category === 'SET UP' && ap.days_before_live_due
+            ? calculateDueDate(ap.days_before_live_due)
             : null;
           const dueDateText = formatDueDate(dueDate);
           const isOverdue = dueDate && differenceInDays(dueDate, new Date()) < 0;
@@ -471,10 +529,11 @@ export default function InlineActionPoints({
             <div
               key={ap.id}
               className="flex items-start gap-2 group rounded-md px-2 py-1.5 transition-colors border border-gray-100 bg-gray-50 hover:border-gray-200 hover:bg-white"
+              style={{ opacity: isCompleting ? 0.6 : 1, transition: 'opacity 0.4s' }}
             >
               <button
                 type="button"
-                onClick={() => handleToggle(ap.id, !ap.completed)}
+                onClick={(e) => handleToggle(ap.id, !ap.completed, e)}
                 className="flex-shrink-0 mt-0.5 cursor-pointer hover:opacity-80 transition-opacity"
                 aria-label={ap.completed ? 'Mark as incomplete' : 'Mark as complete'}
                 disabled={isEditing}
@@ -548,12 +607,14 @@ export default function InlineActionPoints({
                   <div className="flex items-start justify-between gap-2">
                     <span
                       className={`text-xs leading-snug ${
-                        ap.completed
-                          ? 'line-through text-gray-400'
-                          : 'text-gray-700'
+                        ap.completed ? 'line-through text-gray-400' : 'text-gray-700'
                       }`}
+                      style={{ position: 'relative', color: isCompleting ? '#B5B0A5' : undefined, transition: 'color 0.2s' }}
                     >
                       {ap.text}
+                      {isCompleting && (
+                        <span style={{ position: 'absolute', left: 0, top: '50%', height: '1.5px', background: '#6B7280', width: 0, animation: 'strike 0.35s ease forwards' }} />
+                      )}
                     </span>
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
@@ -614,6 +675,7 @@ export default function InlineActionPoints({
           );
         })}
       </div>
+      </>
     );
   };
 

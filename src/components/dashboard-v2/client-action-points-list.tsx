@@ -2,6 +2,50 @@
 
 import { useState, useMemo } from 'react';
 
+function fireConfetti(originX: number, originY: number) {
+  try {
+    if (typeof window === 'undefined') return;
+    const canvas = document.createElement('canvas');
+    canvas.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:99999;';
+    document.body.appendChild(canvas);
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) { canvas.remove(); return; }
+    const COLORS = ['#4A7C59', '#4A6580', '#B07030', '#A0442A', '#F5F0E8', '#D5D0C5'];
+    const pieces = Array.from({ length: 60 }, () => ({
+      x: originX, y: originY,
+      vx: (Math.random() - 0.5) * 10,
+      vy: -(Math.random() * 8 + 3),
+      gravity: 0.3,
+      color: COLORS[Math.floor(Math.random() * COLORS.length)],
+      w: Math.random() * 7 + 4, h: Math.random() * 4 + 3,
+      angle: Math.random() * Math.PI * 2,
+      spin: (Math.random() - 0.5) * 0.25,
+      opacity: 1,
+    }));
+    let frame = 0;
+    function animate() {
+      ctx!.clearRect(0, 0, canvas.width, canvas.height);
+      let alive = false;
+      for (const p of pieces) {
+        p.vy += p.gravity; p.x += p.vx; p.y += p.vy; p.angle += p.spin;
+        if (frame > 30) p.opacity -= 0.025;
+        if (p.opacity > 0 && p.y < canvas.height + 20) {
+          alive = true;
+          ctx!.save(); ctx!.globalAlpha = Math.max(0, p.opacity);
+          ctx!.translate(p.x, p.y); ctx!.rotate(p.angle);
+          ctx!.fillStyle = p.color; ctx!.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+          ctx!.restore();
+        }
+      }
+      frame++;
+      if (alive) requestAnimationFrame(animate); else canvas.remove();
+    }
+    requestAnimationFrame(animate);
+  } catch { /* never block completion */ }
+}
+
 interface ActionPoint {
   id: string;
   text: string;
@@ -264,33 +308,56 @@ function KanbanCard({
   onToggle: (id: string, c: boolean) => void;
   isLast: boolean;
 }) {
+  const [isCompleting, setIsCompleting] = useState(false);
+  const [localCompleted, setLocalCompleted] = useState(false);
+
+  const effectiveCompleted = item.completed || localCompleted;
+
+  const handleClick = (e: React.MouseEvent) => {
+    if (!effectiveCompleted && !isCompleting) {
+      fireConfetti(e.clientX, e.clientY);
+      setIsCompleting(true);
+      setTimeout(() => {
+        setIsCompleting(false);
+        setLocalCompleted(true);
+        onToggle(item.id, true);
+      }, 400);
+    } else if (effectiveCompleted) {
+      setLocalCompleted(false);
+      onToggle(item.id, false);
+    }
+  };
+
   return (
-    <div style={{
-      display: 'flex',
-      alignItems: 'flex-start',
-      gap: 7,
-      padding: '7px 10px',
-      borderBottom: isLast ? 'none' : '0.5px solid #E8E4DC',
-      opacity: item.completed ? 0.5 : 1,
-    }}>
+    <>
+      <style>{`@keyframes strike { from { width: 0% } to { width: 100% } }`}</style>
+      <div style={{
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: 7,
+        padding: '7px 10px',
+        borderBottom: isLast ? 'none' : '0.5px solid #E8E4DC',
+        opacity: effectiveCompleted || isCompleting ? 0.5 : 1,
+        transition: 'opacity 0.4s',
+      }}>
       {/* Circle checkbox */}
       <div
-        onClick={() => onToggle(item.id, !item.completed)}
+        onClick={handleClick}
         style={{
           marginTop: 2,
           width: 13,
           height: 13,
           borderRadius: '50%',
           flexShrink: 0,
-          border: item.completed ? '0.5px solid #4A7C59' : '0.5px solid #D5D0C5',
-          background: item.completed ? '#4A7C59' : 'transparent',
+          border: effectiveCompleted || isCompleting ? '0.5px solid #4A7C59' : '0.5px solid #D5D0C5',
+          background: effectiveCompleted || isCompleting ? '#4A7C59' : 'transparent',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           cursor: 'pointer',
         }}
       >
-        {item.completed && (
+        {(effectiveCompleted || isCompleting) && (
           <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
             <path d="M1.5 4L3 5.5L6.5 2" stroke="#fff" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
@@ -302,11 +369,16 @@ function KanbanCard({
         <div style={{
           fontSize: 11,
           lineHeight: 1.4,
-          color: item.completed ? '#B5B0A5' : '#1C1917',
-          textDecoration: item.completed ? 'line-through' : 'none',
+          color: effectiveCompleted || isCompleting ? '#B5B0A5' : '#1C1917',
+          textDecoration: effectiveCompleted ? 'line-through' : 'none',
           wordBreak: 'break-word',
+          position: 'relative',
+          transition: 'color 0.2s',
         }}>
           {item.text}
+          {isCompleting && (
+            <span style={{ position: 'absolute', left: 0, top: '50%', height: '1.5px', background: '#6B7280', width: 0, animation: 'strike 0.35s ease forwards' }} />
+          )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 3, flexWrap: 'wrap' }}>
           {item.channel_type && (
@@ -335,5 +407,6 @@ function KanbanCard({
         </div>
       </div>
     </div>
+    </>
   );
 }

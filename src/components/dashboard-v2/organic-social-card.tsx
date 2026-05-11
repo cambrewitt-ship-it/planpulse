@@ -10,6 +10,7 @@ import { format, startOfMonth, endOfMonth, parseISO, eachWeekOfInterval } from '
 import Nango from '@nangohq/frontend';
 import InlineActionPoints from './inline-action-points';
 import { getChannelLogo } from '@/lib/utils/channel-icons';
+import ManualSpendSlider from './manual-spend-slider';
 
 interface OrganicSocialCardProps {
   channel: MediaPlanChannel;
@@ -17,6 +18,7 @@ interface OrganicSocialCardProps {
   weekCommencing: string; // Current week in 'yyyy-MM-dd' format
   actuals: OrganicSocialActual[];
   onRefresh?: () => void; // Callback to reload actuals after fetching
+  onUpdateChannel?: (channelId: string, updates: Partial<MediaPlanChannel>) => void;
 }
 
 function getChannelIcon(channelName: string) {
@@ -28,6 +30,9 @@ function getStatusBadge(postsPublished: number | null, postsPerWeek: number) {
   if (postsPublished === null || postsPublished === undefined) {
     return { color: 'bg-gray-100', text: 'text-gray-700', label: '⚪ Not logged', emoji: '⚪' };
   }
+  if (postsPerWeek === 0) {
+    return { color: 'bg-gray-100', text: 'text-gray-500', label: '⚪ No target set', emoji: '⚪' };
+  }
   if (postsPublished >= postsPerWeek) {
     return { color: 'bg-emerald-100', text: 'text-emerald-700', label: '🟢 On Track', emoji: '🟢' };
   }
@@ -37,8 +42,16 @@ function getStatusBadge(postsPublished: number | null, postsPerWeek: number) {
   return { color: 'bg-red-100', text: 'text-red-700', label: '🔴 Off Track', emoji: '🔴' };
 }
 
-export default function OrganicSocialCard({ channel, clientId, weekCommencing, actuals, onRefresh }: OrganicSocialCardProps) {
+export default function OrganicSocialCard({ channel, clientId, weekCommencing, actuals, onRefresh, onUpdateChannel }: OrganicSocialCardProps) {
   const postsPerWeek = channel.postsPerWeek || 0;
+  const plannedSpend = channel.flights?.reduce((sum, f) =>
+    sum + Object.values(f.monthlySpend).reduce((a, b) => a + b, 0), 0) || 0;
+  const [manualActualSpend, setManualActualSpend] = useState(channel.manualActualSpend ?? 0);
+
+  function handleSpendChange(val: number) {
+    setManualActualSpend(val);
+    onUpdateChannel?.(channel.id, { manualActualSpend: val });
+  }
   const [viewMode, setViewMode] = useState<'week' | 'month'>('week');
   
   // Find actual for current week
@@ -312,7 +325,9 @@ export default function OrganicSocialCard({ channel, clientId, weekCommencing, a
     return handleStampCurrentWeek(delta);
   };
 
-  const status = getStatusBadge(manualStampCount, postsPerWeek);
+  // Only treat as "stamped" if there's a real DB record or a local stamp has been applied
+  const hasStampData = currentWeekActual !== undefined || manualStampCount > 0;
+  const status = getStatusBadge(hasStampData ? manualStampCount : null, postsPerWeek);
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden hover:shadow-md transition-shadow duration-200 relative">
@@ -419,79 +434,73 @@ export default function OrganicSocialCard({ channel, clientId, weekCommencing, a
                 <p className="text-xs text-gray-600 font-medium mb-1">
                   Monthly stamps for {format(parseISO(weekCommencing), 'MMMM yyyy')}
                 </p>
-                {monthViewWeeks.length === 0 ? (
-                  <p className="text-xs text-gray-400">No posts logged for this month yet.</p>
-                ) : (
-                  (() => {
-                    const totalStamped = monthViewWeeks.reduce(
-                      (sum, w) => sum + (w.manual_stamp_count ?? 0),
-                      0
-                    );
-                    // Calculate how many weeks are in this calendar month,
-                    // rather than how many weeks currently have data.
-                    const wcDate = parseISO(weekCommencing);
-                    const monthStart = startOfMonth(wcDate);
-                    const monthEnd = endOfMonth(wcDate);
-                    const calendarWeeks = eachWeekOfInterval(
-                      { start: monthStart, end: monthEnd },
-                      { weekStartsOn: 1 } // Monday, matching week_commencing
-                    );
-                    const weeksInMonth = calendarWeeks.length || 1;
-                    const monthTargetRaw = (postsPerWeek || 0) * weeksInMonth;
-                    const monthTarget = monthTargetRaw > 0 ? monthTargetRaw : 1;
-                    const boxCount = Math.max(monthTarget, totalStamped || 0, 1);
+                {(() => {
+                  const totalStamped = monthViewWeeks.reduce(
+                    (sum, w) => sum + (w.manual_stamp_count ?? 0),
+                    0
+                  );
+                  const wcDate = parseISO(weekCommencing);
+                  const monthStart = startOfMonth(wcDate);
+                  const monthEnd = endOfMonth(wcDate);
+                  const calendarWeeks = eachWeekOfInterval(
+                    { start: monthStart, end: monthEnd },
+                    { weekStartsOn: 1 }
+                  );
+                  const weeksInMonth = calendarWeeks.length || 1;
+                  const monthTargetRaw = (postsPerWeek || 0) * weeksInMonth;
+                  const monthTarget = monthTargetRaw > 0 ? monthTargetRaw : 1;
+                  const boxCount = Math.max(monthTarget, totalStamped || 0, 1);
 
-                    const handleMonthClick = (index: number) => {
-                      const desiredTotal = index + 1;
-                      const delta = desiredTotal - totalStamped;
-                      if (delta === 0) return;
-                      adjustMonthStamps(delta);
-                    };
+                  const handleMonthClick = (index: number) => {
+                    const desiredTotal = index + 1;
+                    const delta = desiredTotal - totalStamped;
+                    if (delta === 0) return;
+                    adjustMonthStamps(delta);
+                  };
 
-                    const totalAuto = monthViewWeeks.reduce(
-                      (sum, w) => sum + (w.posts_automatic ?? 0),
-                      0
-                    );
+                  const totalAuto = monthViewWeeks.reduce(
+                    (sum, w) => sum + (w.posts_automatic ?? 0),
+                    0
+                  );
 
-                    return (
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[11px] text-gray-600">
-                            {totalStamped} / {monthTarget} stamped this month
-                          </span>
-                          <span className="text-[11px] text-gray-500">
-                            Auto-detected: {totalAuto}
-                          </span>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {Array.from({ length: boxCount }).map((_, idx) => {
-                            const filled = idx < totalStamped;
-                            return (
-                              <button
-                                key={idx}
-                                type="button"
-                                onClick={() => handleMonthClick(idx)}
-                                disabled={isStamping}
-                                className={`w-7 h-7 rounded-md border text-xs flex items-center justify-center transition-colors ${
-                                  filled
-                                    ? 'bg-blue-600 border-blue-600 text-white'
-                                    : 'bg-white border-gray-300 text-gray-400 hover:border-blue-400'
-                                }`}
-                                aria-label={
-                                  filled
-                                    ? `Unstamp monthly post ${idx + 1}`
-                                    : `Stamp monthly post ${idx + 1}`
-                                }
-                              >
-                                {filled ? idx + 1 : ''}
-                              </button>
-                            );
-                          })}
-                        </div>
+                  return (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] text-gray-600">
+                          {totalStamped} / {monthTarget} stamped this month
+                        </span>
+                        <span className="text-[11px] text-gray-500">
+                          Auto-detected: {totalAuto}
+                        </span>
                       </div>
-                    );
-                  })()
-                )}
+                      <div className="flex flex-wrap gap-2">
+                        {Array.from({ length: boxCount }).map((_, idx) => {
+                          const filled = idx < totalStamped;
+                          return (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => handleMonthClick(idx)}
+                              disabled={isStamping}
+                              className={`w-7 h-7 rounded-md border text-xs flex items-center justify-center transition-colors ${
+                                filled
+                                  ? 'bg-blue-600 border-blue-600 text-white'
+                                  : 'bg-white border-gray-300 text-gray-400 hover:border-blue-400'
+                              }`}
+                              aria-label={
+                                filled
+                                  ? `Unstamp monthly post ${idx + 1}`
+                                  : `Stamp monthly post ${idx + 1}`
+                              }
+                            >
+                              {filled ? idx + 1 : ''}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             )}
           </div>
@@ -534,6 +543,14 @@ export default function OrganicSocialCard({ channel, clientId, weekCommencing, a
           </div>
         </div>
       </div>
+
+      {/* ── Spend slider — full width ─────────────────────── */}
+      <ManualSpendSlider
+        planned={plannedSpend}
+        actual={manualActualSpend}
+        onChange={handleSpendChange}
+        accentColor="#7c3aed"
+      />
     </div>
   );
 }

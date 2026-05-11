@@ -159,8 +159,8 @@ const getOrganicStripeStyle = (channelName: string): React.CSSProperties => {
   else if (lower.includes('facebook')) c = '#3b82f6';
   else if (lower.includes('linkedin')) c = '#06b6d4';
   return {
-    backgroundImage: `repeating-linear-gradient(-45deg, ${c}35 0px, ${c}35 3px, transparent 3px, transparent 9px)`,
-    backgroundColor: `${c}10`,
+    backgroundImage: `repeating-linear-gradient(-45deg, ${c} 0px, ${c} 4px, white 4px, white 10px)`,
+    backgroundColor: `${c}20`,
   };
 };
 
@@ -245,6 +245,16 @@ function parsedToMediaPlanChannels(parsed: ParsedChannel[]): MediaPlanChannel[] 
         if (parts.length >= 2) {
           remappedSpend[`${currentYear}-${parts.slice(1).join('-')}`] = v || 0;
         }
+      }
+
+      // Strip months outside the flight's startDate–endDate range so AI
+      // parse errors don't bleed spend into months with no planned activity.
+      const flightStartNum = (() => { const d = new Date(startDate + 'T00:00:00'); return d.getFullYear() * 12 + d.getMonth(); })();
+      const flightEndNum   = (() => { const d = new Date(endDate   + 'T00:00:00'); return d.getFullYear() * 12 + d.getMonth(); })();
+      for (const k of Object.keys(remappedSpend)) {
+        const [ky, km] = k.split('-').map(Number);
+        const keyNum = ky * 12 + (km - 1);
+        if (keyNum < flightStartNum || keyNum > flightEndNum) delete remappedSpend[k];
       }
 
       const spendSum = Object.values(remappedSpend).reduce((s, v) => s + v, 0);
@@ -371,9 +381,7 @@ interface MediaPlanGridProps {
 
 export function MediaPlanGrid({ channels: externalChannels, onChannelsChange, commission: externalCommission, onCommissionChange }: MediaPlanGridProps) {
   // Use internal state if not controlled
-  const [internalChannels, setInternalChannels] = useState<MediaPlanChannel[]>(() => [
-    createEmptyChannel(),
-  ]);
+  const [internalChannels, setInternalChannels] = useState<MediaPlanChannel[]>([]);
   const channels = externalChannels ?? internalChannels;
   const setChannels = onChannelsChange ?? setInternalChannels;
   
@@ -558,12 +566,26 @@ export function MediaPlanGrid({ channels: externalChannels, onChannelsChange, co
     return weekIdx >= minWeek && weekIdx <= maxWeek;
   };
 
-const calculateMonthlyTotal = (monthKey: string) => {
+// Sum spend for a display month group by distributing each flight's calendar-month
+// spend evenly across the weeks that overlap that flight, then crediting the weeks
+// that fall in this display group. This correctly handles boundary weeks (e.g. the
+// week starting March 30 displayed under "April 2026").
+const calculateWeekGroupTotal = (weeksInGroup: WeekRange[]): number => {
   let total = 0;
-  channels.forEach((channel) => {
-    channel.flights?.forEach((flight) => {
-      // Sum monthly spend for the specific month
-      total += flight.monthlySpend[monthKey] || 0;
+  channels.forEach(channel => {
+    channel.flights?.forEach(flight => {
+      const overlappingWeeks = weeksInGroup.filter(w => weekOverlapsFlight(w, flight));
+      if (!overlappingWeeks.length) return;
+      overlappingWeeks.forEach(week => {
+        const calMonthKey = getMonthKey(week.weekStart);
+        const monthSpend = flight.monthlySpend[calMonthKey] ?? 0;
+        if (!monthSpend) return;
+        // Divide monthly spend evenly across weeks in that calendar month that belong to this flight
+        const weeksInCalMonth = weeks.filter(w =>
+          getMonthKey(w.weekStart) === calMonthKey && weekOverlapsFlight(w, flight)
+        );
+        if (weeksInCalMonth.length > 0) total += monthSpend / weeksInCalMonth.length;
+      });
     });
   });
   return total;
@@ -653,7 +675,7 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
   // Delete a channel
   const handleDeleteChannel = (channelId: string) => {
     const updatedChannels = channels.filter((channel) => channel.id !== channelId);
-    setChannels(updatedChannels.length > 0 ? updatedChannels : [createEmptyChannel()]);
+    setChannels(updatedChannels);
   };
 
   // Generate a unique ID for new flights
@@ -1317,6 +1339,43 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
           </div>
         </div>
       </div>
+      {channels.length === 0 ? (
+        <div className="flex w-full" style={{ minHeight: 340 }}>
+          <button
+            onClick={() => screenshotInputRef.current?.click()}
+            disabled={isParsingScreenshot}
+            className="flex-1 flex flex-col items-center justify-center gap-4 border-r border-gray-200 bg-gray-900 hover:bg-gray-800 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ minHeight: 340 }}
+          >
+            <div className="w-14 h-14 rounded-full bg-white/15 flex items-center justify-center">
+              {isParsingScreenshot ? (
+                <Loader2 className="w-7 h-7 text-white animate-spin" />
+              ) : (
+                <Upload className="w-7 h-7 text-white" />
+              )}
+            </div>
+            <div className="text-center">
+              <div className="text-lg font-semibold text-white">
+                {isParsingScreenshot ? 'Analysing…' : 'Upload Media Plan Screenshot with AI'}
+              </div>
+              <div className="text-sm text-gray-400 mt-1">Let AI extract your channels and budgets automatically</div>
+            </div>
+          </button>
+          <button
+            onClick={handleAddChannel}
+            className="flex-1 flex flex-col items-center justify-center gap-4 bg-white hover:bg-gray-50 transition-colors cursor-pointer"
+            style={{ minHeight: 340 }}
+          >
+            <div className="w-14 h-14 rounded-full bg-gray-100 flex items-center justify-center">
+              <Plus className="w-7 h-7 text-gray-500" />
+            </div>
+            <div className="text-center">
+              <div className="text-lg font-semibold text-gray-700">Enter Media Plan Details Manually</div>
+              <div className="text-sm text-gray-400 mt-1">Add channels and flights one by one</div>
+            </div>
+          </button>
+        </div>
+      ) : (
       <div className="overflow-x-auto w-full">
         <table className="border-collapse w-full">
           <thead className="bg-gray-100 sticky top-0 z-10">
@@ -1419,39 +1478,7 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
           </thead>
           
           <tbody>
-            {channels.length === 0 ? (
-              // Empty state
-              <>
-                <tr>
-                  <td
-                    colSpan={3 + customColumns.length + weeks.length}
-                    className="border border-gray-300 bg-white px-3 py-8 text-center text-gray-500"
-                  >
-                    No channels added yet
-                  </td>
-                </tr>
-                {/* Add Channel button row */}
-                <tr>
-                  <td className="border border-gray-300 px-3 py-2 sticky left-0 mr-[-1px] z-20 bg-gray-50 w-[200px] min-w-[200px] border-r-2 border-gray-400 shadow-[2px_0_4px_rgba(0,0,0,0.1)]">
-                    <Button
-                      onClick={handleAddChannel}
-                      variant="outline"
-                      size="sm"
-                      className="h-7 px-2 text-xs"
-                    >
-                      <Plus className="h-3 w-3 mr-1" />
-                      Add Channel
-                    </Button>
-                  </td>
-                  <td
-                    colSpan={2 + customColumns.length + weeks.length}
-                    className="border border-gray-300 bg-white"
-                  >
-                    {/* Empty space */}
-                  </td>
-                </tr>
-              </>
-            ) : (
+            {
               // Channel rows
               channels.map((channel, channelIndex) => {
                 const channelColors = getChannelColorClasses(channel.channelName);
@@ -2510,8 +2537,8 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                 </tr>
                 );
               })
-            )}
-            
+            }
+
             {/* Totals Row */}
             {channels.length > 0 && (() => {
               // Calculate total budget across all channels (auto-calculated from flights)
@@ -2551,8 +2578,7 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
 
                   {/* Monthly totals in date columns */}
                   {monthGroups.map((group, groupIdx) => {
-                    const monthKey = getMonthKey(group.weeks[0].weekStart);
-                    const monthTotal = calculateMonthlyTotal(monthKey);
+                    const monthTotal = calculateWeekGroupTotal(group.weeks);
                     
                     return (
                       <td
@@ -2577,8 +2603,15 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
               
               channels.forEach((channel) => {
                 channel.flights.forEach((flight) => {
+                  const flightStart = flight.startWeek instanceof Date ? flight.startWeek : new Date(flight.startWeek);
+                  const flightEnd = flight.endWeek instanceof Date ? flight.endWeek : new Date(flight.endWeek);
                   Object.entries(flight.monthlySpend).forEach(([monthKey, amount]) => {
-                    monthlyTotals[monthKey] = (monthlyTotals[monthKey] || 0) + amount;
+                    const [yr, mo] = monthKey.split('-').map(Number);
+                    const monthStart = new Date(yr, mo - 1, 1);
+                    const monthEnd = new Date(yr, mo, 0);
+                    if (monthEnd >= flightStart && monthStart <= flightEnd) {
+                      monthlyTotals[monthKey] = (monthlyTotals[monthKey] || 0) + amount;
+                    }
                   });
                 });
               });
@@ -2603,6 +2636,7 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
           </tbody>
         </table>
       </div>
+      )}
 
 
       {/* Channel 3-dots portal dropdown */}

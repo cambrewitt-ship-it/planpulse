@@ -74,6 +74,7 @@ export interface ChannelCardProps {
   presets?: MetricPreset[];
   clientChannelPresets?: ClientChannelPreset[];
   onPresetSaved?: (updated: ClientChannelPreset) => void;
+  onCampaignSelectionChange?: (channelKey: string, ids: string[]) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -285,13 +286,16 @@ function PacingBar({
   const spendRatio = plannedSpend > 0 ? (currentSpend / plannedSpend) * 100 : 0;
   const fillPct  = Math.min(100, spendRatio);
   const barColor = spendRatio > 100 ? '#ef4444' : STATUS_CONFIG[status].bar;
+  // Use spendRatio (derived from displayed values) for the label so it stays
+  // consistent with the bar and the spend figures shown below it.
+  const displayPct = Math.round(spendRatio);
 
   return (
     <div className="space-y-1">
       <div className="flex justify-between text-xs text-gray-500">
         <span>Pacing</span>
-        <span className={pacingPercentage > 100 ? 'text-red-600 font-medium' : pacingPercentage < 85 ? 'text-amber-600 font-medium' : 'text-emerald-600 font-medium'}>
-          {fmt(pacingPercentage, 'percent', 0)} of target
+        <span className={displayPct > 100 ? 'text-red-600 font-medium' : displayPct < 85 ? 'text-amber-600 font-medium' : 'text-emerald-600 font-medium'}>
+          {fmt(displayPct, 'percent', 0)} of target
         </span>
       </div>
       <div className="relative h-2 w-full rounded-full bg-gray-100 overflow-visible">
@@ -545,13 +549,15 @@ function normalizeChannelType(channelName: string): string {
     .join(' ');
 }
 
-export default function ChannelPerformanceCard({ channel, selectedMonth, dateRange, onAdjust, onViewReport, clientId, channelStartDate, refetchTrigger, benchmarks, presets, clientChannelPresets, onPresetSaved }: ChannelCardProps) {
+export default function ChannelPerformanceCard({ channel, selectedMonth, dateRange, onAdjust, onViewReport, clientId, channelStartDate, refetchTrigger, benchmarks, presets, clientChannelPresets, onPresetSaved, onCampaignSelectionChange }: ChannelCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [chartType, setChartType] = useState<'spend' | 'metrics'>('spend');
   const [selectedMetrics, setSelectedMetrics] = useState<Set<MetricKey>>(new Set(['impressions']));
   const [presetOpen, setPresetOpen] = useState(false);
   const [savingPreset, setSavingPreset] = useState(false);
   const [displayedMetrics, setDisplayedMetrics] = useState<MetricKey[]>(ALL_METRIC_KEYS);
+  const NONE_SENTINEL = '__none__';
+
   const [selectedCampaignIds, setSelectedCampaignIds] = useState<Set<string>>(() => {
     if (typeof window === 'undefined' || !clientId) return new Set();
     try {
@@ -559,6 +565,17 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
       return saved ? new Set(JSON.parse(saved) as string[]) : new Set();
     } catch { return new Set(); }
   });
+
+  const isNoneSelected = selectedCampaignIds.size === 1 && selectedCampaignIds.has(NONE_SENTINEL);
+
+  // Notify parent whenever selection changes so it can recompute the total spend
+  useEffect(() => {
+    if (!onCampaignSelectionChange) return;
+    const channelKey = channel.id ?? channel.name;
+    onCampaignSelectionChange(channelKey, [...selectedCampaignIds]);
+  // Only fire on actual selection changes
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCampaignIds]);
   const [campaignDropdownOpen, setCampaignDropdownOpen] = useState(false);
   const campaignDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -576,6 +593,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
   const toggleCampaign = (id: string) => {
     setSelectedCampaignIds(prev => {
       const next = new Set(prev);
+      next.delete(NONE_SENTINEL);
       if (next.has(id)) {
         next.delete(id);
       } else {
@@ -591,6 +609,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
   const campaignSubtitle = (() => {
     const campaigns = channel.campaigns;
     if (!campaigns || campaigns.length === 0) return null;
+    if (isNoneSelected) return 'NOT SET UP YET';
     if (selectedCampaignIds.size === 0 || selectedCampaignIds.size === campaigns.length) return 'ALL CAMPAIGNS';
     const selected = campaigns.filter(c => selectedCampaignIds.has(c.id));
     if (selected.length === 1) return selected[0].name.toUpperCase();
@@ -599,7 +618,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
 
   // For 3+ selected campaigns, split into two display lines at the midpoint
   const campaignLines = (() => {
-    if (!campaignSubtitle || selectedCampaignIds.size < 3) return null;
+    if (!campaignSubtitle || isNoneSelected || selectedCampaignIds.size < 3) return null;
     const campaigns = channel.campaigns ?? [];
     const selected = campaigns.filter(c => selectedCampaignIds.has(c.id));
     if (selected.length < 3) return null;
@@ -626,6 +645,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
 
   // Derive unique action types from raw spend points
   const availableActionTypes = useMemo(() => {
+    if (isNoneSelected) return [];
     const pts = selectedCampaignIds.size === 0
       ? (channel.rawSpendPoints ?? [])
       : (channel.rawSpendPoints ?? []).filter((p: any) => selectedCampaignIds.has(p.campaignId));
@@ -653,6 +673,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
     }, 0);
 
   const filteredMetrics = useMemo(() => {
+    if (isNoneSelected) return { impressions: 0, clicks: 0, spend: 0, ctr: 0, cpc: 0, conversions: 0, conv_events: 0 };
     const pts = selectedCampaignIds.size === 0
       ? (channel.rawSpendPoints ?? [])
       : (channel.rawSpendPoints ?? []).filter((p: any) => selectedCampaignIds.has(p.campaignId));
@@ -677,6 +698,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
   }, [selectedCampaignIds, selectedActionType, channel.rawSpendPoints, channel.metrics]);
 
   const filteredMetricsChartData = useMemo(() => {
+    if (isNoneSelected) return [];
     const pts = selectedCampaignIds.size === 0
       ? (channel.rawSpendPoints ?? [])
       : (channel.rawSpendPoints ?? []).filter((p: any) => selectedCampaignIds.has(p.campaignId));
@@ -712,21 +734,34 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
 
   // Filtered spend chart data — rebuilds actualSpend from rawSpendPoints when campaigns are selected
   const filteredSpendChartData = useMemo(() => {
+    if (isNoneSelected) return (channel.chartData ?? []).map(p => ({ ...p, actualSpend: null }));
     if (selectedCampaignIds.size === 0) return channel.chartData ?? [];
     const pts = (channel.rawSpendPoints ?? []).filter((p: any) => selectedCampaignIds.has(p.campaignId));
     if (!pts.length) return channel.chartData ?? [];
 
-    // Sum actual spend per date from filtered campaigns
+    // Sum daily spend per date from filtered campaigns
     const spendByDate = new Map<string, number>();
     pts.forEach((p: any) => {
       spendByDate.set(p.date, (spendByDate.get(p.date) ?? 0) + (p.spend ?? 0));
     });
 
-    // Overlay onto the original chart data (preserving plannedSpend / projectedSpend shape)
-    return (channel.chartData ?? []).map(point => ({
-      ...point,
-      actualSpend: spendByDate.has(point.date) ? spendByDate.get(point.date)! : null,
-    }));
+    // Determine the range of dates we have actual data for
+    const spendDates = [...spendByDate.keys()].sort();
+    const firstSpendDate = spendDates[0];
+    const lastSpendDate  = spendDates[spendDates.length - 1];
+
+    // Accumulate daily values into a cumulative line (matching how chartData is built)
+    let runningTotal = 0;
+    return (channel.chartData ?? []).map(point => {
+      if (!firstSpendDate || point.date < firstSpendDate) {
+        return { ...point, actualSpend: null };
+      }
+      runningTotal += spendByDate.get(point.date) ?? 0;
+      return {
+        ...point,
+        actualSpend: point.date <= lastSpendDate ? runningTotal : null,
+      };
+    });
   }, [selectedCampaignIds, channel.rawSpendPoints, channel.chartData]);
 
   // Benchmark / preset derived values
@@ -928,15 +963,30 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                       </button>
                       {campaignDropdownOpen && (
                         <div className="absolute top-full left-0 mt-1 z-30 bg-white border border-gray-200 rounded-lg shadow-lg py-1 min-w-[220px] max-w-[300px] max-h-64 overflow-y-auto">
-                          {/* Select All / Clear */}
+                          {/* All Campaigns */}
                           <button
                             onClick={() => { setSelectedCampaignIds(new Set()); if (clientId) { try { localStorage.removeItem(`channel-campaigns-${clientId}-${channel.id ?? channel.name}`); } catch {} } }}
-                            className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors border-b border-gray-100 ${selectedCampaignIds.size === 0 ? 'font-semibold text-blue-600 bg-blue-50' : 'text-gray-600 hover:bg-gray-50'}`}
+                            className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors border-b border-gray-100 ${!isNoneSelected && selectedCampaignIds.size === 0 ? 'font-semibold text-blue-600 bg-blue-50' : 'text-gray-600 hover:bg-gray-50'}`}
                           >
-                            <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0 ${selectedCampaignIds.size === 0 ? 'bg-blue-600 border-blue-600' : 'border-gray-300'}`}>
-                              {selectedCampaignIds.size === 0 && <span className="text-white text-[8px] leading-none">✓</span>}
+                            <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0 ${!isNoneSelected && selectedCampaignIds.size === 0 ? 'bg-blue-600 border-blue-600' : 'border-gray-300'}`}>
+                              {!isNoneSelected && selectedCampaignIds.size === 0 && <span className="text-white text-[8px] leading-none">✓</span>}
                             </span>
                             All Campaigns
+                          </button>
+                          {/* No Campaigns / Not set up yet */}
+                          <button
+                            onClick={() => {
+                              const next = new Set([NONE_SENTINEL]);
+                              setSelectedCampaignIds(next);
+                              if (clientId) { try { localStorage.setItem(`channel-campaigns-${clientId}-${channel.id ?? channel.name}`, JSON.stringify([...next])); } catch {} }
+                              setCampaignDropdownOpen(false);
+                            }}
+                            className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors border-b border-gray-100 ${isNoneSelected ? 'font-semibold text-amber-600 bg-amber-50' : 'text-gray-600 hover:bg-gray-50'}`}
+                          >
+                            <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0 ${isNoneSelected ? 'bg-amber-500 border-amber-500' : 'border-gray-300'}`}>
+                              {isNoneSelected && <span className="text-white text-[8px] leading-none">✓</span>}
+                            </span>
+                            Not set up yet
                           </button>
                           {channel.campaigns.map(c => {
                             const checked = selectedCampaignIds.has(c.id);

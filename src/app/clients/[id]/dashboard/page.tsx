@@ -39,6 +39,7 @@ import {
 import OrganicSocialCard from '@/components/dashboard-v2/organic-social-card';
 import EdmCard from '@/components/dashboard-v2/edm-card';
 import OohCard from '@/components/dashboard-v2/ooh-card';
+import OtherChannelCard from '@/components/dashboard-v2/other-channel-card';
 import DisplayNativeCard from '@/components/dashboard-v2/display-native-card';
 import type { OrganicSocialActual, EdmActual, ChannelBenchmark, MetricPreset, ClientChannelPreset } from '@/types/database';
 import { startOfWeek } from 'date-fns';
@@ -228,19 +229,59 @@ export default function DashboardV2() {
   const [allBenchmarks, setAllBenchmarks] = useState<ChannelBenchmark[]>([]);
   const [allPresets, setAllPresets] = useState<MetricPreset[]>([]);
   const [clientChannelPresets, setClientChannelPresets] = useState<ClientChannelPreset[]>([]);
+  // Campaign selections lifted from ChannelPerformanceCard: channelKey → selected IDs
+  // Empty array = All Campaigns; ['__none__'] = Not set up yet
+  const [channelCampaignSelections, setChannelCampaignSelections] = useState<Record<string, string[]>>({});
   // Derived from channelMonthSpendData — sum of spend across all platforms for
   // the currently selected analytics period.
+  // ── Total actual spend: respects per-channel campaign filters ────────────
   const totalActualSpend = useMemo(() => {
-    if (!channelMonthSpendData.length || !analyticsDateRange?.startDate || !analyticsDateRange?.endDate) {
-      return 0;
-    }
+    if (!channelMonthSpendData.length || !analyticsDateRange?.startDate || !analyticsDateRange?.endDate) return 0;
     const rangeStart = analyticsDateRange.startDate;
     const rangeEnd   = analyticsDateRange.endDate;
 
-    return (channelMonthSpendData as any[])
-      .filter((p: any) => p.date >= rangeStart && p.date <= rangeEnd)
-      .reduce((sum: number, p: any) => sum + (p.spend ?? 0), 0);
-  }, [channelMonthSpendData, analyticsDateRange.startDate, analyticsDateRange.endDate]);
+    const paidChannels = mediaPlanBuilderChannels.filter(ch => {
+      const cat = (ch as any).channelCategory || getChannelCategory(ch.channelName);
+      return cat === 'paid_digital';
+    });
+
+    if (paidChannels.length === 0) {
+      return (channelMonthSpendData as any[])
+        .filter((p: any) => p.date >= rangeStart && p.date <= rangeEnd)
+        .reduce((sum: number, p: any) => sum + (p.spend ?? 0), 0);
+    }
+
+    let total = 0;
+    for (const ch of paidChannels) {
+      const channelKey = String((ch as any).id ?? ch.channelName);
+      const selectedIds = channelCampaignSelections[channelKey];
+      const isNone = selectedIds?.length === 1 && selectedIds[0] === '__none__';
+      if (isNone) continue;
+
+      const platform = getPlatformForChannel(ch.channelName);
+      const keyword  = ch.channelName.toLowerCase().split(' ')[0];
+
+      const chPoints = (channelMonthSpendData as any[]).filter((p: any) => {
+        if (!p.date || p.date < rangeStart || p.date > rangeEnd) return false;
+        const matchesPlatform = (p.platform && p.platform === platform) ||
+                                 (p.channelName && p.channelName.toLowerCase().includes(keyword));
+        if (!matchesPlatform) return false;
+        if (!selectedIds || selectedIds.length === 0) return true;
+        return selectedIds.includes(p.campaignId);
+      });
+
+      total += chPoints.reduce((s: number, p: any) => s + (p.spend ?? 0), 0);
+    }
+    // Add manual actual spend from non-digital channels
+    const nonDigitalTotal = mediaPlanBuilderChannels
+      .filter(ch => {
+        const cat = (ch as any).channelCategory || getChannelCategory(ch.channelName);
+        return cat !== 'paid_digital';
+      })
+      .reduce((sum, ch) => sum + ((ch as any).manualActualSpend ?? 0), 0);
+
+    return total + nonDigitalTotal;
+  }, [channelMonthSpendData, analyticsDateRange.startDate, analyticsDateRange.endDate, mediaPlanBuilderChannels, channelCampaignSelections]);
 
   // Fetch account managers
   useEffect(() => {
@@ -1203,6 +1244,20 @@ export default function DashboardV2() {
   }, []);
 
   // ── Props for ChannelPerformanceCard list ────────────────────────────────
+  function channelSortOrder(card: { type: string; platform?: string; name?: string }): number {
+    if (card.type === 'paid_digital') {
+      if (card.platform === 'meta-ads') return 0;
+      if (card.platform === 'google-ads') return 1;
+      return 2;
+    }
+    if (card.type === 'display_native') return 3;
+    if (card.type === 'edm') return 4;
+    if (card.type === 'ooh') return 5;
+    if (card.type === 'other') return 6;
+    if (card.type === 'organic_social') return 7;
+    return 8;
+  }
+
   const channelCards = useMemo(() => {
     if (!mediaPlanBuilderChannels.length) return [];
 
@@ -1265,6 +1320,13 @@ export default function DashboardV2() {
       if (category === 'display_native') {
         return {
           type: 'display_native' as const,
+          channel: ch,
+        };
+      }
+
+      if (category === 'other') {
+        return {
+          type: 'other' as const,
           channel: ch,
         };
       }
@@ -1416,7 +1478,7 @@ export default function DashboardV2() {
         })(),
         rawSpendPoints: chMetricPoints,
       };
-    });
+    }).sort((a, b) => channelSortOrder(a) - channelSortOrder(b));
   }, [mediaPlanBuilderChannels, channelMonthSpendData, spendApiErrors, selectedMonth, commission, analyticsDateRange.startDate, analyticsDateRange.endDate]);
 
   // ── Calculate health score whenever the relevant inputs change ────────────
@@ -1570,6 +1632,28 @@ export default function DashboardV2() {
       section.scrollIntoView({ behavior: 'smooth' });
     }
   }, []);
+
+  // Called by ChannelPerformanceCard whenever the user changes campaign selection
+  const handleCampaignSelectionChange = useCallback((channelKey: string, ids: string[]) => {
+    setChannelCampaignSelections(prev => ({ ...prev, [channelKey]: ids }));
+  }, []);
+
+  // Initialise channelCampaignSelections from localStorage when channelCards first loads
+  useEffect(() => {
+    if (!clientId || !channelCards.length) return;
+    const initial: Record<string, string[]> = {};
+    channelCards.forEach((card: any) => {
+      if (card.type !== 'paid_digital') return;
+      const key = card.id ?? card.name;
+      try {
+        const saved = localStorage.getItem(`channel-campaigns-${clientId}-${key}`);
+        initial[key] = saved ? JSON.parse(saved) : [];
+      } catch { initial[key] = []; }
+    });
+    setChannelCampaignSelections(initial);
+  // Run once when channelCards are first populated
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId, channelCards.length > 0]);
 
   const handleChannelsChange = (channels: MediaPlanChannel[]) => {
     setMediaPlanBuilderChannels(channels);
@@ -2045,10 +2129,11 @@ export default function DashboardV2() {
                               weekCommencing={currentWeekCommencing}
                               actuals={organicSocialActuals}
                               onRefresh={loadNonDigitalActuals}
+                              onUpdateChannel={handleUpdateChannel}
                             />
                           );
                         }
-                        
+
                         if (ch.type === 'edm') {
                           return (
                             <EdmCard
@@ -2056,6 +2141,7 @@ export default function DashboardV2() {
                               channel={ch.channel}
                               clientId={clientId}
                               actuals={edmActuals}
+                              onUpdateChannel={handleUpdateChannel}
                             />
                           );
                         }
@@ -2081,7 +2167,26 @@ export default function DashboardV2() {
                             />
                           );
                         }
-                        
+
+                        if (ch.type === 'other') {
+                          const channelData = mediaPlanBuilderChannels.find(
+                            (mbCh: any) => mbCh.channelName?.toLowerCase().trim() === ch.channel.channelName?.toLowerCase().trim()
+                          );
+                          const earliestStart = channelData?.flights?.length > 0
+                            ? new Date(Math.min(...channelData.flights.map((f: any) => new Date(f.startWeek).getTime())))
+                            : null;
+                          return (
+                            <OtherChannelCard
+                              key={`other-${ch.channel.id}`}
+                              channel={ch.channel}
+                              clientId={clientId}
+                              channelStartDate={earliestStart}
+                              refetchTrigger={actionPointsRefetchTrigger}
+                              onUpdateChannel={handleUpdateChannel}
+                            />
+                          );
+                        }
+
                         // Paid digital - existing card
                         // Find the earliest start date from mediaPlanBuilderChannels
                         // Normalize channel names for comparison (same logic as normalizeChannelType)
@@ -2113,6 +2218,7 @@ export default function DashboardV2() {
                                 ? prev.map((p, i) => i === idx2 ? updated : p)
                                 : [...prev, updated];
                             })}
+                            onCampaignSelectionChange={handleCampaignSelectionChange}
                           />
                         );
                       })}

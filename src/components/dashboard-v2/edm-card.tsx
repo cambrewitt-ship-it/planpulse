@@ -9,11 +9,13 @@ import { MediaPlanChannel } from '@/components/media-plan-builder/media-plan-gri
 import type { EdmActual } from '@/types/database';
 import { format, subDays } from 'date-fns';
 import InlineActionPoints from './inline-action-points';
+import ManualSpendSlider from './manual-spend-slider';
 
 interface EdmCardProps {
   channel: MediaPlanChannel;
   clientId: string;
   actuals: EdmActual[];
+  onUpdateChannel?: (channelId: string, updates: Partial<MediaPlanChannel>) => void;
 }
 
 function getFrequencyLabel(sendFrequency: string | undefined): string {
@@ -79,8 +81,16 @@ function calculateOnTrackStatus(sendFrequency: string | undefined, actuals: EdmA
   return { status: 'not-set', message: 'Frequency not recognized' };
 }
 
-export default function EdmCard({ channel, clientId, actuals }: EdmCardProps) {
+export default function EdmCard({ channel, clientId, actuals, onUpdateChannel }: EdmCardProps) {
+  const plannedSpend = channel.flights?.reduce((sum, f) =>
+    sum + Object.values(f.monthlySpend).reduce((a, b) => a + b, 0), 0) || 0;
+  const [manualActualSpend, setManualActualSpend] = useState(channel.manualActualSpend ?? 0);
   const [isLogging, setIsLogging] = useState(false);
+
+  function handleSpendChange(val: number) {
+    setManualActualSpend(val);
+    onUpdateChannel?.(channel.id, { manualActualSpend: val });
+  }
   const [showLogForm, setShowLogForm] = useState(false);
   const [sendDate, setSendDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [subject, setSubject] = useState('');
@@ -249,6 +259,14 @@ export default function EdmCard({ channel, clientId, actuals }: EdmCardProps) {
           />
         </div>
       </div>{/* end display:flex container */}
+
+      {/* ── Spend slider — full width ─────────────────────── */}
+      <ManualSpendSlider
+        planned={plannedSpend}
+        actual={manualActualSpend}
+        onChange={handleSpendChange}
+        accentColor="#6366f1"
+      />
     </div>
   );
 }
