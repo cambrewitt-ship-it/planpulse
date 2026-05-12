@@ -22,9 +22,9 @@
 
 import Link from 'next/link';
 import { MediaPlanGrid, MediaPlanChannel } from '@/components/media-plan-builder/media-plan-grid';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
-import { getClients, getMediaPlans, getPlanById, updateClient, updateClientLogoUrl } from '@/lib/db/plans';
+import { getClients, getMediaPlans, getPlanById, updateClient, updateClientLogoUrl, deleteClient } from '@/lib/db/plans';
 import { fetchAnalyticsData, fetchSpendData, calculateCostPerMetric, calculateCostPerPlatformMetric, extractPlatformEventOptions, SpendDataPoint, CostMetricPoint, MetricSource, PlatformEventOption } from '@/lib/api/analytics-data-integration';
 import { subDays, addDays, format, differenceInDays, parseISO, startOfMonth, endOfMonth, startOfYear } from 'date-fns';
 import { FunnelStage, MediaPlanFunnel, FunnelConfig } from '@/lib/types/funnel';
@@ -126,6 +126,7 @@ function getChannelDisplayNameFromPlatform(platform?: string): string {
 
 export default function DashboardV2() {
   const params = useParams();
+  const router = useRouter();
   const clientId = params.id as string;
 
   const [client, setClient] = useState<Client | null>(null);
@@ -210,6 +211,8 @@ export default function DashboardV2() {
   const [organicSocialActuals, setOrganicSocialActuals] = useState<OrganicSocialActual[]>([]);
   const [edmActuals, setEdmActuals] = useState<EdmActual[]>([]);
   const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [healthWeights, setHealthWeights] = useState<{ pacing: number; actions: number; perf: number }>(() => {
     if (typeof window === 'undefined') return { pacing: 44, actions: 28, perf: 28 };
     try {
@@ -1139,15 +1142,23 @@ export default function DashboardV2() {
     setIsUploadingLogo(true);
     setLogoUploadError(null);
     try {
-      const fd = new FormData();
-      fd.append('file', file);
-      const res = await fetch(`/api/clients/${clientId}/upload-logo`, { method: 'POST', body: fd });
+      const ext = file.name.split('.').pop() || 'png';
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve((reader.result as string).split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const res = await fetch(`/api/clients/${clientId}/upload-logo`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data: base64, contentType: file.type || 'image/png', ext }),
+      });
       if (!res.ok) {
         const { error } = await res.json().catch(() => ({ error: 'Upload failed' }));
         throw new Error(error || 'Upload failed');
       }
       const { url } = await res.json();
-      await updateClientLogoUrl(clientId, url);
       if (client) setClient({ ...client, logo_url: url });
     } catch (err) {
       setLogoUploadError(err instanceof Error ? err.message : 'Upload failed');
@@ -2560,6 +2571,70 @@ export default function DashboardV2() {
                     </div>
                   </div>
                 )}
+
+                {/* Delete Client */}
+                <div style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', padding: '20px 24px' }}>
+                  <div style={{ marginBottom: 12 }}>
+                    <span style={{ fontSize: 13, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Danger Zone</span>
+                  </div>
+                  {deleteConfirm ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      <p style={{ fontSize: 13, color: '#A0442A', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+                        Are you sure? This will permanently delete <strong>{client?.name}</strong> and all associated data. This cannot be undone.
+                      </p>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button
+                          onClick={async () => {
+                            setDeleting(true);
+                            try {
+                              await deleteClient(clientId);
+                              router.push('/dashboard');
+                            } catch {
+                              setDeleting(false);
+                              setDeleteConfirm(false);
+                              alert('Failed to delete client. Please try again.');
+                            }
+                          }}
+                          disabled={deleting}
+                          style={{
+                            height: 30, padding: '0 14px', borderRadius: 12,
+                            border: 'none', background: '#A0442A',
+                            color: '#fff', fontSize: 12, fontWeight: 500,
+                            cursor: deleting ? 'not-allowed' : 'pointer',
+                            fontFamily: "'DM Sans', system-ui, sans-serif",
+                            opacity: deleting ? 0.6 : 1,
+                          }}
+                        >
+                          {deleting ? 'Deleting…' : 'Yes, delete client'}
+                        </button>
+                        <button
+                          onClick={() => setDeleteConfirm(false)}
+                          disabled={deleting}
+                          style={{
+                            height: 30, padding: '0 14px', borderRadius: 12,
+                            border: '0.5px solid #D5D0C5', background: '#FDFCF8',
+                            color: '#1C1917', fontSize: 12, fontWeight: 500,
+                            cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif",
+                          }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setDeleteConfirm(true)}
+                      style={{
+                        height: 30, padding: '0 12px', borderRadius: 12,
+                        border: '0.5px solid #F5C5B8', background: '#FDF2EF',
+                        color: '#A0442A', fontSize: 12, fontWeight: 500,
+                        cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif",
+                      }}
+                    >
+                      Delete Client
+                    </button>
+                  )}
+                </div>
 
               </div>
             )}

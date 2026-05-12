@@ -97,6 +97,19 @@ export async function updateClient(clientId: string, name: string, notes?: strin
   return data;
 }
 
+export async function deleteClient(clientId: string): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not authenticated');
+
+  const { error } = await supabase
+    .from('clients')
+    .delete()
+    .eq('id', clientId)
+    .eq('user_id', user.id);
+
+  if (error) throw error;
+}
+
 export async function createMediaPlan(
   clientId: string,
   channels: MediaChannel[]

@@ -171,11 +171,17 @@ export default function SettingsPage() {
 
     setUploadingClientId(logoUploadClientId);
     try {
-      const fd = new FormData();
-      fd.append('file', file);
+      const ext = file.name.split('.').pop() || 'png';
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve((reader.result as string).split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
       const res = await fetch(`/api/clients/${logoUploadClientId}/upload-logo`, {
         method: 'POST',
-        body: fd,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data: base64, contentType: file.type || 'image/png', ext }),
       });
       if (res.ok) {
         const { url } = await res.json();

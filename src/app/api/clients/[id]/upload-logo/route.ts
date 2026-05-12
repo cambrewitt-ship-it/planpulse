@@ -18,11 +18,15 @@ export async function POST(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const formData = await request.formData();
-    const file = formData.get('file') as File | null;
-    if (!file) {
+    const body = await request.json();
+    const { data: base64, contentType, ext: rawExt } = body ?? {};
+
+    if (!base64 || typeof base64 !== 'string') {
       return NextResponse.json({ error: 'No file provided' }, { status: 400 });
     }
+
+    const ext = (rawExt ?? 'png').replace(/[^a-zA-Z0-9]/g, '').slice(0, 10) || 'png';
+    const bytes = Buffer.from(base64, 'base64');
 
     // Prefer service role key for storage (bypasses RLS, can create buckets)
     const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
@@ -49,20 +53,31 @@ export async function POST(
       return NextResponse.json({ error: `Could not create storage bucket: ${bucketError!.message}${hint}` }, { status: 500 });
     }
 
-    const ext = file.name.split('.').pop() || 'png';
     const path = `${clientId}/logo.${ext}`;
-    const bytes = await file.arrayBuffer();
 
     const { error: uploadError } = await storageClient.storage
       .from(BUCKET_NAME)
-      .upload(path, bytes, { contentType: file.type, upsert: true });
+      .upload(path, bytes, { contentType: contentType || 'application/octet-stream', upsert: true });
 
     if (uploadError) {
       return NextResponse.json({ error: uploadError.message }, { status: 500 });
     }
 
     const { data } = storageClient.storage.from(BUCKET_NAME).getPublicUrl(path);
-    return NextResponse.json({ url: data.publicUrl });
+    const publicUrl = data.publicUrl;
+
+    // Update logo_url using the session client (same auth path as browser SDK)
+    const { error: dbError } = await supabase
+      .from('clients')
+      .update({ logo_url: publicUrl })
+      .eq('id', clientId)
+      .eq('user_id', session.user.id);
+
+    if (dbError) {
+      return NextResponse.json({ error: `Uploaded but failed to save URL: ${dbError.message}` }, { status: 500 });
+    }
+
+    return NextResponse.json({ url: publicUrl });
   } catch (error: any) {
     console.error('Logo upload error:', error);
     return NextResponse.json({ error: error.message || 'Upload failed' }, { status: 500 });

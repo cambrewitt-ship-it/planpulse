@@ -198,6 +198,7 @@ export default function CreateClientPage() {
   const [channelCampaignMap, setChannelCampaignMap] = useState<Record<string, string>>({});
   const [campaignsLoading, setCampaignsLoading] = useState(false);
   const [campaignsSaving, setCampaignsSaving] = useState(false);
+  const [campaignSearch, setCampaignSearch] = useState('');
 
   // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -225,9 +226,18 @@ export default function CreateClientPage() {
       const newId = client.id;
       if (logoFile) {
         try {
-          const fd = new FormData();
-          fd.append('file', logoFile);
-          const res = await fetch(`/api/clients/${newId}/upload-logo`, { method: 'POST', body: fd });
+          const ext = logoFile.name.split('.').pop() || 'png';
+          const base64 = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve((reader.result as string).split(',')[1]);
+            reader.onerror = reject;
+            reader.readAsDataURL(logoFile);
+          });
+          const res = await fetch(`/api/clients/${newId}/upload-logo`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ data: base64, contentType: logoFile.type || 'image/png', ext }),
+          });
           if (res.ok) {
             const { url } = await res.json();
             await updateClientLogoUrl(newId, url);
@@ -951,7 +961,19 @@ export default function CreateClientPage() {
                         No campaigns found in your saved Meta accounts. You can link campaigns later from the client dashboard.
                       </div>
                     )}
-                    {namedChannels.map((channel) => (
+                    {metaCampaigns.length > 0 && (
+                      <Input
+                        placeholder="Search campaigns…"
+                        value={campaignSearch}
+                        onChange={(e) => setCampaignSearch(e.target.value)}
+                        className="text-sm"
+                      />
+                    )}
+                    {namedChannels.map((channel) => {
+                      const filteredCampaigns = metaCampaigns.filter((c) =>
+                        c.name.toLowerCase().includes(campaignSearch.toLowerCase())
+                      );
+                      return (
                       <div key={channel.id} className="flex items-center gap-4 p-3 rounded-xl border border-gray-200 bg-white">
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium text-gray-900 truncate">
@@ -973,14 +995,19 @@ export default function CreateClientPage() {
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="__none__">No campaign</SelectItem>
-                              {metaCampaigns.map((c) => (
-                                <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                              ))}
+                              {filteredCampaigns.length === 0 && campaignSearch ? (
+                                <div className="py-2 px-3 text-xs text-gray-400">No campaigns match "{campaignSearch}"</div>
+                              ) : (
+                                filteredCampaigns.map((c) => (
+                                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                                ))
+                              )}
                             </SelectContent>
                           </Select>
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                     <Button onClick={saveCampaigns} disabled={campaignsSaving} className="w-full mt-2">
                       {campaignsSaving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving&hellip;</> : <>Finish Setup<Check className="h-4 w-4 ml-2" /></>}
                     </Button>
