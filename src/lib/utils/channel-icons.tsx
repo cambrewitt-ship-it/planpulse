@@ -88,6 +88,61 @@ export function getChannelLogo(channelType: string, className: string = "w-5 h-5
     );
   }
 
+  if (l.includes('reddit')) {
+    return (
+      <svg className={className} viewBox="0 0 24 24" fill="none" aria-label="Reddit">
+        <circle cx="12" cy="12" r="12" fill="#FF4500"/>
+        <path d="M20 12a2 2 0 00-2-2 2 2 0 00-1.4.58A9.8 9.8 0 0012 9.2a.25.25 0 00-.24.18l-.77 3.63-2.53-.05a2 2 0 100 .74l2.9.06.06-.06.71-3.28a9.3 9.3 0 013.93.97A2 2 0 0020 12zm-7.5 3.5c-.69 0-1.25-.28-1.25-.63s.56-.62 1.25-.62 1.25.28 1.25.62-.56.63-1.25.63zm3.25 0c-.69 0-1.25-.28-1.25-.63s.56-.62 1.25-.62 1.25.28 1.25.62-.56.63-1.25.63zm.64-3.44a.74.74 0 100-1.48.74.74 0 000 1.48z" fill="white"/>
+        <circle cx="8.75" cy="10.56" r=".74" fill="white"/>
+      </svg>
+    );
+  }
+
+  if (l.includes('native')) {
+    return (
+      <svg className={className} viewBox="0 0 24 24" fill="none" aria-label="Native Ads">
+        <rect width="24" height="24" rx="4" fill="#0D9488"/>
+        <rect x="4" y="5" width="16" height="2.5" rx="1" fill="white" fillOpacity="0.9"/>
+        <rect x="4" y="9.5" width="10" height="2" rx="1" fill="white" fillOpacity="0.6"/>
+        <rect x="4" y="13" width="7" height="2" rx="1" fill="white" fillOpacity="0.6"/>
+        <rect x="13" y="13" width="7" height="2" rx="1" fill="white" fillOpacity="0.3"/>
+        <rect x="4" y="17" width="12" height="2" rx="1" fill="white" fillOpacity="0.4"/>
+      </svg>
+    );
+  }
+
+  if (l === 'radio' || l.includes('radio ') || l.includes(' radio')) {
+    return (
+      <svg className={className} viewBox="0 0 24 24" fill="none" aria-label="Radio">
+        <rect width="24" height="24" rx="4" fill="#D97706"/>
+        <path d="M12 7c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zm0 8.5a3.5 3.5 0 110-7 3.5 3.5 0 010 7z" fill="white" fillOpacity="0.9"/>
+        <circle cx="12" cy="12" r="1.5" fill="white"/>
+        <path d="M7.76 5.11L6.34 3.7A9.97 9.97 0 002 12c0 3.31 1.61 6.24 4.1 8.07l1.37-1.46A8 8 0 014 12c0-2.72 1.36-5.12 3.44-6.6L7.76 5.11zM17.9 3.93l-1.37 1.47A8 8 0 0120 12c0 2.6-1.24 4.91-3.17 6.4l1.38 1.47A10 10 0 0022 12c0-3.2-1.51-6.07-3.88-7.93l-.22-.14z" fill="white" fillOpacity="0.7"/>
+      </svg>
+    );
+  }
+
+  if (l === 'ooh' || l.includes('out of home') || l.includes('out-of-home') || l.includes('billboard')) {
+    return (
+      <svg className={className} viewBox="0 0 24 24" fill="none" aria-label="OOH">
+        <rect width="24" height="24" rx="4" fill="#EA580C"/>
+        <rect x="3" y="4" width="18" height="11" rx="1.5" fill="white" fillOpacity="0.9"/>
+        <rect x="5" y="6" width="14" height="7" rx="1" fill="#EA580C" fillOpacity="0.25"/>
+        <path d="M11 15v5M13 15v5M9 20h6" stroke="white" strokeWidth="1.5" strokeLinecap="round"/>
+      </svg>
+    );
+  }
+
+  if (l.includes('edm') || l.includes('email')) {
+    return (
+      <svg className={className} viewBox="0 0 24 24" fill="none" aria-label="EDM / Email">
+        <rect width="24" height="24" rx="4" fill="#7C3AED"/>
+        <rect x="3" y="6" width="18" height="13" rx="2" fill="white" fillOpacity="0.9"/>
+        <path d="M3 8l9 6 9-6" stroke="#7C3AED" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+      </svg>
+    );
+  }
+
   if (l.includes('programmatic') || l.includes('display') || l.includes('dv360') || l.includes('trade desk')) {
     return (
       <svg className={className} viewBox="0 0 24 24" fill="none" aria-label="Programmatic">

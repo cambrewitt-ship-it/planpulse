@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -101,6 +101,61 @@ export default function LibraryPage() {
   const [addingSpecChannelId, setAddingSpecChannelId] = useState<string | null>(null);
   const [newSpecText, setNewSpecText] = useState('');
   const [activeTab, setActiveTab] = useState<'channels' | 'benchmarks'>('channels');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showSearchResults, setShowSearchResults] = useState(false);
+  const [highlightedEntryId, setHighlightedEntryId] = useState<string | null>(null);
+  const cardRefs = useRef<Map<string, HTMLElement>>(new Map());
+  const searchBlurTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  interface SearchResult {
+    type: 'channel' | 'action-point' | 'spec';
+    entryId: string;
+    entryTitle: string;
+    matchText: string;
+    subtitle: string;
+  }
+
+  const searchResults = useMemo((): SearchResult[] => {
+    if (!searchQuery.trim()) return [];
+    const q = searchQuery.toLowerCase();
+    const results: SearchResult[] = [];
+
+    for (const entry of libraryEntries) {
+      if (
+        entry.title.toLowerCase().includes(q) ||
+        entry.channel_type.toLowerCase().includes(q) ||
+        (entry.notes && entry.notes.toLowerCase().includes(q))
+      ) {
+        results.push({ type: 'channel', entryId: entry.id, entryTitle: entry.title, matchText: entry.title, subtitle: entry.channel_type });
+      }
+      for (const ap of actionPoints[entry.channel_type] || []) {
+        if (ap.text.toLowerCase().includes(q)) {
+          results.push({ type: 'action-point', entryId: entry.id, entryTitle: entry.title, matchText: ap.text, subtitle: `${entry.title} · ${ap.category}` });
+        }
+      }
+      for (const spec of specs[entry.id] || []) {
+        if (spec.spec_text.toLowerCase().includes(q)) {
+          results.push({ type: 'spec', entryId: entry.id, entryTitle: entry.title, matchText: spec.spec_text, subtitle: `${entry.title} · Spec` });
+        }
+      }
+    }
+    return results.slice(0, 12);
+  }, [searchQuery, libraryEntries, actionPoints, specs]);
+
+  const handleSearchResultClick = useCallback((result: SearchResult) => {
+    setSearchQuery('');
+    setShowSearchResults(false);
+    // Switch to channels tab if needed
+    setActiveTab('channels');
+    setTimeout(() => {
+      const el = cardRefs.current.get(result.entryId);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setHighlightedEntryId(result.entryId);
+        setTimeout(() => setHighlightedEntryId(null), 1800);
+      }
+    }, 50);
+  }, []);
 
   useEffect(() => {
     loadLibraryEntries();
@@ -718,6 +773,38 @@ export default function LibraryPage() {
       );
     }
 
+    if (l.includes('linear tv') || l.includes('linear-tv')) {
+      return (
+        <svg className={className} viewBox="0 0 24 24" fill="none" aria-label="Linear TV">
+          <rect x="2" y="4" width="20" height="14" rx="2" stroke="#7C3AED" strokeWidth="2" fill="none"/>
+          <rect x="5" y="7" width="14" height="8" rx="1" fill="#7C3AED" fillOpacity="0.15"/>
+          <path d="M9 11l3-2v4l-3-2zM8 21h8M12 18v3" stroke="#7C3AED" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      );
+    }
+
+    if (l === 'svod') {
+      return (
+        <svg className={className} viewBox="0 0 24 24" fill="none" aria-label="SVOD">
+          <rect x="2" y="4" width="20" height="14" rx="2" stroke="#9333EA" strokeWidth="2" fill="none"/>
+          <rect x="5" y="7" width="14" height="8" rx="1" fill="#9333EA" fillOpacity="0.15"/>
+          <circle cx="12" cy="11" r="3" stroke="#9333EA" strokeWidth="1.5" fill="none"/>
+          <path d="M10.5 11l1.5-1v2l-1.5-1zM8 21h8M12 18v3" stroke="#9333EA" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      );
+    }
+
+    if (l === 'bvod') {
+      return (
+        <svg className={className} viewBox="0 0 24 24" fill="none" aria-label="BVOD">
+          <rect x="2" y="4" width="20" height="14" rx="2" stroke="#A855F7" strokeWidth="2" fill="none"/>
+          <rect x="5" y="7" width="14" height="8" rx="1" fill="#A855F7" fillOpacity="0.15"/>
+          <path d="M9 9l6 2-6 2V9z" stroke="#A855F7" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          <path d="M8 21h8M12 18v3" stroke="#A855F7" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      );
+    }
+
     // Other / generic fallback
     return (
       <svg className={className} viewBox="0 0 24 24" fill="none" aria-label="Other">
@@ -813,6 +900,109 @@ export default function LibraryPage() {
         </Dialog>
       </div>
 
+      {/* Search bar */}
+      <div className="relative mb-6">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none" style={{ color: '#A09890' }} />
+          <input
+            type="text"
+            placeholder="Search channels, action points, specs…"
+            value={searchQuery}
+            onChange={(e) => { setSearchQuery(e.target.value); setShowSearchResults(true); }}
+            onFocus={() => setShowSearchResults(true)}
+            onBlur={() => {
+              searchBlurTimeout.current = setTimeout(() => setShowSearchResults(false), 180);
+            }}
+            onKeyDown={(e) => { if (e.key === 'Escape') { setSearchQuery(''); setShowSearchResults(false); } }}
+            style={{
+              width: '100%',
+              padding: '10px 12px 10px 36px',
+              borderRadius: 12,
+              border: '1px solid rgba(232,228,220,0.9)',
+              background: '#FDFCF8',
+              fontSize: 14,
+              color: '#1C1917',
+              outline: 'none',
+              boxShadow: showSearchResults && searchResults.length > 0 ? '0 2px 12px rgba(0,0,0,0.08)' : '0 1px 4px rgba(0,0,0,0.04)',
+              transition: 'box-shadow 0.15s',
+            }}
+          />
+          {searchQuery && (
+            <button
+              onClick={() => { setSearchQuery(''); setShowSearchResults(false); }}
+              style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', color: '#A09890', background: 'none', border: 'none', cursor: 'pointer', padding: 2, display: 'flex' }}
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+        {showSearchResults && searchQuery.trim() && (
+          <div
+            onMouseDown={(e) => e.preventDefault()}
+            style={{
+              position: 'absolute',
+              top: 'calc(100% + 6px)',
+              left: 0,
+              right: 0,
+              background: '#FDFCF8',
+              border: '1px solid rgba(232,228,220,0.9)',
+              borderRadius: 14,
+              boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
+              zIndex: 50,
+              overflow: 'hidden',
+              maxHeight: 380,
+              overflowY: 'auto',
+            }}
+          >
+            {searchResults.length === 0 ? (
+              <div style={{ padding: '16px 16px', color: '#A09890', fontSize: 13 }}>No results for &ldquo;{searchQuery}&rdquo;</div>
+            ) : (
+              <>
+                {searchResults.map((result, i) => (
+                  <button
+                    key={`${result.type}-${result.entryId}-${i}`}
+                    onClick={() => handleSearchResultClick(result)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      width: '100%',
+                      padding: '10px 14px',
+                      background: 'none',
+                      border: 'none',
+                      borderBottom: i < searchResults.length - 1 ? '1px solid rgba(232,228,220,0.5)' : 'none',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = '#F5F3EF')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}
+                  >
+                    <div style={{ flexShrink: 0, color: result.type === 'channel' ? '#6B7280' : result.type === 'action-point' ? '#7C3AED' : '#0891B2' }}>
+                      {result.type === 'channel' && getChannelIcon(result.entryTitle, 'w-4 h-4')}
+                      {result.type === 'action-point' && (
+                        <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="12" height="12" rx="2" stroke="currentColor" strokeWidth="1.5"/><path d="M5 8l2 2 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                      )}
+                      {result.type === 'spec' && (
+                        <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none"><rect x="1" y="4" width="14" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.5"/><path d="M4 4V3M8 4V2M12 4V3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                      )}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, color: '#1C1917', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {result.matchText}
+                      </div>
+                      <div style={{ fontSize: 11, color: '#A09890', marginTop: 1 }}>{result.subtitle}</div>
+                    </div>
+                    <div style={{ flexShrink: 0 }}>
+                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 7h8M8 4l3 3-3 3" stroke="#C4BEB6" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                    </div>
+                  </button>
+                ))}
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Tab toggle */}
       <div className="flex gap-1 mb-6" style={{ background: '#EEECE8', padding: 4, borderRadius: 12, display: 'inline-flex' }}>
         <Button
@@ -854,7 +1044,12 @@ export default function LibraryPage() {
             const isEditing = editingId === entry.id;
 
             return (
-              <Card key={entry.id} className="transition-shadow" style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)' }}>
+              <div
+                key={entry.id}
+                ref={(el) => { if (el) cardRefs.current.set(entry.id, el); else cardRefs.current.delete(entry.id); }}
+                style={{ borderRadius: 18, transition: 'box-shadow 0.3s, outline 0.3s', outline: highlightedEntryId === entry.id ? '2px solid #C4A882' : '2px solid transparent', outlineOffset: 2 }}
+              >
+              <Card className="transition-shadow" style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: highlightedEntryId === entry.id ? '0 0 0 4px rgba(196,168,130,0.2), 0 4px 24px rgba(0,0,0,0.07)' : '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)' }}>
                 <CardHeader>
                   <div className="flex items-start justify-between">
                     <div className="flex items-start gap-3 flex-1">
@@ -1223,6 +1418,7 @@ export default function LibraryPage() {
                   </div>
                 </CardContent>
               </Card>
+              </div>
             );
           })}
         </div>

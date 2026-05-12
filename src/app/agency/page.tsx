@@ -678,6 +678,7 @@ export default function AgencyDashboard() {
                 accountManagers={accountManagers}
                 view={kanbanView}
                 onAskAI={(prompt) => chatRef.current?.sendMessage(prompt)}
+                clients={clients.map(c => ({ id: c.id, name: c.name }))}
               />
             </div>
           </div>

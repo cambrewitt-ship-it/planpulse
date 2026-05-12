@@ -76,18 +76,26 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { channel_type, text, category, frequency, due_date, days_before_live_due } = body;
+    const { channel_type, text, category, frequency, due_date, days_before_live_due, client_id } = body;
 
-    if (!channel_type || !text || !text.trim()) {
+    if (!text || !text.trim()) {
       return NextResponse.json(
-        { error: 'channel_type and text are required' },
+        { error: 'text is required' },
         { status: 400 }
       );
     }
 
-    if (!category || !['SET UP', 'HEALTH CHECK'].includes(category)) {
+    if (!category || !['SET UP', 'HEALTH CHECK', 'TODO'].includes(category)) {
       return NextResponse.json(
-        { error: 'category must be either "SET UP" or "HEALTH CHECK"' },
+        { error: 'category must be "SET UP", "HEALTH CHECK", or "TODO"' },
+        { status: 400 }
+      );
+    }
+
+    // channel_type required for SET UP / HEALTH CHECK but optional for TODO
+    if (category !== 'TODO' && !channel_type) {
+      return NextResponse.json(
+        { error: 'channel_type is required for SET UP and HEALTH CHECK action points' },
         { status: 400 }
       );
     }
@@ -100,7 +108,7 @@ export async function POST(request: NextRequest) {
     }
 
     const insertData: any = {
-      channel_type,
+      channel_type: category === 'TODO' ? 'General' : channel_type,
       text: text.trim(),
       category,
       completed: false,
@@ -117,6 +125,12 @@ export async function POST(request: NextRequest) {
       } else if (due_date) {
         insertData.due_date = due_date;
       }
+    }
+
+    // TODO items support a direct due_date and optional client association
+    if (category === 'TODO') {
+      if (due_date) insertData.due_date = due_date;
+      if (client_id) insertData.client_id = client_id;
     }
 
     const { data, error } = await supabase
@@ -243,9 +257,9 @@ export async function PUT(request: NextRequest) {
       updateData.completed = completed;
     }
     if (category !== undefined) {
-      if (!['SET UP', 'HEALTH CHECK'].includes(category)) {
+      if (!['SET UP', 'HEALTH CHECK', 'TODO'].includes(category)) {
         return NextResponse.json(
-          { error: 'category must be either "SET UP" or "HEALTH CHECK"' },
+          { error: 'category must be "SET UP", "HEALTH CHECK", or "TODO"' },
           { status: 400 }
         );
       }

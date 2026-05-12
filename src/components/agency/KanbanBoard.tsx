@@ -206,6 +206,11 @@ export interface KanbanBoardHandle {
   startAdding: () => void;
 }
 
+interface ClientOption {
+  id: string;
+  name: string;
+}
+
 interface KanbanBoardProps {
   actionPointClients: AgencyClientActionPoints[];
   amFilter: string;
@@ -214,10 +219,11 @@ interface KanbanBoardProps {
   availableChannels?: string[];
   view?: 'kanban' | 'list' | 'gantt';
   onAskAI?: (prompt: string) => void;
+  clients?: ClientOption[];
 }
 
 export const KanbanBoard = forwardRef(function KanbanBoard(
-  { actionPointClients, amFilter, onActionPointCompleted, accountManagers = [], availableChannels, view = 'kanban', onAskAI }: KanbanBoardProps,
+  { actionPointClients, amFilter, onActionPointCompleted, accountManagers = [], availableChannels, view = 'kanban', onAskAI, clients = [] }: KanbanBoardProps,
   ref: ForwardedRef<KanbanBoardHandle>
 ) {
   const today = new Date();
@@ -298,9 +304,11 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
   const [isAdding, setIsAdding] = useState(false);
   const [addText, setAddText] = useState('');
   const [addChannel, setAddChannel] = useState('');
-  const [addCategory, setAddCategory] = useState<'SET UP' | 'HEALTH CHECK'>('SET UP');
+  const [addCategory, setAddCategory] = useState<'SET UP' | 'HEALTH CHECK' | 'TODO'>('SET UP');
   const [addDaysBefore, setAddDaysBefore] = useState<string>('');
   const [addFrequency, setAddFrequency] = useState<'weekly' | 'fortnightly' | 'monthly'>('weekly');
+  const [addDueDate, setAddDueDate] = useState<string>('');
+  const [addClientId, setAddClientId] = useState<string>('');
   const [isSaving, setIsSaving] = useState(false);
 
   const channelOptions = availableChannels && availableChannels.length > 0
@@ -315,6 +323,8 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
       setAddDaysBefore('');
       setAddCategory('SET UP');
       setAddFrequency('weekly');
+      setAddDueDate('');
+      setAddClientId('');
     },
   }));
 
@@ -423,14 +433,16 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
     // Immediately show scratch-out
     setCompletingIds(prev => new Set(prev).add(card.id));
     try {
+      // TODO items have no per-client completion — mark the template directly
+      const isGenericTodo = card.tag === 'TODO';
       const res = await fetch('/api/action-points', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: card.id,
-          client_id: card.clientId,
-          completed: true,
-        }),
+        body: JSON.stringify(
+          isGenericTodo
+            ? { id: card.id, completed: true }
+            : { id: card.id, client_id: card.clientId, completed: true }
+        ),
       });
       if (!res.ok) {
         console.error('Failed to complete action point from Kanban');
@@ -477,17 +489,22 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
   }
 
   async function handleSaveAdd() {
-    if (!addText.trim() || !addChannel) return;
+    if (!addText.trim()) return;
+    if (addCategory !== 'TODO' && !addChannel) return;
     setIsSaving(true);
     try {
       const body: any = {
-        channel_type: addChannel,
         text: addText.trim(),
         category: addCategory,
       };
-      if (addCategory === 'SET UP') {
+      if (addCategory === 'TODO') {
+        if (addDueDate) body.due_date = addDueDate;
+        if (addClientId) body.client_id = addClientId;
+      } else if (addCategory === 'SET UP') {
+        body.channel_type = addChannel;
         body.days_before_live_due = addDaysBefore !== '' ? Number(addDaysBefore) : null;
       } else {
+        body.channel_type = addChannel;
         body.frequency = addFrequency;
       }
       const res = await fetch('/api/action-points', {
@@ -504,6 +521,8 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
       setAddText('');
       setAddChannel('');
       setAddDaysBefore('');
+      setAddDueDate('');
+      setAddClientId('');
       onActionPointCompleted?.();
     } catch (err) {
       console.error('Error adding action point:', err);
@@ -590,29 +609,11 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
             }}
             onKeyDown={e => { if (e.key === 'Enter') void handleSaveAdd(); if (e.key === 'Escape') setIsAdding(false); }}
           />
-          {/* Row 2: channel + category + conditional */}
+          {/* Row 2: category + conditional fields */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
             <select
-              value={addChannel}
-              onChange={e => setAddChannel(e.target.value)}
-              style={{
-                fontSize: 11,
-                padding: '3px 6px',
-                border: '0.5px solid #D5D0C5',
-                borderRadius: 8,
-                background: '#fff',
-                fontFamily: "'DM Sans', system-ui, sans-serif",
-                color: '#1C1917',
-                cursor: 'pointer',
-              }}
-            >
-              {channelOptions.map(c => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
-            <select
               value={addCategory}
-              onChange={e => setAddCategory(e.target.value as 'SET UP' | 'HEALTH CHECK')}
+              onChange={e => setAddCategory(e.target.value as 'SET UP' | 'HEALTH CHECK' | 'TODO')}
               style={{
                 fontSize: 11,
                 padding: '3px 6px',
@@ -624,9 +625,33 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                 cursor: 'pointer',
               }}
             >
+              <option value="TODO">TO DO</option>
               <option value="SET UP">SET UP</option>
               <option value="HEALTH CHECK">HEALTH CHECK</option>
             </select>
+
+            {/* Channel picker — only for SET UP / HEALTH CHECK */}
+            {addCategory !== 'TODO' && (
+              <select
+                value={addChannel}
+                onChange={e => setAddChannel(e.target.value)}
+                style={{
+                  fontSize: 11,
+                  padding: '3px 6px',
+                  border: '0.5px solid #D5D0C5',
+                  borderRadius: 8,
+                  background: '#fff',
+                  fontFamily: "'DM Sans', system-ui, sans-serif",
+                  color: '#1C1917',
+                  cursor: 'pointer',
+                }}
+              >
+                {channelOptions.map(c => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            )}
+
             {addCategory === 'SET UP' && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                 <span style={{ fontSize: 11, color: '#8A8578', whiteSpace: 'nowrap' }}>days before:</span>
@@ -670,18 +695,61 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                 <option value="monthly">monthly</option>
               </select>
             )}
+
+            {/* TODO-specific fields: due date + optional client */}
+            {addCategory === 'TODO' && (
+              <>
+                <input
+                  type="date"
+                  value={addDueDate}
+                  onChange={e => setAddDueDate(e.target.value)}
+                  style={{
+                    fontSize: 11,
+                    padding: '3px 6px',
+                    border: '0.5px solid #D5D0C5',
+                    borderRadius: 4,
+                    background: '#fff',
+                    fontFamily: "'DM Sans', system-ui, sans-serif",
+                    color: addDueDate ? '#1C1917' : '#8A8578',
+                    outline: 'none',
+                    cursor: 'pointer',
+                  }}
+                />
+                {clients.length > 0 && (
+                  <select
+                    value={addClientId}
+                    onChange={e => setAddClientId(e.target.value)}
+                    style={{
+                      fontSize: 11,
+                      padding: '3px 6px',
+                      border: '0.5px solid #D5D0C5',
+                      borderRadius: 8,
+                      background: '#fff',
+                      fontFamily: "'DM Sans', system-ui, sans-serif",
+                      color: '#1C1917',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <option value="">All clients</option>
+                    {clients.map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                )}
+              </>
+            )}
           </div>
           {/* Row 3: save / cancel */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <button
               onClick={() => void handleSaveAdd()}
-              disabled={isSaving || !addText.trim() || !addChannel}
+              disabled={isSaving || !addText.trim() || (addCategory !== 'TODO' && !addChannel)}
               style={{
                 display: 'flex', alignItems: 'center', gap: 3,
                 fontSize: 11, padding: '3px 10px',
                 borderRadius: 8, border: 'none',
-                background: isSaving || !addText.trim() || !addChannel ? '#D5D0C5' : '#4A6580',
-                color: '#fff', cursor: isSaving || !addText.trim() || !addChannel ? 'default' : 'pointer',
+                background: isSaving || !addText.trim() || (addCategory !== 'TODO' && !addChannel) ? '#D5D0C5' : '#4A6580',
+                color: '#fff', cursor: isSaving || !addText.trim() || (addCategory !== 'TODO' && !addChannel) ? 'default' : 'pointer',
                 fontFamily: "'DM Sans', system-ui, sans-serif",
               }}
             >
@@ -865,7 +933,7 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
       })()
     ) : view === 'list' ? (
       /* ── List view: single sorted column ── */
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
         {allCardsSorted.map((card) => {
           const isInProgress = inProgressIds.has(card.id);
           const isCompleting = completingIds.has(card.id);
@@ -873,14 +941,16 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
           const colColor = card.status === '1-2' ? '#A0442A' : card.status === '3-4' ? '#B07030' : '#4A6580';
           const clientCol = clientColor(card.clientId);
           return (
-            <div key={card.id} style={{
+            <div key={card.id} style={{ display: 'grid', gridTemplateRows: isCompleting ? '0fr' : '1fr', marginBottom: isCompleting ? 0 : 4, transition: 'grid-template-rows 0.45s ease 0.35s, margin-bottom 0.45s ease 0.35s', overflow: 'hidden' }}>
+            <div style={{ overflow: 'hidden' }}>
+            <div style={{
               background: isInProgress ? '#FFFBF4' : '#FDFCF8',
               border: `0.5px solid ${isInProgress ? 'rgba(176,112,48,0.4)' : '#E8E4DC'}`,
               borderLeft: `2px solid ${isInProgress ? '#B07030' : colColor}`,
               borderRadius: 5,
               overflow: 'hidden',
               opacity: isCompleting ? 0 : 1,
-              transition: isCompleting ? 'opacity 0.7s ease 0.2s' : undefined,
+              transition: 'opacity 0.3s ease',
               animation: isFlashing ? 'aiFlash 2s ease-out' : undefined,
             }}>
               {/* Client name header */}
@@ -920,7 +990,7 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                   {isInProgress && (
                     <span style={{ fontSize: 8, fontWeight: 600, color: '#B07030', background: 'rgba(176,112,48,0.12)', border: '0.5px solid rgba(176,112,48,0.3)', borderRadius: 3, padding: '1px 4px', textTransform: 'uppercase', letterSpacing: '0.07em', whiteSpace: 'nowrap' }}>In Progress</span>
                   )}
-                  <span style={{ fontSize: 9, fontWeight: 400, color: card.tag === 'SET UP' ? '#B07030' : card.tag === 'HEALTH CHECK' ? '#4A7C59' : '#4A6580', textTransform: 'uppercase', letterSpacing: '0.08em', whiteSpace: 'nowrap' }}>{card.tag}</span>
+                  <span style={{ fontSize: 9, fontWeight: 400, color: card.tag === 'SET UP' ? '#B07030' : card.tag === 'HEALTH CHECK' ? '#4A7C59' : card.tag === 'TODO' ? '#7A5C8A' : '#4A6580', textTransform: 'uppercase', letterSpacing: '0.08em', whiteSpace: 'nowrap' }}>{card.tag}</span>
                   <span style={{ fontSize: 9, fontWeight: 400, color: '#B5B0A5', whiteSpace: 'nowrap' }}>
                     {card.daysUntilDue === null ? 'no date' : card.daysUntilDue < 0 ? `${Math.abs(card.daysUntilDue)}d overdue` : card.daysUntilDue === 0 ? 'today' : `${card.daysUntilDue}d`}
                   </span>
@@ -938,6 +1008,8 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                 </div>
               </div>
               </div>
+            </div>
+            </div>
             </div>
           );
         })}
@@ -963,14 +1035,14 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
               <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.7)', marginLeft: 'auto' }}>{overdueCards.length}</span>
             </div>
             <div style={{ position: 'relative' }}>
-              <div style={{ overflowY: 'auto', maxHeight: 340, display: 'flex', flexDirection: 'column', gap: 5, paddingBottom: overdueCards.length > 3 ? 10 : 2 }}>
+              <div style={{ overflowY: 'auto', maxHeight: 340, display: 'flex', flexDirection: 'column', paddingBottom: overdueCards.length > 3 ? 10 : 2 }}>
                 {overdueCards.map((card) => {
                   const isInProgress = inProgressIds.has(card.id);
                   const isCompleting = completingIds.has(card.id);
                   const isFlashing = flashingIds.has(card.id);
                   const clientCol = clientColor(card.clientId);
                   return (
-                    <div key={card.id} style={{ display: 'grid', gridTemplateRows: isCompleting ? '0fr' : '1fr', transition: isCompleting ? 'grid-template-rows 0.45s ease 0.35s' : undefined, overflow: 'hidden', flexShrink: 0 }}>
+                    <div key={card.id} style={{ display: 'grid', gridTemplateRows: isCompleting ? '0fr' : '1fr', marginBottom: isCompleting ? 0 : 5, transition: 'grid-template-rows 0.45s ease 0.35s, margin-bottom 0.45s ease 0.35s', overflow: 'hidden', flexShrink: 0 }}>
                     <div style={{ overflow: 'hidden' }}>
                     <div style={{ background: isInProgress ? '#FFFBF4' : '#FDFCF8', border: `0.5px solid ${isInProgress ? 'rgba(176,112,48,0.4)' : '#E8E4DC'}`, borderLeft: `2px solid ${isInProgress ? '#B07030' : OVERDUE_COLOR}`, borderRadius: 5, overflow: 'hidden', animation: isFlashing ? 'aiFlash 2s ease-out' : undefined }}>
                       <div style={{ background: clientCol, padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -987,7 +1059,7 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                             {isInProgress && (
                               <span style={{ fontSize: 8, fontWeight: 600, color: '#B07030', background: 'rgba(176,112,48,0.12)', border: '0.5px solid rgba(176,112,48,0.3)', borderRadius: 3, padding: '1px 4px', textTransform: 'uppercase', letterSpacing: '0.07em', whiteSpace: 'nowrap' }}>In Progress</span>
                             )}
-                            <span style={{ fontSize: 9, fontWeight: 400, color: card.tag === 'SET UP' ? '#B07030' : card.tag === 'HEALTH CHECK' ? '#4A7C59' : '#4A6580', textTransform: 'uppercase', letterSpacing: '0.08em', whiteSpace: 'nowrap' }}>{card.tag}</span>
+                            <span style={{ fontSize: 9, fontWeight: 400, color: card.tag === 'SET UP' ? '#B07030' : card.tag === 'HEALTH CHECK' ? '#4A7C59' : card.tag === 'TODO' ? '#7A5C8A' : '#4A6580', textTransform: 'uppercase', letterSpacing: '0.08em', whiteSpace: 'nowrap' }}>{card.tag}</span>
                             <span style={{ fontSize: 9, fontWeight: 500, color: OVERDUE_COLOR, whiteSpace: 'nowrap' }}>
                               {Math.abs(card.daysUntilDue!)}d overdue
                             </span>
@@ -1044,7 +1116,6 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                 maxHeight: 340,
                 display: 'flex',
                 flexDirection: 'column',
-                gap: 5,
                 paddingBottom: colCards.length > 3 ? 10 : 2,
               }}>
               {colCards.map((card) => {
@@ -1053,7 +1124,7 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                 const isFlashing = flashingIds.has(card.id);
                 const clientCol = clientColor(card.clientId);
                 return (
-                <div key={card.id} style={{ display: 'grid', gridTemplateRows: isCompleting ? '0fr' : '1fr', transition: isCompleting ? 'grid-template-rows 0.45s ease 0.35s' : undefined, overflow: 'hidden', flexShrink: 0, marginBottom: isCompleting ? 0 : undefined }}>
+                <div key={card.id} style={{ display: 'grid', gridTemplateRows: isCompleting ? '0fr' : '1fr', marginBottom: isCompleting ? 0 : 5, transition: 'grid-template-rows 0.45s ease 0.35s, margin-bottom 0.45s ease 0.35s', overflow: 'hidden', flexShrink: 0 }}>
                 <div style={{ overflow: 'hidden' }}>
                 <div style={{
                   background: isInProgress ? '#FFFBF4' : '#FDFCF8',
@@ -1134,7 +1205,7 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                       )}
                       <span style={{
                         fontSize: 9, fontWeight: 400,
-                        color: card.tag === 'SET UP' ? '#B07030' : card.tag === 'HEALTH CHECK' ? '#4A7C59' : '#4A6580',
+                        color: card.tag === 'SET UP' ? '#B07030' : card.tag === 'HEALTH CHECK' ? '#4A7C59' : card.tag === 'TODO' ? '#7A5C8A' : '#4A6580',
                         textTransform: 'uppercase', letterSpacing: '0.08em',
                         whiteSpace: 'nowrap',
                       }}>
@@ -1239,7 +1310,7 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
             <span style={{ fontSize: 10, color: '#8A8578' }}>{ganttPopup.card.channelType}</span>
             <span style={{
               fontSize: 9, fontWeight: 500, marginLeft: 'auto',
-              color: ganttPopup.card.tag === 'SET UP' ? '#B07030' : '#4A7C59',
+              color: ganttPopup.card.tag === 'SET UP' ? '#B07030' : ganttPopup.card.tag === 'TODO' ? '#7A5C8A' : '#4A7C59',
               textTransform: 'uppercase', letterSpacing: '0.08em',
             }}>{ganttPopup.card.tag}</span>
           </div>

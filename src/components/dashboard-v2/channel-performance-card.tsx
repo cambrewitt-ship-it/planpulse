@@ -372,9 +372,13 @@ function MetricSlot({
   }, [swapOpen]);
 
   const [actionOpen, setActionOpen] = useState(false);
+  const [actionSearch, setActionSearch] = useState('');
   const actionRef = useRef<HTMLDivElement>(null);
+  const actionSearchRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (!actionOpen) return;
+    setActionSearch('');
+    setTimeout(() => actionSearchRef.current?.focus(), 0);
     function handleClick(e: MouseEvent) {
       if (actionRef.current && !actionRef.current.contains(e.target as Node)) setActionOpen(false);
     }
@@ -421,29 +425,50 @@ function MetricSlot({
             <div style={{
               position: 'absolute', top: '100%', left: 0, zIndex: 40, marginTop: 2,
               background: 'white', border: '1px solid #e5e7eb', borderRadius: 6,
-              boxShadow: '0 4px 12px rgba(0,0,0,0.12)', minWidth: 180, maxHeight: 200,
-              overflowY: 'auto',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.12)', minWidth: 200,
             }}>
-              {(actionTypes ?? []).length === 0 ? (
-                <div style={{ padding: '8px 10px', fontSize: 11, color: '#9ca3af' }}>No events found</div>
-              ) : (actionTypes ?? []).map(type => (
-                <button
-                  key={type}
-                  onClick={() => { onActionTypeChange?.(type); setActionOpen(false); }}
+              <div style={{ padding: '6px 8px', borderBottom: '1px solid #f3f4f6' }}>
+                <input
+                  ref={actionSearchRef}
+                  value={actionSearch}
+                  onChange={e => setActionSearch(e.target.value)}
+                  placeholder="Search events..."
+                  onClick={e => e.stopPropagation()}
                   style={{
-                    display: 'block', width: '100%', textAlign: 'left',
-                    padding: '6px 10px', fontSize: 11,
-                    color: type === selectedActionType ? '#2563eb' : '#374151',
-                    fontWeight: type === selectedActionType ? 600 : 400,
-                    background: type === selectedActionType ? '#eff6ff' : 'transparent',
-                    border: 'none', cursor: 'pointer',
+                    width: '100%', border: '1px solid #e5e7eb', borderRadius: 4,
+                    padding: '3px 7px', fontSize: 11, outline: 'none', color: '#374151',
+                    boxSizing: 'border-box',
                   }}
-                  onMouseEnter={e => { if (type !== selectedActionType) (e.currentTarget as HTMLElement).style.background = '#f9fafb'; }}
-                  onMouseLeave={e => { if (type !== selectedActionType) (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
-                >
-                  {actionTypeLabel(type)}
-                </button>
-              ))}
+                />
+              </div>
+              <div style={{ maxHeight: 180, overflowY: 'auto' }}>
+                {(() => {
+                  const filtered = (actionTypes ?? []).filter(t =>
+                    actionTypeLabel(t).toLowerCase().includes(actionSearch.toLowerCase())
+                  );
+                  if (filtered.length === 0) {
+                    return <div style={{ padding: '8px 10px', fontSize: 11, color: '#9ca3af' }}>No events found</div>;
+                  }
+                  return filtered.map(type => (
+                    <button
+                      key={type}
+                      onClick={() => { onActionTypeChange?.(type); setActionOpen(false); }}
+                      style={{
+                        display: 'block', width: '100%', textAlign: 'left',
+                        padding: '6px 10px', fontSize: 11,
+                        color: type === selectedActionType ? '#2563eb' : '#374151',
+                        fontWeight: type === selectedActionType ? 600 : 400,
+                        background: type === selectedActionType ? '#eff6ff' : 'transparent',
+                        border: 'none', cursor: 'pointer',
+                      }}
+                      onMouseEnter={e => { if (type !== selectedActionType) (e.currentTarget as HTMLElement).style.background = '#f9fafb'; }}
+                      onMouseLeave={e => { if (type !== selectedActionType) (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+                    >
+                      {actionTypeLabel(type)}
+                    </button>
+                  ));
+                })()}
+              </div>
             </div>
           )}
         </div>
@@ -628,7 +653,11 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
     return [line1, line2];
   })();
 
-  const [selectedActionType, setSelectedActionType] = useState<string>('');
+  const convEventStorageKey = `conv-event-${clientId ?? ''}-${channel.id ?? channel.name}`;
+  const [selectedActionType, setSelectedActionType] = useState<string>(() => {
+    if (typeof window === 'undefined') return '';
+    return localStorage.getItem(convEventStorageKey) ?? '';
+  });
   const [actionDropdownOpen, setActionDropdownOpen] = useState(false);
   const actionDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -642,6 +671,13 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
   }, [actionDropdownOpen]);
+
+  const handleSetSelectedActionType = (type: string) => {
+    setSelectedActionType(type);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(convEventStorageKey, type);
+    }
+  };
 
   // Derive unique action types from raw spend points
   const availableActionTypes = useMemo(() => {
@@ -658,10 +694,13 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
     return Array.from(seen).sort();
   }, [selectedCampaignIds, channel.rawSpendPoints]);
 
-  // Auto-select first action type when available types change
+  // Auto-select first action type only when no persisted value exists
   useEffect(() => {
     if (availableActionTypes.length > 0 && !availableActionTypes.includes(selectedActionType)) {
-      setSelectedActionType(availableActionTypes[0]);
+      const persisted = typeof window !== 'undefined' ? localStorage.getItem(convEventStorageKey) : null;
+      if (!persisted || !availableActionTypes.includes(persisted)) {
+        handleSetSelectedActionType(availableActionTypes[0]);
+      }
     }
   }, [availableActionTypes]);
 
@@ -1098,7 +1137,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                     onSwap={(newKey) => handleSwapMetric(slotIdx, newKey)}
                     actionTypes={effectiveKey === 'conv_events' ? availableActionTypes : undefined}
                     selectedActionType={effectiveKey === 'conv_events' ? selectedActionType : undefined}
-                    onActionTypeChange={effectiveKey === 'conv_events' ? setSelectedActionType : undefined}
+                    onActionTypeChange={effectiveKey === 'conv_events' ? handleSetSelectedActionType : undefined}
                   />
                 );
               })}

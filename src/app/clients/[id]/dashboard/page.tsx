@@ -171,6 +171,8 @@ export default function DashboardV2() {
   const [availablePlatformEvents, setAvailablePlatformEvents] = useState<PlatformEventOption[]>([]);
   const [selectedChannels, setSelectedChannels] = useState<Set<string>>(new Set());
   const [availableChannels, setAvailableChannels] = useState<Array<{ id: string; name: string }>>([]);
+  const [selectedCampaignIds, setSelectedCampaignIds] = useState<Set<string>>(new Set());
+  const [availableCampaigns, setAvailableCampaigns] = useState<Array<{ id: string; name: string; channelId: string }>>([]);;
   const [viewMode, setViewMode] = useState<'overview' | 'funnels' | 'media-plan' | 'admin'>('overview');
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
   const [logoUploadError, setLogoUploadError] = useState<string | null>(null);
@@ -570,7 +572,9 @@ export default function DashboardV2() {
     }
   }, [selectedFunnelId, funnels, viewMode]);
 
-  // Reload analytics when date range, selected metric, event name, or metric source changes
+  // Reload analytics when date range, selected metric, or event name changes.
+  // Switching metricSource / platformMetricKey does NOT need a full refetch —
+  // the second effect below recalculates in-memory from already-loaded spend data.
   useEffect(() => {
     if (clientId) {
       const eventName = selectedMetric === 'eventCount' ? selectedEventName : null;
@@ -581,14 +585,16 @@ export default function DashboardV2() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [analyticsDateRange.startDate, analyticsDateRange.endDate, clientId, selectedMetric, selectedEventName, selectedMetricSource, selectedPlatformMetricKey]);
+  }, [analyticsDateRange.startDate, analyticsDateRange.endDate, clientId, selectedMetric, selectedEventName]);
 
-  // Recalculate cost metrics when selected channels, source, or platform metric key changes
+  // Recalculate cost metrics when selected channels, campaigns, source, or platform metric key changes
   useEffect(() => {
     if (spendData.length > 0 && availableChannels.length > 0 && selectedChannels.size > 0) {
-      const filteredSpendData = spendData.filter((point: any) =>
-        point.channelId && selectedChannels.has(point.channelId)
-      );
+      const filteredSpendData = spendData.filter((point: any) => {
+        if (point.channelId && !selectedChannels.has(point.channelId)) return false;
+        if (selectedCampaignIds.size > 0 && point.campaignId && !selectedCampaignIds.has(point.campaignId)) return false;
+        return true;
+      });
 
       const costResult = selectedMetricSource !== 'ga4'
         ? calculateCostPerPlatformMetric(filteredSpendData, selectedPlatformMetricKey, selectedMetricSource as 'meta' | 'google')
@@ -605,7 +611,7 @@ export default function DashboardV2() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedChannels, spendData, ga4Data, selectedMetric, selectedMetricSource, selectedPlatformMetricKey]);
+  }, [selectedChannels, selectedCampaignIds, spendData, ga4Data, selectedMetric, selectedMetricSource, selectedPlatformMetricKey]);
 
   const loadData = async () => {
     try {
@@ -806,9 +812,20 @@ export default function DashboardV2() {
         setSelectedChannels(new Set(channels.map(ch => ch.id)));
       }
 
-      const filteredSpendData = selectedChannels.size > 0
-        ? enhancedSpendData.filter((point: any) => point.channelId && selectedChannels.has(point.channelId))
-        : enhancedSpendData;
+      // Derive available campaigns from spend data
+      const campaignMap = new Map<string, { name: string; channelId: string }>();
+      enhancedSpendData.forEach((point: any) => {
+        if (point.campaignId && point.campaignName && !campaignMap.has(point.campaignId)) {
+          campaignMap.set(point.campaignId, { name: point.campaignName, channelId: point.channelId || '' });
+        }
+      });
+      setAvailableCampaigns(Array.from(campaignMap.entries()).map(([id, { name, channelId }]) => ({ id, name, channelId })));
+
+      const filteredSpendData = enhancedSpendData.filter((point: any) => {
+        if (selectedChannels.size > 0 && point.channelId && !selectedChannels.has(point.channelId)) return false;
+        if (selectedCampaignIds.size > 0 && point.campaignId && !selectedCampaignIds.has(point.campaignId)) return false;
+        return true;
+      });
 
       const costResult = selectedMetricSource !== 'ga4'
         ? calculateCostPerPlatformMetric(filteredSpendData, selectedPlatformMetricKey, selectedMetricSource as 'meta' | 'google')
@@ -1930,7 +1947,7 @@ export default function DashboardV2() {
             {viewMode === 'overview' && (
               <>
                 {/* Notes (left, collapsible) + Action Points list (right) */}
-                <div style={{ display: 'flex', gap: 16, height: 240 }}>
+                <div style={{ display: 'flex', gap: 16, alignItems: 'stretch' }}>
                   {/* Notes panel */}
                   <div style={{
                     flexShrink: 0,
@@ -2092,8 +2109,8 @@ export default function DashboardV2() {
                     )}
                   </div>
 
-                  {/* Action Points — fills remaining space */}
-                  <div style={{ flex: 1, minWidth: 0 }}>
+                  {/* Action Points — grows with content */}
+                  <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
                     <ClientActionPointsList
                       actionPoints={enrichedActionPoints}
                       onToggle={handleToggleActionPoint}
@@ -2348,6 +2365,9 @@ export default function DashboardV2() {
                       availablePlatformEvents={availablePlatformEvents}
                       selectedPlatformMetricKey={selectedPlatformMetricKey}
                       onPlatformMetricChange={setSelectedPlatformMetricKey}
+                      availableCampaigns={availableCampaigns}
+                      selectedCampaignIds={selectedCampaignIds}
+                      onCampaignIdsChange={setSelectedCampaignIds}
                     />
                   </div>
 

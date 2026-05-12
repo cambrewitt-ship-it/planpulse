@@ -11,10 +11,6 @@ VALUES
   
   ('Google Ads', 'Google Ads', 'Google''s comprehensive advertising platform including Search, Display, Shopping, Video, and App campaigns. Reach users across Google''s vast network with intent-based targeting.', NOW(), NOW()),
   
-  ('Google Search', 'Google Search Ads', 'Text-based ads appearing in Google search results. Target users actively searching for products or services with keyword-based campaigns. Pay-per-click model with high intent traffic.', NOW(), NOW()),
-  
-  ('Google Shopping', 'Google Shopping Ads', 'Product-focused ads displaying images, prices, and merchant information in Google Search and Shopping tab. Ideal for e-commerce businesses with product catalogs.', NOW(), NOW()),
-  
   ('LinkedIn Ads', 'LinkedIn Ads', 'Professional B2B advertising platform. Target audiences by job title, industry, company size, and professional attributes. Ideal for lead generation, brand awareness, and recruitment.', NOW(), NOW()),
   
   ('TikTok Ads', 'TikTok Ads', 'Short-form video advertising on TikTok platform. Reach younger demographics with engaging, creative video content. Multiple ad formats including in-feed ads, branded effects, and top view.', NOW(), NOW()),

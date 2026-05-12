@@ -11,9 +11,9 @@ import {
   ResponsiveContainer,
   Label,
 } from "recharts";
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { AlertTriangle, TrendingUp, TrendingDown, Minus, Filter, Facebook, Search, Linkedin, Music, Instagram } from "lucide-react";
+import { AlertTriangle, TrendingUp, TrendingDown, Minus, Filter, Facebook, Search, Linkedin, Music, Instagram, ChevronsUpDown, Check } from "lucide-react";
 import { getChannelLogo } from '@/lib/utils/channel-icons';
 import {
   DropdownMenu,
@@ -31,6 +31,20 @@ import {
   SelectItem,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Popover,
+  PopoverTrigger,
+  PopoverContent,
+} from "@/components/ui/popover";
+import {
+  Command,
+  CommandInput,
+  CommandList,
+  CommandEmpty,
+  CommandGroup,
+  CommandItem,
+} from "@/components/ui/command";
+import { cn } from "@/lib/utils";
 import type { MetricSource, PlatformEventOption } from "@/lib/api/analytics-data-integration";
 
 interface CostMetricPoint {
@@ -69,6 +83,10 @@ interface CostPerMetricChartProps {
   availablePlatformEvents?: PlatformEventOption[];
   selectedPlatformMetricKey?: string;
   onPlatformMetricChange?: (key: string) => void;
+  // Campaign filter
+  availableCampaigns?: Array<{ id: string; name: string; channelId: string }>;
+  selectedCampaignIds?: Set<string>;
+  onCampaignIdsChange?: (ids: Set<string>) => void;
 }
 
 // Get singular display name for metric
@@ -86,6 +104,65 @@ function getMetricDisplayName(metricKey: string): string {
 // Get channel icon based on channel name or platform
 function getChannelIcon(channelName: string) {
   return getChannelLogo(channelName, "w-4 h-4");
+}
+
+// Searchable combobox for the platform (Meta / Google) event picker
+function PlatformEventCombobox({
+  events,
+  value,
+  onChange,
+}: {
+  events: PlatformEventOption[];
+  value: string;
+  onChange: (key: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const selectedLabel = events.find(e => e.key === value)?.label ?? value;
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          className="h-9 w-[220px] justify-between text-sm font-normal"
+        >
+          <span className="truncate">{selectedLabel || 'Select event'}</span>
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[280px] p-0" align="start">
+        <Command>
+          <CommandInput placeholder="Search events…" className="h-9" />
+          <CommandList>
+            <CommandEmpty>No events found.</CommandEmpty>
+            <CommandGroup>
+              {events.map(event => (
+                <CommandItem
+                  key={event.key}
+                  value={`${event.label} ${event.key}`}
+                  onSelect={() => { onChange(event.key); setOpen(false); }}
+                  className="flex items-center justify-between gap-2"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Check className={cn('h-4 w-4 shrink-0', event.key === value ? 'opacity-100' : 'opacity-0')} />
+                    <span className="truncate">{event.label}</span>
+                  </div>
+                  {event.count !== undefined && (
+                    <span className="text-xs text-gray-400 shrink-0">{event.count.toLocaleString()}</span>
+                  )}
+                </CommandItem>
+              ))}
+              {events.length === 0 && (
+                <CommandItem disabled value="_none">No events available</CommandItem>
+              )}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 // Metric configuration with Grafana colors - keys match new property names
@@ -120,6 +197,9 @@ export function CostPerMetricChart({
   availablePlatformEvents = [],
   selectedPlatformMetricKey = 'clicks',
   onPlatformMetricChange,
+  availableCampaigns = [],
+  selectedCampaignIds = new Set(),
+  onCampaignIdsChange,
 }: CostPerMetricChartProps) {
   // State for comparison mode
   const [showComparison, setShowComparison] = useState(false);
@@ -501,6 +581,26 @@ export function CostPerMetricChart({
     onChannelsChange(new Set());
   };
 
+  const handleCampaignToggle = (campaignId: string) => {
+    if (!onCampaignIdsChange) return;
+    const next = new Set(selectedCampaignIds);
+    if (next.has(campaignId)) {
+      next.delete(campaignId);
+    } else {
+      next.add(campaignId);
+    }
+    onCampaignIdsChange(next);
+  };
+
+  const handleSelectAllCampaigns = () => {
+    if (!onCampaignIdsChange) return;
+    onCampaignIdsChange(new Set());
+  };
+
+  const campaignsLabel = selectedCampaignIds.size === 0
+    ? 'All Campaigns'
+    : `${selectedCampaignIds.size} Campaign${selectedCampaignIds.size > 1 ? 's' : ''}`;
+
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -614,39 +714,13 @@ export function CostPerMetricChart({
               </div>
             )}
 
-            {/* Platform metric selector for Meta / Google */}
+            {/* Platform metric selector for Meta / Google — searchable combobox */}
             {onPlatformMetricChange && (metricSource === 'meta' || metricSource === 'google') && (
-              <div className="flex items-center gap-2">
-                <Select
-                  value={selectedPlatformMetricKey}
-                  onValueChange={onPlatformMetricChange}
-                >
-                  <SelectTrigger className="w-[200px] h-9 text-sm">
-                    <SelectValue placeholder="Select event" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {availablePlatformEvents
-                      .filter(e => e.source === metricSource)
-                      .map((event) => (
-                        <SelectItem key={event.key} value={event.key}>
-                          <div className="flex items-center justify-between w-full gap-2">
-                            <span className="truncate">{event.label}</span>
-                            {event.count !== undefined && (
-                              <span className="text-xs text-gray-400">
-                                ({event.count.toLocaleString()})
-                              </span>
-                            )}
-                          </div>
-                        </SelectItem>
-                      ))}
-                    {availablePlatformEvents.filter(e => e.source === metricSource).length === 0 && (
-                      <SelectItem value="_none" disabled>
-                        No events available
-                      </SelectItem>
-                    )}
-                  </SelectContent>
-                </Select>
-              </div>
+              <PlatformEventCombobox
+                events={availablePlatformEvents.filter(e => e.source === metricSource)}
+                value={selectedPlatformMetricKey}
+                onChange={onPlatformMetricChange}
+              />
             )}
           </div>
 
@@ -703,6 +777,50 @@ export function CostPerMetricChart({
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
+            {/* Campaign Filter */}
+            {availableCampaigns.length > 0 && onCampaignIdsChange && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="gap-2 max-w-[200px]">
+                    <Filter className="h-4 w-4 shrink-0" />
+                    <span className="truncate">{campaignsLabel}</span>
+                    {selectedCampaignIds.size > 0 && (
+                      <span className="ml-1 bg-primary text-primary-foreground rounded-full px-1.5 py-0.5 text-xs shrink-0">
+                        {selectedCampaignIds.size}
+                      </span>
+                    )}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-72">
+                  <DropdownMenuLabel>Filter by Campaign</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <div className="px-2 py-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 text-xs w-full justify-start"
+                      onClick={handleSelectAllCampaigns}
+                    >
+                      {selectedCampaignIds.size === 0 ? '✓ ' : ''}All Campaigns
+                    </Button>
+                  </div>
+                  <DropdownMenuSeparator />
+                  <div className="max-h-64 overflow-y-auto">
+                    {availableCampaigns.map((campaign) => (
+                      <DropdownMenuCheckboxItem
+                        key={campaign.id}
+                        checked={selectedCampaignIds.has(campaign.id)}
+                        onCheckedChange={() => handleCampaignToggle(campaign.id)}
+                        className="pr-2"
+                      >
+                        <span className="truncate text-sm">{campaign.name}</span>
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                  </div>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+
             {/* Comparison Toggle */}
             <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
               <input

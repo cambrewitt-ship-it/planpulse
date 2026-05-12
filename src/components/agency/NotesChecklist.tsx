@@ -1,7 +1,7 @@
 // src/components/agency/NotesChecklist.tsx
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '@/lib/supabase/client';
 
 interface Note {
@@ -17,6 +17,8 @@ function genId() {
 }
 
 const LOCAL_KEY = (userId: string) => `agency_notes_${userId}`;
+const FREE_TEXT_KEY = (userId: string, scope: string) => `agency_notes_freetext_${userId}_${scope}`;
+const MODE_KEY = (userId: string, scope: string) => `agency_notes_mode_${userId}_${scope}`;
 
 function formatDueDate(dateStr: string | null): string {
   if (!dateStr) return '';
@@ -52,26 +54,43 @@ interface NotesChecklistProps {
 
 const DRAFT_ID = '__draft__';
 
+function autoResize(el: HTMLTextAreaElement | null) {
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = el.scrollHeight + 'px';
+}
+
 export function NotesChecklist({ filteredClientIds, activeClientId }: NotesChecklistProps = {}) {
   const [notes, setNotes] = useState<Note[]>([]);
   const [userId, setUserId] = useState<string | null>(null);
   const [useLocal, setUseLocal] = useState(false);
-  // inline text edits: noteId → current text (including the DRAFT_ID sentinel)
   const [editTexts, setEditTexts] = useState<Record<string, string>>({ [DRAFT_ID]: '' });
-  // inline due-date edits keyed same way
   const [editDates, setEditDates] = useState<Record<string, string>>({});
+  const [mode, setMode] = useState<'checklist' | 'notes'>('checklist');
+  const [freeText, setFreeText] = useState('');
 
-  // refs for every input row, keyed by id (includes DRAFT_ID)
-  const inputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const inputRefs = useRef<Record<string, HTMLTextAreaElement | null>>({});
   const listRef = useRef<HTMLDivElement>(null);
+  const freeTextRef = useRef<HTMLTextAreaElement>(null);
 
   const sansFont = "'DM Sans', system-ui, sans-serif";
+
+  const scope = activeClientId ?? 'global';
 
   useEffect(() => {
     (async () => {
       const { data: { session } } = await supabase.auth.getSession();
       const uid = session?.user?.id ?? null;
       setUserId(uid);
+
+      // Restore mode from localStorage
+      if (uid) {
+        const savedMode = localStorage.getItem(MODE_KEY(uid, scope));
+        if (savedMode === 'notes' || savedMode === 'checklist') setMode(savedMode);
+        const savedText = localStorage.getItem(FREE_TEXT_KEY(uid, scope));
+        if (savedText !== null) setFreeText(savedText);
+      }
+
       if (!uid) return;
 
       try {
@@ -83,7 +102,6 @@ export function NotesChecklist({ filteredClientIds, activeClientId }: NotesCheck
         if (error) throw error;
         const loaded: Note[] = data || [];
         setNotes(loaded);
-        // seed editTexts with all note texts so inputs are controlled
         const texts: Record<string, string> = { [DRAFT_ID]: '' };
         loaded.forEach(n => { texts[n.id] = n.text; });
         setEditTexts(texts);
@@ -101,7 +119,18 @@ export function NotesChecklist({ filteredClientIds, activeClientId }: NotesCheck
         }
       }
     })();
-  }, []);
+  }, [scope]);
+
+  // Persist mode toggle
+  function switchMode(next: 'checklist' | 'notes') {
+    setMode(next);
+    if (userId) localStorage.setItem(MODE_KEY(userId, scope), next);
+  }
+
+  // Save free-text notes (localStorage only for now)
+  const saveFreeText = useCallback((text: string) => {
+    if (userId) localStorage.setItem(FREE_TEXT_KEY(userId, scope), text);
+  }, [userId, scope]);
 
   function persistLocal(updated: Note[]) {
     if (userId) {
@@ -136,7 +165,6 @@ export function NotesChecklist({ filteredClientIds, activeClientId }: NotesCheck
     }
   }
 
-  // Synchronous optimistic creation — adds to state immediately, persists in background.
   function createNote(text: string, due_date: string | null, insertAfterIndex: number): string {
     const tempId = genId();
     const client_id = activeClientId ?? null;
@@ -153,7 +181,6 @@ export function NotesChecklist({ filteredClientIds, activeClientId }: NotesCheck
       return next;
     };
 
-    // Update state immediately — note appears before any network call
     setNotes(insertIntoList);
     setEditTexts(prev => ({ ...prev, [tempId]: trimmed }));
 
@@ -164,7 +191,6 @@ export function NotesChecklist({ filteredClientIds, activeClientId }: NotesCheck
       return tempId;
     }
 
-    // Save to Supabase in background; swap temp ID for real DB ID when done
     ;(async () => {
       try {
         const { data, error } = await (supabase as any)
@@ -228,21 +254,19 @@ export function NotesChecklist({ filteredClientIds, activeClientId }: NotesCheck
 
   const visibleNotes = getVisibleNotes(notes);
 
-  // Focus a specific input after React re-renders
   function focusAfterRender(id: string) {
     requestAnimationFrame(() => {
       const el = inputRefs.current[id];
       if (el) {
         el.focus();
-        // place cursor at end
         const len = el.value.length;
         el.setSelectionRange(len, len);
       }
     });
   }
 
-  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>, id: string, visibleIdx: number) {
-    if (e.key === 'Enter') {
+  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>, id: string, visibleIdx: number) {
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       const text = editTexts[id] ?? '';
 
@@ -253,7 +277,6 @@ export function NotesChecklist({ filteredClientIds, activeClientId }: NotesCheck
         setEditDates(prev => { const c = { ...prev }; delete c[DRAFT_ID]; return c; });
         focusAfterRender(DRAFT_ID);
       } else {
-        // Fire-and-forget any pending text change on the current row
         const note = notes.find(n => n.id === id);
         if (note && text.trim() !== note.text) {
           saveNoteText(id, text);
@@ -276,7 +299,7 @@ export function NotesChecklist({ filteredClientIds, activeClientId }: NotesCheck
   }
 
   function handleBlur(id: string) {
-    if (id === DRAFT_ID) return; // draft is only committed on Enter
+    if (id === DRAFT_ID) return;
     const note = notes.find(n => n.id === id);
     const text = editTexts[id] ?? '';
     if (note && text.trim() !== note.text) {
@@ -287,6 +310,15 @@ export function NotesChecklist({ filteredClientIds, activeClientId }: NotesCheck
       }
     }
   }
+
+  const moleskineBackground = {
+    backgroundImage: [
+      'repeating-linear-gradient(transparent, transparent 27px, rgba(160,200,240,0.55) 27px, rgba(160,200,240,0.55) 28px)',
+      'linear-gradient(to right, transparent 28px, rgba(220,90,90,0.28) 28px, rgba(220,90,90,0.28) 29.5px, transparent 29.5px)',
+    ].join(', '),
+    backgroundPositionY: '4px',
+    backgroundPositionX: '0px',
+  };
 
   return (
     <div
@@ -308,64 +340,122 @@ export function NotesChecklist({ filteredClientIds, activeClientId }: NotesCheck
         borderBottom: '1.5px solid #E0E8F4',
         background: '#FFFFFF',
       }}>
-        <div style={{ fontSize: 9, fontWeight: 600, color: '#8A8578', textTransform: 'uppercase', letterSpacing: '0.12em' }}>Notes</div>
-        <div style={{ fontSize: 9, color: '#C0BBC0', marginTop: 1 }}>Only visible to you</div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <div style={{ fontSize: 9, fontWeight: 600, color: '#8A8578', textTransform: 'uppercase', letterSpacing: '0.12em' }}>Notes</div>
+            <div style={{ fontSize: 9, color: '#C0BBC0', marginTop: 1 }}>Only visible to you</div>
+          </div>
+          {/* Mode toggle */}
+          <div style={{
+            display: 'flex',
+            background: '#2C2926',
+            borderRadius: 6,
+            padding: 2,
+            gap: 1,
+          }}>
+            {(['notes', 'checklist'] as const).map(m => (
+              <button
+                key={m}
+                onClick={() => switchMode(m)}
+                style={{
+                  fontSize: 9,
+                  fontWeight: 600,
+                  padding: '3px 8px',
+                  borderRadius: 4,
+                  border: 'none',
+                  cursor: 'pointer',
+                  background: mode === m ? '#FFFFFF' : '#4A4540',
+                  color: mode === m ? '#1C1917' : '#FFFFFF',
+                  boxShadow: mode === m ? '0 1px 3px rgba(0,0,0,0.3)' : 'none',
+                  textTransform: 'capitalize',
+                  transition: 'all 0.15s',
+                  fontFamily: sansFont,
+                }}
+              >
+                {m}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
-      {/* Notes list — scrollable, moleskine-ruled */}
-      <div
-        ref={listRef}
-        style={{
-          flex: 1,
-          overflowY: 'auto',
-          padding: '4px 0',
-          backgroundImage: [
-            'repeating-linear-gradient(transparent, transparent 27px, rgba(160,200,240,0.55) 27px, rgba(160,200,240,0.55) 28px)',
-            'linear-gradient(to right, transparent 28px, rgba(220,90,90,0.28) 28px, rgba(220,90,90,0.28) 29.5px, transparent 29.5px)',
-          ].join(', '),
-          backgroundPositionY: '4px',
-          backgroundPositionX: '0px',
-        }}
-        onClick={e => {
-          // Clicking empty space in the list focuses the draft input
-          if (e.target === e.currentTarget) {
-            inputRefs.current[DRAFT_ID]?.focus();
-          }
-        }}
-      >
-        {visibleNotes.map((note, idx) => (
-          <NoteRow
-            key={note.id}
-            note={note}
-            text={editTexts[note.id] ?? note.text}
-            dateValue={editDates[note.id] !== undefined ? editDates[note.id] : (note.due_date ?? '')}
-            inputRef={el => { inputRefs.current[note.id] = el; }}
-            onToggle={() => toggleNote(note.id)}
-            onTextChange={v => setEditTexts(prev => ({ ...prev, [note.id]: v }))}
-            onDateChange={v => {
-              setEditDates(prev => ({ ...prev, [note.id]: v }));
-              updateNoteDate(note.id, v || null);
+      {mode === 'notes' ? (
+        /* ── Free-text Notes mode ── */
+        <div
+          style={{ flex: 1, overflowY: 'auto', padding: '4px 0', ...moleskineBackground }}
+          onClick={() => freeTextRef.current?.focus()}
+        >
+          <textarea
+            ref={freeTextRef}
+            value={freeText}
+            onChange={e => {
+              setFreeText(e.target.value);
+              saveFreeText(e.target.value);
+              autoResize(e.target);
             }}
-            onBlur={() => handleBlur(note.id)}
-            onKeyDown={e => handleKeyDown(e, note.id, idx)}
-            onDelete={() => deleteNote(note.id)}
+            placeholder="Start writing…"
+            style={{
+              display: 'block',
+              width: '100%',
+              minHeight: '100%',
+              fontSize: 12,
+              lineHeight: '28px',
+              color: '#1C1917',
+              background: 'transparent',
+              border: 'none',
+              outline: 'none',
+              resize: 'none',
+              fontFamily: sansFont,
+              padding: '5px 13px 5px 42px',
+              boxSizing: 'border-box',
+              overflow: 'hidden',
+            }}
+          />
+        </div>
+      ) : (
+        /* ── Checklist mode ── */
+        <div
+          ref={listRef}
+          style={{ flex: 1, overflowY: 'auto', padding: '4px 0', ...moleskineBackground }}
+          onClick={e => {
+            if (e.target === e.currentTarget) {
+              inputRefs.current[DRAFT_ID]?.focus();
+            }
+          }}
+        >
+          {visibleNotes.map((note, idx) => (
+            <NoteRow
+              key={note.id}
+              note={note}
+              text={editTexts[note.id] ?? note.text}
+              dateValue={editDates[note.id] !== undefined ? editDates[note.id] : (note.due_date ?? '')}
+              inputRef={el => { inputRefs.current[note.id] = el; }}
+              onToggle={() => toggleNote(note.id)}
+              onTextChange={v => setEditTexts(prev => ({ ...prev, [note.id]: v }))}
+              onDateChange={v => {
+                setEditDates(prev => ({ ...prev, [note.id]: v }));
+                updateNoteDate(note.id, v || null);
+              }}
+              onBlur={() => handleBlur(note.id)}
+              onKeyDown={e => handleKeyDown(e, note.id, idx)}
+              onDelete={() => deleteNote(note.id)}
+              sansFont={sansFont}
+            />
+          ))}
+
+          <DraftRow
+            text={editTexts[DRAFT_ID] ?? ''}
+            dateValue={editDates[DRAFT_ID] ?? ''}
+            inputRef={el => { inputRefs.current[DRAFT_ID] = el; }}
+            onTextChange={v => setEditTexts(prev => ({ ...prev, [DRAFT_ID]: v }))}
+            onDateChange={v => setEditDates(prev => ({ ...prev, [DRAFT_ID]: v }))}
+            onKeyDown={e => handleKeyDown(e, DRAFT_ID, visibleNotes.length)}
+            hasNotes={visibleNotes.length > 0}
+            autoFocus={visibleNotes.length === 0}
             sansFont={sansFont}
           />
-        ))}
-
-        {/* Draft row — always visible at bottom for new entries */}
-        <DraftRow
-          text={editTexts[DRAFT_ID] ?? ''}
-          dateValue={editDates[DRAFT_ID] ?? ''}
-          inputRef={el => { inputRefs.current[DRAFT_ID] = el; }}
-          onTextChange={v => setEditTexts(prev => ({ ...prev, [DRAFT_ID]: v }))}
-          onDateChange={v => setEditDates(prev => ({ ...prev, [DRAFT_ID]: v }))}
-          onKeyDown={e => handleKeyDown(e, DRAFT_ID, visibleNotes.length)}
-          hasNotes={visibleNotes.length > 0}
-          autoFocus={visibleNotes.length === 0}
-          sansFont={sansFont}
-        />
-      </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -376,12 +466,12 @@ interface NoteRowProps {
   note: Note;
   text: string;
   dateValue: string;
-  inputRef: (el: HTMLInputElement | null) => void;
+  inputRef: (el: HTMLTextAreaElement | null) => void;
   onToggle: () => void;
   onTextChange: (v: string) => void;
   onDateChange: (v: string) => void;
   onBlur: () => void;
-  onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+  onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   onDelete: () => void;
   sansFont: string;
 }
@@ -403,12 +493,12 @@ function NoteRow({ note, text, dateValue, inputRef, onToggle, onTextChange, onDa
       <div
         onClick={onToggle}
         style={{
-          marginTop: 3,
+          marginTop: 4,
           width: 13,
           height: 13,
           borderRadius: '50%',
           flexShrink: 0,
-          border: note.done ? '0.5px solid #4A7C59' : '0.5px solid #D5D0C5',
+          border: note.done ? '1.5px solid #4A7C59' : '1.5px solid #8A8578',
           background: note.done ? '#4A7C59' : 'transparent',
           display: 'flex',
           alignItems: 'center',
@@ -424,10 +514,17 @@ function NoteRow({ note, text, dateValue, inputRef, onToggle, onTextChange, onDa
       </div>
 
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
-        <input
-          ref={inputRef}
+        <textarea
+          ref={el => {
+            inputRef(el);
+            autoResize(el);
+          }}
           value={text}
-          onChange={e => onTextChange(e.target.value)}
+          rows={1}
+          onChange={e => {
+            onTextChange(e.target.value);
+            autoResize(e.target);
+          }}
           onBlur={onBlur}
           onKeyDown={onKeyDown}
           style={{
@@ -441,6 +538,8 @@ function NoteRow({ note, text, dateValue, inputRef, onToggle, onTextChange, onDa
             outline: 'none',
             fontFamily: 'inherit',
             padding: 0,
+            resize: 'none',
+            overflow: 'hidden',
           }}
         />
         {activeDateStr && (
@@ -496,16 +595,16 @@ function NoteRow({ note, text, dateValue, inputRef, onToggle, onTextChange, onDa
 interface DraftRowProps {
   text: string;
   dateValue: string;
-  inputRef: (el: HTMLInputElement | null) => void;
+  inputRef: (el: HTMLTextAreaElement | null) => void;
   onTextChange: (v: string) => void;
   onDateChange: (v: string) => void;
-  onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+  onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   hasNotes: boolean;
   sansFont: string;
   autoFocus?: boolean;
 }
 
-function DraftRow({ text, dateValue, inputRef, onTextChange, onDateChange, onKeyDown, hasNotes, sansFont, autoFocus }: DraftRowProps) {
+function DraftRow({ text, dateValue, inputRef, onTextChange, onDateChange, onKeyDown, hasNotes, autoFocus }: DraftRowProps) {
   return (
     <div
       style={{
@@ -515,10 +614,10 @@ function DraftRow({ text, dateValue, inputRef, onTextChange, onDateChange, onKey
         padding: '5px 13px',
       }}
     >
-      {/* Hollow circle — will become real checkbox once saved */}
+      {/* Hollow dashed circle */}
       <div
         style={{
-          marginTop: 3,
+          marginTop: 4,
           width: 13,
           height: 13,
           borderRadius: '50%',
@@ -529,13 +628,20 @@ function DraftRow({ text, dateValue, inputRef, onTextChange, onDateChange, onKey
       />
 
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
-        <input
-          ref={inputRef}
+        <textarea
+          ref={el => {
+            inputRef(el);
+            autoResize(el);
+          }}
           value={text}
-          onChange={e => onTextChange(e.target.value)}
+          rows={1}
+          onChange={e => {
+            onTextChange(e.target.value);
+            autoResize(e.target);
+          }}
           onKeyDown={onKeyDown}
           autoFocus={autoFocus}
-          placeholder={hasNotes ? 'New note…' : 'Start typing…'}
+          placeholder={hasNotes ? 'New item… (Enter to add)' : 'Start typing…'}
           style={{
             width: '100%',
             fontSize: 12,
@@ -546,6 +652,8 @@ function DraftRow({ text, dateValue, inputRef, onTextChange, onDateChange, onKey
             outline: 'none',
             fontFamily: 'inherit',
             padding: 0,
+            resize: 'none',
+            overflow: 'hidden',
           }}
         />
         {dateValue && (

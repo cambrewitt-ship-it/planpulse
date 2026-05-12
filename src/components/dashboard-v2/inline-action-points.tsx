@@ -6,53 +6,44 @@ import { format, addDays, differenceInDays } from 'date-fns';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
-// Returns the next health check occurrence to display:
-// - If overdue (past occurrence not completed): returns the past occurrence date
-// - Otherwise: returns the next future occurrence
-function getHealthCheckDisplayDate(
-  channelStart: Date,
+// Returns the next due date for a health check based on when it was last completed.
+// Used for display purposes — shows when the item is next due.
+function getHealthCheckNextDueDate(
   frequency: string,
-  isCompletedForCurrentPeriod: boolean
+  completedAt: string | null
 ): Date | null {
+  if (!completedAt) return null;
   const intervalDays =
+    frequency === 'daily' ? 1 :
     frequency === 'weekly' ? 7 :
     frequency === 'fortnightly' ? 14 :
     frequency === 'monthly' ? 30 : 0;
   if (!intervalDays) return null;
-
-  const intervalMs = intervalDays * 24 * 60 * 60 * 1000;
-  const startMs = channelStart.getTime();
-  const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
-  const todayMs = todayStart.getTime();
-  const capMs = todayMs + 2 * 365 * 24 * 60 * 60 * 1000;
-
-  let lastPastOcc: Date | null = null;
-  let nextFutureOcc: Date | null = null;
-
-  for (let n = 1; ; n++) {
-    const occMs = startMs + n * intervalMs;
-    if (occMs > capMs) break;
-    const occ = new Date(occMs); occ.setHours(0, 0, 0, 0);
-    if (occ.getTime() <= todayMs) {
-      lastPastOcc = occ;
-    } else if (!nextFutureOcc) {
-      nextFutureOcc = occ;
-      break;
-    }
-  }
-
-  if (!isCompletedForCurrentPeriod && lastPastOcc) return lastPastOcc; // overdue
-  return nextFutureOcc;
+  const completed = new Date(completedAt);
+  completed.setHours(0, 0, 0, 0);
+  const nextDue = new Date(completed);
+  nextDue.setDate(nextDue.getDate() + intervalDays);
+  return nextDue;
 }
 
-// Checks whether a health check completion is still valid for the current period.
-// A period resets when a new occurrence date arrives (completedAt < currentPeriodStart).
-function isHealthCheckCompletedForCurrentPeriod(
-  channelStart: Date,
+// Returns true if a health check completion is still valid (item should appear ticked).
+// Daily: ticked for the current calendar day only.
+// Weekly/fortnightly/monthly: ticked until 2 days before the next due date.
+function isHealthCheckStillComplete(
   frequency: string,
   completedAt: string | null
 ): boolean {
   if (!completedAt) return false;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const completed = new Date(completedAt);
+  completed.setHours(0, 0, 0, 0);
+
+  if (frequency === 'daily') {
+    return completed.getTime() === today.getTime();
+  }
 
   const intervalDays =
     frequency === 'weekly' ? 7 :
@@ -60,26 +51,13 @@ function isHealthCheckCompletedForCurrentPeriod(
     frequency === 'monthly' ? 30 : 0;
   if (!intervalDays) return false;
 
-  const intervalMs = intervalDays * 24 * 60 * 60 * 1000;
-  const startMs = channelStart.getTime();
-  const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
-  const todayMs = todayStart.getTime();
-  const capMs = todayMs + 2 * 365 * 24 * 60 * 60 * 1000;
+  const nextDue = new Date(completed);
+  nextDue.setDate(nextDue.getDate() + intervalDays);
+  // Reappear 2 days before next due
+  const reappearDate = new Date(nextDue);
+  reappearDate.setDate(reappearDate.getDate() - 2);
 
-  let lastPastOccStr: string | null = null;
-  for (let n = 1; ; n++) {
-    const occMs = startMs + n * intervalMs;
-    if (occMs > capMs) break;
-    if (occMs <= todayMs) {
-      const d = new Date(occMs);
-      lastPastOccStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    } else {
-      break;
-    }
-  }
-
-  if (!lastPastOccStr) return false; // No occurrence yet, nothing to compare
-  return completedAt.slice(0, 10) >= lastPastOccStr;
+  return today.getTime() < reappearDate.getTime();
 }
 
 export interface InlineActionPoint {
@@ -232,18 +210,8 @@ export default function InlineActionPoints({
               const completedAt: string | null = ap.completed_at || null;
               let effectiveCompleted = ap.completed || false;
 
-              // For HEALTH CHECK: reset completed if a new period has started
-              if (
-                (ap.category === 'HEALTH CHECK') &&
-                ap.frequency &&
-                channelStartDate &&
-                effectiveCompleted
-              ) {
-                effectiveCompleted = isHealthCheckCompletedForCurrentPeriod(
-                  channelStartDate,
-                  ap.frequency,
-                  completedAt
-                );
+              if (ap.category === 'HEALTH CHECK' && ap.frequency && effectiveCompleted) {
+                effectiveCompleted = isHealthCheckStillComplete(ap.frequency, completedAt);
               }
 
               return {
@@ -378,8 +346,8 @@ export default function InlineActionPoints({
           setActionPoints(data.map((ap: any) => {
             const completedAt: string | null = ap.completed_at || null;
             let effectiveCompleted = ap.completed || false;
-            if ((ap.category === 'HEALTH CHECK') && ap.frequency && channelStartDate && effectiveCompleted) {
-              effectiveCompleted = isHealthCheckCompletedForCurrentPeriod(channelStartDate, ap.frequency, completedAt);
+            if (ap.category === 'HEALTH CHECK' && ap.frequency && effectiveCompleted) {
+              effectiveCompleted = isHealthCheckStillComplete(ap.frequency, completedAt);
             }
             return {
               id: ap.id,
@@ -469,8 +437,8 @@ export default function InlineActionPoints({
           setActionPoints(data.map((ap: any) => {
             const completedAt: string | null = ap.completed_at || null;
             let effectiveCompleted = ap.completed || false;
-            if ((ap.category === 'HEALTH CHECK') && ap.frequency && channelStartDate && effectiveCompleted) {
-              effectiveCompleted = isHealthCheckCompletedForCurrentPeriod(channelStartDate, ap.frequency, completedAt);
+            if (ap.category === 'HEALTH CHECK' && ap.frequency && effectiveCompleted) {
+              effectiveCompleted = isHealthCheckStillComplete(ap.frequency, completedAt);
             }
             return {
               id: ap.id,
@@ -693,11 +661,11 @@ export default function InlineActionPoints({
                     {(ap.category === 'HEALTH CHECK' || ap.category === 'ONGOING') && ap.frequency && (
                       <>
                         <span className="text-xs text-gray-400">{ap.frequency}</span>
-                        {channelStartDate && (() => {
-                          const nextOcc = getHealthCheckDisplayDate(channelStartDate, ap.frequency, ap.completed);
-                          if (!nextOcc) return null;
-                          const dueDateText = formatDueDate(nextOcc);
-                          const isOverdue = differenceInDays(nextOcc, new Date()) < 0;
+                        {(() => {
+                          const nextDue = getHealthCheckNextDueDate(ap.frequency, ap.completed_at ?? null);
+                          if (!nextDue) return null;
+                          const dueDateText = formatDueDate(nextDue);
+                          const isOverdue = differenceInDays(nextDue, new Date()) < 0;
                           return (
                             <span className={`text-xs ${isOverdue ? 'text-red-600 font-medium' : 'text-gray-500'}`}>
                               {dueDateText}

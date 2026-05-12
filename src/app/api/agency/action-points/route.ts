@@ -8,7 +8,7 @@ import { createClient } from '@/lib/supabase/server';
 export interface AgencyActionPoint {
   id: string;
   text: string;
-  category: 'SET UP' | 'HEALTH CHECK' | 'ONGOING';
+  category: 'SET UP' | 'HEALTH CHECK' | 'ONGOING' | 'TODO';
   channel_type: string;
   due_date: string | null; // Calculated based on channel start date
   frequency?: string | null;
@@ -194,68 +194,40 @@ export async function GET(request: NextRequest) {
 
     /**
      * For HEALTH CHECK action points:
-     * - Generates repeating occurrences from channelStart to channelEnd
-     * - Returns nextDueDate: the upcoming due date to display
-     * - Returns isCompletedForCurrentPeriod: true if the last completion covers the current period
-     *
-     * "Current period" = the most recent occurrence that has already passed (or is today).
-     * If completedAt >= currentPeriodStart, the AP is done for this period.
-     * On the next occurrence, it resets automatically.
+     * - Determines if the completion is still valid based on completed_at + frequency.
+     * - Daily: complete for the current calendar day only.
+     * - Weekly/fortnightly/monthly: complete until 2 days before the next due date.
+     * - Returns nextDueDate: completed_at + interval (or today if never completed).
+     * - Returns isCompletedForCurrentPeriod: true if still within the valid window.
      */
     function getHealthCheckStatus(
-      channelStartDate: string,
-      channelEndDate: string | null,
       frequency: string,
       todayStr: string,
       completedAt: string | null
     ): { nextDueDate: string | null; isCompletedForCurrentPeriod: boolean } {
+      if (frequency === 'daily') {
+        const isComplete = completedAt ? completedAt.slice(0, 10) === todayStr : false;
+        return { nextDueDate: todayStr, isCompletedForCurrentPeriod: isComplete };
+      }
+
       let intervalDays = 0;
       if (frequency === 'weekly') intervalDays = 7;
       else if (frequency === 'fortnightly') intervalDays = 14;
       else if (frequency === 'monthly') intervalDays = 30;
       else return { nextDueDate: null, isCompletedForCurrentPeriod: false };
 
-      const startMs = dateStrToMs(channelStartDate);
-      const todayMs = dateStrToMs(todayStr);
-      const endMs = channelEndDate ? dateStrToMs(channelEndDate) : null;
+      if (!completedAt) {
+        return { nextDueDate: todayStr, isCompletedForCurrentPeriod: false };
+      }
+
+      const completedMs = dateStrToMs(completedAt.slice(0, 10));
       const intervalMs = intervalDays * 24 * 60 * 60 * 1000;
-      // Cap at 5 years to prevent infinite loop
-      const capMs = todayMs + 5 * 365 * 24 * 60 * 60 * 1000;
+      const nextDueMs = completedMs + intervalMs;
+      const reappearMs = nextDueMs - 2 * 24 * 60 * 60 * 1000;
+      const todayMs = dateStrToMs(todayStr);
 
-      let lastPastOccurrence: string | null = null;
-      let nextFutureOccurrence: string | null = null;
-
-      for (let n = 1; ; n++) {
-        const occMs = startMs + n * intervalMs;
-        if (occMs > capMs) break;
-        if (endMs !== null && occMs > endMs) break;
-
-        if (occMs <= todayMs) {
-          lastPastOccurrence = msToDateStr(occMs);
-        } else {
-          nextFutureOccurrence = msToDateStr(occMs);
-          break; // Only need the first future occurrence
-        }
-      }
-
-      // Determine if the current period is completed
-      let isCompletedForCurrentPeriod = false;
-      if (lastPastOccurrence && completedAt) {
-        // completedAt is an ISO timestamp; slice to date for comparison
-        isCompletedForCurrentPeriod = completedAt.slice(0, 10) >= lastPastOccurrence;
-      }
-
-      // What date to display:
-      // - If overdue (past occurrence not yet completed): show the overdue occurrence date
-      // - Otherwise: show the next upcoming occurrence
-      let nextDueDate: string | null;
-      if (!isCompletedForCurrentPeriod && lastPastOccurrence) {
-        nextDueDate = lastPastOccurrence; // overdue
-      } else {
-        nextDueDate = nextFutureOccurrence;
-      }
-
-      return { nextDueDate, isCompletedForCurrentPeriod };
+      const isCompletedForCurrentPeriod = todayMs < reappearMs;
+      return { nextDueDate: msToDateStr(nextDueMs), isCompletedForCurrentPeriod };
     }
 
     // Helper function to calculate due date for SET UP action points
@@ -305,11 +277,9 @@ export async function GET(request: NextRequest) {
           if (isCompleted) continue;
           calculatedDueDate = calculateSetUpDueDate(ap, channelStartDate);
         } else if (ap.category === 'HEALTH CHECK') {
-          if (!channelStartDate || !ap.frequency) continue;
+          if (!ap.frequency) continue;
 
           const { nextDueDate, isCompletedForCurrentPeriod } = getHealthCheckStatus(
-            channelStartDate,
-            channelEndDate,
             ap.frequency,
             today,
             completedAt
@@ -367,10 +337,67 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Sort clients by most outstanding action points first
-    result.sort((a, b) => b.totalOutstanding - a.totalOutstanding);
+    // 6. Add TODO items — these are not channel-matched; they go directly
+    //    into the relevant client group (if client_id is set) or into a
+    //    special "Agency Tasks" group at the top.
+    const agencyTodos: AgencyActionPoint[] = [];
 
-    return NextResponse.json({ clients: result });
+    for (const ap of allActionPoints) {
+      if (ap.category !== 'TODO') continue;
+      if (ap.completed) continue;
+
+      const apEntry: AgencyActionPoint = {
+        id: ap.id,
+        text: ap.text,
+        category: ap.category,
+        channel_type: 'General',
+        due_date: ap.due_date || null,
+        frequency: null,
+        days_before_live_due: null,
+        assigned_to: null,
+      };
+
+      if (ap.client_id) {
+        // Attach to the specific client's result entry
+        let clientEntry = result.find(r => r.clientId === ap.client_id);
+        if (!clientEntry) {
+          // Client may have no channel-based APs — create a stub entry
+          const clientData = clients.find(c => c.id === ap.client_id);
+          if (clientData) {
+            clientEntry = { clientId: clientData.id, clientName: clientData.name, channels: [], totalOutstanding: 0 };
+            result.push(clientEntry);
+          }
+        }
+        if (clientEntry) {
+          let generalGroup = clientEntry.channels.find(ch => ch.channelType === 'General');
+          if (!generalGroup) {
+            generalGroup = { channelType: 'General', actionPoints: [] };
+            clientEntry.channels.push(generalGroup);
+          }
+          generalGroup.actionPoints.push(apEntry);
+          clientEntry.totalOutstanding++;
+        }
+      } else {
+        agencyTodos.push(apEntry);
+      }
+    }
+
+    if (agencyTodos.length > 0) {
+      result.unshift({
+        clientId: '__agency__',
+        clientName: 'Agency Tasks',
+        channels: [{ channelType: 'General', actionPoints: agencyTodos }],
+        totalOutstanding: agencyTodos.length,
+      });
+    }
+
+    // Sort clients by most outstanding action points first (keep Agency Tasks at top)
+    const agencyEntry = result.find(r => r.clientId === '__agency__');
+    const otherEntries = result.filter(r => r.clientId !== '__agency__');
+    otherEntries.sort((a, b) => b.totalOutstanding - a.totalOutstanding);
+    const sortedResult = agencyEntry ? [agencyEntry, ...otherEntries] : otherEntries;
+
+    return NextResponse.json({ clients: sortedResult });
   } catch (error: any) {
     console.error('Error in GET /api/agency/action-points:', error);
     return NextResponse.json(

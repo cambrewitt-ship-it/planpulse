@@ -28,30 +28,6 @@ VALUES
   ('Google Ads', 'Define campaign structure and ad groups', 'SET UP', false, NOW(), NOW()),
   ('Google Ads', 'Set up negative keyword lists', 'SET UP', false, NOW(), NOW());
 
--- Google Search SET UP Action Points
-INSERT INTO action_points (channel_type, text, category, completed, created_at, updated_at)
-VALUES
-  ('Google Search', 'Complete keyword research and planning', 'SET UP', false, NOW(), NOW()),
-  ('Google Search', 'Set up search campaign structure', 'SET UP', false, NOW(), NOW()),
-  ('Google Search', 'Create ad copy variations for A/B testing', 'SET UP', false, NOW(), NOW()),
-  ('Google Search', 'Configure location and language targeting', 'SET UP', false, NOW(), NOW()),
-  ('Google Search', 'Set up ad extensions (sitelinks, callouts, structured snippets)', 'SET UP', false, NOW(), NOW()),
-  ('Google Search', 'Configure bid strategy and budget', 'SET UP', false, NOW(), NOW()),
-  ('Google Search', 'Import and organize negative keywords', 'SET UP', false, NOW(), NOW()),
-  ('Google Search', 'Set up conversion tracking', 'SET UP', false, NOW(), NOW());
-
--- Google Shopping SET UP Action Points
-INSERT INTO action_points (channel_type, text, category, completed, created_at, updated_at)
-VALUES
-  ('Google Shopping', 'Set up Google Merchant Center account', 'SET UP', false, NOW(), NOW()),
-  ('Google Shopping', 'Link Merchant Center to Google Ads', 'SET UP', false, NOW(), NOW()),
-  ('Google Shopping', 'Upload product feed to Merchant Center', 'SET UP', false, NOW(), NOW()),
-  ('Google Shopping', 'Verify and claim website URL', 'SET UP', false, NOW(), NOW()),
-  ('Google Shopping', 'Configure product data specifications', 'SET UP', false, NOW(), NOW()),
-  ('Google Shopping', 'Set up Shopping campaign in Google Ads', 'SET UP', false, NOW(), NOW()),
-  ('Google Shopping', 'Configure product groups and bidding', 'SET UP', false, NOW(), NOW()),
-  ('Google Shopping', 'Set up conversion tracking for purchases', 'SET UP', false, NOW(), NOW());
-
 -- LinkedIn Ads SET UP Action Points
 INSERT INTO action_points (channel_type, text, category, completed, created_at, updated_at)
 VALUES

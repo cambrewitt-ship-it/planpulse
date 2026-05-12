@@ -184,10 +184,11 @@ export interface Database {
             channel_type: string;
             text: string;
             completed: boolean;
-            category: 'SET UP' | 'HEALTH CHECK' | 'ONGOING';
+            category: 'SET UP' | 'HEALTH CHECK' | 'ONGOING' | 'TODO';
             frequency: string | null;
             days_before_live_due: number | null;
             due_date: string | null;
+            client_id: string | null;
             created_at: string;
             updated_at: string;
           };
@@ -196,10 +197,11 @@ export interface Database {
             channel_type: string;
             text: string;
             completed?: boolean;
-            category: 'SET UP' | 'HEALTH CHECK' | 'ONGOING';
+            category: 'SET UP' | 'HEALTH CHECK' | 'ONGOING' | 'TODO';
             frequency?: string | null;
             days_before_live_due?: number | null;
             due_date?: string | null;
+            client_id?: string | null;
             created_at?: string;
             updated_at?: string;
           };
@@ -208,10 +210,11 @@ export interface Database {
             channel_type?: string;
             text?: string;
             completed?: boolean;
-            category?: 'SET UP' | 'HEALTH CHECK' | 'ONGOING';
+            category?: 'SET UP' | 'HEALTH CHECK' | 'ONGOING' | 'TODO';
             frequency?: string | null;
             days_before_live_due?: number | null;
             due_date?: string | null;
+            client_id?: string | null;
             updated_at?: string;
           };
           Relationships: [];
