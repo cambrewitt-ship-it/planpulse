@@ -31,6 +31,7 @@ import {
   SelectItem,
   SelectValue,
 } from "@/components/ui/select";
+import type { MetricSource, PlatformEventOption } from "@/lib/api/analytics-data-integration";
 
 interface CostMetricPoint {
   date: string;
@@ -62,6 +63,12 @@ interface CostPerMetricChartProps {
   selectedEventName?: string | null;
   onEventNameChange?: (name: string | null) => void;
   loadingEventNames?: boolean;
+  // Platform metric source (GA4 / Meta / Google)
+  metricSource?: MetricSource;
+  onMetricSourceChange?: (source: MetricSource) => void;
+  availablePlatformEvents?: PlatformEventOption[];
+  selectedPlatformMetricKey?: string;
+  onPlatformMetricChange?: (key: string) => void;
 }
 
 // Get singular display name for metric
@@ -89,13 +96,13 @@ const COST_METRICS = [
   { key: 'cost_30d', labelKey: 'cost_30d', color: '#B877D9', type: 'line' },
 ] as const;
 
-export function CostPerMetricChart({ 
-  cacMetrics, 
+export function CostPerMetricChart({
+  cacMetrics,
   previousPeriodMetrics,
-  height = 350, 
-  isLoading = false, 
-  error, 
-  errorDetails, 
+  height = 350,
+  isLoading = false,
+  error,
+  errorDetails,
   selectedMetric = 'conversions',
   onComparisonToggle,
   isComparisonLoading = false,
@@ -108,12 +115,23 @@ export function CostPerMetricChart({
   selectedEventName = null,
   onEventNameChange,
   loadingEventNames = false,
+  metricSource = 'ga4',
+  onMetricSourceChange,
+  availablePlatformEvents = [],
+  selectedPlatformMetricKey = 'clicks',
+  onPlatformMetricChange,
 }: CostPerMetricChartProps) {
   // State for comparison mode
   const [showComparison, setShowComparison] = useState(false);
 
-  // Get dynamic display name for the selected metric
-  const metricDisplayName = getMetricDisplayName(selectedMetric);
+  // Derive display name based on active source
+  const metricDisplayName = (() => {
+    if (metricSource === 'ga4') return getMetricDisplayName(selectedMetric);
+    const option = availablePlatformEvents.find(
+      e => e.source === metricSource && e.key === selectedPlatformMetricKey
+    );
+    return option?.label ?? selectedPlatformMetricKey;
+  })();
 
   // Handle comparison toggle
   const handleComparisonToggle = (enabled: boolean) => {
@@ -491,10 +509,37 @@ export function CostPerMetricChart({
           <div className="flex flex-wrap items-center gap-3">
             <CardTitle>Cost Per {metricDisplayName}</CardTitle>
 
-            {/* Metric selector lives on the card when onMetricChange is provided */}
-            {onMetricChange && (
+            {/* Metric source tabs: GA4 / Meta / Google */}
+            {onMetricSourceChange && (
+              <div className="flex items-center rounded-md border border-gray-200 dark:border-gray-700 overflow-hidden text-xs font-medium">
+                {(['ga4', 'meta', 'google'] as MetricSource[]).map((src) => {
+                  const label = src === 'ga4' ? 'GA4' : src === 'meta' ? 'Meta' : 'Google';
+                  const hasPlatformData = src === 'ga4'
+                    ? true
+                    : availablePlatformEvents.some(e => e.source === src);
+                  return (
+                    <button
+                      key={src}
+                      onClick={() => onMetricSourceChange(src)}
+                      disabled={!hasPlatformData && src !== 'ga4'}
+                      className={`px-3 py-1.5 transition-colors ${
+                        metricSource === src
+                          ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
+                          : hasPlatformData || src === 'ga4'
+                            ? 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
+                            : 'bg-white dark:bg-gray-900 text-gray-300 dark:text-gray-600 cursor-not-allowed'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* GA4 metric selector */}
+            {onMetricChange && metricSource === 'ga4' && (
               <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-600 dark:text-gray-300">Metric:</span>
                 <Select
                   value={selectedMetric}
                   onValueChange={(value) => {
@@ -536,10 +581,9 @@ export function CostPerMetricChart({
               </div>
             )}
 
-            {/* Event selector for eventCount */}
-            {onMetricChange && selectedMetric === 'eventCount' && onEventNameChange && (
+            {/* GA4 event selector for eventCount */}
+            {onMetricChange && metricSource === 'ga4' && selectedMetric === 'eventCount' && onEventNameChange && (
               <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-600 dark:text-gray-300">Event:</span>
                 <Select
                   value={selectedEventName || ''}
                   onValueChange={(value) => onEventNameChange(value === '_none' ? null : value)}
@@ -564,6 +608,41 @@ export function CostPerMetricChart({
                           </div>
                         </SelectItem>
                       ))
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {/* Platform metric selector for Meta / Google */}
+            {onPlatformMetricChange && (metricSource === 'meta' || metricSource === 'google') && (
+              <div className="flex items-center gap-2">
+                <Select
+                  value={selectedPlatformMetricKey}
+                  onValueChange={onPlatformMetricChange}
+                >
+                  <SelectTrigger className="w-[200px] h-9 text-sm">
+                    <SelectValue placeholder="Select event" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availablePlatformEvents
+                      .filter(e => e.source === metricSource)
+                      .map((event) => (
+                        <SelectItem key={event.key} value={event.key}>
+                          <div className="flex items-center justify-between w-full gap-2">
+                            <span className="truncate">{event.label}</span>
+                            {event.count !== undefined && (
+                              <span className="text-xs text-gray-400">
+                                ({event.count.toLocaleString()})
+                              </span>
+                            )}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    {availablePlatformEvents.filter(e => e.source === metricSource).length === 0 && (
+                      <SelectItem value="_none" disabled>
+                        No events available
+                      </SelectItem>
                     )}
                   </SelectContent>
                 </Select>

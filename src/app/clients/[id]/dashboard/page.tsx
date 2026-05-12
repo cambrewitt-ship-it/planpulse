@@ -25,7 +25,7 @@ import { MediaPlanGrid, MediaPlanChannel } from '@/components/media-plan-builder
 import { useParams } from 'next/navigation';
 import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { getClients, getMediaPlans, getPlanById, updateClient, updateClientLogoUrl } from '@/lib/db/plans';
-import { fetchAnalyticsData, fetchSpendData, calculateCostPerMetric, SpendDataPoint, CostMetricPoint } from '@/lib/api/analytics-data-integration';
+import { fetchAnalyticsData, fetchSpendData, calculateCostPerMetric, calculateCostPerPlatformMetric, extractPlatformEventOptions, SpendDataPoint, CostMetricPoint, MetricSource, PlatformEventOption } from '@/lib/api/analytics-data-integration';
 import { subDays, addDays, format, differenceInDays, parseISO, startOfMonth, endOfMonth, startOfYear } from 'date-fns';
 import { FunnelStage, MediaPlanFunnel, FunnelConfig } from '@/lib/types/funnel';
 import { calculateHealthScore, type HealthScoreResult } from '@/lib/utils/health-score';
@@ -166,6 +166,9 @@ export default function DashboardV2() {
   const [selectedEventName, setSelectedEventName] = useState<string | null>(null);
   const [availableEventNames, setAvailableEventNames] = useState<Array<{ name: string; count: number }>>([]);
   const [loadingEventNames, setLoadingEventNames] = useState(false);
+  const [selectedMetricSource, setSelectedMetricSource] = useState<MetricSource>('ga4');
+  const [selectedPlatformMetricKey, setSelectedPlatformMetricKey] = useState<string>('clicks');
+  const [availablePlatformEvents, setAvailablePlatformEvents] = useState<PlatformEventOption[]>([]);
   const [selectedChannels, setSelectedChannels] = useState<Set<string>>(new Set());
   const [availableChannels, setAvailableChannels] = useState<Array<{ id: string; name: string }>>([]);
   const [viewMode, setViewMode] = useState<'overview' | 'funnels' | 'media-plan' | 'admin'>('overview');
@@ -567,7 +570,7 @@ export default function DashboardV2() {
     }
   }, [selectedFunnelId, funnels, viewMode]);
 
-  // Reload analytics when date range, selected metric, or event name changes
+  // Reload analytics when date range, selected metric, event name, or metric source changes
   useEffect(() => {
     if (clientId) {
       const eventName = selectedMetric === 'eventCount' ? selectedEventName : null;
@@ -578,16 +581,18 @@ export default function DashboardV2() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [analyticsDateRange.startDate, analyticsDateRange.endDate, clientId, selectedMetric, selectedEventName]);
+  }, [analyticsDateRange.startDate, analyticsDateRange.endDate, clientId, selectedMetric, selectedEventName, selectedMetricSource, selectedPlatformMetricKey]);
 
-  // Recalculate cost metrics when selected channels change
+  // Recalculate cost metrics when selected channels, source, or platform metric key changes
   useEffect(() => {
-    if (spendData.length > 0 && ga4Data.length > 0 && availableChannels.length > 0 && selectedChannels.size > 0) {
+    if (spendData.length > 0 && availableChannels.length > 0 && selectedChannels.size > 0) {
       const filteredSpendData = spendData.filter((point: any) =>
         point.channelId && selectedChannels.has(point.channelId)
       );
 
-      const costResult = calculateCostPerMetric(filteredSpendData, ga4Data, selectedMetric);
+      const costResult = selectedMetricSource !== 'ga4'
+        ? calculateCostPerPlatformMetric(filteredSpendData, selectedPlatformMetricKey, selectedMetricSource as 'meta' | 'google')
+        : calculateCostPerMetric(filteredSpendData, ga4Data, selectedMetric);
 
       if (!costResult.error) {
         setCacError(undefined);
@@ -600,7 +605,7 @@ export default function DashboardV2() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedChannels, spendData, ga4Data, selectedMetric]);
+  }, [selectedChannels, spendData, ga4Data, selectedMetric, selectedMetricSource, selectedPlatformMetricKey]);
 
   const loadData = async () => {
     try {
@@ -785,6 +790,9 @@ export default function DashboardV2() {
       setSpendData(enhancedSpendData);
       setGa4Data(result.ga4Data || []);
 
+      // Extract platform-native event options from the loaded spend data
+      setAvailablePlatformEvents(extractPlatformEventOptions(enhancedSpendData));
+
       const channelMap = new Map<string, string>();
       enhancedSpendData.forEach((point: any) => {
         if (point.channelId && point.channelName) {
@@ -802,7 +810,9 @@ export default function DashboardV2() {
         ? enhancedSpendData.filter((point: any) => point.channelId && selectedChannels.has(point.channelId))
         : enhancedSpendData;
 
-      const costResult = calculateCostPerMetric(filteredSpendData, result.ga4Data || [], metricKey);
+      const costResult = selectedMetricSource !== 'ga4'
+        ? calculateCostPerPlatformMetric(filteredSpendData, selectedPlatformMetricKey, selectedMetricSource as 'meta' | 'google')
+        : calculateCostPerMetric(filteredSpendData, result.ga4Data || [], metricKey);
 
       if (costResult.error) {
         setCacError(costResult.error);
@@ -850,7 +860,9 @@ export default function DashboardV2() {
         eventName: eventName || undefined,
       });
 
-      const costResult = calculateCostPerMetric(result.spendData || [], result.ga4Data || [], selectedMetric);
+      const costResult = selectedMetricSource !== 'ga4'
+        ? calculateCostPerPlatformMetric(result.spendData || [], selectedPlatformMetricKey, selectedMetricSource as 'meta' | 'google')
+        : calculateCostPerMetric(result.spendData || [], result.ga4Data || [], selectedMetric);
       if (!costResult.error) {
         setPreviousPeriodMetrics(costResult.data);
       } else {
@@ -2331,6 +2343,11 @@ export default function DashboardV2() {
                       selectedEventName={selectedEventName}
                       onEventNameChange={setSelectedEventName}
                       loadingEventNames={loadingEventNames}
+                      metricSource={selectedMetricSource}
+                      onMetricSourceChange={setSelectedMetricSource}
+                      availablePlatformEvents={availablePlatformEvents}
+                      selectedPlatformMetricKey={selectedPlatformMetricKey}
+                      onPlatformMetricChange={setSelectedPlatformMetricKey}
                     />
                   </div>
 

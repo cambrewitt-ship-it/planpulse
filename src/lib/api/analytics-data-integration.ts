@@ -2,6 +2,39 @@
  * Utility functions for fetching and combining GA4 analytics data with spend data
  */
 
+export type MetricSource = 'ga4' | 'meta' | 'google';
+
+export interface PlatformEventOption {
+  source: MetricSource;
+  key: string;
+  label: string;
+  count?: number;
+}
+
+// Human-readable labels for Meta action types
+const META_ACTION_LABELS: Record<string, string> = {
+  link_click: 'Link Clicks',
+  landing_page_view: 'Landing Page Views',
+  purchase: 'Purchases',
+  lead: 'Leads',
+  complete_registration: 'Registrations',
+  add_to_cart: 'Add to Cart',
+  initiate_checkout: 'Checkout Initiated',
+  view_content: 'View Content',
+  video_view: 'Video Views',
+  post_engagement: 'Post Engagements',
+  page_engagement: 'Page Engagements',
+  comment: 'Comments',
+  like: 'Likes',
+  share: 'Shares',
+  click: 'All Clicks',
+  reach: 'Reach',
+};
+
+export function getMetaActionLabel(actionType: string): string {
+  return META_ACTION_LABELS[actionType] || actionType.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
 // Valid GA4 metrics that can be used for cost calculations
 export const VALID_METRICS = [
   'conversions',
@@ -585,4 +618,147 @@ export function calculateCostPerMetric(
 
 // Legacy alias for backward compatibility
 export const calculateCACMetrics = calculateCostPerMetric;
+
+/**
+ * Calculate Cost Per Platform Metric using spend data native metrics.
+ * Used for Meta/Google events like "cost per link click" or "cost per impression".
+ * @param spendData Raw spend data points (already channel-filtered)
+ * @param metricKey Standard field ('clicks', 'impressions', 'conversions') or Meta action_type
+ * @param platform 'meta' or 'google'
+ */
+export function calculateCostPerPlatformMetric(
+  spendData: SpendDataPoint[],
+  metricKey: string,
+  platform: 'meta' | 'google'
+): CostCalculationResult {
+  try {
+    const platformFilter = platform === 'meta' ? 'meta-ads' : 'google-ads';
+    const filteredSpend = spendData.filter(p => p.platform === platformFilter);
+
+    if (filteredSpend.length === 0) {
+      return {
+        data: [],
+        error: `No ${platform === 'meta' ? 'Meta Ads' : 'Google Ads'} data available`,
+        errorDetails: `Connect ${platform === 'meta' ? 'a Meta Ads account' : 'a Google Ads account'} to measure platform events.`,
+      };
+    }
+
+    const standardFields = ['clicks', 'impressions', 'conversions'];
+    const isActionType = !standardFields.includes(metricKey);
+
+    const spendByDate = new Map<string, number>();
+    const metricByDate = new Map<string, number>();
+
+    filteredSpend.forEach(point => {
+      if (!point.date) return;
+      const spend = typeof point.spend === 'number' && !isNaN(point.spend) ? point.spend : 0;
+      spendByDate.set(point.date, (spendByDate.get(point.date) || 0) + spend);
+
+      let metricValue = 0;
+      if (isActionType && point.actions) {
+        const action = point.actions.find(a => a.action_type === metricKey);
+        metricValue = action ? parseFloat(action.value) || 0 : 0;
+      } else {
+        const raw = (point as any)[metricKey];
+        metricValue = typeof raw === 'number' ? raw : parseFloat(raw) || 0;
+      }
+      metricByDate.set(point.date, (metricByDate.get(point.date) || 0) + metricValue);
+    });
+
+    const allDates = new Set<string>([...spendByDate.keys(), ...metricByDate.keys()]);
+
+    if (allDates.size === 0) {
+      return { data: [], error: 'No data available', errorDetails: 'No valid dates in spend data' };
+    }
+
+    const dailyData: Array<{ date: string; spend: number; metricValue: number; dailyCost: number | null }> = [];
+
+    allDates.forEach(date => {
+      const spend = spendByDate.get(date) || 0;
+      const metricValue = metricByDate.get(date) || 0;
+      let dailyCost: number | null = null;
+      if (metricValue > 0 && spend >= 0) {
+        dailyCost = spend / metricValue;
+        if (!isFinite(dailyCost) || dailyCost < 0) dailyCost = null;
+      }
+      dailyData.push({ date, spend, metricValue, dailyCost });
+    });
+
+    dailyData.sort((a, b) => a.date.localeCompare(b.date));
+
+    const cost7d = calculateMovingAverage(dailyData, 7, item => item.dailyCost);
+    const cost14d = calculateMovingAverage(dailyData, 14, item => item.dailyCost);
+    const cost30d = calculateMovingAverage(dailyData, 30, item => item.dailyCost);
+
+    const results: CostMetricPoint[] = dailyData.map((item, index) => ({
+      date: item.date,
+      spend: item.spend,
+      metricValue: item.metricValue,
+      dailyCost: item.dailyCost,
+      cost_7d: cost7d[index] ?? null,
+      cost_14d: cost14d[index] ?? null,
+      cost_30d: cost30d[index] ?? null,
+    }));
+
+    return { data: results };
+  } catch (error: any) {
+    return {
+      data: [],
+      error: 'Failed to calculate cost per platform metric',
+      errorDetails: error.message,
+    };
+  }
+}
+
+/**
+ * Extract available platform event options from loaded spend data.
+ * Returns Meta and Google metrics that have actual data in the spend points.
+ */
+export function extractPlatformEventOptions(spendData: SpendDataPoint[]): PlatformEventOption[] {
+  const options: PlatformEventOption[] = [];
+
+  const metaSpend = spendData.filter(p => p.platform === 'meta-ads');
+  if (metaSpend.length > 0) {
+    const totalClicks = metaSpend.reduce((s, p) => s + (p.clicks || 0), 0);
+    const totalImpressions = metaSpend.reduce((s, p) => s + (p.impressions || 0), 0);
+    const totalConversions = metaSpend.reduce((s, p) => s + (p.conversions || 0), 0);
+
+    if (totalClicks > 0) options.push({ source: 'meta', key: 'clicks', label: 'Clicks', count: totalClicks });
+    if (totalImpressions > 0) options.push({ source: 'meta', key: 'impressions', label: 'Impressions', count: totalImpressions });
+    if (totalConversions > 0) options.push({ source: 'meta', key: 'conversions', label: 'Conversions', count: totalConversions });
+
+    // Extract action types with counts
+    const actionCounts = new Map<string, number>();
+    metaSpend.forEach(point => {
+      point.actions?.forEach(action => {
+        const val = parseFloat(action.value) || 0;
+        actionCounts.set(action.action_type, (actionCounts.get(action.action_type) || 0) + val);
+      });
+    });
+
+    actionCounts.forEach((count, actionType) => {
+      if (count > 0) {
+        options.push({
+          source: 'meta',
+          key: actionType,
+          label: getMetaActionLabel(actionType),
+          count: Math.round(count),
+        });
+      }
+    });
+  }
+
+  const googleSpend = spendData.filter(p => p.platform === 'google-ads');
+  if (googleSpend.length > 0) {
+    const totalClicks = googleSpend.reduce((s, p) => s + (p.clicks || 0), 0);
+    const totalImpressions = googleSpend.reduce((s, p) => s + (p.impressions || 0), 0);
+    const totalConversions = googleSpend.reduce((s, p) => s + (p.conversions || 0), 0);
+
+    if (totalClicks > 0) options.push({ source: 'google', key: 'clicks', label: 'Clicks', count: totalClicks });
+    if (totalImpressions > 0) options.push({ source: 'google', key: 'impressions', label: 'Impressions', count: totalImpressions });
+    if (totalConversions > 0) options.push({ source: 'google', key: 'conversions', label: 'Conversions', count: totalConversions });
+  }
+
+  return options;
+}
 
