@@ -44,7 +44,10 @@ export default function SignupPage() {
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
-        options: { data: { first_name: firstName.trim() } },
+        options: {
+          data: { first_name: firstName.trim() },
+          emailRedirectTo: `${window.location.origin}/auth/callback?next=/clients/create`,
+        },
       });
 
       if (error) throw error;
@@ -54,8 +57,8 @@ export default function SignupPage() {
         setSuccess(true);
         setError('Please check your email to confirm your account');
       } else if (data.session) {
-        // Auto-signed in (email confirmation disabled)
-        router.push('/');
+        // Auto-signed in (email confirmation disabled) — go straight to client onboarding
+        router.push('/clients/create');
         router.refresh();
       }
     } catch (error: any) {

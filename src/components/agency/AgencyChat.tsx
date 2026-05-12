@@ -385,8 +385,15 @@ export const AgencyChat = forwardRef<AgencyChatHandle, AgencyChatProps>(function
                 get_action_points: 'Checking action points…',
                 get_channel_library: 'Searching channel library…',
                 get_channel_performance: 'Pulling channel performance data…',
+                complete_action_point: 'Marking task as complete…',
+                create_action_point: 'Adding new action point…',
+                create_client: 'Creating new client…',
+                update_media_plan_budget: 'Updating media plan budget…',
+                get_live_meta_campaigns: 'Fetching live Meta campaigns…',
               };
-              setToolInProgress(labels[event.tool] ?? 'Fetching data…');
+              setToolInProgress(labels[event.tool] ?? 'Working on it…');
+            } else if (event.type === 'action') {
+              window.dispatchEvent(new CustomEvent('planpulse:ai-action', { detail: { tool: event.tool, data: event.data } }));
             } else if (event.type === 'done') {
               setMessages(prev => {
                 const next = [...prev];

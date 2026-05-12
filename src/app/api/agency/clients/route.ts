@@ -125,8 +125,8 @@ export async function GET(request: NextRequest) {
     }
 
     // ── Fetch actual spend per client for the specified date range ─────────
-    // Use provided date range or default to current month
-    const dateRangeStart = startDateParam || toDateStr(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+    // Default to YTD (Jan 1 – today) to match the dashboard's default date range
+    const dateRangeStart = startDateParam || toDateStr(new Date(new Date().getFullYear(), 0, 1));
     const dateRangeEnd = endDateParam || toDateStr(new Date());
     const { data: spendRows } = await supabase
       .from('ad_performance_metrics')
@@ -145,13 +145,6 @@ export async function GET(request: NextRequest) {
       if (row.campaign_id && row.campaign_id.startsWith('manual-override-')) continue;
       spendByClient.set(row.client_id, (spendByClient.get(row.client_id) || 0) + Number(row.spend || 0));
     }
-
-    // Current month keys — check both padded and unpadded formats (matching new-client-dashboard logic)
-    const now = new Date();
-    const currentYear = now.getFullYear();
-    const currentMonthNum = now.getMonth() + 1;
-    const unpaddedMonthKey = `${currentYear}-${currentMonthNum}`;
-    const paddedMonthKey = `${currentYear}-${String(currentMonthNum).padStart(2, '0')}`;
 
     // ── Build enriched client list ────────────────────────────────────────────
     const enrichedClients: ClientCardData[] = await Promise.all(
@@ -212,44 +205,25 @@ export async function GET(request: NextRequest) {
           return clientCompletions.get(ap.id) !== true;
         }).length;
 
-        // ── Planned budget for the date range (from monthlySpend breakdown) ──
-        // Calculate planned budget for all months in the date range
+        // ── Planned budget: total campaign budget across ALL months ──
+        // Matches dashboard's campaignDates.totalBudget (sum of all monthlySpend values)
         let plannedBudget = 0;
-        const rangeStart = new Date(dateRangeStart);
-        const rangeEnd = new Date(dateRangeEnd);
-        
-        // Iterate through each month in the date range
-        let currentMonth = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), 1);
-        const rangeEndMonth = new Date(rangeEnd.getFullYear(), rangeEnd.getMonth(), 1);
-        
-        while (currentMonth <= rangeEndMonth) {
-          const year = currentMonth.getFullYear();
-          const monthNum = currentMonth.getMonth() + 1;
-          const unpaddedMonthKey = `${year}-${monthNum}`;
-          const paddedMonthKey = `${year}-${String(monthNum).padStart(2, '0')}`;
-          
-          for (const ch of rawChannels) {
-            for (const f of ch.flights || []) {
-              if (f.monthlySpend && typeof f.monthlySpend === 'object') {
-                // Try both padded and unpadded formats (matching new-client-dashboard)
-                const spend = f.monthlySpend[paddedMonthKey] || f.monthlySpend[unpaddedMonthKey] || 0;
+        for (const ch of rawChannels) {
+          for (const f of ch.flights || []) {
+            if (f.monthlySpend && typeof f.monthlySpend === 'object') {
+              for (const spend of Object.values(f.monthlySpend)) {
                 plannedBudget += Number(spend);
               }
             }
           }
-          
-          // Move to next month
-          currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1);
         }
 
-        // ── Actual spend ──
-        // Prefer the value cached by new-client-dashboard (exact mirror) so both
-        // views always show the same number. Fall back to DB calculation when the
-        // cache hasn't been populated yet (e.g. client hasn't been opened today).
-        const cachedActualSpend = health?.mtd_actual_spend ?? null;
-        const actualSpend = cachedActualSpend !== null
-          ? Number(cachedActualSpend)
-          : calculateActualSpendForClient(client.id, spendRows || []);
+        // ── Actual spend: compute fresh from DB for the YTD range ──
+        // Matches the dashboard's default YTD range (Jan 1 – today).
+        // The mtd_actual_spend cache is intentionally skipped — it reflects whatever
+        // date range the user had selected last time they opened the dashboard, so
+        // it can be stale or cover a different period than plannedBudget.
+        const actualSpend = calculateActualSpendForClient(client.id, spendRows || []);
         
         // Debug logging for Content Manager client
         if (client.name === 'Content Manager') {

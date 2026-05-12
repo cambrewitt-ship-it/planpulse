@@ -16,7 +16,7 @@ const QUICK_ACTIONS = [
   { label: 'Channel health', prompt: 'Do a channel health check — for each client show me channel pacing, spend vs plan, and flag any channels that are over or under pacing.' },
   { label: 'Overdue tasks', prompt: 'What action points are overdue right now?' },
   { label: 'Red clients', prompt: 'Which clients have red health status and why?' },
-  { label: 'Channel specs', prompt: 'What channel specs and notes do we have in our library?' },
+  { label: 'Live Meta campaigns', prompt: 'Show me all our live Meta campaigns — which ones are active and which are paused?' },
 ];
 
 function renderMarkdown(text: string): React.ReactNode[] {
@@ -116,8 +116,20 @@ function FloatingAIChatInner() {
               setMessages(prev => { const next = [...prev]; const last = next[next.length - 1]; if (last?.role === 'assistant') next[next.length - 1] = { ...last, content: last.content + event.text }; return next; });
               setToolInProgress(null);
             } else if (event.type === 'tool_call') {
-              const labels: Record<string, string> = { get_daily_briefing: 'Fetching daily briefing…', get_client_status: 'Looking up client data…', get_action_points: 'Checking action points…', get_channel_library: 'Searching channel library…', get_channel_performance: 'Pulling channel performance…' };
-              setToolInProgress(labels[event.tool] ?? 'Fetching data…');
+              const labels: Record<string, string> = {
+                get_daily_briefing: 'Fetching daily briefing…',
+                get_client_status: 'Looking up client data…',
+                get_action_points: 'Checking action points…',
+                get_channel_library: 'Searching channel library…',
+                get_channel_performance: 'Pulling channel performance…',
+                complete_action_point: 'Marking task as complete…',
+                create_client: 'Creating new client…',
+                update_media_plan_budget: 'Updating media plan budget…',
+                get_live_meta_campaigns: 'Fetching live Meta campaigns…',
+              };
+              setToolInProgress(labels[event.tool] ?? 'Working on it…');
+            } else if (event.type === 'action') {
+              window.dispatchEvent(new CustomEvent('planpulse:ai-action', { detail: { tool: event.tool, data: event.data } }));
             } else if (event.type === 'done') {
               setMessages(prev => { const next = [...prev]; const last = next[next.length - 1]; if (last?.role === 'assistant') next[next.length - 1] = { ...last, isStreaming: false }; return next; });
               setToolInProgress(null);
@@ -185,7 +197,7 @@ function FloatingAIChatInner() {
                       value={input}
                       onChange={handleInput}
                       onKeyDown={handleKeyDown}
-                      placeholder="Ask about clients, tasks, or specs…"
+                      placeholder="Ask about clients, complete tasks, update budgets…"
                       rows={2}
                       style={{ width: '100%', resize: 'none', border: 'none', background: 'transparent', fontSize: 13, lineHeight: 1.5, color: '#1C1917', outline: 'none', ...font, minHeight: 44, maxHeight: 120, overflow: 'auto', display: 'block', boxSizing: 'border-box' }}
                     />
@@ -295,7 +307,7 @@ function FloatingAIChatInner() {
                           value={input}
                           onChange={handleInput}
                           onKeyDown={handleKeyDown}
-                          placeholder="Ask about clients, tasks, or specs…"
+                          placeholder="Ask about clients, complete tasks, update budgets…"
                           rows={2}
                           disabled={isLoading}
                           style={{ width: '100%', resize: 'none', border: 'none', background: 'transparent', fontSize: 13, lineHeight: 1.5, color: '#1C1917', outline: 'none', ...font, minHeight: 44, maxHeight: 140, overflow: 'auto', display: 'block', boxSizing: 'border-box' }}

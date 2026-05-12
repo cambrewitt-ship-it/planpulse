@@ -232,6 +232,44 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
   // Completing state — optimistic scratch-out before card disappears
   const [completingIds, setCompletingIds] = useState<Set<string>>(new Set());
 
+  // Flash/highlight newly AI-created items
+  const [flashingIds, setFlashingIds] = useState<Set<string>>(new Set());
+
+  // Listen for AI write actions and trigger animations
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { tool, data } = (e as CustomEvent<{ tool: string; data: any }>).detail;
+      if (!data?.success) return;
+
+      if (tool === 'complete_action_point') {
+        const apId = data.action_point?.id;
+        if (apId) {
+          setCompletingIds(prev => new Set(prev).add(apId));
+          // Fire confetti from the bottom-right (near the AI chat button)
+          fireConfetti(window.innerWidth - 50, window.innerHeight - 50);
+        }
+        setTimeout(() => onActionPointCompleted?.(), 900);
+      }
+
+      if (tool === 'create_action_point') {
+        const newId = data.action_point?.id;
+        // Refresh data first, then highlight the new card
+        setTimeout(() => {
+          onActionPointCompleted?.();
+          if (newId) {
+            setTimeout(() => {
+              setFlashingIds(prev => new Set(prev).add(newId));
+              setTimeout(() => setFlashingIds(prev => { const n = new Set(prev); n.delete(newId); return n; }), 2000);
+            }, 400); // slight delay so card is rendered before highlight
+          }
+        }, 200);
+      }
+    };
+
+    window.addEventListener('planpulse:ai-action', handler);
+    return () => window.removeEventListener('planpulse:ai-action', handler);
+  }, [onActionPointCompleted]);
+
   function handleToggleInProgress(card: KanbanCard) {
     setInProgressIds(prev => {
       const next = new Set(prev);
@@ -513,6 +551,11 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
       @keyframes strike {
         from { width: 0%; }
         to   { width: 100%; }
+      }
+      @keyframes aiFlash {
+        0%   { box-shadow: inset 0 0 0 2px rgba(74,124,89,0.7), 0 0 12px rgba(74,124,89,0.35); }
+        60%  { box-shadow: inset 0 0 0 2px rgba(74,124,89,0.3), 0 0 6px rgba(74,124,89,0.15); }
+        100% { box-shadow: none; }
       }
     `}</style>
     <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -826,6 +869,7 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
         {allCardsSorted.map((card) => {
           const isInProgress = inProgressIds.has(card.id);
           const isCompleting = completingIds.has(card.id);
+          const isFlashing = flashingIds.has(card.id);
           const colColor = card.status === '1-2' ? '#A0442A' : card.status === '3-4' ? '#B07030' : '#4A6580';
           const clientCol = clientColor(card.clientId);
           return (
@@ -837,6 +881,7 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
               overflow: 'hidden',
               opacity: isCompleting ? 0 : 1,
               transition: isCompleting ? 'opacity 0.7s ease 0.2s' : undefined,
+              animation: isFlashing ? 'aiFlash 2s ease-out' : undefined,
             }}>
               {/* Client name header */}
               <div style={{
@@ -922,11 +967,12 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                 {overdueCards.map((card) => {
                   const isInProgress = inProgressIds.has(card.id);
                   const isCompleting = completingIds.has(card.id);
+                  const isFlashing = flashingIds.has(card.id);
                   const clientCol = clientColor(card.clientId);
                   return (
                     <div key={card.id} style={{ display: 'grid', gridTemplateRows: isCompleting ? '0fr' : '1fr', transition: isCompleting ? 'grid-template-rows 0.45s ease 0.35s' : undefined, overflow: 'hidden', flexShrink: 0 }}>
                     <div style={{ overflow: 'hidden' }}>
-                    <div style={{ background: isInProgress ? '#FFFBF4' : '#FDFCF8', border: `0.5px solid ${isInProgress ? 'rgba(176,112,48,0.4)' : '#E8E4DC'}`, borderLeft: `2px solid ${isInProgress ? '#B07030' : OVERDUE_COLOR}`, borderRadius: 5, overflow: 'hidden' }}>
+                    <div style={{ background: isInProgress ? '#FFFBF4' : '#FDFCF8', border: `0.5px solid ${isInProgress ? 'rgba(176,112,48,0.4)' : '#E8E4DC'}`, borderLeft: `2px solid ${isInProgress ? '#B07030' : OVERDUE_COLOR}`, borderRadius: 5, overflow: 'hidden', animation: isFlashing ? 'aiFlash 2s ease-out' : undefined }}>
                       <div style={{ background: clientCol, padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 4 }}>
                         <span style={{ fontSize: 9, fontWeight: 600, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '0.02em' }}>{card.clientName}</span>
                       </div>
@@ -1004,6 +1050,7 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
               {colCards.map((card) => {
                 const isInProgress = inProgressIds.has(card.id);
                 const isCompleting = completingIds.has(card.id);
+                const isFlashing = flashingIds.has(card.id);
                 const clientCol = clientColor(card.clientId);
                 return (
                 <div key={card.id} style={{ display: 'grid', gridTemplateRows: isCompleting ? '0fr' : '1fr', transition: isCompleting ? 'grid-template-rows 0.45s ease 0.35s' : undefined, overflow: 'hidden', flexShrink: 0, marginBottom: isCompleting ? 0 : undefined }}>
@@ -1014,6 +1061,7 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                   borderLeft: `2px solid ${isInProgress ? '#B07030' : col.color}`,
                   borderRadius: 5,
                   overflow: 'hidden',
+                  animation: isFlashing ? 'aiFlash 2s ease-out' : undefined,
                 }}>
                   {/* Client name header */}
                   <div style={{

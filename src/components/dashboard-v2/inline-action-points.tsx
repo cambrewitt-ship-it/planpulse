@@ -176,6 +176,43 @@ export default function InlineActionPoints({
   const [newActionPointCategory, setNewActionPointCategory] = useState<'SET UP' | 'HEALTH CHECK'>('SET UP');
   const [newActionPointDaysBefore, setNewActionPointDaysBefore] = useState<number | ''>('');
   const [newActionPointFrequency, setNewActionPointFrequency] = useState<'daily' | 'weekly' | 'fortnightly' | 'monthly'>('weekly');
+  const [internalRefetchKey, setInternalRefetchKey] = useState(0);
+  const [flashingIds, setFlashingIds] = useState<Set<string>>(new Set());
+
+  // Listen for AI write actions and trigger animations
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { tool, data } = (e as CustomEvent<{ tool: string; data: any }>).detail;
+      if (!data?.success) return;
+
+      if (tool === 'complete_action_point') {
+        const apId = data.action_point?.id;
+        // Only animate if this component actually renders this action point
+        if (apId && actionPoints.some(ap => ap.id === apId)) {
+          setCompletingIds(prev => new Set(prev).add(apId));
+          fireConfetti(window.innerWidth - 50, window.innerHeight - 50);
+        }
+      }
+
+      if (tool === 'create_action_point') {
+        const newId = data.action_point?.id;
+        const newChannelType = data.action_point?.channel_type;
+        // Only refetch if the new action point matches this component's channel
+        if (newChannelType && channelType && newChannelType.toLowerCase().includes(channelType.toLowerCase().replace(' ads', ''))) {
+          setInternalRefetchKey(k => k + 1);
+          if (newId) {
+            setTimeout(() => {
+              setFlashingIds(prev => new Set(prev).add(newId));
+              setTimeout(() => setFlashingIds(prev => { const n = new Set(prev); n.delete(newId); return n; }), 2000);
+            }, 500);
+          }
+        }
+      }
+    };
+
+    window.addEventListener('planpulse:ai-action', handler);
+    return () => window.removeEventListener('planpulse:ai-action', handler);
+  }, [actionPoints, channelType]);
 
   useEffect(() => {
     const fetchActionPoints = async () => {
@@ -229,7 +266,7 @@ export default function InlineActionPoints({
     };
 
     fetchActionPoints();
-  }, [channelType, clientId, refetchTrigger]);
+  }, [channelType, clientId, refetchTrigger, internalRefetchKey]);
 
   const handleToggle = async (id: string, completed: boolean, e?: React.MouseEvent) => {
     if (completed && e) fireConfetti(e.clientX, e.clientY);
@@ -514,10 +551,11 @@ export default function InlineActionPoints({
 
     return (
       <>
-        <style>{`@keyframes strike { from { width: 0% } to { width: 100% } }`}</style>
+        <style>{`@keyframes strike { from { width: 0% } to { width: 100% } } @keyframes aiFlash { 0% { box-shadow: inset 0 0 0 2px rgba(74,124,89,0.7), 0 0 12px rgba(74,124,89,0.35); } 60% { box-shadow: inset 0 0 0 2px rgba(74,124,89,0.3), 0 0 6px rgba(74,124,89,0.15); } 100% { box-shadow: none; } }`}</style>
         <div className="space-y-1.5">
         {items.map((ap) => {
           const isCompleting = completingIds.has(ap.id);
+          const isFlashing = flashingIds.has(ap.id);
           const dueDate = ap.category === 'SET UP' && ap.days_before_live_due
             ? calculateDueDate(ap.days_before_live_due)
             : null;
@@ -529,7 +567,7 @@ export default function InlineActionPoints({
             <div
               key={ap.id}
               className="flex items-start gap-2 group rounded-md px-2 py-1.5 transition-colors border border-gray-100 bg-gray-50 hover:border-gray-200 hover:bg-white"
-              style={{ opacity: isCompleting ? 0.6 : 1, transition: 'opacity 0.4s' }}
+              style={{ opacity: isCompleting ? 0.6 : 1, transition: 'opacity 0.4s', animation: isFlashing ? 'aiFlash 2s ease-out' : undefined }}
             >
               <button
                 type="button"

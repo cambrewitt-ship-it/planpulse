@@ -74,6 +74,9 @@ export interface MediaPlanChannel {
   campaignNotes?: string;
   manualActualSpend?: number;
   campaignStatus?: 'planning' | 'live' | 'paused' | 'complete';
+  // Meta campaign linkage (set during onboarding)
+  metaCampaignId?: string;
+  metaCampaignName?: string | null;
 }
 
 const generateChannelId = (): string => {

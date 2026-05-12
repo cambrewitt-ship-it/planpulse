@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 
 export const maxDuration = 60;
 
-const SYSTEM_PROMPT = `You are an AI assistant embedded in a digital media agency's management platform called PlanPulse. You have real-time access to the agency's client data, campaigns, action points, and channel library.
+const SYSTEM_PROMPT = `You are an AI assistant embedded in a digital media agency's management platform called PlanPulse. You have real-time access to the agency's client data, campaigns, action points, and channel library. You can also take actions directly in the platform.
 
 You help the team with:
 - Daily briefings on client status and health
@@ -13,6 +13,12 @@ You help the team with:
 - Channel-level performance health checks (spend vs plan, KPIs, pacing status)
 - Media channel specifications and best practices from the agency library
 - Guidance on how to use the platform
+
+You can also take actions:
+- Complete action points: Mark tasks as done for specific clients using complete_action_point
+- Create new clients: Add new clients to the platform using create_client
+- Update budgets: Adjust channel budgets in media plans for specific months using update_media_plan_budget
+- View live Meta campaigns: Fetch current campaign data directly from the Meta Ads API using get_live_meta_campaigns
 
 Client health indicators:
 - Red: Significant issues (spend variance >15%, overdue setup tasks)
@@ -28,9 +34,19 @@ Action points have due dates calculated from channel start dates — SET UP task
 
 When asked about channel performance, spend, metrics, or pacing — always use get_channel_performance to pull live data.
 
+Multi-step workflow patterns:
+- "Onboard [client]": Use create_client to create them, then explain what to do next (add media plan channels + budgets in the app, connect ad accounts, assign account manager)
+- "Health check [client]": Use get_channel_performance + get_action_points, identify issues, offer to complete tasks that are resolved
+- "End of month review": Use get_daily_briefing + get_channel_performance for all clients, synthesise and flag issues
+- "Sort out tasks for [client]": Use get_action_points to list overdue items, then use complete_action_point for any the user confirms are done
+- When completing action points for multiple items, you can call complete_action_point multiple times in parallel
+
+Always confirm what you've done after taking a write action. If a request is ambiguous (e.g. multiple clients or action points match), ask for clarification before acting.
+
 Be concise, professional, and actionable. Use bullet points and bold text to make responses scannable.`;
 
 const TOOLS: Anthropic.Tool[] = [
+  // ── Read tools ───────────────────────────────────────────────────────────────
   {
     name: 'get_daily_briefing',
     description: 'Get a full daily briefing: all clients, health status, overdue action points, upcoming tasks, and pacing issues. Use this for morning briefings or "how are we doing" questions.',
@@ -109,9 +125,127 @@ const TOOLS: Anthropic.Tool[] = [
       required: [],
     },
   },
+
+  // ── Write / action tools (Tier 1) ─────────────────────────────────────────
+  {
+    name: 'complete_action_point',
+    description: 'Mark a specific action point as complete for a client. Use when the user says something is done, finished, sorted, or no longer needed. Searches for the action point by partial text match. If multiple match, returns options for clarification.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        client_name: {
+          type: 'string',
+          description: 'The client name (partial match is fine).',
+        },
+        action_point_description: {
+          type: 'string',
+          description: 'Partial text of the action point to complete (e.g. "health check", "pixel", "tracking setup").',
+        },
+        channel_type: {
+          type: 'string',
+          description: 'Optional: filter to a specific channel (e.g. "Meta", "Google"). Helps disambiguate if multiple action points match.',
+        },
+      },
+      required: ['client_name', 'action_point_description'],
+    },
+  },
+  {
+    name: 'create_client',
+    description: 'Create a new client in PlanPulse. Use when the user wants to onboard a new client or add a new client to the system.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        client_name: {
+          type: 'string',
+          description: 'The name of the new client.',
+        },
+      },
+      required: ['client_name'],
+    },
+  },
+  {
+    name: 'update_media_plan_budget',
+    description: 'Update a channel\'s planned budget for a specific month in a client\'s media plan. Use when the user wants to adjust, change, or set a budget for a channel. Month must be in YYYY-MM format (e.g. "2026-06" for June 2026).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        client_name: {
+          type: 'string',
+          description: 'The client name (partial match is fine).',
+        },
+        channel_name: {
+          type: 'string',
+          description: 'The channel to update (e.g. "Meta", "Google Ads", "LinkedIn").',
+        },
+        month: {
+          type: 'string',
+          description: 'The month to update in YYYY-MM format (e.g. "2026-06").',
+        },
+        new_budget: {
+          type: 'number',
+          description: 'The new planned budget amount in dollars.',
+        },
+      },
+      required: ['client_name', 'channel_name', 'month', 'new_budget'],
+    },
+  },
+
+  {
+    name: 'create_action_point',
+    description: 'Create a new action point task that will appear for all clients running that channel. Use when the user wants to add a new recurring health check or a new setup task to the agency workflow.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        text: {
+          type: 'string',
+          description: 'The task description (e.g. "Check attribution window settings").',
+        },
+        channel_type: {
+          type: 'string',
+          description: 'The channel this applies to (e.g. "Meta Ads", "Google Ads", "LinkedIn Ads").',
+        },
+        category: {
+          type: 'string',
+          enum: ['SET UP', 'HEALTH CHECK'],
+          description: 'SET UP for one-time pre-launch tasks, HEALTH CHECK for recurring checks.',
+        },
+        days_before_live_due: {
+          type: 'number',
+          description: 'SET UP only: how many days before channel launch the task is due.',
+        },
+        frequency: {
+          type: 'string',
+          enum: ['weekly', 'fortnightly', 'monthly'],
+          description: 'HEALTH CHECK only: how often the task recurs.',
+        },
+      },
+      required: ['text', 'channel_type', 'category'],
+    },
+  },
+
+  // ── Live ad platform data (Tier 3) ────────────────────────────────────────
+  {
+    name: 'get_live_meta_campaigns',
+    description: 'Fetch live campaign data directly from the Meta Ads API. Returns current campaign names, status, and account info. Use when asked about Meta campaigns, what campaigns are running, or to check live Meta campaign status.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        status_filter: {
+          type: 'string',
+          enum: ['ACTIVE', 'PAUSED', 'ARCHIVED', 'DELETED'],
+          description: 'Filter campaigns by effective status. Omit for all.',
+        },
+        account_name: {
+          type: 'string',
+          description: 'Filter to campaigns under a specific ad account by partial name match. Omit for all accounts.',
+        },
+      },
+      required: [],
+    },
+  },
 ];
 
-// ── Tool implementations — call existing API endpoints ──────────────────────
+// ── Helpers ────────────────────────────────────────────────────────────────────
 
 async function callInternalApi(path: string, request: NextRequest): Promise<any> {
   const origin = new URL(request.url).origin;
@@ -122,6 +256,8 @@ async function callInternalApi(path: string, request: NextRequest): Promise<any>
   if (!res.ok) return { error: `API call failed: ${res.status}` };
   return res.json();
 }
+
+// ── Read tool implementations ─────────────────────────────────────────────────
 
 async function toolGetActionPoints(request: NextRequest, clientNameFilter?: string) {
   const data = await callInternalApi('/api/agency/action-points', request);
@@ -146,7 +282,9 @@ async function toolGetActionPoints(request: NextRequest, clientNameFilter?: stri
     for (const channel of client.channels ?? []) {
       for (const ap of channel.actionPoints ?? []) {
         const item = {
+          id: ap.id,
           client: client.clientName,
+          client_id: client.clientId,
           channel: channel.channelType,
           task: ap.text,
           category: ap.category,
@@ -183,7 +321,7 @@ async function toolGetClientStatus(request: NextRequest, input: { client_name?: 
   const data = await callInternalApi(`/api/agency/clients?${params}`, request);
   if (data.error) return data;
 
-  let clients: any[] = Array.isArray(data) ? data : [];
+  let clients: any[] = Array.isArray(data) ? data : (data.clients ?? []);
 
   if (input.client_name) {
     clients = clients.filter((c: any) =>
@@ -248,14 +386,6 @@ async function toolGetDailyBriefing(request: NextRequest) {
   };
 }
 
-function platformToChannelName(platform: string): string {
-  if (platform === 'meta-ads') return 'Meta Ads';
-  if (platform === 'google-ads') return 'Google Ads';
-  if (platform === 'linkedin-ads') return 'LinkedIn Ads';
-  if (platform === 'tiktok-ads') return 'TikTok Ads';
-  return platform;
-}
-
 function channelNameToPlatform(channelName: string): string | null {
   const lower = channelName.toLowerCase();
   if (lower.includes('meta') || lower.includes('facebook') || lower.includes('instagram')) return 'meta-ads';
@@ -278,7 +408,6 @@ async function toolGetChannelPerformance(
   const startDate = input.start_date || monthStart;
   const endDate = input.end_date || today;
 
-  // Resolve clients
   const { data: clientsData } = await supabase
     .from('clients')
     .select('id, name')
@@ -293,13 +422,11 @@ async function toolGetChannelPerformance(
   const clientIds = clients.map(c => c.id);
   const clientMap = new Map(clients.map(c => [c.id, c.name]));
 
-  // Get media plans (planned budgets per channel)
   const { data: mediaPlans } = await supabase
     .from('client_media_plan_builder')
     .select('client_id, channels')
     .in('client_id', clientIds);
 
-  // Get actual performance metrics
   const { data: metricsRows } = await supabase
     .from('ad_performance_metrics')
     .select('client_id, platform, spend, impressions, clicks, ctr, conversions, reach, cpc, cpm, average_cpc, frequency, date')
@@ -309,7 +436,6 @@ async function toolGetChannelPerformance(
     .lte('date', endDate)
     .not('campaign_id', 'like', 'manual-override-%');
 
-  // Aggregate actual metrics by client + platform
   const actualByClientPlatform = new Map<string, {
     spend: number; impressions: number; clicks: number; conversions: number;
     reach: number; cpm_sum: number; cpm_count: number; cpc_sum: number; cpc_count: number; days: number;
@@ -333,7 +459,6 @@ async function toolGetChannelPerformance(
     actualByClientPlatform.set(key, existing);
   }
 
-  // Build per-channel results
   const channels: any[] = [];
 
   const now = new Date();
@@ -348,13 +473,10 @@ async function toolGetChannelPerformance(
 
     for (const ch of rawChannels) {
       if (!ch.channelName) continue;
-
-      // Optional filter by channel name
       if (input.channel_name && !ch.channelName.toLowerCase().includes(input.channel_name.toLowerCase())) continue;
 
       const platform = channelNameToPlatform(ch.channelName);
 
-      // Planned budget for current month from flights
       let plannedBudget = 0;
       const flights: any[] = ch.flights || [];
       for (const f of flights) {
@@ -363,7 +485,6 @@ async function toolGetChannelPerformance(
         }
       }
 
-      // Channel status
       const startDates = flights.map((f: any) => f.startWeek).filter(Boolean).map((s: string) => s.split('T')[0]).sort();
       const endDates = flights.map((f: any) => f.endWeek).filter(Boolean).map((s: string) => s.split('T')[0]).sort();
       const earliestStart = startDates[0] || null;
@@ -375,12 +496,10 @@ async function toolGetChannelPerformance(
         else channelStatus = 'upcoming';
       }
 
-      // Actual metrics
       const actualKey = platform ? `${plan.client_id}::${platform}` : null;
       const actual = actualKey ? actualByClientPlatform.get(actualKey) : null;
       const actualSpend = actual?.spend ?? 0;
 
-      // Spend variance
       const variancePct = plannedBudget > 0 ? ((actualSpend - plannedBudget) / plannedBudget) * 100 : null;
 
       let pacingStatus: string;
@@ -389,7 +508,6 @@ async function toolGetChannelPerformance(
       else if (variancePct < -15) pacingStatus = 'underpacing';
       else pacingStatus = 'on track';
 
-      // Computed KPIs
       const ctr = actual && actual.impressions > 0 ? (actual.clicks / actual.impressions) * 100 : null;
       const cpc = actual && actual.clicks > 0 ? actual.spend / actual.clicks : null;
       const cpm = actual && actual.impressions > 0 ? (actual.spend / actual.impressions) * 1000 : null;
@@ -456,7 +574,290 @@ async function toolGetChannelLibrary(request: NextRequest, input: { channel_type
   return { total: (data ?? []).length, entries: (data ?? []).slice(0, 20) };
 }
 
-// ── Route handler ───────────────────────────────────────────────────────────
+// ── Write / action tool implementations (Tier 1) ──────────────────────────────
+
+async function toolCompleteActionPoint(
+  _request: NextRequest,
+  input: { client_name: string; action_point_description: string; channel_type?: string }
+) {
+  const supabase = await createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.user) return { error: 'Unauthorized' };
+
+  // Find the client
+  const { data: clients } = await supabase
+    .from('clients')
+    .select('id, name')
+    .eq('user_id', session.user.id)
+    .ilike('name', `%${input.client_name}%`);
+
+  if (!clients?.length) return { error: `No client found matching "${input.client_name}"` };
+  if (clients.length > 1) return {
+    error: 'Multiple clients matched — be more specific.',
+    matches: clients.map((c: any) => c.name),
+  };
+
+  const client = clients[0];
+
+  // Search action points by text
+  let query = supabase.from('action_points').select('id, text, channel_type, category');
+  if (input.channel_type) {
+    query = (query as any).ilike('channel_type', `%${input.channel_type}%`);
+  }
+  const { data: allAps } = await query;
+
+  const matches = (allAps || []).filter((ap: any) =>
+    ap.text.toLowerCase().includes(input.action_point_description.toLowerCase())
+  );
+
+  if (!matches.length) {
+    return { error: `No action point found matching "${input.action_point_description}". Try a different keyword.` };
+  }
+
+  if (matches.length > 1) {
+    return {
+      clarification_needed: true,
+      message: 'Multiple action points matched — which one did you mean?',
+      matches: matches.map((ap: any) => ({ id: ap.id, text: ap.text, channel_type: ap.channel_type })),
+    };
+  }
+
+  const ap = matches[0];
+
+  const { error: upsertError } = await (supabase as any)
+    .from('client_action_point_completions')
+    .upsert(
+      {
+        client_id: client.id,
+        action_point_id: ap.id,
+        completed: true,
+        completed_at: new Date().toISOString(),
+      },
+      { onConflict: 'client_id,action_point_id' }
+    );
+
+  if (upsertError) return { error: 'Failed to mark as complete', details: upsertError.message };
+
+  return {
+    success: true,
+    message: `Marked "${ap.text}" as complete for ${client.name}`,
+    action_point: { id: ap.id, text: ap.text, channel_type: ap.channel_type, category: ap.category },
+    client: client.name,
+  };
+}
+
+async function toolCreateClient(
+  _request: NextRequest,
+  input: { client_name: string }
+) {
+  const supabase = await createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.user) return { error: 'Unauthorized' };
+
+  if (!input.client_name?.trim()) return { error: 'client_name is required' };
+
+  // Check for duplicates
+  const { data: existing } = await supabase
+    .from('clients')
+    .select('id, name')
+    .eq('user_id', session.user.id)
+    .ilike('name', input.client_name.trim());
+
+  if (existing?.length) {
+    return {
+      error: `A client named "${existing[0].name}" already exists`,
+      existing_client_id: existing[0].id,
+    };
+  }
+
+  const { data, error } = await supabase
+    .from('clients')
+    .insert({ name: input.client_name.trim(), user_id: session.user.id })
+    .select()
+    .single();
+
+  if (error) return { error: 'Failed to create client', details: error.message };
+
+  return {
+    success: true,
+    message: `Created new client "${data.name}"`,
+    client: { id: data.id, name: data.name },
+    next_steps: [
+      'Open the client in PlanPulse to build their media plan (add channels, budgets, and flight dates)',
+      'Connect their ad accounts (Meta Ads, Google Ads, LinkedIn) via Settings → Integrations',
+      'Assign an account manager in the client settings',
+    ],
+  };
+}
+
+async function toolUpdateMediaPlanBudget(
+  _request: NextRequest,
+  input: { client_name: string; channel_name: string; month: string; new_budget: number }
+) {
+  const supabase = await createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.user) return { error: 'Unauthorized' };
+
+  // Find client
+  const { data: clients } = await supabase
+    .from('clients')
+    .select('id, name')
+    .eq('user_id', session.user.id)
+    .ilike('name', `%${input.client_name}%`);
+
+  if (!clients?.length) return { error: `No client found matching "${input.client_name}"` };
+  if (clients.length > 1) return { error: 'Multiple clients matched', matches: clients.map((c: any) => c.name) };
+
+  const client = clients[0];
+
+  // Fetch media plan
+  const { data: mediaPlan } = await supabase
+    .from('client_media_plan_builder')
+    .select('client_id, channels')
+    .eq('client_id', client.id)
+    .maybeSingle();
+
+  if (!mediaPlan) {
+    return { error: `No media plan found for ${client.name}. Create one in the app first.` };
+  }
+
+  const channels: any[] = JSON.parse(JSON.stringify(mediaPlan.channels || []));
+
+  // Find the matching channel
+  const channelIdx = channels.findIndex((ch: any) =>
+    ch.channelName?.toLowerCase().includes(input.channel_name.toLowerCase())
+  );
+
+  if (channelIdx === -1) {
+    return {
+      error: `Channel "${input.channel_name}" not found in ${client.name}'s media plan`,
+      available_channels: channels.map((ch: any) => ch.channelName).filter(Boolean),
+    };
+  }
+
+  const channel = channels[channelIdx];
+  const flights: any[] = channel.flights || [];
+
+  if (!flights.length) {
+    return { error: `No flights found for ${channel.channelName}. Add flight dates in the media plan builder first.` };
+  }
+
+  // Update the primary (first) flight's monthlySpend
+  const oldBudget = flights[0].monthlySpend?.[input.month] ?? 0;
+  if (!flights[0].monthlySpend) flights[0].monthlySpend = {};
+  flights[0].monthlySpend[input.month] = input.new_budget;
+  channels[channelIdx] = { ...channel, flights };
+
+  const { error: updateError } = await supabase
+    .from('client_media_plan_builder')
+    .update({ channels })
+    .eq('client_id', client.id);
+
+  if (updateError) return { error: 'Failed to save budget update', details: updateError.message };
+
+  return {
+    success: true,
+    message: `Updated ${channel.channelName} budget for ${input.month}: $${Number(oldBudget).toLocaleString()} → $${Number(input.new_budget).toLocaleString()} for ${client.name}`,
+    client: client.name,
+    channel: channel.channelName,
+    month: input.month,
+    previous_budget: oldBudget,
+    new_budget: input.new_budget,
+    ...(flights.length > 1 && { note: `${client.name} has ${flights.length} flights for this channel — updated the primary flight.` }),
+  };
+}
+
+async function toolCreateActionPoint(
+  request: NextRequest,
+  input: { text: string; channel_type: string; category: 'SET UP' | 'HEALTH CHECK'; days_before_live_due?: number; frequency?: string }
+) {
+  const origin = new URL(request.url).origin;
+  const cookieHeader = request.headers.get('cookie') ?? '';
+
+  const body: any = {
+    text: input.text.trim(),
+    channel_type: input.channel_type,
+    category: input.category,
+  };
+  if (input.category === 'HEALTH CHECK' && input.frequency) body.frequency = input.frequency;
+  if (input.category === 'SET UP' && input.days_before_live_due !== undefined) body.days_before_live_due = input.days_before_live_due;
+
+  const res = await fetch(`${origin}/api/action-points`, {
+    method: 'POST',
+    headers: { cookie: cookieHeader, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) return { error: `Failed to create action point: ${res.status}` };
+  const data = await res.json();
+
+  return {
+    success: true,
+    message: `Created "${input.text}" action point for ${input.channel_type}`,
+    action_point: {
+      id: data.data?.id,
+      text: input.text,
+      channel_type: input.channel_type,
+      category: input.category,
+    },
+    note: 'This action point will now appear for all clients running this channel.',
+  };
+}
+
+// ── Live ad platform tool implementations (Tier 3) ────────────────────────────
+
+async function toolGetLiveMetaCampaigns(
+  request: NextRequest,
+  input: { status_filter?: string; account_name?: string }
+) {
+  const data = await callInternalApi('/api/ads/meta/campaigns', request);
+  if (data.error) return data;
+
+  let campaigns: any[] = data.campaigns || [];
+
+  if (input.status_filter) {
+    campaigns = campaigns.filter((c: any) =>
+      c.effectiveStatus?.toUpperCase() === input.status_filter?.toUpperCase()
+    );
+  }
+
+  if (input.account_name) {
+    campaigns = campaigns.filter((c: any) =>
+      c.accountName?.toLowerCase().includes(input.account_name!.toLowerCase())
+    );
+  }
+
+  if (!campaigns.length) {
+    return {
+      message: input.status_filter
+        ? `No ${input.status_filter} campaigns found. Meta Ads may not be connected, or no campaigns match the filter.`
+        : 'No campaigns found. Make sure Meta Ads is connected in Settings.',
+      total_campaigns: 0,
+    };
+  }
+
+  // Group by account
+  const grouped: Record<string, any[]> = {};
+  for (const c of campaigns) {
+    const acct = c.accountName || 'Unknown Account';
+    if (!grouped[acct]) grouped[acct] = [];
+    grouped[acct].push({
+      id: c.id,
+      name: c.name,
+      status: c.status,
+      effective_status: c.effectiveStatus,
+    });
+  }
+
+  return {
+    total_campaigns: campaigns.length,
+    active_count: campaigns.filter((c: any) => c.effectiveStatus === 'ACTIVE').length,
+    paused_count: campaigns.filter((c: any) => c.effectiveStatus === 'PAUSED').length,
+    by_account: Object.entries(grouped).map(([account, cams]) => ({ account, campaign_count: cams.length, campaigns: cams })),
+  };
+}
+
+// ── Route handler ─────────────────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
   if (!process.env.ANTHROPIC_API_KEY) {
@@ -516,6 +917,7 @@ export async function POST(request: NextRequest) {
             let result: any;
             const input = block.input as any;
 
+            // Read tools
             if (block.name === 'get_daily_briefing') {
               result = await toolGetDailyBriefing(request);
             } else if (block.name === 'get_action_points') {
@@ -526,8 +928,26 @@ export async function POST(request: NextRequest) {
               result = await toolGetChannelLibrary(request, input);
             } else if (block.name === 'get_channel_performance') {
               result = await toolGetChannelPerformance(request, input);
+            // Write / action tools (Tier 1)
+            } else if (block.name === 'complete_action_point') {
+              result = await toolCompleteActionPoint(request, input);
+            } else if (block.name === 'create_action_point') {
+              result = await toolCreateActionPoint(request, input);
+            } else if (block.name === 'create_client') {
+              result = await toolCreateClient(request, input);
+            } else if (block.name === 'update_media_plan_budget') {
+              result = await toolUpdateMediaPlanBudget(request, input);
+            // Live ad platform tools (Tier 3)
+            } else if (block.name === 'get_live_meta_campaigns') {
+              result = await toolGetLiveMetaCampaigns(request, input);
             } else {
               result = { error: `Unknown tool: ${block.name}` };
+            }
+
+            // Emit structured action event so the UI can trigger animations
+            const writableTools = ['complete_action_point', 'create_action_point', 'create_client', 'update_media_plan_budget'];
+            if (writableTools.includes(block.name) && result?.success) {
+              send({ type: 'action', tool: block.name, data: result });
             }
 
             toolResults.push({
