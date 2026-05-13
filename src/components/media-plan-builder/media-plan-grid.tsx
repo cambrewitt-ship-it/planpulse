@@ -77,6 +77,8 @@ export interface MediaPlanChannel {
   // Meta campaign linkage (set during onboarding)
   metaCampaignId?: string;
   metaCampaignName?: string | null;
+  metaCampaignIds?: string[];
+  metaCampaignNames?: string[];
 }
 
 const generateChannelId = (): string => {

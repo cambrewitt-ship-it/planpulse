@@ -24,7 +24,7 @@ import Link from 'next/link';
 import { MediaPlanGrid, MediaPlanChannel } from '@/components/media-plan-builder/media-plan-grid';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
-import { getClients, getMediaPlans, getPlanById, updateClient, updateClientLogoUrl, deleteClient } from '@/lib/db/plans';
+import { getClients, getMediaPlans, getPlanById, updateClient, updateClientLogoUrl } from '@/lib/db/plans';
 import { fetchAnalyticsData, fetchSpendData, calculateCostPerMetric, calculateCostPerPlatformMetric, extractPlatformEventOptions, SpendDataPoint, CostMetricPoint, MetricSource, PlatformEventOption } from '@/lib/api/analytics-data-integration';
 import { subDays, addDays, format, differenceInDays, parseISO, startOfMonth, endOfMonth, startOfYear } from 'date-fns';
 import { FunnelStage, MediaPlanFunnel, FunnelConfig } from '@/lib/types/funnel';
@@ -354,7 +354,7 @@ export default function DashboardV2() {
       fetch(`/api/clients/${clientId}/actual-spend`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ actualSpend: totalActualSpend }),
+        body: JSON.stringify({ actualSpend: totalActualSpend, dateRange: analyticsDateRange }),
       }).catch(() => {/* fire-and-forget */});
     }, 2000);
     return () => clearTimeout(timer);
@@ -662,6 +662,21 @@ export default function DashboardV2() {
 
         setMediaPlanBuilderChannels(processedChannels);
         setCommission(result.data.commission || 0);
+
+        // Pre-populate localStorage with campaign selections from onboarding so
+        // channel cards initialize with the right campaigns on first load.
+        if (typeof window !== 'undefined' && clientId) {
+          processedChannels.forEach((ch: any) => {
+            const key = `channel-campaigns-${clientId}-${ch.id ?? ch.channelName}`;
+            if (localStorage.getItem(key)) return; // already set by user — don't override
+            const ids: string[] = ch.metaCampaignIds?.length
+              ? ch.metaCampaignIds
+              : ch.metaCampaignId ? [ch.metaCampaignId] : [];
+            if (ids.length > 0) {
+              try { localStorage.setItem(key, JSON.stringify(ids)); } catch {}
+            }
+          });
+        }
       }
     } catch (error) {
       console.error('Error loading media plan builder data:', error);
@@ -1687,7 +1702,15 @@ export default function DashboardV2() {
       const key = card.id ?? card.name;
       try {
         const saved = localStorage.getItem(`channel-campaigns-${clientId}-${key}`);
-        initial[key] = saved ? JSON.parse(saved) : [];
+        if (saved) {
+          initial[key] = JSON.parse(saved);
+        } else {
+          const ch = mediaPlanBuilderChannels.find(c => String(c.id ?? c.channelName) === key);
+          const ids: string[] = (ch as any)?.metaCampaignIds?.length
+            ? (ch as any).metaCampaignIds
+            : (ch as any)?.metaCampaignId ? [(ch as any).metaCampaignId] : [];
+          initial[key] = ids;
+        }
       } catch { initial[key] = []; }
     });
     setChannelCampaignSelections(initial);
@@ -2587,7 +2610,8 @@ export default function DashboardV2() {
                           onClick={async () => {
                             setDeleting(true);
                             try {
-                              await deleteClient(clientId);
+                              const res = await fetch(`/api/clients/${clientId}`, { method: 'DELETE' });
+                              if (!res.ok) throw new Error(await res.text());
                               router.push('/dashboard');
                             } catch {
                               setDeleting(false);

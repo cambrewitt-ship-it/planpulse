@@ -5,6 +5,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { RefreshCw, Plus, Maximize2 } from 'lucide-react';
 import { format, startOfYear } from 'date-fns';
 import type { ClientCardData } from '@/app/api/agency/clients/route';
+import { fetchSpendData } from '@/lib/api/analytics-data-integration';
 import type { AgencyClientActionPoints } from '@/app/api/agency/action-points/route';
 import { ClientCardCompact } from '@/components/agency/ClientCardCompact';
 import { TodayCard } from '@/components/agency/TodayCard';
@@ -206,6 +207,59 @@ export default function AgencyDashboard() {
     const interval = setInterval(() => fetchData(true), 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, [fetchData]);
+
+  // Background spend sync: for clients with $0 actual spend, fetch their spend
+  // from the ad platforms and cache it so future loads show the correct figure.
+  const syncedClientIds = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (loading) return;
+    const needsSync = clients.filter(c => c.actualSpend === 0 && !syncedClientIds.current.has(c.id));
+    if (needsSync.length === 0) return;
+
+    (async () => {
+      for (const client of needsSync) {
+        syncedClientIds.current.add(client.id);
+        try {
+          const result = await fetchSpendData(dateRange.startDate, dateRange.endDate, client.id);
+          if (!result.data?.length) continue;
+
+          // Collect the linked campaign IDs for this client (from all channels)
+          const campaignIds = new Set<string>(
+            client.channels.flatMap(ch => (ch as any).campaignIds ?? [])
+          );
+
+          // Sum spend, respecting campaign filter when IDs are available
+          let total = 0;
+          for (const point of result.data) {
+            if (campaignIds.size > 0 && point.campaignId && !campaignIds.has(point.campaignId)) continue;
+            total += point.spend ?? 0;
+          }
+          if (total <= 0) continue;
+
+          // Persist so future agency-page loads use the cached value directly
+          void fetch(`/api/clients/${client.id}/actual-spend`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ actualSpend: total, dateRange }),
+          });
+
+          // Update the card in place — no full refresh needed
+          setClients(prev => prev.map(c => {
+            if (c.id !== client.id) return c;
+            const spendVariancePct = c.plannedBudget > 0
+              ? ((total - c.plannedBudget) / c.plannedBudget) * 100
+              : null;
+            return { ...c, actualSpend: total, spendVariancePct };
+          }));
+        } catch {
+          // Non-fatal — best-effort sync
+        }
+      }
+    })();
+  // Run once after initial load; dateRange is intentionally omitted so changing
+  // the date picker doesn't re-trigger (fetchData already handles that).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, clients]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -679,6 +733,7 @@ export default function AgencyDashboard() {
                 view={kanbanView}
                 onAskAI={(prompt) => chatRef.current?.sendMessage(prompt)}
                 clients={clients.map(c => ({ id: c.id, name: c.name }))}
+                onAccountManagerCreated={fetchAccountManagers}
               />
             </div>
           </div>

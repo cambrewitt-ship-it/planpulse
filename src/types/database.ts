@@ -237,6 +237,8 @@ export interface Database {
             updated_at: string;
             mtd_actual_spend: number | null;
             mtd_actual_spend_updated_at: string | null;
+            spend_date_start: string | null;
+            spend_date_end: string | null;
           };
           Insert: {
             id?: string;
@@ -253,6 +255,8 @@ export interface Database {
             last_calculated_at?: string;
             mtd_actual_spend?: number | null;
             mtd_actual_spend_updated_at?: string | null;
+            spend_date_start?: string | null;
+            spend_date_end?: string | null;
           };
           Update: {
             id?: string;
@@ -269,6 +273,8 @@ export interface Database {
             last_calculated_at?: string;
             mtd_actual_spend?: number | null;
             mtd_actual_spend_updated_at?: string | null;
+            spend_date_start?: string | null;
+            spend_date_end?: string | null;
           };
           Relationships: [];
         };

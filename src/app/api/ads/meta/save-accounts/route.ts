@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
 
     // Parse request body
     const body = await request.json();
-    const { accounts } = body;
+    const { accounts, clientId } = body;
 
     if (!accounts || !Array.isArray(accounts) || accounts.length === 0) {
       return NextResponse.json(
@@ -48,6 +48,7 @@ export async function POST(request: NextRequest) {
     // Insert all selected accounts
     const accountsToInsert = accounts.map(account => ({
       user_id: user.id,
+      client_id: clientId ?? null,
       account_id: account.accountId,
       account_name: account.accountName || null,
       is_active: true,
@@ -59,7 +60,7 @@ export async function POST(request: NextRequest) {
       .upsert(
         accountsToInsert,
         {
-          onConflict: 'user_id,account_id',
+          onConflict: 'user_id,client_id,account_id',
           ignoreDuplicates: false,
         }
       )

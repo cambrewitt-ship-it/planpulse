@@ -543,7 +543,7 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
       const response = await fetch('/api/ads/meta/save-accounts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accounts: accountsToSave }),
+        body: JSON.stringify({ accounts: accountsToSave, clientId }),
       });
 
       const data = await response.json();

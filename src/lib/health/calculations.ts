@@ -335,7 +335,11 @@ export async function calculateClientHealth(
     }
 
     // 5. Upsert to client_health_status
-    const healthStatus: Omit<ClientHealthStatus, 'id' | 'created_at' | 'updated_at'> = {
+    // mtd_actual_spend, mtd_actual_spend_updated_at, spend_date_start, and
+    // spend_date_end are intentionally excluded — they are managed by the
+    // dashboard's PATCH /api/clients/[id]/actual-spend endpoint and must not
+    // be overwritten here.
+    const healthStatus: Omit<ClientHealthStatus, 'id' | 'created_at' | 'updated_at' | 'mtd_actual_spend' | 'mtd_actual_spend_updated_at' | 'spend_date_start' | 'spend_date_end'> = {
       client_id: clientId,
       status: clientStatus,
       active_channel_count: activeChannelCount,
@@ -347,8 +351,6 @@ export async function calculateClientHealth(
       next_critical_date: nextCriticalDate,
       next_critical_task: nextCriticalTask,
       last_calculated_at: new Date().toISOString(),
-      mtd_actual_spend: null,
-      mtd_actual_spend_updated_at: null,
     };
 
     const { data: upserted, error: upsertError } = await supabase

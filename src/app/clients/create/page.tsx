@@ -7,13 +7,6 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import Link from 'next/link';
 import Nango from '@nangohq/frontend';
 import {
@@ -195,10 +188,11 @@ export default function CreateClientPage() {
 
   // ── Step 5: campaigns ──
   const [metaCampaigns, setMetaCampaigns] = useState<MetaCampaign[]>([]);
-  const [channelCampaignMap, setChannelCampaignMap] = useState<Record<string, string>>({});
+  const [channelCampaignMap, setChannelCampaignMap] = useState<Record<string, string[]>>({});
   const [campaignsLoading, setCampaignsLoading] = useState(false);
   const [campaignsSaving, setCampaignsSaving] = useState(false);
-  const [campaignSearch, setCampaignSearch] = useState('');
+  const [openCampaignDropdown, setOpenCampaignDropdown] = useState<string | null>(null);
+  const [campaignSearchMap, setCampaignSearchMap] = useState<Record<string, string>>({});
 
   // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -511,10 +505,20 @@ export default function CreateClientPage() {
     if (step === 5 && connectionStatus.facebook) loadCampaigns();
   }, [step]);
 
+  useEffect(() => {
+    if (!openCampaignDropdown) return;
+    const handler = (e: MouseEvent) => {
+      const target = e.target as Element;
+      if (!target.closest('[data-campaign-dropdown]')) setOpenCampaignDropdown(null);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [openCampaignDropdown]);
+
   const loadCampaigns = async () => {
     setCampaignsLoading(true);
     try {
-      const res = await fetch('/api/ads/meta/campaigns');
+      const res = await fetch(clientId ? `/api/ads/meta/campaigns?clientId=${clientId}` : '/api/ads/meta/campaigns');
       if (res.ok) {
         const data = await res.json();
         setMetaCampaigns(data.campaigns ?? []);
@@ -528,10 +532,16 @@ export default function CreateClientPage() {
     setCampaignsSaving(true);
     try {
       const updatedChannels = channels.map((ch) => {
-        const campaignId = channelCampaignMap[ch.id];
-        if (campaignId) {
-          const campaign = metaCampaigns.find((c) => c.id === campaignId);
-          return { ...ch, metaCampaignId: campaignId, metaCampaignName: campaign?.name ?? null };
+        const campaignIds = (channelCampaignMap[ch.id] ?? []).filter(Boolean);
+        if (campaignIds.length > 0) {
+          const campaigns = metaCampaigns.filter((c) => campaignIds.includes(c.id));
+          return {
+            ...ch,
+            metaCampaignId: campaignIds[0],
+            metaCampaignName: campaigns[0]?.name ?? null,
+            metaCampaignIds: campaignIds,
+            metaCampaignNames: campaigns.map((c) => c.name),
+          };
         }
         return ch;
       });
@@ -961,18 +971,24 @@ export default function CreateClientPage() {
                         No campaigns found in your saved Meta accounts. You can link campaigns later from the client dashboard.
                       </div>
                     )}
-                    {metaCampaigns.length > 0 && (
-                      <Input
-                        placeholder="Search campaigns…"
-                        value={campaignSearch}
-                        onChange={(e) => setCampaignSearch(e.target.value)}
-                        className="text-sm"
-                      />
-                    )}
                     {namedChannels.map((channel) => {
-                      const filteredCampaigns = metaCampaigns.filter((c) =>
-                        c.name.toLowerCase().includes(campaignSearch.toLowerCase())
+                      const selectedIds = channelCampaignMap[channel.id] ?? [];
+                      const [dropOpen, setDropOpen] = [
+                        openCampaignDropdown === channel.id,
+                        (v: boolean) => setOpenCampaignDropdown(v ? channel.id : null),
+                      ];
+                      const [search, setSearch] = [
+                        campaignSearchMap[channel.id] ?? '',
+                        (v: string) => setCampaignSearchMap(prev => ({ ...prev, [channel.id]: v })),
+                      ];
+                      const filtered = metaCampaigns.filter((c) =>
+                        c.name.toLowerCase().includes(search.toLowerCase())
                       );
+                      const triggerLabel = selectedIds.length === 0
+                        ? 'Select campaigns…'
+                        : selectedIds.length === 1
+                          ? (metaCampaigns.find(c => c.id === selectedIds[0])?.name ?? 'Select campaigns…')
+                          : `${selectedIds.length} campaigns selected`;
                       return (
                       <div key={channel.id} className="flex items-center gap-4 p-3 rounded-xl border border-gray-200 bg-white">
                         <div className="flex-1 min-w-0">
@@ -983,27 +999,70 @@ export default function CreateClientPage() {
                             <p className="text-xs text-gray-400">{channel.channelSubType}</p>
                           )}
                         </div>
-                        <div className="w-56 flex-shrink-0">
-                          <Select
-                            value={channelCampaignMap[channel.id] ?? '__none__'}
-                            onValueChange={(val) =>
-                              setChannelCampaignMap((prev) => ({ ...prev, [channel.id]: val === '__none__' ? '' : val }))
-                            }
+                        <div className="w-56 flex-shrink-0 relative" data-campaign-dropdown>
+                          <button
+                            type="button"
+                            onClick={() => setDropOpen(!dropOpen)}
+                            className="w-full flex items-center justify-between gap-2 px-3 py-2 text-sm border border-gray-200 rounded-md bg-white hover:bg-gray-50 focus:outline-none"
                           >
-                            <SelectTrigger className="text-sm">
-                              <SelectValue placeholder="Select campaign…" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="__none__">No campaign</SelectItem>
-                              {filteredCampaigns.length === 0 && campaignSearch ? (
-                                <div className="py-2 px-3 text-xs text-gray-400">No campaigns match "{campaignSearch}"</div>
-                              ) : (
-                                filteredCampaigns.map((c) => (
-                                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                                ))
+                            <span className="truncate text-left min-w-0 text-gray-700">{triggerLabel}</span>
+                            <svg className="h-4 w-4 text-gray-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                          </button>
+                          {dropOpen && (
+                            <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
+                              <div className="p-2 border-b border-gray-100">
+                                <input
+                                  autoFocus
+                                  type="text"
+                                  placeholder="Search campaigns…"
+                                  value={search}
+                                  onChange={(e) => setSearch(e.target.value)}
+                                  className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                />
+                              </div>
+                              <div className="max-h-52 overflow-y-auto">
+                                {filtered.length === 0 ? (
+                                  <div className="py-3 px-3 text-xs text-gray-400 text-center">No campaigns found</div>
+                                ) : (
+                                  filtered.map((c) => {
+                                    const checked = selectedIds.includes(c.id);
+                                    return (
+                                      <button
+                                        key={c.id}
+                                        type="button"
+                                        onClick={() => {
+                                          setChannelCampaignMap(prev => {
+                                            const cur = prev[channel.id] ?? [];
+                                            return {
+                                              ...prev,
+                                              [channel.id]: checked ? cur.filter(id => id !== c.id) : [...cur, c.id],
+                                            };
+                                          });
+                                        }}
+                                        className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50 text-left"
+                                      >
+                                        <span className={`flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center ${checked ? 'bg-blue-600 border-blue-600' : 'border-gray-300'}`}>
+                                          {checked && <svg className="w-2.5 h-2.5 text-white" viewBox="0 0 10 10" fill="currentColor"><path d="M1.5 5l2.5 2.5 4.5-4.5" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                                        </span>
+                                        <span className="truncate text-gray-700">{c.name}</span>
+                                      </button>
+                                    );
+                                  })
+                                )}
+                              </div>
+                              {selectedIds.length > 0 && (
+                                <div className="p-2 border-t border-gray-100">
+                                  <button
+                                    type="button"
+                                    onClick={() => setChannelCampaignMap(prev => ({ ...prev, [channel.id]: [] }))}
+                                    className="text-xs text-gray-400 hover:text-gray-600"
+                                  >
+                                    Clear selection
+                                  </button>
+                                </div>
                               )}
-                            </SelectContent>
-                          </Select>
+                            </div>
+                          )}
                         </div>
                       </div>
                       );

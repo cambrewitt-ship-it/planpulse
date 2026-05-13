@@ -64,49 +64,72 @@ interface AssignMenuProps {
   card: KanbanCard;
   onAssign: (card: KanbanCard, am: string | null) => void;
   accountManagers?: AccountManager[];
+  variant?: 'default' | 'header';
+  onAccountManagerCreated?: () => void;
 }
 
-function AssignMenu({ card, onAssign, accountManagers = [] }: AssignMenuProps) {
+function AssignMenu({ card, onAssign, accountManagers = [], variant = 'default', onAccountManagerCreated }: AssignMenuProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [saving, setSaving] = useState(false);
+  const addInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!open) return;
     function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node) && 
+      if (ref.current && !ref.current.contains(e.target as Node) &&
           menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setOpen(false);
+        setShowAddForm(false);
+        setNewName('');
       }
     }
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
   }, [open]);
 
-  // Calculate menu position when it opens
   useEffect(() => {
     if (open && ref.current) {
       const rect = ref.current.getBoundingClientRect();
       setMenuPosition({
-        top: rect.top - 4, // Position above the button
-        left: rect.right, // Align to right edge of button
+        top: rect.top - 4,
+        left: rect.right,
       });
     } else {
       setMenuPosition(null);
     }
   }, [open]);
 
-  // Debug: Log accountManagers when menu opens
   useEffect(() => {
-    if (open) {
-      console.log('[AssignMenu] accountManagers:', accountManagers);
-    }
-  }, [open, accountManagers]);
+    if (showAddForm) setTimeout(() => addInputRef.current?.focus(), 50);
+  }, [showAddForm]);
+
+  async function handleSaveTeamMember() {
+    if (!newName.trim() || saving) return;
+    setSaving(true);
+    try {
+      const res = await fetch('/api/account-managers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newName.trim() }),
+      });
+      if (res.ok) {
+        setNewName('');
+        setShowAddForm(false);
+        setOpen(false);
+        onAccountManagerCreated?.();
+      }
+    } catch {}
+    setSaving(false);
+  }
 
   return (
     <>
-      <div style={{ position: 'relative' }} ref={ref}>
+      <div style={{ position: 'relative', flexShrink: 0, display: 'flex', alignItems: 'center' }} ref={ref}>
         <button
           onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }}
           title="Assign to account manager"
@@ -115,9 +138,13 @@ function AssignMenu({ card, onAssign, accountManagers = [] }: AssignMenuProps) {
             fontWeight: 500,
             padding: '1px 5px',
             borderRadius: 3,
-            border: card.assignedTo ? '0.5px solid rgba(74,101,128,0.3)' : '0.5px dashed #D5D0C5',
-            background: card.assignedTo ? 'rgba(74,101,128,0.08)' : 'transparent',
-            color: card.assignedTo ? '#4A6580' : '#B5B0A5',
+            border: variant === 'header'
+              ? (card.assignedTo ? '0.5px solid rgba(255,255,255,0.5)' : '0.5px dashed rgba(255,255,255,0.4)')
+              : (card.assignedTo ? '0.5px solid rgba(74,101,128,0.3)' : '0.5px dashed #D5D0C5'),
+            background: variant === 'header'
+              ? (card.assignedTo ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.1)')
+              : (card.assignedTo ? 'rgba(74,101,128,0.08)' : 'transparent'),
+            color: variant === 'header' ? 'rgba(255,255,255,0.9)' : (card.assignedTo ? '#4A6580' : '#B5B0A5'),
             cursor: 'pointer',
             fontFamily: "'DM Sans', system-ui, sans-serif",
             whiteSpace: 'nowrap',
@@ -127,7 +154,7 @@ function AssignMenu({ card, onAssign, accountManagers = [] }: AssignMenuProps) {
         </button>
       </div>
       {open && menuPosition && typeof window !== 'undefined' && createPortal(
-        <div 
+        <div
           ref={menuRef}
           style={{
             position: 'fixed',
@@ -139,56 +166,97 @@ function AssignMenu({ card, onAssign, accountManagers = [] }: AssignMenuProps) {
             borderRadius: 5,
             boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
             zIndex: 9999,
-            minWidth: 100,
+            minWidth: 160,
             width: 'auto',
             overflow: 'visible',
             maxHeight: 'none',
             display: 'flex',
             flexDirection: 'column',
           }}>
-          {accountManagers.map((am, index) => {
-            console.log(`[AssignMenu] Rendering option ${index}:`, am);
-            return (
-              <button
-                key={am.id}
-                onClick={(e) => { 
-                  e.stopPropagation(); 
-                  console.log(`[AssignMenu] Clicked on:`, am.name);
-                  setOpen(false); 
-                  onAssign(card, am.name); 
-                }}
+          {accountManagers.map((am) => (
+            <button
+              key={am.id}
+              onClick={(e) => { e.stopPropagation(); setOpen(false); onAssign(card, am.name); }}
+              style={{
+                display: 'block', width: '100%', textAlign: 'left',
+                padding: '6px 10px', fontSize: 11,
+                color: card.assignedTo === am.name ? '#4A6580' : '#1C1917',
+                fontWeight: card.assignedTo === am.name ? 600 : 400,
+                background: card.assignedTo === am.name ? 'rgba(74,101,128,0.06)' : 'transparent',
+                border: 'none', cursor: 'pointer',
+                fontFamily: "'DM Sans', system-ui, sans-serif",
+                minHeight: '24px',
+              }}
+            >{am.name}</button>
+          ))}
+
+          {/* Add team member section */}
+          {showAddForm ? (
+            <div style={{ padding: '8px 10px', borderTop: accountManagers.length > 0 ? '0.5px solid #E8E4DC' : 'none', display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <input
+                ref={addInputRef}
+                value={newName}
+                onChange={e => setNewName(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') void handleSaveTeamMember(); if (e.key === 'Escape') { setShowAddForm(false); setNewName(''); } }}
+                placeholder="Name…"
                 style={{
-                  display: 'block',
-                  width: '100%',
-                  textAlign: 'left',
-                  padding: '6px 10px',
-                  fontSize: 11,
-                  color: card.assignedTo === am.name ? '#4A6580' : '#1C1917',
-                  fontWeight: card.assignedTo === am.name ? 600 : 400,
-                  background: card.assignedTo === am.name ? 'rgba(74,101,128,0.06)' : 'transparent',
-                  border: 'none',
-                  cursor: 'pointer',
+                  fontSize: 11, padding: '4px 7px',
+                  border: '0.5px solid #D5D0C5', borderRadius: 4,
+                  background: '#fff', outline: 'none',
                   fontFamily: "'DM Sans', system-ui, sans-serif",
-                  visibility: 'visible',
-                  opacity: 1,
-                  height: 'auto',
-                  minHeight: '24px',
+                  color: '#1C1917', width: '100%', boxSizing: 'border-box',
                 }}
-              >{am.name}</button>
-            );
-          })}
-          {card.assignedTo && (
+              />
+              <div style={{ display: 'flex', gap: 4 }}>
+                <button
+                  onClick={(e) => { e.stopPropagation(); void handleSaveTeamMember(); }}
+                  disabled={!newName.trim() || saving}
+                  style={{
+                    flex: 1, fontSize: 10, fontWeight: 600, padding: '3px 0',
+                    borderRadius: 3, border: 'none',
+                    background: newName.trim() && !saving ? '#1C1917' : '#D5D0C5',
+                    color: '#fff', cursor: newName.trim() && !saving ? 'pointer' : 'default',
+                    fontFamily: "'DM Sans', system-ui, sans-serif",
+                  }}
+                >{saving ? 'Saving…' : 'Save'}</button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setShowAddForm(false); setNewName(''); }}
+                  style={{
+                    fontSize: 10, padding: '3px 8px', borderRadius: 3,
+                    border: '0.5px solid #D5D0C5', background: 'transparent',
+                    color: '#8A8578', cursor: 'pointer',
+                    fontFamily: "'DM Sans', system-ui, sans-serif",
+                  }}
+                >Cancel</button>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={(e) => { e.stopPropagation(); setShowAddForm(true); }}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 5,
+                width: '100%', textAlign: 'left',
+                padding: '6px 10px', fontSize: 11,
+                color: '#4A6580', fontWeight: 500,
+                background: 'transparent',
+                border: 'none',
+                borderTop: accountManagers.length > 0 ? '0.5px solid #E8E4DC' : 'none',
+                cursor: 'pointer',
+                fontFamily: "'DM Sans', system-ui, sans-serif",
+              }}
+            >
+              <span style={{ fontSize: 14, lineHeight: 1, color: '#4A6580' }}>+</span>
+              Add team member
+            </button>
+          )}
+
+          {card.assignedTo && !showAddForm && (
             <button
               onClick={(e) => { e.stopPropagation(); setOpen(false); onAssign(card, null); }}
               style={{
-                display: 'block',
-                width: '100%',
-                textAlign: 'left',
-                padding: '6px 10px',
-                fontSize: 10,
-                color: '#B5B0A5',
-                background: 'transparent',
-                border: 'none',
+                display: 'block', width: '100%', textAlign: 'left',
+                padding: '6px 10px', fontSize: 10, color: '#B5B0A5',
+                background: 'transparent', border: 'none',
                 borderTop: '0.5px solid #E8E4DC',
                 cursor: 'pointer',
                 fontFamily: "'DM Sans', system-ui, sans-serif",
@@ -220,10 +288,11 @@ interface KanbanBoardProps {
   view?: 'kanban' | 'list' | 'gantt';
   onAskAI?: (prompt: string) => void;
   clients?: ClientOption[];
+  onAccountManagerCreated?: () => void;
 }
 
 export const KanbanBoard = forwardRef(function KanbanBoard(
-  { actionPointClients, amFilter, onActionPointCompleted, accountManagers = [], availableChannels, view = 'kanban', onAskAI, clients = [] }: KanbanBoardProps,
+  { actionPointClients, amFilter, onActionPointCompleted, accountManagers = [], availableChannels, view = 'kanban', onAskAI, clients = [], onAccountManagerCreated }: KanbanBoardProps,
   ref: ForwardedRef<KanbanBoardHandle>
 ) {
   const today = new Date();
@@ -365,7 +434,7 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
           clientId: clientGroup.clientId,
           channelType: channelGroup.channelType,
           tag: ap.category,
-          urgent: daysUntilDue !== null && daysUntilDue <= 0,
+          urgent: daysUntilDue !== null && daysUntilDue < 0,
           daysUntilDue,
           assignedTo,
         });
@@ -957,52 +1026,63 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
               <div style={{
                 background: clientCol,
                 padding: '3px 8px',
+                display: 'flex',
+                alignItems: 'center',
+                flexWrap: 'nowrap',
+                gap: 4,
               }}>
                 <span style={{
                   fontSize: 9, fontWeight: 600, color: '#fff',
                   overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  display: 'block', letterSpacing: '0.02em',
+                  letterSpacing: '0.02em', flex: 1, minWidth: 0,
                 }}>{card.clientName}</span>
+                <AssignMenu card={card} onAssign={handleAssign} accountManagers={accountManagers} variant="header" onAccountManagerCreated={onAccountManagerCreated} />
+                {card.daysUntilDue !== null && (
+                  card.daysUntilDue < 0 ? (
+                    <span style={{ fontSize: 9, fontWeight: 600, color: '#FCA5A5', background: '#7F1D1D', borderRadius: 3, padding: '1px 5px', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                      {Math.abs(card.daysUntilDue)}d overdue
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: 9, fontWeight: 500, color: 'rgba(255,255,255,0.9)', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                      {card.daysUntilDue === 0 ? 'today' : `due in ${card.daysUntilDue}d`}
+                    </span>
+                  )
+                )}
               </div>
               {/* Card content */}
               <div style={{ padding: '6px 8px', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-              <button
-                type="button"
-                onClick={(e) => { e.stopPropagation(); void handleComplete(card, e); }}
-                title="Mark complete"
-                style={{
-                  flexShrink: 0, marginTop: 2,
-                  width: 14, height: 14, borderRadius: '50%',
-                  border: '1px solid #D5D0C5', background: 'transparent',
-                  cursor: 'pointer', padding: 0,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                }}
-              />
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, flexShrink: 0, paddingTop: 2 }}>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); void handleComplete(card, e); }}
+                  title="Mark complete"
+                  style={{
+                    width: 14, height: 14, borderRadius: '50%',
+                    border: '1px solid #D5D0C5', background: 'transparent',
+                    cursor: 'pointer', padding: 0,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    flexShrink: 0,
+                  }}
+                />
+                {getChannelIcon(card.channelType)}
+              </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 4 }}>
-                  <div style={{ flexShrink: 0, marginTop: 1 }}>{getChannelIcon(card.channelType)}</div>
                   <span style={{ flex: 1, fontSize: 12, fontWeight: 500, color: isCompleting ? '#B5B0A5' : '#1C1917', lineHeight: 1.35, textDecoration: isCompleting ? 'line-through' : 'none', transition: 'color 0.2s' }}>{card.text}</span>
                   {card.urgent && !isCompleting && (
                     <span style={{ fontSize: 9, fontWeight: 500, color: '#A0442A', textTransform: 'uppercase', letterSpacing: '0.08em', flexShrink: 0, whiteSpace: 'nowrap' }}>OVERDUE</span>
                   )}
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 6 }}>
-                  {isInProgress && (
-                    <span style={{ fontSize: 8, fontWeight: 600, color: '#B07030', background: 'rgba(176,112,48,0.12)', border: '0.5px solid rgba(176,112,48,0.3)', borderRadius: 3, padding: '1px 4px', textTransform: 'uppercase', letterSpacing: '0.07em', whiteSpace: 'nowrap' }}>In Progress</span>
-                  )}
-                  <span style={{ fontSize: 9, fontWeight: 400, color: card.tag === 'SET UP' ? '#B07030' : card.tag === 'HEALTH CHECK' ? '#4A7C59' : card.tag === 'TODO' ? '#7A5C8A' : '#4A6580', textTransform: 'uppercase', letterSpacing: '0.08em', whiteSpace: 'nowrap' }}>{card.tag}</span>
-                  <span style={{ fontSize: 9, fontWeight: 400, color: '#B5B0A5', whiteSpace: 'nowrap' }}>
-                    {card.daysUntilDue === null ? 'no date' : card.daysUntilDue < 0 ? `${Math.abs(card.daysUntilDue)}d overdue` : card.daysUntilDue === 0 ? 'today' : `${card.daysUntilDue}d`}
-                  </span>
-                  <div style={{ marginLeft: 'auto', display: 'flex', gap: 3, alignItems: 'center', flexShrink: 0 }}>
+                <span style={{ fontSize: 9, fontWeight: 400, display: 'block', marginTop: 4, color: card.tag === 'SET UP' ? '#B07030' : card.tag === 'HEALTH CHECK' ? '#4A7C59' : card.tag === 'TODO' ? '#7A5C8A' : '#4A6580', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{card.tag}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                  <div style={{ display: 'flex', gap: 3, alignItems: 'center', flexShrink: 0 }}>
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); handleToggleInProgress(card); }}
-                      style={{ fontSize: 8, fontWeight: 500, padding: '1px 5px', borderRadius: 6, border: isInProgress ? '0.5px solid rgba(176,112,48,0.4)' : '0.5px dashed #D5D0C5', background: isInProgress ? 'rgba(176,112,48,0.1)' : 'transparent', color: isInProgress ? '#B07030' : '#C0BBC0', cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif", whiteSpace: 'nowrap' }}
-                    >In Progress</button>
-                    <AssignMenu card={card} onAssign={handleAssign} accountManagers={accountManagers} />
+                      style={{ fontSize: isInProgress ? 8 : 9, fontWeight: isInProgress ? 600 : 500, padding: '2px 6px', borderRadius: 3, border: isInProgress ? '0.5px solid rgba(176,112,48,0.3)' : '0.5px solid #C8C4BC', background: isInProgress ? 'rgba(176,112,48,0.12)' : 'rgba(0,0,0,0.04)', color: isInProgress ? '#B07030' : '#8A8578', cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif", whiteSpace: 'nowrap', textTransform: isInProgress ? 'uppercase' : 'none', letterSpacing: isInProgress ? '0.07em' : 'normal' }}
+                    >{isInProgress ? 'In Progress' : 'In Progress'}</button>
                     {onAskAI && (
-                      <button type="button" onClick={(e) => { e.stopPropagation(); onAskAI(`Help me with this action point for ${card.clientName} (${card.channelType}): ${card.text}`); }} style={{ fontSize: 9, fontWeight: 600, padding: '2px 6px', borderRadius: 3, border: '0.5px solid rgba(74,101,128,0.5)', background: 'rgba(74,101,128,0.12)', color: '#4A6580', cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif", whiteSpace: 'nowrap' }}>Ask AI</button>
+                      <button type="button" onClick={(e) => { e.stopPropagation(); onAskAI(`Help me with this action point for ${card.clientName} (${card.channelType}): ${card.text}`); }} style={{ fontSize: 9, fontWeight: 600, padding: '2px 6px', borderRadius: 3, border: '0.5px solid rgba(74,101,128,0.5)', background: 'rgba(74,101,128,0.12)', color: '#4A6580', cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif", whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 3 }}><span style={{ fontSize: 10, lineHeight: 1 }}>✦</span>Ask AI</button>
                     )}
                   </div>
                 </div>
@@ -1045,29 +1125,26 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                     <div key={card.id} style={{ display: 'grid', gridTemplateRows: isCompleting ? '0fr' : '1fr', marginBottom: isCompleting ? 0 : 5, transition: 'grid-template-rows 0.45s ease 0.35s, margin-bottom 0.45s ease 0.35s', overflow: 'hidden', flexShrink: 0 }}>
                     <div style={{ overflow: 'hidden' }}>
                     <div style={{ background: isInProgress ? '#FFFBF4' : '#FDFCF8', border: `0.5px solid ${isInProgress ? 'rgba(176,112,48,0.4)' : '#E8E4DC'}`, borderLeft: `2px solid ${isInProgress ? '#B07030' : OVERDUE_COLOR}`, borderRadius: 5, overflow: 'hidden', animation: isFlashing ? 'aiFlash 2s ease-out' : undefined }}>
-                      <div style={{ background: clientCol, padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <span style={{ fontSize: 9, fontWeight: 600, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '0.02em' }}>{card.clientName}</span>
+                      <div style={{ background: clientCol, padding: '3px 8px', display: 'flex', alignItems: 'center', flexWrap: 'nowrap', gap: 4 }}>
+                        <span style={{ fontSize: 9, fontWeight: 600, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '0.02em', flex: 1, minWidth: 0 }}>{card.clientName}</span>
+                        <AssignMenu card={card} onAssign={handleAssign} accountManagers={accountManagers} variant="header" onAccountManagerCreated={onAccountManagerCreated} />
+                        <span style={{ fontSize: 9, fontWeight: 600, color: '#FCA5A5', background: '#7F1D1D', borderRadius: 3, padding: '1px 5px', whiteSpace: 'nowrap', flexShrink: 0 }}>{Math.abs(card.daysUntilDue!)}d overdue</span>
                       </div>
                       <div style={{ padding: '6px 8px', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                        <button type="button" onClick={(e) => { e.stopPropagation(); void handleComplete(card, e); }} title="Mark complete" style={{ flexShrink: 0, marginTop: 2, width: 14, height: 14, borderRadius: '50%', border: `1px solid #D5D0C5`, background: 'transparent', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }} />
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, flexShrink: 0, paddingTop: 2 }}>
+                          <button type="button" onClick={(e) => { e.stopPropagation(); void handleComplete(card, e); }} title="Mark complete" style={{ width: 14, height: 14, borderRadius: '50%', border: `1px solid #D5D0C5`, background: 'transparent', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }} />
+                          {getChannelIcon(card.channelType)}
+                        </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 4 }}>
-                            <div style={{ flexShrink: 0, marginTop: 1 }}>{getChannelIcon(card.channelType)}</div>
                             <span style={{ flex: 1, fontSize: 12, fontWeight: 500, color: isCompleting ? '#B5B0A5' : '#1C1917', lineHeight: 1.35, transition: 'color 0.2s', position: 'relative' }}>{card.text}{isCompleting && <span style={{ position: 'absolute', left: 0, top: '50%', height: '1.5px', background: '#6B7280', width: 0, animation: 'strike 0.35s ease forwards' }} />}</span>
                           </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 6 }}>
-                            {isInProgress && (
-                              <span style={{ fontSize: 8, fontWeight: 600, color: '#B07030', background: 'rgba(176,112,48,0.12)', border: '0.5px solid rgba(176,112,48,0.3)', borderRadius: 3, padding: '1px 4px', textTransform: 'uppercase', letterSpacing: '0.07em', whiteSpace: 'nowrap' }}>In Progress</span>
-                            )}
-                            <span style={{ fontSize: 9, fontWeight: 400, color: card.tag === 'SET UP' ? '#B07030' : card.tag === 'HEALTH CHECK' ? '#4A7C59' : card.tag === 'TODO' ? '#7A5C8A' : '#4A6580', textTransform: 'uppercase', letterSpacing: '0.08em', whiteSpace: 'nowrap' }}>{card.tag}</span>
-                            <span style={{ fontSize: 9, fontWeight: 500, color: OVERDUE_COLOR, whiteSpace: 'nowrap' }}>
-                              {Math.abs(card.daysUntilDue!)}d overdue
-                            </span>
-                            <div style={{ marginLeft: 'auto', display: 'flex', gap: 3, alignItems: 'center', flexShrink: 0 }}>
-                              <button type="button" onClick={(e) => { e.stopPropagation(); handleToggleInProgress(card); }} title={isInProgress ? 'Clear in progress' : 'Mark as in progress'} style={{ fontSize: 8, fontWeight: 500, padding: '1px 5px', borderRadius: 6, border: isInProgress ? '0.5px solid rgba(176,112,48,0.4)' : '0.5px dashed #D5D0C5', background: isInProgress ? 'rgba(176,112,48,0.1)' : 'transparent', color: isInProgress ? '#B07030' : '#C0BBC0', cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif", whiteSpace: 'nowrap' }}>In Progress</button>
-                              <AssignMenu card={card} onAssign={handleAssign} accountManagers={accountManagers} />
+                          <span style={{ fontSize: 9, fontWeight: 400, display: 'block', marginTop: 4, color: card.tag === 'SET UP' ? '#B07030' : card.tag === 'HEALTH CHECK' ? '#4A7C59' : card.tag === 'TODO' ? '#7A5C8A' : '#4A6580', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{card.tag}</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                            <div style={{ display: 'flex', gap: 3, alignItems: 'center', flexShrink: 0 }}>
+                              <button type="button" onClick={(e) => { e.stopPropagation(); handleToggleInProgress(card); }} title={isInProgress ? 'Clear in progress' : 'Mark as in progress'} style={{ fontSize: isInProgress ? 8 : 9, fontWeight: isInProgress ? 600 : 500, padding: '2px 6px', borderRadius: 3, border: isInProgress ? '0.5px solid rgba(176,112,48,0.3)' : '0.5px solid #C8C4BC', background: isInProgress ? 'rgba(176,112,48,0.12)' : 'rgba(0,0,0,0.04)', color: isInProgress ? '#B07030' : '#8A8578', cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif", whiteSpace: 'nowrap', textTransform: isInProgress ? 'uppercase' : 'none', letterSpacing: isInProgress ? '0.07em' : 'normal' }}>In Progress</button>
                               {onAskAI && (
-                                <button type="button" onClick={(e) => { e.stopPropagation(); onAskAI(`Help me with this action point for ${card.clientName} (${card.channelType}): ${card.text}`); }} style={{ fontSize: 9, fontWeight: 600, padding: '2px 6px', borderRadius: 3, border: '0.5px solid rgba(74,101,128,0.5)', background: 'rgba(74,101,128,0.12)', color: '#4A6580', cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif", whiteSpace: 'nowrap' }}>Ask AI</button>
+                                <button type="button" onClick={(e) => { e.stopPropagation(); onAskAI(`Help me with this action point for ${card.clientName} (${card.channelType}): ${card.text}`); }} style={{ fontSize: 9, fontWeight: 600, padding: '2px 6px', borderRadius: 3, border: '0.5px solid rgba(74,101,128,0.5)', background: 'rgba(74,101,128,0.12)', color: '#4A6580', cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif", whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 3 }}><span style={{ fontSize: 10, lineHeight: 1 }}>✦</span>Ask AI</button>
                               )}
                             </div>
                           </div>
@@ -1140,45 +1217,57 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                     padding: '3px 8px',
                     display: 'flex',
                     alignItems: 'center',
+                    flexWrap: 'nowrap',
                     gap: 4,
                   }}>
                     <span style={{
                       fontSize: 9, fontWeight: 600, color: '#fff',
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                      letterSpacing: '0.02em',
+                      letterSpacing: '0.02em', flex: 1, minWidth: 0,
                     }}>{card.clientName}</span>
+                    <AssignMenu card={card} onAssign={handleAssign} accountManagers={accountManagers} variant="header" onAccountManagerCreated={onAccountManagerCreated} />
+                    {card.daysUntilDue !== null && (
+                      card.daysUntilDue < 0 ? (
+                        <span style={{ fontSize: 9, fontWeight: 600, color: '#FCA5A5', background: '#7F1D1D', borderRadius: 3, padding: '1px 5px', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                          {Math.abs(card.daysUntilDue)}d overdue
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: 9, fontWeight: 500, color: 'rgba(255,255,255,0.9)', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                          {card.daysUntilDue === 0 ? 'today' : `due in ${card.daysUntilDue}d`}
+                        </span>
+                      )
+                    )}
                   </div>
 
                   {/* Card content */}
                   <div style={{ padding: '6px 8px', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                  {/* Circular checkbox */}
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); void handleComplete(card, e); }}
-                    title="Mark complete"
-                    style={{
-                      flexShrink: 0,
-                      marginTop: 2,
-                      width: 14,
-                      height: 14,
-                      borderRadius: '50%',
-                      border: `1px solid #D5D0C5`,
-                      background: 'transparent',
-                      cursor: 'pointer',
-                      padding: 0,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  />
+                  {/* Circular checkbox + channel icon stacked */}
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, flexShrink: 0, paddingTop: 2 }}>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); void handleComplete(card, e); }}
+                      title="Mark complete"
+                      style={{
+                        width: 14,
+                        height: 14,
+                        borderRadius: '50%',
+                        border: `1px solid #D5D0C5`,
+                        background: 'transparent',
+                        cursor: 'pointer',
+                        padding: 0,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                      }}
+                    />
+                    {getChannelIcon(card.channelType)}
+                  </div>
 
                   {/* Card body */}
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    {/* Top row: channel icon + text + urgent badge */}
+                    {/* Top row: text + urgent badge */}
                     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 4 }}>
-                      <div style={{ flexShrink: 0, marginTop: 1 }}>
-                        {getChannelIcon(card.channelType)}
-                      </div>
                       <span style={{ flex: 1, fontSize: 12, fontWeight: 500, color: isCompleting ? '#B5B0A5' : '#1C1917', lineHeight: 1.35, transition: 'color 0.2s', position: 'relative' }}>
                         {card.text}
                         {isCompleting && <span style={{ position: 'absolute', left: 0, top: '50%', height: '1.5px', background: '#6B7280', width: 0, animation: 'strike 0.35s ease forwards' }} />}
@@ -1191,58 +1280,31 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                         }}>OVERDUE</span>
                       )}
                     </div>
-                    {/* Bottom row: category tag + date + assignee */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 6, flexWrap: 'wrap' }}>
-                      {isInProgress && (
-                        <span style={{
-                          fontSize: 8, fontWeight: 600, color: '#B07030',
-                          background: 'rgba(176,112,48,0.12)',
-                          border: '0.5px solid rgba(176,112,48,0.3)',
-                          borderRadius: 3, padding: '1px 4px',
-                          textTransform: 'uppercase', letterSpacing: '0.07em',
-                          whiteSpace: 'nowrap',
-                        }}>In Progress</span>
-                      )}
-                      <span style={{
-                        fontSize: 9, fontWeight: 400,
-                        color: card.tag === 'SET UP' ? '#B07030' : card.tag === 'HEALTH CHECK' ? '#4A7C59' : card.tag === 'TODO' ? '#7A5C8A' : '#4A6580',
-                        textTransform: 'uppercase', letterSpacing: '0.08em',
-                        whiteSpace: 'nowrap',
-                      }}>
-                        {card.tag}
-                      </span>
-                      <span style={{
-                        fontSize: 9, fontWeight: 400, color: '#B5B0A5',
-                        whiteSpace: 'nowrap',
-                      }}>
-                        {card.daysUntilDue === null
-                          ? 'no date'
-                          : card.daysUntilDue < 0
-                            ? `${Math.abs(card.daysUntilDue)}d overdue`
-                            : card.daysUntilDue === 0
-                              ? 'today'
-                              : `${card.daysUntilDue}d`}
-                      </span>
-                      <div style={{ marginLeft: 'auto', display: 'flex', gap: 3, alignItems: 'center', flexShrink: 0 }}>
+                    {/* Tag row */}
+                    <span style={{ fontSize: 9, fontWeight: 400, display: 'block', marginTop: 4, color: card.tag === 'SET UP' ? '#B07030' : card.tag === 'HEALTH CHECK' ? '#4A7C59' : card.tag === 'TODO' ? '#7A5C8A' : '#4A6580', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{card.tag}</span>
+                    {/* Actions row */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                      <div style={{ display: 'flex', gap: 3, alignItems: 'center', flexShrink: 0 }}>
                         <button
                           type="button"
                           onClick={(e) => { e.stopPropagation(); handleToggleInProgress(card); }}
                           title={isInProgress ? 'Clear in progress' : 'Mark as in progress'}
                           style={{
-                            fontSize: 8, fontWeight: 500,
-                            padding: '1px 5px',
+                            fontSize: isInProgress ? 8 : 9, fontWeight: isInProgress ? 600 : 500,
+                            padding: '2px 6px',
                             borderRadius: 3,
-                            border: isInProgress ? '0.5px solid rgba(176,112,48,0.4)' : '0.5px dashed #D5D0C5',
-                            background: isInProgress ? 'rgba(176,112,48,0.1)' : 'transparent',
-                            color: isInProgress ? '#B07030' : '#C0BBC0',
+                            border: isInProgress ? '0.5px solid rgba(176,112,48,0.3)' : '0.5px solid #C8C4BC',
+                            background: isInProgress ? 'rgba(176,112,48,0.12)' : 'rgba(0,0,0,0.04)',
+                            color: isInProgress ? '#B07030' : '#8A8578',
                             cursor: 'pointer',
                             fontFamily: "'DM Sans', system-ui, sans-serif",
                             whiteSpace: 'nowrap',
+                            textTransform: isInProgress ? 'uppercase' : 'none',
+                            letterSpacing: isInProgress ? '0.07em' : 'normal',
                           }}
                         >
                           In Progress
                         </button>
-                        <AssignMenu card={card} onAssign={handleAssign} accountManagers={accountManagers} />
                         {onAskAI && (
                           <button
                             type="button"
@@ -1257,8 +1319,9 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                               cursor: 'pointer',
                               fontFamily: "'DM Sans', system-ui, sans-serif",
                               whiteSpace: 'nowrap',
+                              display: 'inline-flex', alignItems: 'center', gap: 3,
                             }}
-                          >Ask AI</button>
+                          ><span style={{ fontSize: 10, lineHeight: 1 }}>✦</span>Ask AI</button>
                         )}
                       </div>
                     </div>
@@ -1344,7 +1407,7 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
               <Check size={11} />
               Complete
             </button>
-            <AssignMenu card={ganttPopup.card} onAssign={(card, am) => { handleAssign(card, am); }} accountManagers={accountManagers} />
+            <AssignMenu card={ganttPopup.card} onAssign={(card, am) => { handleAssign(card, am); }} accountManagers={accountManagers} onAccountManagerCreated={onAccountManagerCreated} />
             {onAskAI && (
               <button
                 type="button"
@@ -1354,8 +1417,9 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                   background: 'rgba(74,101,128,0.08)', color: '#4A6580',
                   border: '0.5px solid rgba(74,101,128,0.35)', borderRadius: 5, cursor: 'pointer',
                   fontFamily: "'DM Sans', system-ui, sans-serif", whiteSpace: 'nowrap',
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
                 }}
-              >Ask AI</button>
+              ><span style={{ fontSize: 11, lineHeight: 1 }}>✦</span>Ask AI</button>
             )}
           </div>
         </div>

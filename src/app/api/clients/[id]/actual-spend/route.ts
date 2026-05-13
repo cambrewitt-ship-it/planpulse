@@ -21,7 +21,7 @@ export async function PATCH(
 
     const { id: clientId } = await params;
     const body = await request.json();
-    const { actualSpend } = body;
+    const { actualSpend, dateRange } = body;
 
     if (actualSpend === undefined || actualSpend === null || typeof actualSpend !== 'number') {
       return NextResponse.json({ error: 'actualSpend must be a number' }, { status: 400 });
@@ -38,6 +38,9 @@ export async function PATCH(
           status: 'green',
           mtd_actual_spend: actualSpend,
           mtd_actual_spend_updated_at: new Date().toISOString(),
+          // Store the date range so the agency dashboard can verify a cache hit
+          spend_date_start: dateRange?.startDate ?? null,
+          spend_date_end: dateRange?.endDate ?? null,
         },
         {
           onConflict: 'client_id',

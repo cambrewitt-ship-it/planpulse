@@ -11,6 +11,7 @@ export interface ClientChannel {
   status: 'live' | 'upcoming' | 'ended';
   startDate: string | null; // ISO date of earliest flight start
   endDate: string | null;   // ISO date of latest flight end
+  campaignIds: string[];    // metaCampaignIds linked in the media plan (for spend filtering)
 }
 
 export interface ClientCardData extends ClientWithHealth {
@@ -173,11 +174,17 @@ export async function GET(request: NextRequest) {
             const earliestStart = startDates[0] || null;
             const latestEnd = endDates[endDates.length - 1] || null;
 
+            const campaignIds: string[] = Array.from(new Set([
+              ...((ch.metaCampaignIds as string[] | undefined) || []),
+              ...((ch.metaCampaignId as string | undefined) ? [ch.metaCampaignId as string] : []),
+            ]));
+
             return {
               channelName: ch.channelName as string,
               status: channelStatus(earliestStart, latestEnd),
               startDate: earliestStart,
               endDate: latestEnd,
+              campaignIds,
             };
           })
           // Only show live + upcoming (not ended)
@@ -218,28 +225,50 @@ export async function GET(request: NextRequest) {
           }
         }
 
-        // ── Actual spend: compute fresh from DB for the YTD range ──
-        // Matches the dashboard's default YTD range (Jan 1 – today).
-        // The mtd_actual_spend cache is intentionally skipped — it reflects whatever
-        // date range the user had selected last time they opened the dashboard, so
-        // it can be stale or cover a different period than plannedBudget.
-        const actualSpend = calculateActualSpendForClient(client.id, spendRows || []);
-        
-        // Debug logging for Content Manager client
-        if (client.name === 'Content Manager') {
-          const clientSpendRows = (spendRows || []).filter(row => row.client_id === client.id);
-          console.log(`[Agency Dashboard] Content Manager actual spend calculation:`, {
-            clientId: client.id,
-            totalSpendRows: spendRows?.length || 0,
-            clientSpendRows: clientSpendRows.length,
-            calculatedActualSpend: actualSpend,
-            spendRowsSample: clientSpendRows.slice(0, 5).map(r => ({
-              date: r.date,
-              spend: r.spend,
-              campaign_id: r.campaign_id,
-              account_id: r.account_id
-            }))
-          });
+        // ── Actual spend: use campaign-filtered cache when date range matches ──
+        // Priority 1: mtd_actual_spend from client_health_status — this is computed
+        // by the client dashboard with the user's campaign selection applied, so it
+        // correctly excludes campaigns the client hasn't linked. Use it when the
+        // stored date range matches the agency date range.
+        // Priority 2: filter ad_performance_metrics by metaCampaignIds from the
+        // media plan (also campaign-filtered, available without a dashboard visit).
+        // Priority 3: sum all campaign rows (fallback, may over-count).
+
+        const cachedSpend: number | null = health?.mtd_actual_spend ?? null;
+        const cachedStart: string | null = health?.spend_date_start ?? null;
+        const cachedEnd: string | null = health?.spend_date_end ?? null;
+        // Cache hit when:
+        // 1. Dates match exactly (normal case after new code runs), OR
+        // 2. No dates stored yet (pre-migration rows) — both pages default to YTD
+        //    so the value is almost certainly for the same period.
+        // Don't use the cache when the user has explicitly changed the agency date
+        // range and stored dates differ from the request.
+        const cacheHit =
+          cachedSpend !== null &&
+          (
+            (cachedStart === dateRangeStart && cachedEnd === dateRangeEnd) ||
+            (cachedStart === null && cachedEnd === null)
+          );
+
+        let actualSpend: number;
+        if (cacheHit) {
+          actualSpend = cachedSpend!;
+        } else {
+          // Build set of selected campaign IDs from the media plan (server-side source
+          // of truth that is always available without a dashboard visit).
+          const selectedCampaignIds = new Set<string>();
+          for (const ch of rawChannels) {
+            if (ch.metaCampaignIds?.length) {
+              (ch.metaCampaignIds as string[]).forEach(id => selectedCampaignIds.add(id));
+            } else if (ch.metaCampaignId) {
+              selectedCampaignIds.add(ch.metaCampaignId as string);
+            }
+          }
+          actualSpend = calculateActualSpendForClient(
+            client.id,
+            spendRows || [],
+            selectedCampaignIds.size > 0 ? selectedCampaignIds : undefined
+          );
         }
 
         // ── Spend variance % — positive means overspending ──
@@ -315,19 +344,22 @@ function normalizeChannel(name: string): string {
 
 /**
  * Calculate actual spend for a client by summing live API rows only.
- * Matches new-client-dashboard behaviour: uses only real API data stored in
- * ad_performance_metrics, excluding manual-override sentinel rows.
+ * When selectedCampaignIds is provided, only rows with a matching campaign_id
+ * are counted — this mirrors the client dashboard's per-channel campaign filter.
  */
 function calculateActualSpendForClient(
   clientId: string,
-  spendRows: any[]
+  spendRows: any[],
+  selectedCampaignIds?: Set<string>
 ): number {
   let totalSpend = 0;
 
   for (const row of spendRows) {
     if (row.client_id !== clientId) continue;
-    // Exclude manual override sentinel rows — match new-client-dashboard (live API only)
     if (row.campaign_id && row.campaign_id.startsWith('manual-override-')) continue;
+    if (selectedCampaignIds && selectedCampaignIds.size > 0) {
+      if (!row.campaign_id || !selectedCampaignIds.has(row.campaign_id)) continue;
+    }
     totalSpend += Number(row.spend || 0);
   }
 
