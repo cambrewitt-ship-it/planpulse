@@ -59,6 +59,12 @@ interface MediaChannel {
   platform: string;
 }
 
+interface AvailableCampaign {
+  id: string;
+  name: string;
+  channelId: string;
+}
+
 interface FunnelBuilderModalProps {
   isOpen?: boolean;
   open?: boolean;
@@ -67,6 +73,7 @@ interface FunnelBuilderModalProps {
   onSave: (config: FunnelConfig) => Promise<void>;
   initialConfig?: FunnelConfig | null;
   availableChannels: MediaChannel[];
+  availableCampaigns?: AvailableCampaign[];
   clientId?: string;
 }
 
@@ -731,6 +738,7 @@ export function FunnelBuilderModal({
   onSave,
   initialConfig,
   availableChannels,
+  availableCampaigns = [],
   clientId,
 }: FunnelBuilderModalProps) {
   const modalOpen = open ?? isOpen;
@@ -740,6 +748,9 @@ export function FunnelBuilderModal({
   const [funnelName, setFunnelName] = useState(initialConfig?.name || '');
   const [selectedChannelIds, setSelectedChannelIds] = useState<string[]>(
     initialConfig?.channelIds || []
+  );
+  const [selectedCampaignIds, setSelectedCampaignIds] = useState<string[]>(
+    initialConfig?.campaignIds || []
   );
   const [startDate, setStartDate] = useState(
     initialConfig?.dateRange.startDate || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
@@ -769,6 +780,7 @@ export function FunnelBuilderModal({
     if (initialConfig) {
       setFunnelName(initialConfig.name || '');
       setSelectedChannelIds(initialConfig.channelIds || []);
+      setSelectedCampaignIds(initialConfig.campaignIds || []);
       setStartDate(initialConfig.dateRange?.startDate || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
       setEndDate(initialConfig.dateRange?.endDate || new Date().toISOString().split('T')[0]);
       setStages(initialConfig.stages || []);
@@ -776,6 +788,7 @@ export function FunnelBuilderModal({
       // Reset to defaults when creating new funnel
       setFunnelName('');
       setSelectedChannelIds([]);
+      setSelectedCampaignIds([]);
       setStartDate(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
       setEndDate(new Date().toISOString().split('T')[0]);
       setStages([]);
@@ -993,6 +1006,7 @@ export function FunnelBuilderModal({
         id: initialConfig?.id || `funnel-${Date.now()}`,
         name: funnelName,
         channelIds: selectedChannelIds,
+        campaignIds: selectedCampaignIds.length > 0 ? selectedCampaignIds : undefined,
         stages: processedStages,
         totalCost: 0,
         dateRange: { startDate, endDate },
@@ -1132,6 +1146,49 @@ export function FunnelBuilderModal({
               </div>
             )}
           </div>
+
+          {/* Campaign Selector (optional) */}
+          {availableCampaigns.length > 0 && (
+            <div>
+              <Label>Campaigns</Label>
+              <div className="text-sm text-gray-500 mb-2">
+                Optionally filter to specific campaigns — leave all unchecked to include all
+              </div>
+              <div className="border rounded-lg p-3 space-y-2 max-h-48 overflow-y-auto">
+                {availableCampaigns.map(campaign => (
+                  <label key={campaign.id} className="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 p-2 rounded">
+                    <input
+                      type="checkbox"
+                      checked={selectedCampaignIds.includes(campaign.id)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedCampaignIds([...selectedCampaignIds, campaign.id]);
+                        } else {
+                          setSelectedCampaignIds(selectedCampaignIds.filter(id => id !== campaign.id));
+                        }
+                      }}
+                      className="h-4 w-4 rounded border-gray-300"
+                    />
+                    <span className="flex-1 truncate">{campaign.name}</span>
+                  </label>
+                ))}
+              </div>
+              {selectedCampaignIds.length > 0 && (
+                <div className="flex items-center justify-between mt-2">
+                  <span className="text-sm text-gray-600">
+                    {selectedCampaignIds.length} campaign{selectedCampaignIds.length !== 1 ? 's' : ''} selected
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCampaignIds([])}
+                    className="text-sm text-gray-400 hover:text-gray-600 underline"
+                  >
+                    Clear
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Date Range */}
           <div className="grid grid-cols-2 gap-4">

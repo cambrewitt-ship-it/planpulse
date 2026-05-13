@@ -2414,6 +2414,7 @@ export default function DashboardV2() {
                     onSave={handleFunnelSaved}
                     initialConfig={editingFunnel?.config as FunnelConfig | undefined}
                     availableChannels={mediaChannels}
+                    availableCampaigns={availableCampaigns}
                   />
                 </div>
               </>
