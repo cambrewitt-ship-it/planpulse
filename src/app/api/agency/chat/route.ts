@@ -395,6 +395,21 @@ function channelNameToPlatform(channelName: string): string | null {
   return null;
 }
 
+function getMonthsInRange(startDate: string, endDate: string): Array<{ padded: string; unpadded: string }> {
+  const months: Array<{ padded: string; unpadded: string }> = [];
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  let cur = new Date(start.getFullYear(), start.getMonth(), 1);
+  while (cur.getFullYear() < end.getFullYear() ||
+    (cur.getFullYear() === end.getFullYear() && cur.getMonth() <= end.getMonth())) {
+    const y = cur.getFullYear();
+    const m = cur.getMonth() + 1;
+    months.push({ padded: `${y}-${String(m).padStart(2, '0')}`, unpadded: `${y}-${m}` });
+    cur = new Date(y, m, 1);
+  }
+  return months;
+}
+
 async function toolGetChannelPerformance(
   request: NextRequest,
   input: { client_name?: string; channel_name?: string; start_date?: string; end_date?: string }
@@ -459,13 +474,20 @@ async function toolGetChannelPerformance(
     actualByClientPlatform.set(key, existing);
   }
 
-  const channels: any[] = [];
+  const monthsInRange = getMonthsInRange(startDate, endDate);
 
-  const now = new Date();
-  const currentYear = now.getFullYear();
-  const currentMonthNum = now.getMonth() + 1;
-  const unpaddedKey = `${currentYear}-${currentMonthNum}`;
-  const paddedKey = `${currentYear}-${String(currentMonthNum).padStart(2, '0')}`;
+  // First pass: collect per-channel data with per-channel planned budgets
+  // Key: client::platform — used to aggregate multiple plan lines on the same platform
+  const platformGroups = new Map<string, {
+    client: string;
+    line_items: string[];
+    platform: string;
+    status: string;
+    planned_budget: number;
+    actual: typeof actualByClientPlatform extends Map<string, infer V> ? V : never;
+    start_date: string | null;
+    end_date: string | null;
+  }>();
 
   for (const plan of mediaPlans || []) {
     const clientName = clientMap.get(plan.client_id) || 'Unknown';
@@ -477,11 +499,14 @@ async function toolGetChannelPerformance(
 
       const platform = channelNameToPlatform(ch.channelName);
 
+      // Sum planned budget across every month in the requested date range
       let plannedBudget = 0;
       const flights: any[] = ch.flights || [];
       for (const f of flights) {
         if (f.monthlySpend && typeof f.monthlySpend === 'object') {
-          plannedBudget += Number(f.monthlySpend[paddedKey] || f.monthlySpend[unpaddedKey] || 0);
+          for (const { padded, unpadded } of monthsInRange) {
+            plannedBudget += Number(f.monthlySpend[padded] || f.monthlySpend[unpadded] || 0);
+          }
         }
       }
 
@@ -497,43 +522,73 @@ async function toolGetChannelPerformance(
       }
 
       const actualKey = platform ? `${plan.client_id}::${platform}` : null;
-      const actual = actualKey ? actualByClientPlatform.get(actualKey) : null;
-      const actualSpend = actual?.spend ?? 0;
+      const actual = (actualKey ? actualByClientPlatform.get(actualKey) : null) as any;
 
-      const variancePct = plannedBudget > 0 ? ((actualSpend - plannedBudget) / plannedBudget) * 100 : null;
-
-      let pacingStatus: string;
-      if (variancePct === null) pacingStatus = 'no plan';
-      else if (variancePct > 15) pacingStatus = 'overpacing';
-      else if (variancePct < -15) pacingStatus = 'underpacing';
-      else pacingStatus = 'on track';
-
-      const ctr = actual && actual.impressions > 0 ? (actual.clicks / actual.impressions) * 100 : null;
-      const cpc = actual && actual.clicks > 0 ? actual.spend / actual.clicks : null;
-      const cpm = actual && actual.impressions > 0 ? (actual.spend / actual.impressions) * 1000 : null;
-
-      channels.push({
-        client: clientName,
-        channel: ch.channelName,
-        platform: platform ?? 'unknown',
-        status: channelStatus,
-        date_range: { start: startDate, end: endDate },
-        planned_budget: plannedBudget > 0 ? Number(plannedBudget.toFixed(2)) : null,
-        actual_spend: Number(actualSpend.toFixed(2)),
-        spend_variance_pct: variancePct !== null ? Number(variancePct.toFixed(1)) : null,
-        pacing_status: pacingStatus,
-        impressions: actual?.impressions ?? null,
-        clicks: actual?.clicks ?? null,
-        ctr_pct: ctr !== null ? Number(ctr.toFixed(2)) : null,
-        cpc: cpc !== null ? Number(cpc.toFixed(2)) : null,
-        cpm: cpm !== null ? Number(cpm.toFixed(2)) : null,
-        conversions: actual?.conversions ?? null,
-        reach: actual?.reach ?? null,
-        start_date: earliestStart,
-        end_date: latestEnd,
-      });
+      // Aggregate channels that share a platform (actual spend is always platform-level)
+      const groupKey = `${clientName}::${platform ?? ch.channelName}`;
+      if (!platformGroups.has(groupKey)) {
+        platformGroups.set(groupKey, {
+          client: clientName,
+          line_items: [ch.channelName],
+          platform: platform ?? 'unknown',
+          status: channelStatus,
+          planned_budget: plannedBudget,
+          actual,
+          start_date: earliestStart,
+          end_date: latestEnd,
+        });
+      } else {
+        const group = platformGroups.get(groupKey)!;
+        group.line_items.push(ch.channelName);
+        group.planned_budget += plannedBudget;
+        if (channelStatus === 'live') group.status = 'live';
+        if (earliestStart && (!group.start_date || earliestStart < group.start_date)) group.start_date = earliestStart;
+        if (latestEnd && (!group.end_date || latestEnd > group.end_date)) group.end_date = latestEnd;
+      }
     }
   }
+
+  const channels: any[] = Array.from(platformGroups.values()).map(group => {
+    const actualSpend = group.actual?.spend ?? 0;
+    const variancePct = group.planned_budget > 0 ? ((actualSpend - group.planned_budget) / group.planned_budget) * 100 : null;
+    const pacingStatus = variancePct === null ? 'no plan'
+      : variancePct > 15 ? 'overpacing'
+      : variancePct < -15 ? 'underpacing'
+      : 'on track';
+
+    const impressions = group.actual?.impressions ?? null;
+    const clicks = group.actual?.clicks ?? null;
+    const conversions = group.actual?.conversions ?? null;
+    const reach = group.actual?.reach ?? null;
+    const ctr = impressions && impressions > 0 ? (clicks! / impressions) * 100 : null;
+    const cpc = clicks && clicks > 0 ? actualSpend / clicks : null;
+    const cpm = impressions && impressions > 0 ? (actualSpend / impressions) * 1000 : null;
+
+    return {
+      client: group.client,
+      channel: group.line_items.length > 1 ? group.line_items.join(' + ') : group.line_items[0],
+      platform: group.platform,
+      status: group.status,
+      date_range: { start: startDate, end: endDate },
+      planned_budget: group.planned_budget > 0 ? Number(group.planned_budget.toFixed(2)) : null,
+      actual_spend: Number(actualSpend.toFixed(2)),
+      spend_variance_pct: variancePct !== null ? Number(variancePct.toFixed(1)) : null,
+      pacing_status: pacingStatus,
+      impressions,
+      clicks,
+      ctr_pct: ctr !== null ? Number(ctr.toFixed(2)) : null,
+      cpc: cpc !== null ? Number(cpc.toFixed(2)) : null,
+      cpm: cpm !== null ? Number(cpm.toFixed(2)) : null,
+      conversions,
+      reach,
+      start_date: group.start_date,
+      end_date: group.end_date,
+      ...(group.line_items.length > 1 && {
+        plan_lines: group.line_items,
+        note: `Planned budget is the combined total of ${group.line_items.length} plan lines. Actual spend is at the platform level.`,
+      }),
+    };
+  });
 
   if (channels.length === 0) {
     return { message: 'No channel data found for the specified filters.', channels: [] };
