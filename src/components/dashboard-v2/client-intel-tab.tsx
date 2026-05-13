@@ -448,7 +448,7 @@ function BriefVersionModal({
 
 // ── BriefSection ──────────────────────────────────────────────────────────────
 
-function BriefSection({ clientId }: { clientId: string }) {
+function BriefSection({ clientId, onLockChange }: { clientId: string; onLockChange?: (locked: boolean) => void }) {
   const [brief, setBrief] = useState<ClientBrief | null>(null);
   const [versions, setVersions] = useState<ClientBriefVersion[]>([]);
   const [loading, setLoading] = useState(true);
@@ -473,6 +473,7 @@ function BriefSection({ clientId }: { clientId: string }) {
       if (res.ok) {
         setBrief(data.brief);
         setVersions(data.versions ?? []);
+        onLockChange?.(data.brief?.is_locked ?? false);
         if (data.brief) {
           setForm({
             objectives: data.brief.objectives ?? '',
@@ -529,6 +530,7 @@ function BriefSection({ clientId }: { clientId: string }) {
       }
       setBrief(data.brief);
       setVersions(data.versions ?? []);
+      onLockChange?.(data.brief?.is_locked ?? false);
       setEditing(false);
     } catch {
       setError('Failed to save brief');
@@ -698,6 +700,381 @@ function BriefSection({ clientId }: { clientId: string }) {
         )}
       </div>
     </>
+  );
+}
+
+// ── Goal Types ────────────────────────────────────────────────────────────────
+
+export interface CampaignGoal {
+  id: string;
+  client_id: string;
+  brief_id: string | null;
+  channel: string;
+  metric: string;
+  benchmark_id: string | null;
+  target_value: number | null;
+  stretch_value: number | null;
+  floor_value: number | null;
+  set_by: string | null;
+  set_at: string;
+}
+
+export interface ChannelBenchmarkData {
+  id: string;
+  channel_name: string;
+  metric_key: string;
+  metric_label: string;
+  benchmark_value: number;
+  unit: string;
+  direction: 'higher_is_better' | 'lower_is_better';
+}
+
+interface GoalsData {
+  channels: Array<{ channelName: string; benchmarkChannel: string; platform: string | null }>;
+  goals: CampaignGoal[];
+  benchmarks: ChannelBenchmarkData[];
+  channelActuals: Record<string, Record<string, number | null>>;
+  period: { start: string; end: string };
+}
+
+// ── Goal constants ────────────────────────────────────────────────────────────
+
+const METRIC_OPTIONS = ['CPL', 'CTR', 'CPM', 'ROAS', 'CPC', 'CPA', 'Conversions', 'Impressions', 'Clicks', 'Reach'];
+
+const METRIC_KEY_MAP: Record<string, string> = {
+  CPL: 'cpl', CTR: 'ctr', CPM: 'cpm', ROAS: 'roas', CPC: 'cpc',
+  CPA: 'cpa', Conversions: 'conversions', Impressions: 'impressions',
+  Clicks: 'clicks', Reach: 'reach',
+};
+
+function goalStatusColor(actual: number | null | undefined, floor: number | null, target: number | null, stretch: number | null, direction: 'higher_is_better' | 'lower_is_better' = 'lower_is_better'): string {
+  if (actual == null) return '#B5B0A5';
+  if (floor != null) {
+    const belowFloor = direction === 'lower_is_better' ? actual > floor : actual < floor;
+    if (belowFloor) return '#A0442A';
+  }
+  if (target != null) {
+    const belowTarget = direction === 'lower_is_better' ? actual > target : actual < target;
+    if (belowTarget) return '#B07030';
+  }
+  if (stretch != null) {
+    const atStretch = direction === 'lower_is_better' ? actual <= stretch : actual >= stretch;
+    if (atStretch) return '#B07030'; // gold-ish amber for at/above stretch
+  }
+  return '#4A7C59';
+}
+
+// ── GoalRangeBar ──────────────────────────────────────────────────────────────
+
+function GoalRangeBar({
+  floor, target, stretch, actual, direction,
+}: {
+  floor: number | null;
+  target: number | null;
+  stretch: number | null;
+  actual: number | null;
+  direction: 'higher_is_better' | 'lower_is_better';
+}) {
+  const vals = [floor, target, stretch, actual].filter(v => v != null) as number[];
+  if (vals.length < 2) return null;
+  const min = Math.min(...vals) * 0.85;
+  const max = Math.max(...vals) * 1.15;
+  const range = max - min || 1;
+  const pct = (v: number | null) => v != null ? Math.max(0, Math.min(100, ((v - min) / range) * 100)) : null;
+
+  const color = goalStatusColor(actual, floor, target, stretch, direction);
+
+  return (
+    <div style={{ position: 'relative', height: 6, background: '#E8E4DC', borderRadius: 3, margin: '8px 0' }}>
+      {/* Floor → Target filled region */}
+      {floor != null && target != null && (
+        <div style={{
+          position: 'absolute', top: 0, height: '100%', borderRadius: 3,
+          left: `${Math.min(pct(floor)!, pct(target)!)}%`,
+          width: `${Math.abs(pct(target)! - pct(floor)!)}%`,
+          background: 'rgba(74,101,128,0.2)',
+        }} />
+      )}
+      {/* Target → Stretch */}
+      {target != null && stretch != null && (
+        <div style={{
+          position: 'absolute', top: 0, height: '100%', borderRadius: 3,
+          left: `${Math.min(pct(target)!, pct(stretch)!)}%`,
+          width: `${Math.abs(pct(stretch)! - pct(target)!)}%`,
+          background: 'rgba(74,124,89,0.2)',
+        }} />
+      )}
+      {/* Floor marker */}
+      {floor != null && <div style={{ position: 'absolute', top: -2, width: 2, height: 10, background: '#A0442A', borderRadius: 1, left: `${pct(floor)}%`, transform: 'translateX(-50%)' }} />}
+      {/* Target marker */}
+      {target != null && <div style={{ position: 'absolute', top: -2, width: 2, height: 10, background: '#4A6580', borderRadius: 1, left: `${pct(target)}%`, transform: 'translateX(-50%)' }} />}
+      {/* Stretch marker */}
+      {stretch != null && <div style={{ position: 'absolute', top: -2, width: 2, height: 10, background: '#4A7C59', borderRadius: 1, left: `${pct(stretch)}%`, transform: 'translateX(-50%)' }} />}
+      {/* Actual dot */}
+      {actual != null && (
+        <div style={{
+          position: 'absolute', top: '50%', transform: 'translate(-50%, -50%)',
+          width: 10, height: 10, borderRadius: '50%',
+          background: color, border: '1.5px solid #fff',
+          left: `${pct(actual)}%`,
+          boxShadow: '0 1px 4px rgba(0,0,0,0.2)',
+        }} />
+      )}
+    </div>
+  );
+}
+
+// ── GoalRow ───────────────────────────────────────────────────────────────────
+
+function GoalRow({
+  clientId,
+  channelName,
+  benchmarkChannel,
+  existing,
+  benchmarks,
+  actuals,
+  isLocked,
+  onSaved,
+}: {
+  clientId: string;
+  channelName: string;
+  benchmarkChannel: string;
+  existing: CampaignGoal | null;
+  benchmarks: ChannelBenchmarkData[];
+  actuals: Record<string, number | null>;
+  isLocked: boolean;
+  onSaved: (goal: CampaignGoal) => void;
+}) {
+  const [metric, setMetric] = useState(existing?.metric ?? 'CPL');
+  const [floor, setFloor] = useState(existing?.floor_value != null ? String(existing.floor_value) : '');
+  const [target, setTarget] = useState(existing?.target_value != null ? String(existing.target_value) : '');
+  const [stretch, setStretch] = useState(existing?.stretch_value != null ? String(existing.stretch_value) : '');
+  const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
+
+  // Find matching benchmark
+  const metricKey = METRIC_KEY_MAP[metric] ?? metric.toLowerCase();
+  const matchingBenchmark = benchmarks.find(
+    b => b.channel_name === benchmarkChannel && b.metric_key === metricKey
+  );
+
+  const actualValue = actuals[metricKey] ?? actuals[metric.toLowerCase()] ?? null;
+  const direction = matchingBenchmark?.direction ?? 'lower_is_better';
+
+  const statusColor = goalStatusColor(actualValue, floor ? Number(floor) : null, target ? Number(target) : null, stretch ? Number(stretch) : null, direction);
+
+  function useBenchmark() {
+    if (matchingBenchmark) {
+      setTarget(String(matchingBenchmark.benchmark_value));
+      setDirty(true);
+    }
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/clients/${clientId}/goals`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: existing?.id,
+          channel: channelName,
+          metric,
+          benchmark_id: matchingBenchmark?.id ?? null,
+          floor_value: floor ? Number(floor) : null,
+          target_value: target ? Number(target) : null,
+          stretch_value: stretch ? Number(stretch) : null,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        onSaved(data.goal);
+        setDirty(false);
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const numInput: React.CSSProperties = {
+    width: 70, height: 28, borderRadius: 8, border: '0.5px solid #D5D0C5',
+    background: '#FAFAF8', textAlign: 'center' as const, fontSize: 12,
+    color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif",
+    outline: 'none',
+  };
+
+  const hasGoal = existing && (existing.floor_value != null || existing.target_value != null || existing.stretch_value != null);
+
+  return (
+    <div style={{ padding: '12px 14px', borderRadius: 12, border: '0.5px solid #E8E4DC', background: '#FAFAF8' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' as const }}>
+        {/* Channel name */}
+        <span style={{ fontSize: 13, fontWeight: 600, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif", minWidth: 100 }}>
+          {channelName}
+        </span>
+
+        {/* Metric selector */}
+        {isLocked ? (
+          <span style={{ fontSize: 13, color: '#4A6580', fontFamily: "'DM Sans', system-ui, sans-serif" }}>{metric}</span>
+        ) : (
+          <select
+            value={metric}
+            onChange={e => { setMetric(e.target.value); setDirty(true); }}
+            style={{ ...SELECT_STYLE, height: 28 }}
+          >
+            {METRIC_OPTIONS.map(m => <option key={m} value={m}>{m}</option>)}
+          </select>
+        )}
+
+        {/* Benchmark reference */}
+        {matchingBenchmark && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <span style={{ fontSize: 11, color: '#8A8578', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+              Agency Benchmark: <strong>{matchingBenchmark.benchmark_value}{matchingBenchmark.unit}</strong>
+            </span>
+            {!isLocked && (
+              <button
+                onClick={useBenchmark}
+                style={{ ...BTN_SECONDARY, height: 22, fontSize: 10, padding: '0 8px' }}
+              >
+                Use
+              </button>
+            )}
+          </div>
+        )}
+
+        <div style={{ flex: 1 }} />
+
+        {/* Actual value */}
+        {actualValue != null ? (
+          <span style={{ fontSize: 12, fontWeight: 600, color: statusColor, fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+            Actual: {Number(actualValue).toFixed(2)}
+          </span>
+        ) : (
+          <span style={{ fontSize: 11, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>No data yet</span>
+        )}
+      </div>
+
+      {/* Floor / Target / Stretch inputs */}
+      {!isLocked && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, flexWrap: 'wrap' as const }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ fontSize: 10, color: '#A0442A', fontFamily: "'DM Sans', system-ui, sans-serif", fontWeight: 600 }}>Floor</span>
+            <input type="number" value={floor} onChange={e => { setFloor(e.target.value); setDirty(true); }} style={numInput} placeholder="—" />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ fontSize: 10, color: '#4A6580', fontFamily: "'DM Sans', system-ui, sans-serif", fontWeight: 600 }}>Target</span>
+            <input type="number" value={target} onChange={e => { setTarget(e.target.value); setDirty(true); }} style={numInput} placeholder="—" />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ fontSize: 10, color: '#4A7C59', fontFamily: "'DM Sans', system-ui, sans-serif", fontWeight: 600 }}>Stretch</span>
+            <input type="number" value={stretch} onChange={e => { setStretch(e.target.value); setDirty(true); }} style={numInput} placeholder="—" />
+          </div>
+          {dirty && (
+            <button onClick={handleSave} disabled={saving} style={{ ...BTN_PRIMARY, height: 28, fontSize: 11, opacity: saving ? 0.6 : 1 }}>
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Goal range bar (after goals are set) */}
+      {hasGoal && (
+        <GoalRangeBar
+          floor={existing.floor_value}
+          target={existing.target_value}
+          stretch={existing.stretch_value}
+          actual={actualValue}
+          direction={direction}
+        />
+      )}
+
+      {/* Read-only display when locked */}
+      {isLocked && hasGoal && (
+        <div style={{ display: 'flex', gap: 10, marginTop: 6, fontSize: 12, color: '#8A8578', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+          {existing.floor_value != null && <span>Floor: <strong style={{ color: '#A0442A' }}>{existing.floor_value}</strong></span>}
+          {existing.target_value != null && <span>Target: <strong style={{ color: '#4A6580' }}>{existing.target_value}</strong></span>}
+          {existing.stretch_value != null && <span>Stretch: <strong style={{ color: '#4A7C59' }}>{existing.stretch_value}</strong></span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── GoalsSection ──────────────────────────────────────────────────────────────
+
+function GoalsSection({ clientId, briefIsLocked }: { clientId: string; briefIsLocked: boolean }) {
+  const [data, setData] = useState<GoalsData | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/clients/${clientId}/goals`);
+      const d = await res.json();
+      if (res.ok) setData(d);
+    } finally {
+      setLoading(false);
+    }
+  }, [clientId]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  function handleGoalSaved(goal: CampaignGoal) {
+    setData(prev => {
+      if (!prev) return prev;
+      const existing = prev.goals.find(g => g.id === goal.id);
+      const goals = existing
+        ? prev.goals.map(g => g.id === goal.id ? goal : g)
+        : [...prev.goals, goal];
+      return { ...prev, goals };
+    });
+  }
+
+  const channels = data?.channels ?? [];
+
+  return (
+    <div style={CARD_STYLE}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+        <span style={SECTION_TITLE_STYLE}>Campaign Goals</span>
+        {data?.period && (
+          <span style={{ fontSize: 11, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+            vs. actuals {data.period.start} → {data.period.end}
+          </span>
+        )}
+      </div>
+
+      {loading ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {[1, 2].map(i => <div key={i} style={{ height: 60, borderRadius: 12, background: '#F0EDE8' }} />)}
+        </div>
+      ) : channels.length === 0 ? (
+        <p style={{ fontSize: 13, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+          No channels found in the media plan. Build a media plan first to set channel goals.
+        </p>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {channels.map(ch => {
+            const existing = (data?.goals ?? []).find(
+              g => g.channel === ch.channelName
+            ) ?? null;
+            return (
+              <GoalRow
+                key={ch.channelName}
+                clientId={clientId}
+                channelName={ch.channelName}
+                benchmarkChannel={ch.benchmarkChannel}
+                existing={existing}
+                benchmarks={data?.benchmarks ?? []}
+                actuals={data?.channelActuals?.[ch.channelName] ?? {}}
+                isLocked={briefIsLocked}
+                onSaved={handleGoalSaved}
+              />
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -891,9 +1268,12 @@ interface ClientIntelTabProps {
 }
 
 export function ClientIntelTab({ clientId }: ClientIntelTabProps) {
+  const [briefIsLocked, setBriefIsLocked] = useState(false);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
-      <BriefSection clientId={clientId} />
+      <GoalsSection clientId={clientId} briefIsLocked={briefIsLocked} />
+      <BriefSection clientId={clientId} onLockChange={setBriefIsLocked} />
       <DocumentsSection clientId={clientId} />
       <HandoverNotesSection clientId={clientId} />
     </div>

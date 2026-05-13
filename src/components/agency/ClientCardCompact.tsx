@@ -5,6 +5,38 @@ import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import type { ClientCardData } from '@/app/api/agency/clients/route';
 
+// Compact goal status indicator — fetched once and cached in component state
+function useGoalStrip(clientId: string) {
+  const [goals, setGoals] = useState<Array<{ metric: string; status: string; color: string }>>([]);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/clients/${clientId}/goals`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data || cancelled) return;
+        const top3 = (data.goals ?? []).slice(0, 3).map((g: any) => {
+          const metricKey = g.metric?.toLowerCase();
+          const actual = data.channelActuals?.[g.channel]?.[metricKey] ?? null;
+          let color = '#B5B0A5';
+          if (actual != null) {
+            const floorOk = g.floor_value == null || actual >= g.floor_value;
+            const targetOk = g.target_value == null || actual >= g.target_value;
+            const stretchOk = g.stretch_value != null && actual >= g.stretch_value;
+            if (!floorOk) color = '#A0442A';
+            else if (!targetOk) color = '#B07030';
+            else if (stretchOk) color = '#B07030';
+            else color = '#4A7C59';
+          }
+          return { metric: g.metric, status: actual != null ? 'data' : 'no-data', color };
+        });
+        setGoals(top3);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [clientId]);
+  return goals;
+}
+
 interface AccountManager {
   id: string;
   name: string;
@@ -144,6 +176,8 @@ export function ClientCardCompact({ client, selected, onClick, index = 0, onAcco
       setCurrentAm(client.account_manager ?? null);
     }
   }
+
+  const goalStrip = useGoalStrip(client.id);
 
   // Composite health score 0-100 (mirrors dashboard-v2 calculateHealthScore logic)
   const healthScore = calcCompositeHealthScore(
@@ -350,6 +384,18 @@ export function ClientCardCompact({ client, selected, onClick, index = 0, onAcco
           <span style={{ fontSize: 11, color: '#B5B0A5', whiteSpace: 'nowrap' }}>
             {Math.round(budgetPct)}%
           </span>
+        </div>
+      )}
+
+      {/* Row 5: Goal indicator strip (up to 3 key metrics) */}
+      {goalStrip.length > 0 && (
+        <div style={{ display: 'flex', gap: 6, marginTop: 8, paddingTop: 8, borderTop: '0.5px solid #F0EDE8' }}>
+          {goalStrip.map(g => (
+            <div key={g.metric} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <div style={{ width: 6, height: 6, borderRadius: '50%', background: g.color, flexShrink: 0 }} />
+              <span style={{ fontSize: 10, color: '#8A8578', fontFamily: "'DM Sans', system-ui, sans-serif" }}>{g.metric}</span>
+            </div>
+          ))}
         </div>
       )}
     </div>
