@@ -57,6 +57,7 @@ import dynamic from 'next/dynamic';
 const InvoiceModal = dynamic(() => import('@/components/dashboard-v2/invoice-modal').then(m => m.InvoiceModal), { ssr: false });
 import type { GanttClient, GanttChannel } from '@/components/agency/GanttCalendar';
 import { FullscreenGanttView, type GanttAPMarker } from '@/components/agency/FullscreenGanttView';
+import { ClientIntelTab } from '@/components/dashboard-v2/client-intel-tab';
 
 interface Client {
   id: string;
@@ -174,7 +175,7 @@ export default function DashboardV2() {
   const [availableChannels, setAvailableChannels] = useState<Array<{ id: string; name: string }>>([]);
   const [selectedCampaignIds, setSelectedCampaignIds] = useState<Set<string>>(new Set());
   const [availableCampaigns, setAvailableCampaigns] = useState<Array<{ id: string; name: string; channelId: string }>>([]);;
-  const [viewMode, setViewMode] = useState<'overview' | 'funnels' | 'media-plan' | 'admin'>('overview');
+  const [viewMode, setViewMode] = useState<'overview' | 'funnels' | 'media-plan' | 'admin' | 'client-intel'>('overview');
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
   const [logoUploadError, setLogoUploadError] = useState<string | null>(null);
   const logoInputRef = useRef<HTMLInputElement>(null);
@@ -1940,6 +1941,16 @@ export default function DashboardV2() {
                   >
                     Admin
                   </button>
+                  <button
+                    onClick={() => setViewMode('client-intel')}
+                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                      viewMode === 'client-intel'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    Client Intel
+                  </button>
                   <div style={{ width: '0.5px', height: 20, background: '#E8E4DC', margin: '0 4px' }} />
                   <button
                     onClick={() => setShowFullscreenGantt(true)}
@@ -2663,6 +2674,12 @@ export default function DashboardV2() {
 
               </div>
             )}
+
+            {/* ── Client Intel view ── */}
+            {viewMode === 'client-intel' && (
+              <ClientIntelTab clientId={clientId} />
+            )}
+
           </>
         )}
       </main>

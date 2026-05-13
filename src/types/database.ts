@@ -862,6 +862,197 @@ export interface Database {
           };
           Relationships: [];
         };
+
+        // ── Client Intelligence Hub tables ──────────────────────────────────
+        client_briefs: {
+          Row: {
+            id: string;
+            client_id: string;
+            objectives: string | null;
+            kpis: string | null;
+            budget: number | null;
+            start_date: string | null;
+            end_date: string | null;
+            target_audience: string | null;
+            brief_body: string | null;
+            is_locked: boolean;
+            locked_at: string | null;
+            locked_by: string | null;
+            version: number;
+            created_at: string;
+            created_by: string | null;
+          };
+          Insert: {
+            id?: string;
+            client_id: string;
+            objectives?: string | null;
+            kpis?: string | null;
+            budget?: number | null;
+            start_date?: string | null;
+            end_date?: string | null;
+            target_audience?: string | null;
+            brief_body?: string | null;
+            is_locked?: boolean;
+            locked_at?: string | null;
+            locked_by?: string | null;
+            version?: number;
+            created_at?: string;
+            created_by?: string | null;
+          };
+          Update: {
+            id?: string;
+            client_id?: string;
+            objectives?: string | null;
+            kpis?: string | null;
+            budget?: number | null;
+            start_date?: string | null;
+            end_date?: string | null;
+            target_audience?: string | null;
+            brief_body?: string | null;
+            is_locked?: boolean;
+            locked_at?: string | null;
+            locked_by?: string | null;
+            version?: number;
+            created_by?: string | null;
+          };
+          Relationships: [];
+        };
+
+        client_brief_versions: {
+          Row: {
+            id: string;
+            client_id: string;
+            brief_id: string;
+            brief_data: Record<string, unknown>;
+            version: number;
+            saved_at: string;
+            saved_by: string | null;
+          };
+          Insert: {
+            id?: string;
+            client_id: string;
+            brief_id: string;
+            brief_data: Record<string, unknown>;
+            version: number;
+            saved_at?: string;
+            saved_by?: string | null;
+          };
+          Update: {
+            id?: string;
+            client_id?: string;
+            brief_id?: string;
+            brief_data?: Record<string, unknown>;
+            version?: number;
+            saved_at?: string;
+            saved_by?: string | null;
+          };
+          Relationships: [];
+        };
+
+        client_documents: {
+          Row: {
+            id: string;
+            client_id: string;
+            file_name: string;
+            file_url: string;
+            file_type: string;
+            uploaded_at: string;
+            uploaded_by: string | null;
+          };
+          Insert: {
+            id?: string;
+            client_id: string;
+            file_name: string;
+            file_url: string;
+            file_type?: string;
+            uploaded_at?: string;
+            uploaded_by?: string | null;
+          };
+          Update: {
+            id?: string;
+            client_id?: string;
+            file_name?: string;
+            file_url?: string;
+            file_type?: string;
+            uploaded_at?: string;
+            uploaded_by?: string | null;
+          };
+          Relationships: [];
+        };
+
+        client_notes: {
+          Row: {
+            id: string;
+            client_id: string;
+            note_body: string;
+            note_type: string;
+            is_pinned: boolean;
+            created_at: string;
+            created_by: string | null;
+          };
+          Insert: {
+            id?: string;
+            client_id: string;
+            note_body: string;
+            note_type?: string;
+            is_pinned?: boolean;
+            created_at?: string;
+            created_by?: string | null;
+          };
+          Update: {
+            id?: string;
+            client_id?: string;
+            note_body?: string;
+            note_type?: string;
+            is_pinned?: boolean;
+            created_at?: string;
+            created_by?: string | null;
+          };
+          Relationships: [];
+        };
+
+        client_campaign_goals: {
+          Row: {
+            id: string;
+            client_id: string;
+            brief_id: string | null;
+            channel: string;
+            metric: string;
+            benchmark_id: string | null;
+            target_value: number | null;
+            stretch_value: number | null;
+            floor_value: number | null;
+            set_by: string | null;
+            set_at: string;
+          };
+          Insert: {
+            id?: string;
+            client_id: string;
+            brief_id?: string | null;
+            channel: string;
+            metric: string;
+            benchmark_id?: string | null;
+            target_value?: number | null;
+            stretch_value?: number | null;
+            floor_value?: number | null;
+            set_by?: string | null;
+            set_at?: string;
+          };
+          Update: {
+            id?: string;
+            client_id?: string;
+            brief_id?: string | null;
+            channel?: string;
+            metric?: string;
+            benchmark_id?: string | null;
+            target_value?: number | null;
+            stretch_value?: number | null;
+            floor_value?: number | null;
+            set_by?: string | null;
+            set_at?: string;
+          };
+          Relationships: [];
+        };
       };
       Views: { [_ in never]: never };
       Functions: { [_ in never]: never };
