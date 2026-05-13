@@ -43,7 +43,9 @@ Multi-step workflow patterns:
 
 Always confirm what you've done after taking a write action. If a request is ambiguous (e.g. multiple clients or action points match), ask for clarification before acting.
 
-Be concise, professional, and actionable. Use bullet points and bold text to make responses scannable.`;
+Be concise, professional, and actionable. Use bullet points and bold text to make responses scannable.
+
+Client Intelligence: When working on a specific client, call get_client_intelligence to fetch their campaign brief, goals, handover notes, and documents. Prepend this context to your analysis so your responses are grounded in the client's actual objectives and commitments.`;
 
 const TOOLS: Anthropic.Tool[] = [
   // ── Read tools ───────────────────────────────────────────────────────────────
@@ -220,6 +222,22 @@ const TOOLS: Anthropic.Tool[] = [
         },
       },
       required: ['text', 'channel_type', 'category'],
+    },
+  },
+
+  // ── Client Intelligence Hub (Tier 2) ─────────────────────────────────────
+  {
+    name: 'get_client_intelligence',
+    description: 'Fetch the Client Intelligence Hub data for a specific client: campaign brief (objectives, KPIs, budget, dates, target audience, brief body, lock status), campaign goals with floor/target/stretch and current actual values, handover notes and client intel (pinned first, then reverse-chronological), and documents on file. Use this whenever you need rich context about a specific client\'s campaign strategy, commitments, or background.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        client_name: {
+          type: 'string',
+          description: 'The client name (partial match is fine).',
+        },
+      },
+      required: ['client_name'],
     },
   },
 
@@ -912,6 +930,148 @@ async function toolGetLiveMetaCampaigns(
   };
 }
 
+// ── Client Intelligence tool implementation (Tier 2) ─────────────────────────
+
+async function toolGetClientIntelligence(
+  request: NextRequest,
+  input: { client_name: string }
+) {
+  const supabase = await createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.user) return { error: 'Unauthorized' };
+
+  // Find client by partial name match
+  const { data: clients } = await supabase
+    .from('clients')
+    .select('id, name')
+    .eq('user_id', session.user.id)
+    .ilike('name', `%${input.client_name}%`);
+
+  if (!clients?.length) return { error: `No client found matching "${input.client_name}"` };
+  if (clients.length > 1) return {
+    error: 'Multiple clients matched — be more specific.',
+    matches: clients.map((c: any) => c.name),
+  };
+
+  const client = clients[0];
+  const origin = new URL(request.url).origin;
+  const cookieHeader = request.headers.get('cookie') ?? '';
+
+  async function get(path: string) {
+    const res = await fetch(`${origin}${path}`, { headers: { cookie: cookieHeader } });
+    return res.ok ? res.json() : null;
+  }
+
+  const [briefRes, notesRes, goalsRes, docsRes] = await Promise.all([
+    get(`/api/clients/${client.id}/brief`),
+    get(`/api/clients/${client.id}/notes`),
+    get(`/api/clients/${client.id}/goals`),
+    get(`/api/clients/${client.id}/documents`),
+  ]);
+
+  const brief = briefRes?.brief ?? null;
+  const notes: any[] = notesRes?.notes ?? [];
+  const goals: any[] = goalsRes?.goals ?? [];
+  const channelActuals = goalsRes?.channelActuals ?? {};
+  const benchmarks: any[] = goalsRes?.benchmarks ?? [];
+  const documents: any[] = docsRes?.documents ?? [];
+
+  // Build the formatted context block
+  const lines: string[] = [
+    '---',
+    `CLIENT INTELLIGENCE — ${client.name}`,
+    '',
+  ];
+
+  // Brief
+  if (brief) {
+    lines.push('Campaign Brief:');
+    if (brief.objectives) lines.push(`Objectives: ${brief.objectives}`);
+    if (brief.kpis) lines.push(`KPIs: ${brief.kpis}`);
+    if (brief.budget != null) lines.push(`Budget: $${Number(brief.budget).toLocaleString()}`);
+    if (brief.start_date || brief.end_date) lines.push(`Campaign Dates: ${brief.start_date ?? 'TBD'} to ${brief.end_date ?? 'TBD'}`);
+    if (brief.target_audience) lines.push(`Target Audience: ${brief.target_audience}`);
+    if (brief.brief_body) lines.push(`Brief: ${brief.brief_body}`);
+    const lockStatus = brief.is_locked
+      ? `Locked — locked by ${brief.locked_by_name ?? 'Team member'} on ${brief.locked_at ? new Date(brief.locked_at).toLocaleDateString('en-AU') : 'unknown date'}`
+      : 'Draft';
+    lines.push(`Brief Status: ${lockStatus}`);
+    lines.push('');
+  }
+
+  // Campaign Goals
+  if (goals.length > 0) {
+    lines.push('Campaign Goals:');
+    for (const g of goals) {
+      const metricKey = g.metric?.toLowerCase();
+      const actual = channelActuals?.[g.channel]?.[metricKey] ?? null;
+      const bm = benchmarks.find((b: any) => b.metric_key === metricKey);
+      const direction = bm?.direction ?? 'lower_is_better';
+
+      let status = 'No Data';
+      if (actual != null) {
+        const floorOk = g.floor_value == null || (direction === 'lower_is_better' ? actual <= g.floor_value : actual >= g.floor_value);
+        const targetOk = g.target_value == null || (direction === 'lower_is_better' ? actual <= g.target_value : actual >= g.target_value);
+        const stretchOk = g.stretch_value != null && (direction === 'lower_is_better' ? actual <= g.stretch_value : actual >= g.stretch_value);
+        if (!floorOk) status = 'Below Floor';
+        else if (!targetOk) status = 'At Risk';
+        else if (stretchOk) status = 'At Stretch';
+        else status = 'On Track';
+      }
+
+      const parts = [
+        `${g.channel} — ${g.metric}:`,
+        g.floor_value != null ? `Floor ${g.floor_value}` : null,
+        g.target_value != null ? `/ Target ${g.target_value}` : null,
+        g.stretch_value != null ? `/ Stretch ${g.stretch_value}` : null,
+        actual != null ? `| Current: ${Number(actual).toFixed(2)}` : '| Current: N/A',
+        `| Status: ${status}`,
+      ].filter(Boolean).join(' ');
+
+      lines.push(parts);
+    }
+    lines.push('');
+  }
+
+  // Notes
+  const pinnedNotes = notes.filter(n => n.is_pinned);
+  const otherNotes = notes.filter(n => !n.is_pinned);
+  const allNotes = [...pinnedNotes, ...otherNotes];
+
+  if (allNotes.length > 0) {
+    lines.push('Handover Notes & Client Intel:');
+    for (const n of allNotes) {
+      const typeLabel = n.note_type === 'handover' ? 'Handover' : n.note_type === 'client_intel' ? 'Client Intel' : 'General';
+      const date = new Date(n.created_at).toLocaleDateString('en-AU');
+      lines.push(`[${typeLabel}] ${n.author_name} (${date}): ${n.note_body}`);
+    }
+    lines.push('');
+  }
+
+  // Documents
+  if (documents.length > 0) {
+    const docList = documents
+      .map((d: any) => `${d.file_name} [${d.file_type ?? 'other'}]`)
+      .join(', ');
+    lines.push(`Documents on File: ${docList}`);
+    lines.push('');
+  }
+
+  lines.push('---');
+
+  return {
+    client: client.name,
+    context_block: lines.join('\n'),
+    summary: {
+      has_brief: !!brief,
+      brief_locked: brief?.is_locked ?? false,
+      goal_count: goals.length,
+      note_count: notes.length,
+      document_count: documents.length,
+    },
+  };
+}
+
 // ── Route handler ─────────────────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
@@ -992,6 +1152,9 @@ export async function POST(request: NextRequest) {
               result = await toolCreateClient(request, input);
             } else if (block.name === 'update_media_plan_budget') {
               result = await toolUpdateMediaPlanBudget(request, input);
+            // Client Intelligence Hub (Tier 2)
+            } else if (block.name === 'get_client_intelligence') {
+              result = await toolGetClientIntelligence(request, input);
             // Live ad platform tools (Tier 3)
             } else if (block.name === 'get_live_meta_campaigns') {
               result = await toolGetLiveMetaCampaigns(request, input);
