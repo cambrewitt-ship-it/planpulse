@@ -701,6 +701,189 @@ function BriefSection({ clientId }: { clientId: string }) {
   );
 }
 
+// ── Document Types ────────────────────────────────────────────────────────────
+
+export interface ClientDocument {
+  id: string;
+  client_id: string;
+  file_name: string;
+  file_url: string;
+  file_type: string;
+  uploaded_at: string;
+  uploaded_by: string | null;
+  uploader_name: string;
+}
+
+// ── Document constants ────────────────────────────────────────────────────────
+
+const DOC_TYPE_LABELS: Record<string, string> = {
+  contract: 'Contract',
+  brief: 'Brief',
+  rate_card: 'Rate Card',
+  brand_guidelines: 'Brand Guidelines',
+  media_schedule: 'Media Schedule',
+  other: 'Other',
+};
+
+const DOC_TYPE_OPTIONS = [
+  { value: 'contract', label: 'Contract' },
+  { value: 'brief', label: 'Brief' },
+  { value: 'rate_card', label: 'Rate Card' },
+  { value: 'brand_guidelines', label: 'Brand Guidelines' },
+  { value: 'media_schedule', label: 'Media Schedule' },
+  { value: 'other', label: 'Other' },
+];
+
+// ── DocumentsSection ──────────────────────────────────────────────────────────
+
+function DocumentsSection({ clientId }: { clientId: string }) {
+  const [documents, setDocuments] = useState<ClientDocument[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [fileType, setFileType] = useState('other');
+  const [dragging, setDragging] = useState(false);
+  const fileInputRef = useState<HTMLInputElement | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/clients/${clientId}/documents`);
+      const data = await res.json();
+      if (res.ok) setDocuments(data.documents ?? []);
+    } finally {
+      setLoading(false);
+    }
+  }, [clientId]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  async function uploadFile(file: File) {
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('file_type', fileType);
+      const res = await fetch(`/api/clients/${clientId}/documents`, { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok) {
+        setUploadError(data.error ?? 'Upload failed');
+        return;
+      }
+      setDocuments(prev => [data.document, ...prev]);
+    } catch {
+      setUploadError('Upload failed. Please try again.');
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  function handleFiles(files: FileList | null) {
+    if (!files?.length) return;
+    void uploadFile(files[0]);
+  }
+
+  function onDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setDragging(false);
+    handleFiles(e.dataTransfer.files);
+  }
+
+  return (
+    <div style={CARD_STYLE}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+        <span style={SECTION_TITLE_STYLE}>Documents</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <select value={fileType} onChange={e => setFileType(e.target.value)} style={SELECT_STYLE}>
+            {DOC_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+          <label style={{ ...BTN_SECONDARY, cursor: uploading ? 'not-allowed' : 'pointer', opacity: uploading ? 0.6 : 1 }}>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>
+            {uploading ? 'Uploading…' : 'Upload'}
+            <input
+              type="file"
+              accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.png,.jpg,.jpeg,.gif,.zip,.csv,.txt"
+              style={{ display: 'none' }}
+              onChange={e => handleFiles(e.target.files)}
+              disabled={uploading}
+            />
+          </label>
+        </div>
+      </div>
+
+      {/* Drag-and-drop zone */}
+      <div
+        onDragOver={e => { e.preventDefault(); setDragging(true); }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={onDrop}
+        style={{
+          border: `0.5px dashed ${dragging ? '#4A6580' : '#D5D0C5'}`,
+          borderRadius: 10, padding: '14px 16px', textAlign: 'center',
+          background: dragging ? 'rgba(74,101,128,0.04)' : 'transparent',
+          marginBottom: 14, transition: 'all 0.15s ease',
+        }}
+      >
+        <p style={{ fontSize: 12, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif", margin: 0 }}>
+          {dragging ? 'Drop file here' : 'Drag & drop a file here, or use Upload above'}
+        </p>
+      </div>
+
+      {uploadError && (
+        <p style={{ fontSize: 12, color: '#A0442A', marginBottom: 10, fontFamily: "'DM Sans', system-ui, sans-serif" }}>{uploadError}</p>
+      )}
+
+      {loading ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {[1, 2].map(i => <div key={i} style={{ height: 40, borderRadius: 8, background: '#F0EDE8' }} />)}
+        </div>
+      ) : documents.length === 0 ? (
+        <p style={{ fontSize: 13, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+          No documents uploaded yet.
+        </p>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {documents.map(doc => (
+            <div key={doc.id} style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '9px 12px', borderRadius: 10,
+              border: '0.5px solid #E8E4DC', background: '#FAFAF8',
+            }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8A8578" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              <span style={{ flex: 1, fontSize: 13, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {doc.file_name}
+              </span>
+              <span style={{
+                fontSize: 10, fontWeight: 600, padding: '2px 6px', borderRadius: 6,
+                background: '#F0EDE8', color: '#8A8578', border: '0.5px solid #E0DCD4',
+                fontFamily: "'DM Sans', system-ui, sans-serif", letterSpacing: '0.04em',
+                textTransform: 'uppercase' as const, whiteSpace: 'nowrap',
+              }}>
+                {DOC_TYPE_LABELS[doc.file_type] ?? doc.file_type}
+              </span>
+              <span style={{ fontSize: 11, color: '#B5B0A5', whiteSpace: 'nowrap', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+                {format(new Date(doc.uploaded_at), 'd MMM yyyy')}
+              </span>
+              <span style={{ fontSize: 11, color: '#B5B0A5', whiteSpace: 'nowrap', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+                {doc.uploader_name}
+              </span>
+              <a
+                href={doc.file_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Download"
+                style={{ color: '#4A6580', flexShrink: 0 }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              </a>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── ClientIntelTab ────────────────────────────────────────────────────────────
 
 interface ClientIntelTabProps {
@@ -711,6 +894,7 @@ export function ClientIntelTab({ clientId }: ClientIntelTabProps) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
       <BriefSection clientId={clientId} />
+      <DocumentsSection clientId={clientId} />
       <HandoverNotesSection clientId={clientId} />
     </div>
   );
