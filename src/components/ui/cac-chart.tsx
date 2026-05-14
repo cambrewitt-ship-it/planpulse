@@ -4,6 +4,7 @@ import {
   ComposedChart,
   Bar,
   Line,
+  Area,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -880,6 +881,20 @@ export function CostPerMetricChart({
         {/* Chart */}
         <ResponsiveContainer width="100%" height={height}>
           <ComposedChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+            <defs>
+              <linearGradient id="ma7Gradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#FF9830" stopOpacity={0.2} />
+                <stop offset="100%" stopColor="#FF9830" stopOpacity={0} />
+              </linearGradient>
+              <linearGradient id="ma14Gradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#F2495C" stopOpacity={0.2} />
+                <stop offset="100%" stopColor="#F2495C" stopOpacity={0} />
+              </linearGradient>
+              <linearGradient id="ma30Gradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#B877D9" stopOpacity={0.2} />
+                <stop offset="100%" stopColor="#B877D9" stopOpacity={0} />
+              </linearGradient>
+            </defs>
             <CartesianGrid 
               strokeDasharray="3 3" 
               stroke="#e5e7eb" 
@@ -939,11 +954,12 @@ export function CostPerMetricChart({
             )}
 
             {/* 7-day moving average */}
-            <Line
+            <Area
               type="monotone"
               dataKey="cost_7d"
               stroke="#FF9830"
               strokeWidth={2}
+              fill="url(#ma7Gradient)"
               dot={false}
               name="cost_7d"
               connectNulls
@@ -965,11 +981,12 @@ export function CostPerMetricChart({
             )}
 
             {/* 14-day moving average */}
-            <Line
+            <Area
               type="monotone"
               dataKey="cost_14d"
               stroke="#F2495C"
               strokeWidth={2}
+              fill="url(#ma14Gradient)"
               dot={false}
               name="cost_14d"
               connectNulls
@@ -991,11 +1008,12 @@ export function CostPerMetricChart({
             )}
 
             {/* 30-day moving average */}
-            <Line
+            <Area
               type="monotone"
               dataKey="cost_30d"
               stroke="#B877D9"
               strokeWidth={2}
+              fill="url(#ma30Gradient)"
               dot={false}
               name="cost_30d"
               connectNulls

@@ -22,6 +22,7 @@ export interface FunnelConfig {
   id: string;
   name: string;
   channelIds: string[]; // Changed from channelId to support multiple channels
+  campaignIds?: string[]; // Optional: filter to specific campaigns
   stages: FunnelStage[];
   totalCost: number;
   dateRange: { startDate: string; endDate: string };
