@@ -246,6 +246,128 @@ function AddNoteForm({
   );
 }
 
+// ── SectionDocUploader ────────────────────────────────────────────────────────
+// Compact upload button + list of docs for a specific file_type, embedded in a section.
+
+function SectionDocUploader({ clientId, fileType }: { clientId: string; fileType: string }) {
+  const [docs, setDocs] = useState<ClientDocument[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [expandedDoc, setExpandedDoc] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    const res = await fetch(`/api/clients/${clientId}/documents`);
+    const data = await res.json();
+    if (res.ok) {
+      setDocs((data.documents ?? []).filter((d: ClientDocument) => d.file_type === fileType));
+    }
+  }, [clientId, fileType]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  async function handleFile(file: File) {
+    setUploading(true);
+    setError(null);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('file_type', fileType);
+      const res = await fetch(`/api/clients/${clientId}/documents`, { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok) { setError(data.error ?? 'Upload failed'); return; }
+      setDocs(prev => [data.document, ...prev]);
+    } catch {
+      setError('Upload failed. Please try again.');
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 16, borderTop: '0.5px solid #E8E4DC', paddingTop: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: docs.length > 0 ? 10 : 0 }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: '#8A8578', textTransform: 'uppercase', letterSpacing: '0.07em', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+          Uploaded Files
+        </span>
+        <label style={{
+          ...BTN_SECONDARY,
+          cursor: uploading ? 'not-allowed' : 'pointer',
+          opacity: uploading ? 0.6 : 1,
+          display: 'flex', alignItems: 'center', gap: 5,
+        }}>
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/>
+            <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/>
+          </svg>
+          {uploading ? 'Uploading…' : 'Upload File'}
+          <input
+            type="file"
+            accept=".pdf,.docx,.txt,.csv,.doc"
+            style={{ display: 'none' }}
+            disabled={uploading}
+            onChange={e => { const f = e.target.files?.[0]; if (f) void handleFile(f); e.target.value = ''; }}
+          />
+        </label>
+      </div>
+
+      {error && <p style={{ fontSize: 12, color: '#A0442A', margin: '6px 0', fontFamily: "'DM Sans', system-ui, sans-serif" }}>{error}</p>}
+
+      {docs.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {docs.map(doc => {
+            const hasContent = !!doc.text_content;
+            const isExpanded = expandedDoc === doc.id;
+            return (
+              <div key={doc.id} style={{ borderRadius: 10, border: '0.5px solid #E8E4DC', background: '#FAFAF8', overflow: 'hidden' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px' }}>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8A8578" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                  <span style={{ flex: 1, fontSize: 12, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {doc.file_name}
+                  </span>
+                  {hasContent && (
+                    <span style={{
+                      fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 6,
+                      background: 'rgba(74,124,89,0.1)', color: '#4A7C59', border: '0.5px solid rgba(74,124,89,0.25)',
+                      fontFamily: "'DM Sans', system-ui, sans-serif", whiteSpace: 'nowrap',
+                    }}>
+                      AI readable
+                    </span>
+                  )}
+                  <span style={{ fontSize: 11, color: '#B5B0A5', whiteSpace: 'nowrap', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+                    {format(new Date(doc.uploaded_at), 'd MMM yyyy')}
+                  </span>
+                  {hasContent && (
+                    <button
+                      onClick={() => setExpandedDoc(isExpanded ? null : doc.id)}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#4A6580', fontSize: 11, fontFamily: "'DM Sans', system-ui, sans-serif", flexShrink: 0 }}
+                    >
+                      {isExpanded ? 'Hide' : 'View'}
+                    </button>
+                  )}
+                  {doc.file_url && (
+                    <a href={doc.file_url} target="_blank" rel="noopener noreferrer" title="Download" style={{ color: '#4A6580', flexShrink: 0 }}>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    </a>
+                  )}
+                </div>
+                {hasContent && isExpanded && (
+                  <div style={{
+                    borderTop: '0.5px solid #E8E4DC', padding: '10px 14px',
+                    fontSize: 13, color: '#1C1917', lineHeight: 1.7, whiteSpace: 'pre-wrap',
+                    fontFamily: "'DM Sans', system-ui, sans-serif", maxHeight: 280, overflowY: 'auto',
+                  }}>
+                    {doc.text_content}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── HandoverNotesSection ──────────────────────────────────────────────────────
 
 function HandoverNotesSection({ clientId }: { clientId: string }) {
@@ -343,6 +465,8 @@ function HandoverNotesSection({ clientId }: { clientId: string }) {
           ))}
         </div>
       )}
+
+      <SectionDocUploader clientId={clientId} fileType="handover_notes" />
     </div>
   );
 }
@@ -698,6 +822,8 @@ function BriefSection({ clientId, onLockChange }: { clientId: string; onLockChan
             </div>
           </div>
         )}
+
+        <SectionDocUploader clientId={clientId} fileType="brief" />
       </div>
     </>
   );
@@ -710,6 +836,8 @@ export interface CampaignGoal {
   client_id: string;
   brief_id: string | null;
   channel: string;
+  goal_type: string | null;
+  is_primary: boolean;
   metric: string;
   benchmark_id: string | null;
   target_value: number | null;
@@ -719,282 +847,185 @@ export interface CampaignGoal {
   set_at: string;
 }
 
-export interface ChannelBenchmarkData {
-  id: string;
-  channel_name: string;
-  metric_key: string;
-  metric_label: string;
-  benchmark_value: number;
-  unit: string;
-  direction: 'higher_is_better' | 'lower_is_better';
-}
-
-interface GoalsData {
-  channels: Array<{ channelName: string; benchmarkChannel: string; platform: string | null }>;
-  goals: CampaignGoal[];
-  benchmarks: ChannelBenchmarkData[];
-  channelActuals: Record<string, Record<string, number | null>>;
-  period: { start: string; end: string };
-}
-
 // ── Goal constants ────────────────────────────────────────────────────────────
 
-const METRIC_OPTIONS = ['CPL', 'CTR', 'CPM', 'ROAS', 'CPC', 'CPA', 'Conversions', 'Impressions', 'Clicks', 'Reach'];
+const GOAL_TYPE_OPTIONS = [
+  'Sales', 'Leads', 'Awareness', 'Revenue', 'Traffic',
+  'Engagement', 'Retention', 'Conversions', 'Brand Lift', 'Custom',
+];
 
-const METRIC_KEY_MAP: Record<string, string> = {
-  CPL: 'cpl', CTR: 'ctr', CPM: 'cpm', ROAS: 'roas', CPC: 'cpc',
-  CPA: 'cpa', Conversions: 'conversions', Impressions: 'impressions',
-  Clicks: 'clicks', Reach: 'reach',
+const METRIC_OPTIONS = ['CPA', 'CPL', 'CPC', 'CPM', 'CTR', 'ROAS', 'Conversions', 'Impressions', 'Clicks', 'Reach'];
+
+const METRIC_DIRECTION: Record<string, 'lower_is_better' | 'higher_is_better'> = {
+  CPA: 'lower_is_better', CPL: 'lower_is_better', CPC: 'lower_is_better', CPM: 'lower_is_better',
+  CTR: 'higher_is_better', ROAS: 'higher_is_better', Conversions: 'higher_is_better',
+  Impressions: 'higher_is_better', Clicks: 'higher_is_better', Reach: 'higher_is_better',
 };
 
-function goalStatusColor(actual: number | null | undefined, floor: number | null, target: number | null, stretch: number | null, direction: 'higher_is_better' | 'lower_is_better' = 'lower_is_better'): string {
-  if (actual == null) return '#B5B0A5';
-  if (floor != null) {
-    const belowFloor = direction === 'lower_is_better' ? actual > floor : actual < floor;
-    if (belowFloor) return '#A0442A';
-  }
-  if (target != null) {
-    const belowTarget = direction === 'lower_is_better' ? actual > target : actual < target;
-    if (belowTarget) return '#B07030';
-  }
-  if (stretch != null) {
-    const atStretch = direction === 'lower_is_better' ? actual <= stretch : actual >= stretch;
-    if (atStretch) return '#B07030'; // gold-ish amber for at/above stretch
-  }
-  return '#4A7C59';
+function calcStretch(target: number, direction: 'lower_is_better' | 'higher_is_better'): number {
+  return direction === 'lower_is_better' ? +(target * 0.8).toFixed(2) : +(target * 1.2).toFixed(2);
 }
 
-// ── GoalRangeBar ──────────────────────────────────────────────────────────────
-
-function GoalRangeBar({
-  floor, target, stretch, actual, direction,
-}: {
-  floor: number | null;
-  target: number | null;
-  stretch: number | null;
-  actual: number | null;
-  direction: 'higher_is_better' | 'lower_is_better';
-}) {
-  const vals = [floor, target, stretch, actual].filter(v => v != null) as number[];
-  if (vals.length < 2) return null;
-  const min = Math.min(...vals) * 0.85;
-  const max = Math.max(...vals) * 1.15;
-  const range = max - min || 1;
-  const pct = (v: number | null) => v != null ? Math.max(0, Math.min(100, ((v - min) / range) * 100)) : null;
-
-  const color = goalStatusColor(actual, floor, target, stretch, direction);
-
-  return (
-    <div style={{ position: 'relative', height: 6, background: '#E8E4DC', borderRadius: 3, margin: '8px 0' }}>
-      {/* Floor → Target filled region */}
-      {floor != null && target != null && (
-        <div style={{
-          position: 'absolute', top: 0, height: '100%', borderRadius: 3,
-          left: `${Math.min(pct(floor)!, pct(target)!)}%`,
-          width: `${Math.abs(pct(target)! - pct(floor)!)}%`,
-          background: 'rgba(74,101,128,0.2)',
-        }} />
-      )}
-      {/* Target → Stretch */}
-      {target != null && stretch != null && (
-        <div style={{
-          position: 'absolute', top: 0, height: '100%', borderRadius: 3,
-          left: `${Math.min(pct(target)!, pct(stretch)!)}%`,
-          width: `${Math.abs(pct(stretch)! - pct(target)!)}%`,
-          background: 'rgba(74,124,89,0.2)',
-        }} />
-      )}
-      {/* Floor marker */}
-      {floor != null && <div style={{ position: 'absolute', top: -2, width: 2, height: 10, background: '#A0442A', borderRadius: 1, left: `${pct(floor)}%`, transform: 'translateX(-50%)' }} />}
-      {/* Target marker */}
-      {target != null && <div style={{ position: 'absolute', top: -2, width: 2, height: 10, background: '#4A6580', borderRadius: 1, left: `${pct(target)}%`, transform: 'translateX(-50%)' }} />}
-      {/* Stretch marker */}
-      {stretch != null && <div style={{ position: 'absolute', top: -2, width: 2, height: 10, background: '#4A7C59', borderRadius: 1, left: `${pct(stretch)}%`, transform: 'translateX(-50%)' }} />}
-      {/* Actual dot */}
-      {actual != null && (
-        <div style={{
-          position: 'absolute', top: '50%', transform: 'translate(-50%, -50%)',
-          width: 10, height: 10, borderRadius: '50%',
-          background: color, border: '1.5px solid #fff',
-          left: `${pct(actual)}%`,
-          boxShadow: '0 1px 4px rgba(0,0,0,0.2)',
-        }} />
-      )}
-    </div>
-  );
+function calcFloor(target: number, direction: 'lower_is_better' | 'higher_is_better'): number {
+  return direction === 'lower_is_better' ? +(target * 1.2).toFixed(2) : +(target * 0.8).toFixed(2);
 }
 
-// ── GoalRow ───────────────────────────────────────────────────────────────────
+// ── GoalEditor ────────────────────────────────────────────────────────────────
 
-function GoalRow({
+function GoalEditor({
   clientId,
-  channelName,
-  benchmarkChannel,
-  existing,
-  benchmarks,
-  actuals,
-  isLocked,
+  goal,
+  isPrimary,
   onSaved,
+  onRemove,
 }: {
   clientId: string;
-  channelName: string;
-  benchmarkChannel: string;
-  existing: CampaignGoal | null;
-  benchmarks: ChannelBenchmarkData[];
-  actuals: Record<string, number | null>;
-  isLocked: boolean;
+  goal: CampaignGoal | null;
+  isPrimary: boolean;
   onSaved: (goal: CampaignGoal) => void;
+  onRemove?: () => void;
 }) {
-  const [metric, setMetric] = useState(existing?.metric ?? 'CPL');
-  const [floor, setFloor] = useState(existing?.floor_value != null ? String(existing.floor_value) : '');
-  const [target, setTarget] = useState(existing?.target_value != null ? String(existing.target_value) : '');
-  const [stretch, setStretch] = useState(existing?.stretch_value != null ? String(existing.stretch_value) : '');
+  const [goalType, setGoalType] = useState(goal?.goal_type ?? GOAL_TYPE_OPTIONS[0]);
+  const [metric, setMetric] = useState(goal?.metric ?? 'CPA');
+  const [target, setTarget] = useState(goal?.target_value != null ? String(goal.target_value) : '');
   const [saving, setSaving] = useState(false);
-  const [dirty, setDirty] = useState(false);
+  const [dirty, setDirty] = useState(!goal);
 
-  // Find matching benchmark
-  const metricKey = METRIC_KEY_MAP[metric] ?? metric.toLowerCase();
-  const matchingBenchmark = benchmarks.find(
-    b => b.channel_name === benchmarkChannel && b.metric_key === metricKey
-  );
+  const direction = METRIC_DIRECTION[metric] ?? 'lower_is_better';
+  const targetNum = parseFloat(target);
+  const hasTarget = !isNaN(targetNum) && targetNum > 0;
+  const stretchAuto = hasTarget ? calcStretch(targetNum, direction) : null;
+  const floorAuto = hasTarget ? calcFloor(targetNum, direction) : null;
 
-  const actualValue = actuals[metricKey] ?? actuals[metric.toLowerCase()] ?? null;
-  const direction = matchingBenchmark?.direction ?? 'lower_is_better';
-
-  const statusColor = goalStatusColor(actualValue, floor ? Number(floor) : null, target ? Number(target) : null, stretch ? Number(stretch) : null, direction);
-
-  function useBenchmark() {
-    if (matchingBenchmark) {
-      setTarget(String(matchingBenchmark.benchmark_value));
-      setDirty(true);
-    }
-  }
+  const labelStyle: React.CSSProperties = {
+    fontSize: 10, fontWeight: 700, color: '#8A8578', textTransform: 'uppercase',
+    letterSpacing: '0.07em', fontFamily: "'DM Sans', system-ui, sans-serif", marginBottom: 4, display: 'block',
+  };
+  const numInput: React.CSSProperties = {
+    width: 90, height: 30, borderRadius: 8, border: '0.5px solid #D5D0C5',
+    background: '#FAFAF8', textAlign: 'center' as const, fontSize: 13,
+    color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif", outline: 'none',
+    padding: '0 8px',
+  };
 
   async function handleSave() {
+    if (!hasTarget) return;
     setSaving(true);
     try {
       const res = await fetch(`/api/clients/${clientId}/goals`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          id: existing?.id,
-          channel: channelName,
+          id: goal?.id,
+          channel: 'overarching',
+          goal_type: goalType,
           metric,
-          benchmark_id: matchingBenchmark?.id ?? null,
-          floor_value: floor ? Number(floor) : null,
-          target_value: target ? Number(target) : null,
-          stretch_value: stretch ? Number(stretch) : null,
+          is_primary: isPrimary,
+          target_value: targetNum,
+          stretch_value: stretchAuto,
+          floor_value: floorAuto,
         }),
       });
       const data = await res.json();
-      if (res.ok) {
-        onSaved(data.goal);
-        setDirty(false);
-      }
+      if (res.ok) { onSaved(data.goal); setDirty(false); }
     } finally {
       setSaving(false);
     }
   }
 
-  const numInput: React.CSSProperties = {
-    width: 70, height: 28, borderRadius: 8, border: '0.5px solid #D5D0C5',
-    background: '#FAFAF8', textAlign: 'center' as const, fontSize: 12,
-    color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif",
-    outline: 'none',
-  };
-
-  const hasGoal = existing && (existing.floor_value != null || existing.target_value != null || existing.stretch_value != null);
-
   return (
-    <div style={{ padding: '12px 14px', borderRadius: 12, border: '0.5px solid #E8E4DC', background: '#FAFAF8' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' as const }}>
-        {/* Channel name */}
-        <span style={{ fontSize: 13, fontWeight: 600, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif", minWidth: 100 }}>
-          {channelName}
-        </span>
-
-        {/* Metric selector */}
-        {isLocked ? (
-          <span style={{ fontSize: 13, color: '#4A6580', fontFamily: "'DM Sans', system-ui, sans-serif" }}>{metric}</span>
-        ) : (
+    <div style={{
+      padding: '14px 16px', borderRadius: 12,
+      border: `0.5px solid ${isPrimary ? 'rgba(74,101,128,0.3)' : '#E8E4DC'}`,
+      background: isPrimary ? 'rgba(74,101,128,0.035)' : '#FAFAF8',
+    }}>
+      {/* Inputs row */}
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap' as const }}>
+        <div>
+          <span style={labelStyle}>Goal</span>
+          <select
+            value={goalType}
+            onChange={e => { setGoalType(e.target.value); setDirty(true); }}
+            style={{ ...SELECT_STYLE, height: 30 }}
+          >
+            {GOAL_TYPE_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+          </select>
+        </div>
+        <span style={{ fontSize: 12, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif", paddingBottom: 6 }}>via</span>
+        <div>
+          <span style={labelStyle}>Metric</span>
           <select
             value={metric}
             onChange={e => { setMetric(e.target.value); setDirty(true); }}
-            style={{ ...SELECT_STYLE, height: 28 }}
+            style={{ ...SELECT_STYLE, height: 30 }}
           >
             {METRIC_OPTIONS.map(m => <option key={m} value={m}>{m}</option>)}
           </select>
-        )}
-
-        {/* Benchmark reference */}
-        {matchingBenchmark && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-            <span style={{ fontSize: 11, color: '#8A8578', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
-              Agency Benchmark: <strong>{matchingBenchmark.benchmark_value}{matchingBenchmark.unit}</strong>
-            </span>
-            {!isLocked && (
-              <button
-                onClick={useBenchmark}
-                style={{ ...BTN_SECONDARY, height: 22, fontSize: 10, padding: '0 8px' }}
-              >
-                Use
-              </button>
-            )}
-          </div>
-        )}
-
+        </div>
+        <div>
+          <span style={labelStyle}>Target</span>
+          <input
+            type="number"
+            value={target}
+            onChange={e => { setTarget(e.target.value); setDirty(true); }}
+            placeholder="e.g. 45.00"
+            style={numInput}
+          />
+        </div>
         <div style={{ flex: 1 }} />
-
-        {/* Actual value */}
-        {actualValue != null ? (
-          <span style={{ fontSize: 12, fontWeight: 600, color: statusColor, fontFamily: "'DM Sans', system-ui, sans-serif" }}>
-            Actual: {Number(actualValue).toFixed(2)}
-          </span>
-        ) : (
-          <span style={{ fontSize: 11, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>No data yet</span>
+        {!isPrimary && onRemove && (
+          <button
+            onClick={onRemove}
+            title="Remove goal"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#B5B0A5', fontSize: 18, lineHeight: 1, paddingBottom: 6 }}
+          >
+            ×
+          </button>
         )}
       </div>
 
-      {/* Floor / Target / Stretch inputs */}
-      {!isLocked && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, flexWrap: 'wrap' as const }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ fontSize: 10, color: '#A0442A', fontFamily: "'DM Sans', system-ui, sans-serif", fontWeight: 600 }}>Floor</span>
-            <input type="number" value={floor} onChange={e => { setFloor(e.target.value); setDirty(true); }} style={numInput} placeholder="—" />
+      {/* Auto-calc row */}
+      {hasTarget && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, flexWrap: 'wrap' as const }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: '#4A7C59', textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Stretch</span>
+            <span style={{ fontSize: 14, fontWeight: 700, color: '#4A7C59', fontFamily: "'DM Sans', system-ui, sans-serif" }}>{stretchAuto}</span>
+            <span style={{ fontSize: 10, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>auto</span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ fontSize: 10, color: '#4A6580', fontFamily: "'DM Sans', system-ui, sans-serif", fontWeight: 600 }}>Target</span>
-            <input type="number" value={target} onChange={e => { setTarget(e.target.value); setDirty(true); }} style={numInput} placeholder="—" />
+          <span style={{ color: '#D5D0C5', fontSize: 12 }}>·</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: '#4A6580', textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Target</span>
+            <span style={{ fontSize: 14, fontWeight: 700, color: '#4A6580', fontFamily: "'DM Sans', system-ui, sans-serif" }}>{targetNum}</span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ fontSize: 10, color: '#4A7C59', fontFamily: "'DM Sans', system-ui, sans-serif", fontWeight: 600 }}>Stretch</span>
-            <input type="number" value={stretch} onChange={e => { setStretch(e.target.value); setDirty(true); }} style={numInput} placeholder="—" />
+          <span style={{ color: '#D5D0C5', fontSize: 12 }}>·</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: '#A0442A', textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Floor</span>
+            <span style={{ fontSize: 14, fontWeight: 700, color: '#A0442A', fontFamily: "'DM Sans', system-ui, sans-serif" }}>{floorAuto}</span>
+            <span style={{ fontSize: 10, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>auto</span>
           </div>
+          <div style={{ flex: 1 }} />
           {dirty && (
-            <button onClick={handleSave} disabled={saving} style={{ ...BTN_PRIMARY, height: 28, fontSize: 11, opacity: saving ? 0.6 : 1 }}>
-              {saving ? 'Saving…' : 'Save'}
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              style={{ ...BTN_PRIMARY, height: 28, fontSize: 11, opacity: saving ? 0.6 : 1 }}
+            >
+              {saving ? 'Saving…' : 'Save Goal'}
             </button>
           )}
         </div>
       )}
 
-      {/* Goal range bar (after goals are set) */}
-      {hasGoal && (
-        <GoalRangeBar
-          floor={existing.floor_value}
-          target={existing.target_value}
-          stretch={existing.stretch_value}
-          actual={actualValue}
-          direction={direction}
-        />
-      )}
-
-      {/* Read-only display when locked */}
-      {isLocked && hasGoal && (
-        <div style={{ display: 'flex', gap: 10, marginTop: 6, fontSize: 12, color: '#8A8578', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
-          {existing.floor_value != null && <span>Floor: <strong style={{ color: '#A0442A' }}>{existing.floor_value}</strong></span>}
-          {existing.target_value != null && <span>Target: <strong style={{ color: '#4A6580' }}>{existing.target_value}</strong></span>}
-          {existing.stretch_value != null && <span>Stretch: <strong style={{ color: '#4A7C59' }}>{existing.stretch_value}</strong></span>}
+      {/* Save for goal with no target yet */}
+      {!hasTarget && dirty && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+          <button
+            onClick={handleSave}
+            disabled={saving || !hasTarget}
+            style={{ ...BTN_PRIMARY, height: 28, fontSize: 11, opacity: (saving || !hasTarget) ? 0.4 : 1 }}
+          >
+            {saving ? 'Saving…' : 'Save Goal'}
+          </button>
         </div>
       )}
     </div>
@@ -1003,16 +1034,17 @@ function GoalRow({
 
 // ── GoalsSection ──────────────────────────────────────────────────────────────
 
-function GoalsSection({ clientId, briefIsLocked }: { clientId: string; briefIsLocked: boolean }) {
-  const [data, setData] = useState<GoalsData | null>(null);
+function GoalsSection({ clientId }: { clientId: string }) {
+  const [goals, setGoals] = useState<CampaignGoal[]>([]);
   const [loading, setLoading] = useState(true);
+  const [addingSecondary, setAddingSecondary] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch(`/api/clients/${clientId}/goals`);
       const d = await res.json();
-      if (res.ok) setData(d);
+      if (res.ok) setGoals(d.goals ?? []);
     } finally {
       setLoading(false);
     }
@@ -1020,59 +1052,91 @@ function GoalsSection({ clientId, briefIsLocked }: { clientId: string; briefIsLo
 
   useEffect(() => { void load(); }, [load]);
 
+  const overarchingGoals = goals.filter(g => g.channel === 'overarching');
+  const primaryGoal = overarchingGoals.find(g => g.is_primary) ?? null;
+  const secondaryGoals = overarchingGoals.filter(g => !g.is_primary);
+
   function handleGoalSaved(goal: CampaignGoal) {
-    setData(prev => {
-      if (!prev) return prev;
-      const existing = prev.goals.find(g => g.id === goal.id);
-      const goals = existing
-        ? prev.goals.map(g => g.id === goal.id ? goal : g)
-        : [...prev.goals, goal];
-      return { ...prev, goals };
+    setGoals(prev => {
+      const idx = prev.findIndex(g => g.id === goal.id);
+      if (idx >= 0) return prev.map(g => g.id === goal.id ? goal : g);
+      return [...prev, goal];
     });
+    setAddingSecondary(false);
   }
 
-  const channels = data?.channels ?? [];
+  async function removeGoal(id: string) {
+    await fetch(`/api/clients/${clientId}/goals?id=${id}`, { method: 'DELETE' });
+    setGoals(prev => prev.filter(g => g.id !== id));
+  }
+
+  const subLabel: React.CSSProperties = {
+    fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
+    fontFamily: "'DM Sans', system-ui, sans-serif",
+  };
 
   return (
     <div style={CARD_STYLE}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-        <span style={SECTION_TITLE_STYLE}>Campaign Goals</span>
-        {data?.period && (
-          <span style={{ fontSize: 11, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
-            vs. actuals {data.period.start} → {data.period.end}
-          </span>
-        )}
-      </div>
+      <span style={SECTION_TITLE_STYLE}>Client Goals</span>
 
       {loading ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {[1, 2].map(i => <div key={i} style={{ height: 60, borderRadius: 12, background: '#F0EDE8' }} />)}
+          {[1, 2].map(i => <div key={i} style={{ height: 80, borderRadius: 12, background: '#F0EDE8' }} />)}
         </div>
-      ) : channels.length === 0 ? (
-        <p style={{ fontSize: 13, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
-          No channels found in the media plan. Build a media plan first to set channel goals.
-        </p>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {channels.map(ch => {
-            const existing = (data?.goals ?? []).find(
-              g => g.channel === ch.channelName
-            ) ?? null;
-            return (
-              <GoalRow
-                key={ch.channelName}
-                clientId={clientId}
-                channelName={ch.channelName}
-                benchmarkChannel={ch.benchmarkChannel}
-                existing={existing}
-                benchmarks={data?.benchmarks ?? []}
-                actuals={data?.channelActuals?.[ch.channelName] ?? {}}
-                isLocked={briefIsLocked}
-                onSaved={handleGoalSaved}
-              />
-            );
-          })}
-        </div>
+        <>
+          {/* Primary goal */}
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="#B07030" stroke="none"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+              <span style={{ ...subLabel, color: '#B07030' }}>Primary Goal</span>
+            </div>
+            <GoalEditor
+              clientId={clientId}
+              goal={primaryGoal}
+              isPrimary={true}
+              onSaved={handleGoalSaved}
+            />
+          </div>
+
+          {/* Secondary goals */}
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <span style={{ ...subLabel, color: '#8A8578' }}>Secondary Goals</span>
+              {!addingSecondary && (
+                <button onClick={() => setAddingSecondary(true)} style={BTN_SECONDARY}>
+                  + Add Goal
+                </button>
+              )}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {secondaryGoals.map(g => (
+                <GoalEditor
+                  key={g.id}
+                  clientId={clientId}
+                  goal={g}
+                  isPrimary={false}
+                  onSaved={handleGoalSaved}
+                  onRemove={() => removeGoal(g.id)}
+                />
+              ))}
+              {addingSecondary && (
+                <GoalEditor
+                  clientId={clientId}
+                  goal={null}
+                  isPrimary={false}
+                  onSaved={handleGoalSaved}
+                  onRemove={() => setAddingSecondary(false)}
+                />
+              )}
+              {secondaryGoals.length === 0 && !addingSecondary && (
+                <p style={{ fontSize: 12, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif", margin: 0 }}>
+                  No secondary goals yet — use these to track additional KPIs alongside your primary goal.
+                </p>
+              )}
+            </div>
+          </div>
+        </>
       )}
     </div>
   );
@@ -1086,6 +1150,8 @@ export interface ClientDocument {
   file_name: string;
   file_url: string;
   file_type: string;
+  text_content: string | null;
+  is_text_doc: boolean;
   uploaded_at: string;
   uploaded_by: string | null;
   uploader_name: string;
@@ -1094,19 +1160,25 @@ export interface ClientDocument {
 // ── Document constants ────────────────────────────────────────────────────────
 
 const DOC_TYPE_LABELS: Record<string, string> = {
-  contract: 'Contract',
-  brief: 'Brief',
-  rate_card: 'Rate Card',
+  biz_info: 'Biz Info & Context',
+  tov: 'Tone of Voice',
+  handover_notes: 'Client Handover',
   brand_guidelines: 'Brand Guidelines',
+  brief: 'Brief',
+  contract: 'Contract',
+  rate_card: 'Rate Card',
   media_schedule: 'Media Schedule',
   other: 'Other',
 };
 
 const DOC_TYPE_OPTIONS = [
-  { value: 'contract', label: 'Contract' },
-  { value: 'brief', label: 'Brief' },
-  { value: 'rate_card', label: 'Rate Card' },
+  { value: 'biz_info', label: 'Biz Info & Context' },
+  { value: 'tov', label: 'Tone of Voice' },
+  { value: 'handover_notes', label: 'Client Handover' },
   { value: 'brand_guidelines', label: 'Brand Guidelines' },
+  { value: 'brief', label: 'Brief' },
+  { value: 'contract', label: 'Contract' },
+  { value: 'rate_card', label: 'Rate Card' },
   { value: 'media_schedule', label: 'Media Schedule' },
   { value: 'other', label: 'Other' },
 ];
@@ -1118,9 +1190,12 @@ function DocumentsSection({ clientId }: { clientId: string }) {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [fileType, setFileType] = useState('other');
+  const [fileType, setFileType] = useState('biz_info');
   const [dragging, setDragging] = useState(false);
-  const fileInputRef = useState<HTMLInputElement | null>(null);
+  const [uploadMode, setUploadMode] = useState<'file' | 'text'>('file');
+  const [textTitle, setTextTitle] = useState('');
+  const [textContent, setTextContent] = useState('');
+  const [expandedDoc, setExpandedDoc] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1144,13 +1219,33 @@ function DocumentsSection({ clientId }: { clientId: string }) {
       fd.append('file_type', fileType);
       const res = await fetch(`/api/clients/${clientId}/documents`, { method: 'POST', body: fd });
       const data = await res.json();
-      if (!res.ok) {
-        setUploadError(data.error ?? 'Upload failed');
-        return;
-      }
+      if (!res.ok) { setUploadError(data.error ?? 'Upload failed'); return; }
       setDocuments(prev => [data.document, ...prev]);
     } catch {
       setUploadError('Upload failed. Please try again.');
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function saveText() {
+    if (!textTitle.trim() || !textContent.trim()) return;
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const res = await fetch(`/api/clients/${clientId}/documents`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_name: textTitle.trim(), file_type: fileType, text_content: textContent.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setUploadError(data.error ?? 'Save failed'); return; }
+      setDocuments(prev => [data.document, ...prev]);
+      setTextTitle('');
+      setTextContent('');
+      setUploadMode('file');
+    } catch {
+      setUploadError('Save failed. Please try again.');
     } finally {
       setUploading(false);
     }
@@ -1167,47 +1262,106 @@ function DocumentsSection({ clientId }: { clientId: string }) {
     handleFiles(e.dataTransfer.files);
   }
 
+  const modeBtn = (mode: 'file' | 'text'): React.CSSProperties => ({
+    height: 32, padding: '0 16px', borderRadius: 9999, fontSize: 13, fontWeight: 500,
+    cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif",
+    border: uploadMode === mode ? 'none' : '1px solid #D5D0C5',
+    background: uploadMode === mode ? '#4A6580' : '#FDFCF8',
+    color: uploadMode === mode ? '#fff' : '#1C1917',
+  });
+
   return (
     <div style={CARD_STYLE}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-        <span style={SECTION_TITLE_STYLE}>Documents</span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <select value={fileType} onChange={e => setFileType(e.target.value)} style={SELECT_STYLE}>
-            {DOC_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-          <label style={{ ...BTN_SECONDARY, cursor: uploading ? 'not-allowed' : 'pointer', opacity: uploading ? 0.6 : 1 }}>
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>
-            {uploading ? 'Uploading…' : 'Upload'}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+        <span style={SECTION_TITLE_STYLE}>Documents & Context</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button onClick={() => setUploadMode('file')} style={modeBtn('file')}>Upload File</button>
+          <button onClick={() => setUploadMode('text')} style={modeBtn('text')}>Add as Text</button>
+        </div>
+      </div>
+
+      {/* Type selector always visible */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+        <span style={{ fontSize: 12, color: '#8A8578', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Type:</span>
+        <select value={fileType} onChange={e => setFileType(e.target.value)} style={SELECT_STYLE}>
+          {DOC_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+      </div>
+
+      {uploadMode === 'text' ? (
+        <div style={{ marginBottom: 14 }}>
+          <input
+            type="text"
+            value={textTitle}
+            onChange={e => setTextTitle(e.target.value)}
+            placeholder="Document title (e.g. Brand Voice Guidelines)"
+            style={{
+              width: '100%', border: '0.5px solid #D5D0C5', borderRadius: 10,
+              background: '#FAFAF8', padding: '8px 12px', fontSize: 13,
+              color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif",
+              outline: 'none', marginBottom: 8, boxSizing: 'border-box',
+            }}
+          />
+          <textarea
+            value={textContent}
+            onChange={e => setTextContent(e.target.value)}
+            placeholder="Paste or type the content here — biz info, TOV, handover notes, context…"
+            style={{ ...INPUT_STYLE, minHeight: 120, boxSizing: 'border-box' }}
+          />
+          {uploadError && (
+            <p style={{ fontSize: 12, color: '#A0442A', margin: '6px 0 0', fontFamily: "'DM Sans', system-ui, sans-serif" }}>{uploadError}</p>
+          )}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
+            <button onClick={() => { setUploadMode('file'); setUploadError(null); }} style={BTN_SECONDARY}>Cancel</button>
+            <button
+              onClick={saveText}
+              disabled={uploading || !textTitle.trim() || !textContent.trim()}
+              style={{ ...BTN_PRIMARY, opacity: (uploading || !textTitle.trim() || !textContent.trim()) ? 0.6 : 1 }}
+            >
+              {uploading ? 'Saving…' : 'Save Text Doc'}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <label
+            onDragOver={e => { e.preventDefault(); setDragging(true); }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={onDrop}
+            style={{
+              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+              gap: 10, border: `1.5px dashed ${dragging ? '#4A6580' : '#C8C3B8'}`,
+              borderRadius: 12, padding: '24px 20px', textAlign: 'center',
+              background: dragging ? 'rgba(74,101,128,0.05)' : '#FAFAF8',
+              marginBottom: 14, transition: 'all 0.15s ease',
+              cursor: uploading ? 'not-allowed' : 'pointer',
+              opacity: uploading ? 0.6 : 1,
+            }}
+          >
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#4A6580" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/>
+              <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/>
+            </svg>
+            <div>
+              <p style={{ fontSize: 13, fontWeight: 600, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif", margin: '0 0 2px' }}>
+                {uploading ? 'Uploading…' : dragging ? 'Drop to upload' : 'Click to upload a file'}
+              </p>
+              <p style={{ fontSize: 11, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif", margin: 0 }}>
+                PDF, DOCX, TXT — AI readable · or drag & drop
+              </p>
+            </div>
             <input
               type="file"
-              accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.png,.jpg,.jpeg,.gif,.zip,.csv,.txt"
+              accept=".pdf,.docx,.txt,.csv,.doc"
               style={{ display: 'none' }}
               onChange={e => handleFiles(e.target.files)}
               disabled={uploading}
             />
           </label>
-        </div>
-      </div>
-
-      {/* Drag-and-drop zone */}
-      <div
-        onDragOver={e => { e.preventDefault(); setDragging(true); }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={onDrop}
-        style={{
-          border: `0.5px dashed ${dragging ? '#4A6580' : '#D5D0C5'}`,
-          borderRadius: 10, padding: '14px 16px', textAlign: 'center',
-          background: dragging ? 'rgba(74,101,128,0.04)' : 'transparent',
-          marginBottom: 14, transition: 'all 0.15s ease',
-        }}
-      >
-        <p style={{ fontSize: 12, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif", margin: 0 }}>
-          {dragging ? 'Drop file here' : 'Drag & drop a file here, or use Upload above'}
-        </p>
-      </div>
-
-      {uploadError && (
-        <p style={{ fontSize: 12, color: '#A0442A', marginBottom: 10, fontFamily: "'DM Sans', system-ui, sans-serif" }}>{uploadError}</p>
+          {uploadError && (
+            <p style={{ fontSize: 12, color: '#A0442A', marginBottom: 10, fontFamily: "'DM Sans', system-ui, sans-serif" }}>{uploadError}</p>
+          )}
+        </>
       )}
 
       {loading ? (
@@ -1216,45 +1370,83 @@ function DocumentsSection({ clientId }: { clientId: string }) {
         </div>
       ) : documents.length === 0 ? (
         <p style={{ fontSize: 13, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
-          No documents uploaded yet.
+          No documents yet — upload files or add text to build your client intel library.
         </p>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {documents.map(doc => (
-            <div key={doc.id} style={{
-              display: 'flex', alignItems: 'center', gap: 10,
-              padding: '9px 12px', borderRadius: 10,
-              border: '0.5px solid #E8E4DC', background: '#FAFAF8',
-            }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8A8578" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-              <span style={{ flex: 1, fontSize: 13, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {doc.file_name}
-              </span>
-              <span style={{
-                fontSize: 10, fontWeight: 600, padding: '2px 6px', borderRadius: 6,
-                background: '#F0EDE8', color: '#8A8578', border: '0.5px solid #E0DCD4',
-                fontFamily: "'DM Sans', system-ui, sans-serif", letterSpacing: '0.04em',
-                textTransform: 'uppercase' as const, whiteSpace: 'nowrap',
+          {documents.map((doc) => {
+            const hasContent = !!doc.text_content;
+            const isExpanded = expandedDoc === doc.id;
+            return (
+              <div key={doc.id} style={{
+                borderRadius: 10, border: '0.5px solid #E8E4DC', background: '#FAFAF8', overflow: 'hidden',
               }}>
-                {DOC_TYPE_LABELS[doc.file_type] ?? doc.file_type}
-              </span>
-              <span style={{ fontSize: 11, color: '#B5B0A5', whiteSpace: 'nowrap', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
-                {format(new Date(doc.uploaded_at), 'd MMM yyyy')}
-              </span>
-              <span style={{ fontSize: 11, color: '#B5B0A5', whiteSpace: 'nowrap', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
-                {doc.uploader_name}
-              </span>
-              <a
-                href={doc.file_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                title="Download"
-                style={{ color: '#4A6580', flexShrink: 0 }}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-              </a>
-            </div>
-          ))}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px' }}>
+                  {doc.is_text_doc ? (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8A8578" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="17" y1="10" x2="3" y2="10"/><line x1="21" y1="6" x2="3" y2="6"/><line x1="21" y1="14" x2="3" y2="14"/><line x1="17" y1="18" x2="3" y2="18"/></svg>
+                  ) : (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8A8578" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                  )}
+                  <span style={{ flex: 1, fontSize: 13, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {doc.file_name}
+                  </span>
+                  <span style={{
+                    fontSize: 10, fontWeight: 600, padding: '2px 6px', borderRadius: 6,
+                    background: '#F0EDE8', color: '#8A8578', border: '0.5px solid #E0DCD4',
+                    fontFamily: "'DM Sans', system-ui, sans-serif", letterSpacing: '0.04em',
+                    textTransform: 'uppercase' as const, whiteSpace: 'nowrap',
+                  }}>
+                    {DOC_TYPE_LABELS[doc.file_type] ?? doc.file_type}
+                  </span>
+                  {hasContent && (
+                    <span style={{
+                      fontSize: 10, fontWeight: 600, padding: '2px 6px', borderRadius: 6,
+                      background: 'rgba(74,124,89,0.1)', color: '#4A7C59', border: '0.5px solid rgba(74,124,89,0.25)',
+                      fontFamily: "'DM Sans', system-ui, sans-serif", whiteSpace: 'nowrap',
+                    }}>
+                      AI readable
+                    </span>
+                  )}
+                  <span style={{ fontSize: 11, color: '#B5B0A5', whiteSpace: 'nowrap', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+                    {format(new Date(doc.uploaded_at), 'd MMM yyyy')}
+                  </span>
+                  <span style={{ fontSize: 11, color: '#B5B0A5', whiteSpace: 'nowrap', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+                    {doc.uploader_name}
+                  </span>
+                  {hasContent && (
+                    <button
+                      onClick={() => setExpandedDoc(isExpanded ? null : doc.id)}
+                      title={isExpanded ? 'Collapse' : 'View content'}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#4A6580', flexShrink: 0, fontSize: 11, fontFamily: "'DM Sans', system-ui, sans-serif" }}
+                    >
+                      {isExpanded ? 'Hide' : 'View'}
+                    </button>
+                  )}
+                  {!doc.is_text_doc && doc.file_url && (
+                    <a
+                      href={doc.file_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title="Download"
+                      style={{ color: '#4A6580', flexShrink: 0 }}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    </a>
+                  )}
+                </div>
+                {hasContent && isExpanded && (
+                  <div style={{
+                    borderTop: '0.5px solid #E8E4DC', padding: '10px 14px',
+                    fontSize: 13, color: '#1C1917', lineHeight: 1.7,
+                    fontFamily: "'DM Sans', system-ui, sans-serif", whiteSpace: 'pre-wrap',
+                    background: '#FAFAF8', maxHeight: 300, overflowY: 'auto',
+                  }}>
+                    {doc.text_content}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -1272,10 +1464,10 @@ export function ClientIntelTab({ clientId }: ClientIntelTabProps) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
-      <GoalsSection clientId={clientId} briefIsLocked={briefIsLocked} />
+      <GoalsSection clientId={clientId} />
       <BriefSection clientId={clientId} onLockChange={setBriefIsLocked} />
-      <DocumentsSection clientId={clientId} />
       <HandoverNotesSection clientId={clientId} />
+      <DocumentsSection clientId={clientId} />
     </div>
   );
 }

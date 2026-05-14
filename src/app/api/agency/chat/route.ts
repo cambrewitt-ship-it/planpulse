@@ -999,10 +999,42 @@ async function toolGetClientIntelligence(
     lines.push('');
   }
 
-  // Campaign Goals
-  if (goals.length > 0) {
-    lines.push('Campaign Goals:');
-    for (const g of goals) {
+  // Client Goals — primary first, then secondary
+  const overarchingGoals = goals.filter((g: any) => g.channel === 'overarching');
+  const primaryGoal = overarchingGoals.find((g: any) => g.is_primary) ?? null;
+  const secondaryGoals = overarchingGoals.filter((g: any) => !g.is_primary);
+  const channelGoals = goals.filter((g: any) => g.channel !== 'overarching');
+
+  if (primaryGoal) {
+    lines.push('PRIMARY CLIENT GOAL:');
+    const pg = primaryGoal;
+    const parts = [
+      `${pg.goal_type ?? 'Goal'} via ${pg.metric}`,
+      pg.target_value != null ? `| Target: ${pg.target_value}` : null,
+      pg.stretch_value != null ? `| Stretch: ${pg.stretch_value} (best case)` : null,
+      pg.floor_value != null ? `| Floor: ${pg.floor_value} (minimum acceptable)` : null,
+    ].filter(Boolean).join(' ');
+    lines.push(parts);
+    lines.push('');
+  }
+
+  if (secondaryGoals.length > 0) {
+    lines.push('Secondary Goals:');
+    for (const g of secondaryGoals) {
+      const parts = [
+        `${g.goal_type ?? 'Goal'} via ${g.metric}`,
+        g.target_value != null ? `| Target: ${g.target_value}` : null,
+        g.stretch_value != null ? `| Stretch: ${g.stretch_value}` : null,
+        g.floor_value != null ? `| Floor: ${g.floor_value}` : null,
+      ].filter(Boolean).join(' ');
+      lines.push(`  - ${parts}`);
+    }
+    lines.push('');
+  }
+
+  if (channelGoals.length > 0) {
+    lines.push('Channel Goals:');
+    for (const g of channelGoals) {
       const metricKey = g.metric?.toLowerCase();
       const actual = channelActuals?.[g.channel]?.[metricKey] ?? null;
       const bm = benchmarks.find((b: any) => b.metric_key === metricKey);
@@ -1048,13 +1080,25 @@ async function toolGetClientIntelligence(
     lines.push('');
   }
 
-  // Documents
+  // Documents — include full content for text docs, filename for files
   if (documents.length > 0) {
-    const docList = documents
-      .map((d: any) => `${d.file_name} [${d.file_type ?? 'other'}]`)
-      .join(', ');
-    lines.push(`Documents on File: ${docList}`);
-    lines.push('');
+    const textDocs = documents.filter((d: any) => d.is_text_doc && d.text_content);
+    const fileDocs = documents.filter((d: any) => !d.is_text_doc);
+
+    if (textDocs.length > 0) {
+      lines.push('Client Context Documents:');
+      for (const d of textDocs) {
+        lines.push(`[${d.file_type ?? 'other'}] ${d.file_name}:`);
+        lines.push(d.text_content);
+        lines.push('');
+      }
+    }
+
+    if (fileDocs.length > 0) {
+      const fileList = fileDocs.map((d: any) => `${d.file_name} [${d.file_type ?? 'other'}]`).join(', ');
+      lines.push(`Files on Record: ${fileList}`);
+      lines.push('');
+    }
   }
 
   lines.push('---');
@@ -1066,6 +1110,7 @@ async function toolGetClientIntelligence(
       has_brief: !!brief,
       brief_locked: brief?.is_locked ?? false,
       goal_count: goals.length,
+      primary_goal: primaryGoal ? `${primaryGoal.goal_type ?? 'Goal'} via ${primaryGoal.metric}` : null,
       note_count: notes.length,
       document_count: documents.length,
     },

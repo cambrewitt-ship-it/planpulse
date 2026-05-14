@@ -360,8 +360,14 @@ function FloatingAIChatInner() {
         {open
           ? <X size={17} color="#fff" />
           : <>
-              <span style={{ fontSize: 16, color: '#fff', lineHeight: 1, marginBottom: 1 }}>+</span>
-              <span style={{ fontSize: 13, fontWeight: 500, color: '#fff', letterSpacing: '0.01em' }}>Ask AI</span>
+              <div style={{
+                width: 30, height: 30, borderRadius: '50%',
+                background: '#fff', overflow: 'hidden', flexShrink: 0,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <img src="/favicon.ico" alt="" style={{ width: 26, height: 26, display: 'block' }} />
+              </div>
+              <span style={{ fontSize: 15, fontWeight: 600, color: '#fff', letterSpacing: '0.01em' }}>AI Agent</span>
             </>
         }
       </button>

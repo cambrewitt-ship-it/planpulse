@@ -1,41 +1,10 @@
 // src/components/agency/ClientCardCompact.tsx
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import type { ClientCardData } from '@/app/api/agency/clients/route';
-
-// Compact goal status indicator — fetched once and cached in component state
-function useGoalStrip(clientId: string) {
-  const [goals, setGoals] = useState<Array<{ metric: string; status: string; color: string }>>([]);
-  useEffect(() => {
-    let cancelled = false;
-    fetch(`/api/clients/${clientId}/goals`)
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
-        if (!data || cancelled) return;
-        const top3 = (data.goals ?? []).slice(0, 3).map((g: any) => {
-          const metricKey = g.metric?.toLowerCase();
-          const actual = data.channelActuals?.[g.channel]?.[metricKey] ?? null;
-          let color = '#B5B0A5';
-          if (actual != null) {
-            const floorOk = g.floor_value == null || actual >= g.floor_value;
-            const targetOk = g.target_value == null || actual >= g.target_value;
-            const stretchOk = g.stretch_value != null && actual >= g.stretch_value;
-            if (!floorOk) color = '#A0442A';
-            else if (!targetOk) color = '#B07030';
-            else if (stretchOk) color = '#B07030';
-            else color = '#4A7C59';
-          }
-          return { metric: g.metric, status: actual != null ? 'data' : 'no-data', color };
-        });
-        setGoals(top3);
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [clientId]);
-  return goals;
-}
+import { PerformanceWidget, type PerfData } from './PerformanceWidget';
 
 interface AccountManager {
   id: string;
@@ -55,76 +24,110 @@ function clientInitials(name: string): string {
   return name.split(' ').map(w => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
 }
 
-function scoreColor(score: number): string {
-  if (score >= 70) return '#4A7C59';
-  if (score >= 40) return '#B07030';
-  return '#A0442A';
-}
-
-function calcBudgetPacingScore(pacingRatio: number): number {
-  const pct = pacingRatio * 100;
-  if (pct >= 95 && pct <= 105) return 100;
-  if ((pct >= 85 && pct < 95) || (pct > 105 && pct <= 115)) return 80;
-  if ((pct >= 75 && pct < 85) || (pct > 115 && pct <= 125)) return 60;
-  if ((pct >= 65 && pct < 75) || (pct > 125 && pct <= 135)) return 40;
-  return 20;
-}
-
-function calcActionScore(completionRate: number): number {
-  const pct = completionRate * 100;
-  if (pct >= 100) return 100;
-  if (pct >= 75) return 80;
-  if (pct >= 50) return 60;
-  if (pct >= 25) return 40;
-  return 20;
-}
-
-function calcCompositeHealthScore(
-  spendVariancePct: number | null,
-  completedActions: number,
-  totalActions: number,
-  healthStatus: string | undefined
-): number {
-  const pacingRatio = spendVariancePct != null ? 1 + spendVariancePct / 100 : 1.0;
-  const budgetPacingScore = calcBudgetPacingScore(pacingRatio);
-  const completionRate = totalActions > 0 ? completedActions / totalActions : 1.0;
-  const actionScore = calcActionScore(completionRate);
-  const perfScore = healthStatus === 'green' ? 85 : healthStatus === 'amber' ? 50 : 20;
-  return Math.round(budgetPacingScore * (4 / 9) + actionScore * (2.5 / 9) + perfScore * (2.5 / 9));
-}
-
 function formatCurrency(n: number): string {
   if (n >= 1000) return `$${(n / 1000).toFixed(1)}k`;
   return `$${Math.round(n)}`;
 }
 
-interface HealthRingProps {
-  score: number;
-  color: string;
-}
+// ── Speedometer arc SVG (matches dashboard HealthRing design) ─────────────
+// needle=0 → left (worst), needle=0.5 → top (target), needle=1 → right (best)
 
-function HealthRing({ score, color }: HealthRingProps) {
-  const r = 14;
-  const circ = 2 * Math.PI * r;
-  const offset = circ * (1 - Math.min(100, Math.max(0, score)) / 100);
+function Speedometer({ needle, color, label, sublabel }: {
+  needle: number; color: string; label?: string; sublabel?: string;
+}) {
+  const W = 88, H = 68;
+  const sw = 6;
+  const r = 37;
+  const cx = W / 2;
+  const cy = 44;
+
+  const n = Math.max(0.002, Math.min(0.998, needle));
+  const rad = Math.PI * (1 - n);
+  const ex = cx + r * Math.cos(rad);
+  const ey = cy - r * Math.sin(rad);
+  const nLen = r - sw / 2 - 3;
+  const nx = cx + nLen * Math.cos(rad);
+  const ny = cy - nLen * Math.sin(rad);
+
+  const ticks = [0, 33, 67, 100].map(v => {
+    const tr = Math.PI * (1 - Math.min(0.999, Math.max(0.001, v / 100)));
+    const inner = r - sw / 2 - 2;
+    const outer = r + sw / 2 + 2;
+    return {
+      x1: cx + inner * Math.cos(tr), y1: cy - inner * Math.sin(tr),
+      x2: cx + outer * Math.cos(tr), y2: cy - outer * Math.sin(tr),
+    };
+  });
+
   return (
-    <svg width="36" height="36" viewBox="0 0 36 36" style={{ flexShrink: 0 }}>
-      <circle cx="18" cy="18" r={r} fill="none" stroke="#E8E4DC" strokeWidth="2" />
-      <circle
-        cx="18" cy="18" r={r} fill="none"
-        stroke={color} strokeWidth="2"
-        strokeDasharray={circ}
-        strokeDashoffset={offset}
-        strokeLinecap="round"
-        transform="rotate(-90 18 18)"
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}
+      style={{ display: 'block', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+      {/* Track */}
+      <path
+        d={`M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}`}
+        fill="none" stroke="#e5e7eb" strokeWidth={sw} strokeLinecap="round"
       />
-      <text x="18" y="22" textAnchor="middle" fontSize="10" fontWeight="700" fill="#1C1917"
-        fontFamily="'Inter', system-ui, sans-serif">
-        {Math.round(score)}
-      </text>
+      {/* Coloured fill */}
+      {needle > 0.01 && (
+        <path
+          d={`M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${ex} ${ey}`}
+          fill="none" stroke={color} strokeWidth={sw} strokeLinecap="round"
+        />
+      )}
+      {/* Zone tick marks at 0%, 33%, 67%, 100% */}
+      {ticks.map((t, i) => (
+        <line key={i} x1={t.x1} y1={t.y1} x2={t.x2} y2={t.y2}
+          stroke="#d1d5db" strokeWidth={1} strokeLinecap="round" />
+      ))}
+      {/* Needle */}
+      <line x1={cx} y1={cy} x2={nx} y2={ny} stroke="#374151" strokeWidth={1.5} strokeLinecap="round" />
+      <circle cx={cx} cy={cy} r={3} fill="#374151" />
+      {/* Value label inside SVG */}
+      {label && (
+        <text x={cx} y={cy + 14} textAnchor="middle" fontSize={11} fontWeight="700" fill="#1C1917">{label}</text>
+      )}
+      {sublabel && (
+        <text x={cx} y={cy + 18} textAnchor="middle" fontSize={11} fontWeight="600" fill={color}
+          style={{ textTransform: 'uppercase', letterSpacing: '0.08em' }}>{sublabel}</text>
+      )}
     </svg>
   );
 }
+
+// ── Media plan time progress ───────────────────────────────────────────────
+
+function getMediaPlanProgress(channels: { startDate: string | null; endDate: string | null }[]) {
+  const starts = channels.map(c => c.startDate).filter(Boolean) as string[];
+  const ends = channels.map(c => c.endDate).filter(Boolean) as string[];
+  if (!starts.length || !ends.length) return null;
+  const earliest = [...starts].sort()[0];
+  const latest = [...ends].sort().reverse()[0];
+  const today = new Date();
+  const startD = new Date(earliest);
+  const endD = new Date(latest);
+  if (startD >= endD) return null;
+  const progress = today < startD ? 0 : today > endD ? 1 : (today.getTime() - startD.getTime()) / (endD.getTime() - startD.getTime());
+  const fmt = (d: Date) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  return { progress, startLabel: fmt(startD), endLabel: fmt(endD) };
+}
+
+// ── Month elapsed % for pacing marker ─────────────────────────────────────
+
+function getMonthElapsed(): number {
+  const now = new Date();
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  return Math.min(1, now.getDate() / daysInMonth);
+}
+
+// ── Action points colour ───────────────────────────────────────────────────
+
+function apColor(count: number): string {
+  if (count >= 6) return '#A0442A';
+  if (count >= 3) return '#B07030';
+  return '#B5B0A5';
+}
+
+// ── Main component ─────────────────────────────────────────────────────────
 
 interface ClientCardCompactProps {
   client: ClientCardData;
@@ -135,27 +138,22 @@ interface ClientCardCompactProps {
   accountManagers?: AccountManager[];
 }
 
-export function ClientCardCompact({ client, selected, onClick, index = 0, onAccountManagerChange, accountManagers = [] }: ClientCardCompactProps) {
+export function ClientCardCompact({
+  client, selected, onClick, onAccountManagerChange, accountManagers = []
+}: ClientCardCompactProps) {
   const router = useRouter();
   const color = clientColor(client.id);
   const initials = clientInitials(client.name);
-  const health = client.health;
   const [showAmMenu, setShowAmMenu] = useState(false);
   const [currentAm, setCurrentAm] = useState<string | null>(client.account_manager ?? null);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Sync if parent updates the client prop
-  useEffect(() => {
-    setCurrentAm(client.account_manager ?? null);
-  }, [client.account_manager]);
+  useEffect(() => { setCurrentAm(client.account_manager ?? null); }, [client.account_manager]);
 
-  // Close dropdown on outside click
   useEffect(() => {
     if (!showAmMenu) return;
     function handleClick(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setShowAmMenu(false);
-      }
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setShowAmMenu(false);
     }
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
@@ -171,79 +169,35 @@ export function ClientCardCompact({ client, selected, onClick, index = 0, onAcco
         body: JSON.stringify({ account_manager: am }),
       });
       onAccountManagerChange?.(client.id, am);
-    } catch (err) {
-      console.error('Failed to update account manager:', err);
+    } catch {
       setCurrentAm(client.account_manager ?? null);
     }
   }
 
-  const goalStrip = useGoalStrip(client.id);
+  const [perf, setPerf] = useState<PerfData | null>(null);
+  const handleNeedle = useCallback((data: PerfData | null) => setPerf(data), []);
 
-  // Composite health score 0-100 (mirrors dashboard-v2 calculateHealthScore logic)
-  const healthScore = calcCompositeHealthScore(
-    client.spendVariancePct,
-    client.completedActionPoints,
-    client.totalActionPoints,
-    health?.status
-  );
-
-  const healthLabel = health?.status === 'green' ? 'Healthy' : health?.status === 'amber' ? 'At Risk' : 'Critical';
-  const healthColor = health?.status === 'red' ? '#A0442A' : health?.status === 'amber' ? '#B07030' : '#4A7C59';
-  const healthTextColor = health?.status === 'red' ? '#A0442A' : health?.status === 'amber' ? '#B07030' : '#4A7C59';
-
-  // Sub-scores (0-100)
-  const pacing = Math.max(0, Math.min(100, 100 - Math.abs(client.spendVariancePct ?? 0) * 2));
-  const actions = client.totalActionPoints > 0
-    ? (client.completedActionPoints / client.totalActionPoints) * 100
-    : 100;
-  const perf = health?.status === 'green' ? 85 : health?.status === 'amber' ? 50 : 20;
-
-  const actionPointsOutstanding = client.totalActionPoints - client.completedActionPoints;
-
-  // Spend row
+  const outstanding = Math.max(0, client.totalActionPoints - client.completedActionPoints);
   const hasSpend = client.plannedBudget > 0;
-  const budgetPct = hasSpend ? Math.min(200, (client.actualSpend / client.plannedBudget) * 100) : 0;
-
-  const cardStyle: React.CSSProperties = {
-    background: '#FDFCF8',
-    border: selected ? '1.5px solid rgba(74,101,128,0.5)' : '1px solid #E0DCD4',
-    borderRadius: 18,
-    padding: '14px',
-    marginBottom: 6,
-    cursor: 'pointer',
-    fontFamily: "'DM Sans', system-ui, sans-serif",
-    boxShadow: selected ? '0 2px 12px rgba(74,101,128,0.15)' : '0 2px 8px rgba(0,0,0,0.06)',
-  };
-  const subTextColor = '#8A8578';
-
-  const scores = [
-    {
-      label: 'P',
-      fullLabel: 'Pacing',
-      value: pacing,
-      detail: client.spendVariancePct != null
-        ? `${client.spendVariancePct > 0 ? '+' : ''}${Math.round(client.spendVariancePct)}%`
-        : 'N/A'
-    },
-    {
-      label: 'A',
-      fullLabel: 'Actions',
-      value: actions,
-      detail: client.totalActionPoints > 0
-        ? `${client.completedActionPoints}/${client.totalActionPoints}`
-        : '0/0'
-    },
-    {
-      label: 'Pf',
-      fullLabel: 'Performance',
-      value: perf,
-      detail: health?.status === 'green' ? 'Healthy' : health?.status === 'amber' ? 'At Risk' : 'Critical'
-    },
-  ];
+  const spendPct = hasSpend ? Math.min(100, (client.actualSpend / client.plannedBudget) * 100) : 0;
+  const monthElapsedPct = getMonthElapsed() * 100;
+  const planProgress = getMediaPlanProgress(client.channels);
 
   return (
-    <div style={cardStyle} onClick={() => { onClick(); router.push(`/clients/${client.id}/dashboard`); }}>
-      {/* Row 1: Avatar + Name + Health ring */}
+    <div
+      style={{
+        background: '#FDFCF8',
+        border: selected ? '1.5px solid rgba(74,101,128,0.5)' : '1px solid #E0DCD4',
+        borderRadius: 18,
+        padding: '14px',
+        marginBottom: 6,
+        cursor: 'pointer',
+        fontFamily: "'DM Sans', system-ui, sans-serif",
+        boxShadow: selected ? '0 2px 12px rgba(74,101,128,0.15)' : '0 2px 8px rgba(0,0,0,0.06)',
+      }}
+      onClick={() => { onClick(); router.push(`/clients/${client.id}/dashboard`); }}
+    >
+      {/* Row 1: Avatar + Name/AM */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <div style={{
           width: 34, height: 34, borderRadius: 10,
@@ -260,87 +214,45 @@ export function ClientCardCompact({ client, selected, onClick, index = 0, onAcco
           flex: 1, fontWeight: 500, fontSize: 15, color: '#1C1917',
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}>{client.name}</span>
-        <HealthRing score={healthScore} color={healthColor} />
-      </div>
-
-      {/* Row 2: Health label + action points count + AM tag */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 8 }}>
-        <span style={{
-          fontSize: 11, fontWeight: 500, color: healthTextColor,
-          textTransform: 'uppercase', letterSpacing: '0.08em',
-        }}>{healthLabel}</span>
-        {actionPointsOutstanding > 0 && (
-          <span style={{
-            fontSize: 11, fontWeight: 400, color: '#A0442A',
-          }}>{actionPointsOutstanding} open</span>
-        )}
-        <span style={{ flex: 1 }} />
-        {/* AM tag — click to assign */}
-        <div style={{ position: 'relative' }} ref={menuRef}>
+        <div style={{ position: 'relative', flexShrink: 0 }} ref={menuRef}>
           <button
             onClick={(e) => { e.stopPropagation(); setShowAmMenu(v => !v); }}
-            title="Assign account manager"
             style={{
-              fontSize: 10, fontWeight: 500,
-              padding: '2px 6px',
-              borderRadius: 12,
+              fontSize: 10, fontWeight: 500, padding: '2px 6px', borderRadius: 12,
               border: currentAm ? '0.5px solid rgba(74,101,128,0.3)' : '0.5px dashed #D5D0C5',
               background: currentAm ? 'rgba(74,101,128,0.08)' : 'transparent',
               color: currentAm ? '#4A6580' : '#B5B0A5',
-              cursor: 'pointer',
-              fontFamily: "'DM Sans', system-ui, sans-serif",
-              letterSpacing: '0.04em',
+              cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif",
             }}
-          >
-            {currentAm ?? 'AM'}
-          </button>
+          >{currentAm ?? 'AM'}</button>
           {showAmMenu && (
             <div style={{
-              position: 'absolute',
-              right: 0,
-              top: '100%',
-              marginTop: 4,
-              background: '#FDFCF8',
-              border: '0.5px solid #E8E4DC',
-              borderRadius: 10,
-              boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
-              zIndex: 50,
-              minWidth: 90,
-              overflow: 'hidden',
+              position: 'absolute', right: 0, top: '100%', marginTop: 4,
+              background: '#FDFCF8', border: '0.5px solid #E8E4DC',
+              borderRadius: 10, boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+              zIndex: 50, minWidth: 90, overflow: 'hidden',
             }}>
               {accountManagers.map(am => (
-                <button
-                  key={am.id}
+                <button key={am.id}
                   onClick={(e) => { e.stopPropagation(); void assignAm(am.name); }}
                   style={{
-                    display: 'block',
-                    width: '100%',
-                    textAlign: 'left',
-                    padding: '7px 12px',
-                    fontSize: 12,
+                    display: 'block', width: '100%', textAlign: 'left',
+                    padding: '7px 12px', fontSize: 12,
                     color: currentAm === am.name ? '#4A6580' : '#1C1917',
                     fontWeight: currentAm === am.name ? 600 : 400,
                     background: currentAm === am.name ? 'rgba(74,101,128,0.06)' : 'transparent',
-                    border: 'none',
-                    cursor: 'pointer',
+                    border: 'none', cursor: 'pointer',
                     fontFamily: "'DM Sans', system-ui, sans-serif",
                   }}
                 >{am.name}</button>
               ))}
               {currentAm && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); void assignAm(null); }}
+                <button onClick={(e) => { e.stopPropagation(); void assignAm(null); }}
                   style={{
-                    display: 'block',
-                    width: '100%',
-                    textAlign: 'left',
-                    padding: '7px 12px',
-                    fontSize: 11,
-                    color: '#B5B0A5',
-                    background: 'transparent',
-                    border: 'none',
-                    borderTop: '0.5px solid #E8E4DC',
-                    cursor: 'pointer',
+                    display: 'block', width: '100%', textAlign: 'left',
+                    padding: '7px 12px', fontSize: 11, color: '#B5B0A5',
+                    background: 'transparent', border: 'none',
+                    borderTop: '0.5px solid #E8E4DC', cursor: 'pointer',
                     fontFamily: "'DM Sans', system-ui, sans-serif",
                   }}
                 >Unassign</button>
@@ -350,54 +262,91 @@ export function ClientCardCompact({ client, selected, onClick, index = 0, onAcco
         </div>
       </div>
 
-      {/* Row 3: Score strip with detail */}
-      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-        {scores.map(({ label, fullLabel, value, detail }) => (
-          <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start', flex: 1, minWidth: 0 }}>
-            <span style={{ fontSize: 13, color: subTextColor, fontWeight: 500 }}>{fullLabel}</span>
-            <div style={{
-              width: '100%', height: 3, borderRadius: 1,
-              background: scoreColor(value),
-            }} />
-            <span style={{ fontSize: 10, color: subTextColor, fontWeight: 400, lineHeight: 1.3 }}>
-              {detail}
-            </span>
+      {/* Row 2: Performance metric + Open Actions + Speedometer */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <PerformanceWidget clientId={client.id} onNeedle={handleNeedle} hideControls />
+        </div>
+        <div style={{ width: 0.5, height: 40, background: '#E8E4DC', flexShrink: 0 }} />
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, flexShrink: 0 }}>
+          <span style={{ fontSize: 24, fontWeight: 700, lineHeight: 1, color: apColor(outstanding) }}>{outstanding}</span>
+          <span style={{ fontSize: 9, color: '#8A8578', textAlign: 'center', lineHeight: 1.3 }}>open actions</span>
+        </div>
+        <div style={{ width: 0.5, height: 40, background: '#E8E4DC', flexShrink: 0 }} />
+        <div style={{ width: 62, height: 48, flexShrink: 0, overflow: 'hidden' }}>
+          <div style={{ transform: 'scale(0.7)', transformOrigin: 'left top' }}>
+            {perf?.hasData ? (
+              <Speedometer needle={perf.needle} color={perf.color} sublabel="Performance" />
+            ) : (
+              <Speedometer needle={0.5} color="#B5B0A5" />
+            )}
           </div>
-        ))}
+        </div>
       </div>
 
-      {/* Row 4: Spend row (only if planned budget exists) */}
-      {hasSpend && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8 }}>
-          <span style={{ fontSize: 13, fontWeight: 500, color: '#1C1917', whiteSpace: 'nowrap' }}>
-            {formatCurrency(client.actualSpend)}
-            <span style={{ fontWeight: 400, color: '#B5B0A5', fontSize: 13 }}>
-              {' '}/ {formatCurrency(client.plannedBudget)}
+      {/* Row 3: Pacing bar — actual vs planned spend */}
+      <div style={{ marginTop: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
+          <span style={{ fontSize: 10, color: '#8A8578', fontWeight: 500 }}>Spend</span>
+          {hasSpend ? (
+            <span style={{ fontSize: 10, color: '#1C1917', marginLeft: 'auto' }}>
+              {formatCurrency(client.actualSpend)}
+              <span style={{ color: '#B5B0A5' }}> / {formatCurrency(client.plannedBudget)}</span>
             </span>
-          </span>
-          <div style={{ flex: 1, height: 4, background: '#E8E4DC', borderRadius: 2, overflow: 'hidden' }}>
+          ) : (
+            <span style={{ fontSize: 10, color: '#B5B0A5', marginLeft: 'auto' }}>No data</span>
+          )}
+        </div>
+        <div style={{
+          position: 'relative', width: '100%', height: 5,
+          background: '#E8E4DC', borderRadius: 3, overflow: 'visible',
+        }}>
+          {hasSpend && (
             <div style={{
-              height: '100%', width: `${Math.min(100, budgetPct)}%`,
-              background: healthColor, borderRadius: 2,
+              height: '100%', width: `${spendPct}%`,
+              background: spendPct > monthElapsedPct + 10 ? '#A0442A' :
+                          spendPct < monthElapsedPct - 10 ? '#B07030' : '#4A7C59',
+              borderRadius: 3, transition: 'width 0.3s',
             }} />
-          </div>
-          <span style={{ fontSize: 11, color: '#B5B0A5', whiteSpace: 'nowrap' }}>
-            {Math.round(budgetPct)}%
-          </span>
+          )}
+          {/* Time marker tick */}
+          {hasSpend && (
+            <div style={{
+              position: 'absolute', top: -2, bottom: -2,
+              left: `${Math.min(100, monthElapsedPct)}%`,
+              width: 1.5, background: '#1C1917', opacity: 0.35, borderRadius: 1,
+            }} />
+          )}
         </div>
-      )}
+      </div>
 
-      {/* Row 5: Goal indicator strip (up to 3 key metrics) */}
-      {goalStrip.length > 0 && (
-        <div style={{ display: 'flex', gap: 6, marginTop: 8, paddingTop: 8, borderTop: '0.5px solid #F0EDE8' }}>
-          {goalStrip.map(g => (
-            <div key={g.metric} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <div style={{ width: 6, height: 6, borderRadius: '50%', background: g.color, flexShrink: 0 }} />
-              <span style={{ fontSize: 10, color: '#8A8578', fontFamily: "'DM Sans', system-ui, sans-serif" }}>{g.metric}</span>
-            </div>
-          ))}
+      {/* Row 4: Time progress bar — media plan dates */}
+      <div style={{ marginTop: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
+          <span style={{ fontSize: 10, color: '#8A8578', fontWeight: 500 }}>Plan</span>
+          {planProgress ? (
+            <span style={{ fontSize: 10, color: '#B5B0A5', marginLeft: 'auto' }}>
+              {planProgress.startLabel} → {planProgress.endLabel}
+            </span>
+          ) : (
+            <span style={{ fontSize: 10, color: '#B5B0A5', marginLeft: 'auto' }}>No dates set</span>
+          )}
         </div>
-      )}
+        <div style={{
+          position: 'relative', width: '100%', height: 5,
+          background: '#E8E4DC', borderRadius: 3, overflow: 'hidden',
+        }}>
+          {planProgress && (
+            <div style={{
+              height: '100%',
+              width: `${Math.round(planProgress.progress * 100)}%`,
+              background: '#4A6580',
+              borderRadius: 3, transition: 'width 0.3s',
+            }} />
+          )}
+        </div>
+      </div>
+
     </div>
   );
 }

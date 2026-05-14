@@ -1244,6 +1244,7 @@ export default function DashboardV2() {
       : 0;
 
     return {
+      clientId,
       client: {
         name: client.name,
         // Intentionally omit notes from V2 hero so the legacy "Master Client Notes"

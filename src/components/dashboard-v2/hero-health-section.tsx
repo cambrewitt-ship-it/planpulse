@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import type { HealthScoreResult } from '@/lib/utils/health-score';
+import { PerformanceWidget, type PerfData } from '@/components/agency/PerformanceWidget';
 import {
   GanttCalendar,
   type GanttClient,
@@ -32,6 +33,7 @@ interface HeroGanttProps {
 }
 
 export interface HeroHealthSectionProps {
+  clientId: string;
   client: {
     name: string;
     notes?: string;
@@ -108,29 +110,33 @@ function Badge({ status, label }: { status: string; label: string }) {
 // Health Score Ring (SVG conic-gradient via stroke-dasharray trick)
 // ---------------------------------------------------------------------------
 
-function HealthRing({ score, status }: { score: number; status: HealthScoreResult['status'] }) {
+function HealthRing({ score, status, perf }: {
+  score: number;
+  status: HealthScoreResult['status'];
+  perf?: PerfData | null;
+}) {
   const W = 144, H = 96;
-  const sw = 10;        // stroke width
-  const r = 62;         // arc radius
+  const sw = 10;
+  const r = 62;
   const cx = W / 2;
-  const cy = 70;        // needle pivot — bottom area
+  const cy = 70;
 
-  const ringColor = STATUS_COLORS[status]?.ring ?? '#f59e0b';
-  const label = status === 'healthy' ? 'Healthy' : status === 'caution' ? 'Caution' : 'At Risk';
+  const usePerf = !!(perf?.hasData);
+  const needle = usePerf ? perf!.needle : score / 100;
+  const ringColor = usePerf ? perf!.color : (STATUS_COLORS[status]?.ring ?? '#f59e0b');
+  const centerLabel = usePerf ? perf!.actualLabel : String(Math.round(score));
+  const subLabel = usePerf
+    ? perf!.metric.toUpperCase()
+    : (status === 'healthy' ? 'Healthy' : status === 'caution' ? 'Caution' : 'At Risk');
 
-  // Clamp to avoid degenerate arcs at 0 and 100
-  const s = Math.min(0.998, Math.max(0.002, score / 100));
-  // Math angle: π = left (score 0) → 0 = right (score 100)
+  const s = Math.min(0.998, Math.max(0.002, needle));
   const rad = Math.PI * (1 - s);
   const ex = cx + r * Math.cos(rad);
   const ey = cy - r * Math.sin(rad);
-
-  // Needle tip (stops just inside the track)
   const nLen = r - sw / 2 - 4;
   const nx = cx + nLen * Math.cos(rad);
   const ny = cy - nLen * Math.sin(rad);
 
-  // Zone ticks at 0%, 33%, 67%, 100%
   const ticks = [0, 33, 67, 100].map(v => {
     const tr = Math.PI * (1 - Math.min(0.999, Math.max(0.001, v / 100)));
     const inner = r - sw / 2 - 2;
@@ -147,13 +153,13 @@ function HealthRing({ score, status }: { score: number; status: HealthScoreResul
       viewBox={`0 0 ${W} ${H}`}
       style={{ fontFamily: "'DM Sans', system-ui, sans-serif", display: 'block' }}
     >
-      {/* Track (full semicircle, sweep=1 = CW in SVG = goes through top) */}
+      {/* Track */}
       <path
         d={`M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}`}
         fill="none" stroke="#e5e7eb" strokeWidth={sw} strokeLinecap="round"
       />
       {/* Coloured fill */}
-      {score > 0.5 && (
+      {needle > 0.005 && (
         <path
           d={`M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${ex} ${ey}`}
           fill="none" stroke={ringColor} strokeWidth={sw} strokeLinecap="round"
@@ -164,20 +170,24 @@ function HealthRing({ score, status }: { score: number; status: HealthScoreResul
       {ticks.map((t, i) => (
         <line key={i} x1={t.x1} y1={t.y1} x2={t.x2} y2={t.y2} stroke="#d1d5db" strokeWidth={1.5} strokeLinecap="round" />
       ))}
-      {/* End labels */}
-      <text x={cx - r - 6} y={cy + 12} textAnchor="end" fontSize={8} fill="#9ca3af">0</text>
-      <text x={cx + r + 6} y={cy + 12} textAnchor="start" fontSize={8} fill="#9ca3af">100</text>
+      {/* End labels (only shown without perf data) */}
+      {!usePerf && (
+        <>
+          <text x={cx - r - 6} y={cy + 12} textAnchor="end" fontSize={8} fill="#9ca3af">0</text>
+          <text x={cx + r + 6} y={cy + 12} textAnchor="start" fontSize={8} fill="#9ca3af">100</text>
+        </>
+      )}
       {/* Needle */}
       <line x1={cx} y1={cy} x2={nx} y2={ny} stroke="#374151" strokeWidth={2} strokeLinecap="round" />
       <circle cx={cx} cy={cy} r={4.5} fill="#374151" />
-      {/* Score number */}
-      <text x={cx} y={cy + 24} textAnchor="middle" fontSize={20} fontWeight="700" fill="#1C1917">{Math.round(score)}</text>
-      {/* Status label */}
+      {/* Center value */}
+      <text x={cx} y={cy + 24} textAnchor="middle" fontSize={20} fontWeight="700" fill="#1C1917">{centerLabel}</text>
+      {/* Sub-label */}
       <text
         x={cx} y={cy + 33}
         textAnchor="middle" fontSize={9} fontWeight="600" fill={ringColor}
         style={{ textTransform: 'uppercase', letterSpacing: '0.08em' }}
-      >{label}</text>
+      >{subLabel}</text>
     </svg>
   );
 }
@@ -227,6 +237,7 @@ function MetricCard({ title, value, sub, badge, progress, children }: MetricCard
 // ---------------------------------------------------------------------------
 
 export default function HeroHealthSection({
+  clientId,
   client,
   healthScore,
   currentSpend,
@@ -244,6 +255,7 @@ export default function HeroHealthSection({
 }: HeroHealthSectionProps) {
   const [showAmMenu, setShowAmMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const [perfData, setPerfData] = useState<PerfData | null>(null);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -391,8 +403,13 @@ export default function HeroHealthSection({
                 </div>
               </div>
               <div className="flex-shrink-0">
-                <HealthRing score={healthScore.overallScore} status={healthScore.status} />
+                <HealthRing score={healthScore.overallScore} status={healthScore.status} perf={perfData} />
               </div>
+            </div>
+
+            {/* Performance metric widget — below spend graph */}
+            <div className="mt-1 border-t border-gray-100 pt-3">
+              <PerformanceWidget clientId={clientId} onNeedle={setPerfData} />
             </div>
           </div>
         </div>
