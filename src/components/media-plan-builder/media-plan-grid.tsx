@@ -127,9 +127,12 @@ const getChannelColorClasses = (channelName: string): { bg: string; text: string
   const channel = MEDIA_CHANNELS.find(
     (c) => c.name.toLowerCase() === channelName.toLowerCase()
   );
-  return channel
-    ? { bg: channel.color, text: channel.textColor }
-    : { bg: "bg-white", text: "text-gray-900" };
+  if (channel) return { bg: channel.color, text: channel.textColor };
+  // OOH sub-types (e.g. "OOH - BUS BACKS") inherit OOH colours
+  if (channelName.toLowerCase().startsWith("ooh")) {
+    return { bg: "bg-orange-50", text: "text-orange-900" };
+  }
+  return { bg: "bg-white", text: "text-gray-900" };
 };
 
 // Get channel solid color for budget boxes (Excel-style filled cells)
@@ -153,7 +156,8 @@ const getChannelBudgetColor = (channelName: string): string => {
     "svod": "bg-purple-600",
     "bvod": "bg-fuchsia-600",
   };
-  return channelMap[channelName.toLowerCase()] || "bg-gray-500";
+  const lower = channelName.toLowerCase();
+  return channelMap[lower] ?? (lower.startsWith('ooh') ? 'bg-orange-500' : 'bg-gray-500');
 };
 
 // Get diagonal stripe style for organic social cells
@@ -205,10 +209,23 @@ const CHANNEL_HEX_COLORS: Record<string, string> = {
 };
 
 function getFlightHexColor(channelName: string): string {
-  return CHANNEL_HEX_COLORS[channelName.toLowerCase()] ?? '#6B7280';
+  const lower = channelName.toLowerCase();
+  return CHANNEL_HEX_COLORS[lower] ?? (lower.startsWith('ooh') ? '#F97316' : '#6B7280');
 }
 
+// Round to nearest Monday — for start dates.
+// Fri/Sat/Sun snap FORWARD to next Monday (closer than going back).
+// Mon/Tue/Wed/Thu snap back to the previous/current Monday.
 function toNearestMonday(dateStr: string): Date {
+  const d = new Date(dateStr + 'T00:00:00');
+  const day = d.getDay(); // 0=Sun 1=Mon 2=Tue 3=Wed 4=Thu 5=Fri 6=Sat
+  const diffs = [1, 0, -1, -2, -3, 3, 2];
+  d.setDate(d.getDate() + diffs[day]);
+  return d;
+}
+
+// Always returns the Monday of the week CONTAINING the given date — for end dates.
+function toContainingWeekMonday(dateStr: string): Date {
   const d = new Date(dateStr + 'T00:00:00');
   const day = d.getDay();
   const diff = day === 0 ? -6 : 1 - day;
@@ -216,15 +233,33 @@ function toNearestMonday(dateStr: string): Date {
   return d;
 }
 
+function firstMondayOfYear(year: number): string {
+  const d = new Date(year, 0, 1);
+  const day = d.getDay();
+  const toAdd = day === 0 ? 1 : day === 1 ? 0 : 8 - day;
+  d.setDate(1 + toAdd);
+  return `${year}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function lastMondayOfYear(year: number): string {
+  const d = new Date(year, 11, 31);
+  const day = d.getDay();
+  const toSub = day === 0 ? 6 : day - 1;
+  d.setDate(31 - toSub);
+  return `${year}-12-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function parsedToMediaPlanChannels(parsed: ParsedChannel[]): MediaPlanChannel[] {
   const total = parsed.reduce((s, c) => s + (c.totalBudget || 0), 0);
   const currentYear = new Date().getFullYear();
+  const yearStart = firstMondayOfYear(currentYear);
+  const yearEnd   = lastMondayOfYear(currentYear);
 
-  // Replace the year in a YYYY-MM-DD date string with currentYear
+  // Replace the year in a date string with currentYear; handles both YYYY-MM-DD and YYYY-M-D
   const fixYear = (dateStr: string, fallback: string): string => {
     if (!dateStr) return fallback;
-    const m = dateStr.match(/^(\d{4})(-\d{2}-\d{2})$/);
-    if (m) return `${currentYear}${m[2]}`;
+    const m = dateStr.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (m) return `${currentYear}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
     return fallback;
   };
 
@@ -235,15 +270,14 @@ function parsedToMediaPlanChannels(parsed: ParsedChannel[]): MediaPlanChannel[] 
 
     // Always ensure at least one flight
     if (rawFlights.length === 0) {
-      rawFlights = [{ startDate: `${currentYear}-01-06`, endDate: `${currentYear}-12-28`, monthlySpend: {} }];
+      rawFlights = [{ startDate: yearStart, endDate: yearEnd, monthlySpend: {} }];
     }
 
-    const normalisedFlights = rawFlights.map(f => {
-      // Force dates to currentYear — AI often returns 2025 or placeholder "YYYY"
-      const startDate = fixYear(f.startDate, `${currentYear}-01-06`);
-      const endDate   = fixYear(f.endDate,   `${currentYear}-12-28`);
+    // Phase 1: Fix dates and remap spend keys per flight
+    const dateFixedFlights = rawFlights.map(f => {
+      const startDate = fixYear(f.startDate, yearStart);
+      const endDate   = fixYear(f.endDate,   yearEnd);
 
-      // Remap monthlySpend keys to currentYear too
       const remappedSpend: Record<string, number> = {};
       for (const [k, v] of Object.entries(f.monthlySpend || {})) {
         const parts = k.split('-');
@@ -252,55 +286,79 @@ function parsedToMediaPlanChannels(parsed: ParsedChannel[]): MediaPlanChannel[] 
         }
       }
 
-      // Strip months outside the flight's startDate–endDate range so AI
-      // parse errors don't bleed spend into months with no planned activity.
-      const flightStartNum = (() => { const d = new Date(startDate + 'T00:00:00'); return d.getFullYear() * 12 + d.getMonth(); })();
-      const flightEndNum   = (() => { const d = new Date(endDate   + 'T00:00:00'); return d.getFullYear() * 12 + d.getMonth(); })();
+      // Strip months outside the week-snapped flight range so spend never bleeds
+      // into months the flight won't visually reach (e.g. endDate Dec 3 → endWeek Dec 6
+      // → no Dec week is highlighted, so strip December spend).
+      const snapStart = toNearestMonday(startDate);
+      const snapEndMonday = toContainingWeekMonday(endDate);
+      const snapEnd = new Date(snapEndMonday);
+      snapEnd.setDate(snapEnd.getDate() + 6); // Sunday of end week
+      const flightStartNum = snapStart.getFullYear() * 12 + snapStart.getMonth();
+      const flightEndNum   = snapEnd.getFullYear() * 12 + snapEnd.getMonth();
       for (const k of Object.keys(remappedSpend)) {
         const [ky, km] = k.split('-').map(Number);
         const keyNum = ky * 12 + (km - 1);
         if (keyNum < flightStartNum || keyNum > flightEndNum) delete remappedSpend[k];
       }
 
-      const spendSum = Object.values(remappedSpend).reduce((s, v) => s + v, 0);
-      let normalisedSpend = remappedSpend;
-
-      if (spendSum > 0 && Math.abs(spendSum - targetBudget) > 1) {
-        const scale = targetBudget / spendSum;
-        normalisedSpend = Object.fromEntries(
-          Object.entries(remappedSpend).map(([k, v]) => [k, Math.round(v * scale)])
-        );
-        const keys = Object.keys(normalisedSpend);
-        if (keys.length > 0) {
-          const normSum = Object.values(normalisedSpend).reduce((s, v) => s + v, 0);
-          normalisedSpend[keys[keys.length - 1]] += targetBudget - normSum;
-        }
-      } else if (spendSum === 0 && targetBudget > 0) {
-        // Distribute evenly across months in the flight range
-        const start = new Date(startDate + 'T00:00:00');
-        const end   = new Date(endDate   + 'T00:00:00');
-        const months: string[] = [];
-        const cur = new Date(start.getFullYear(), start.getMonth(), 1);
-        while (cur <= end) {
-          months.push(`${cur.getFullYear()}-${cur.getMonth() + 1}`);
-          cur.setMonth(cur.getMonth() + 1);
-        }
-        if (months.length > 0) {
-          const perMonth = Math.round(targetBudget / months.length);
-          months.forEach((m, i) => {
-            normalisedSpend[m] = i === months.length - 1
-              ? targetBudget - perMonth * (months.length - 1)
-              : perMonth;
-          });
-        }
-      }
-
-      return { startDate, endDate, monthlySpend: normalisedSpend };
+      return { startDate, endDate, monthlySpend: remappedSpend };
     });
 
+    // Phase 2: Normalise budget across ALL flights together
+    const grandTotal = dateFixedFlights.reduce(
+      (sum, f) => sum + Object.values(f.monthlySpend).reduce((s, v) => s + v, 0), 0
+    );
+    // If AI returned totalBudget=0 but flights have spend, use the flight grand total
+    const effectiveBudget = targetBudget > 0 ? targetBudget : grandTotal;
+
+    let normalisedFlights: typeof dateFixedFlights;
+
+    if (grandTotal > 0 && Math.abs(grandTotal - effectiveBudget) > 1) {
+      // Scale all flights proportionally so combined total matches effectiveBudget
+      const scale = effectiveBudget / grandTotal;
+      let scaledRunning = 0;
+      normalisedFlights = dateFixedFlights.map((f, fi) => {
+        const isLastFlight = fi === dateFixedFlights.length - 1;
+        const entries = Object.entries(f.monthlySpend);
+        const scaledSpend: Record<string, number> = {};
+        entries.forEach(([k, v], ki) => {
+          if (isLastFlight && ki === entries.length - 1) {
+            scaledSpend[k] = effectiveBudget - scaledRunning;
+          } else {
+            const scaled = Math.round(v * scale);
+            scaledSpend[k] = scaled;
+            scaledRunning += scaled;
+          }
+        });
+        return { ...f, monthlySpend: scaledSpend };
+      });
+    } else if (grandTotal === 0 && effectiveBudget > 0) {
+      // Distribute budget evenly across all months in all flights
+      const allFlightMonths: Array<{ fi: number; month: string }> = [];
+      dateFixedFlights.forEach((f, fi) => {
+        const start = new Date(f.startDate + 'T00:00:00');
+        const end   = new Date(f.endDate   + 'T00:00:00');
+        const cur = new Date(start.getFullYear(), start.getMonth(), 1);
+        while (cur <= end) {
+          allFlightMonths.push({ fi, month: `${cur.getFullYear()}-${cur.getMonth() + 1}` });
+          cur.setMonth(cur.getMonth() + 1);
+        }
+      });
+      const n = allFlightMonths.length;
+      const perMonth = n > 0 ? Math.round(effectiveBudget / n) : 0;
+      const spendByFlight: Record<number, Record<string, number>> = {};
+      allFlightMonths.forEach(({ fi, month }, i) => {
+        if (!spendByFlight[fi]) spendByFlight[fi] = {};
+        spendByFlight[fi][month] = i === n - 1 ? effectiveBudget - perMonth * (n - 1) : perMonth;
+      });
+      normalisedFlights = dateFixedFlights.map((f, fi) => ({ ...f, monthlySpend: spendByFlight[fi] || {} }));
+    } else {
+      normalisedFlights = dateFixedFlights;
+    }
+
     const flights: MediaFlight[] = normalisedFlights.map(f => {
-      let startWeek = toNearestMonday(f.startDate);
-      let endMonday = toNearestMonday(f.endDate);
+      let startWeek = toNearestMonday(f.startDate);        // snap to nearest Mon (fwd-biased)
+      let endMonday = toContainingWeekMonday(f.endDate);   // snap to Monday of containing week
 
       if (isNaN(startWeek.getTime())) startWeek = new Date(currentYear, 0, 5);
       if (isNaN(endMonday.getTime())) endMonday = new Date(currentYear, 11, 28);
@@ -322,8 +380,8 @@ function parsedToMediaPlanChannels(parsed: ParsedChannel[]): MediaPlanChannel[] 
       channelName: ch.channelName,
       customChannelName: ch.customChannelName || '',
       format: ch.format || '',
-      totalBudget: targetBudget,
-      percentOfInvestment: total > 0 ? Math.round((targetBudget / total) * 100) : (ch.percentOfInvestment || 0),
+      totalBudget: effectiveBudget,
+      percentOfInvestment: total > 0 ? Math.round((effectiveBudget / total) * 100) : (ch.percentOfInvestment || 0),
       flights,
       channelCategory: getChannelCategory(ch.channelName),
     };
@@ -352,17 +410,9 @@ function generateWeeklyDateRanges(startDate: Date, endDate: Date): WeekRange[] {
     const weekEnd = new Date(currentWeekStart);
     weekEnd.setDate(weekEnd.getDate() + 6); // Sunday (6 days after Monday)
     
-    // Get month name for the week — assign to majority month (4+ days)
-    const dayCounts = new Map<string, number>();
-    const tempDay = new Date(currentWeekStart);
-    for (let d = 0; d < 7; d++) {
-      const m = tempDay.toLocaleDateString("en-US", { month: "long", year: "numeric" });
-      dayCounts.set(m, (dayCounts.get(m) || 0) + 1);
-      tempDay.setDate(tempDay.getDate() + 1);
-    }
-    let monthName = currentWeekStart.toLocaleDateString("en-US", { month: "long", year: "numeric" });
-    let maxDays = 0;
-    dayCounts.forEach((count, m) => { if (count > maxDays) { maxDays = count; monthName = m; } });
+    // Assign week to the month of its Monday (weekStart) so that display groups
+    // stay aligned with the getMonthKey() lookup used in spend calculations.
+    const monthName = currentWeekStart.toLocaleDateString("en-US", { month: "long", year: "numeric" });
     
     weeks.push({
       weekStart: new Date(currentWeekStart),
@@ -1228,6 +1278,7 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
       try {
         const res = await fetch('/api/media-plan/parse-screenshot', {
           method: 'POST',
+          credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ image: base64, mimeType: file.type }),
         });
@@ -1345,14 +1396,14 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
         </div>
       </div>
       {channels.length === 0 ? (
-        <div className="flex w-full" style={{ minHeight: 340 }}>
+        <div className="flex w-full overflow-hidden rounded-xl" style={{ minHeight: 340 }}>
           <button
             onClick={() => screenshotInputRef.current?.click()}
             disabled={isParsingScreenshot}
-            className="flex-1 flex flex-col items-center justify-center gap-4 border-r border-gray-200 bg-gray-900 hover:bg-gray-800 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-            style={{ minHeight: 340 }}
+            className="flex-1 flex flex-col items-center justify-center gap-4 border-r border-blue-500 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed rounded-l-xl"
+            style={{ minHeight: 340, background: 'linear-gradient(135deg, #1e3a8a 0%, #1d4ed8 100%)' }}
           >
-            <div className="w-14 h-14 rounded-full bg-white/15 flex items-center justify-center">
+            <div className="w-14 h-14 rounded-full bg-white/20 flex items-center justify-center">
               {isParsingScreenshot ? (
                 <Loader2 className="w-7 h-7 text-white animate-spin" />
               ) : (
@@ -1361,14 +1412,14 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
             </div>
             <div className="text-center">
               <div className="text-lg font-semibold text-white">
-                {isParsingScreenshot ? 'Analysing…' : 'Upload Media Plan Screenshot with AI'}
+                {isParsingScreenshot ? 'Analysing…' : 'Upload Media Plan Screenshot'}
               </div>
-              <div className="text-sm text-gray-400 mt-1">Let AI extract your channels and budgets automatically</div>
+              <div className="text-sm text-white/70 mt-1">AI will extract your channels and budgets automatically</div>
             </div>
           </button>
           <button
             onClick={handleAddChannel}
-            className="flex-1 flex flex-col items-center justify-center gap-4 bg-white hover:bg-gray-50 transition-colors cursor-pointer"
+            className="flex-1 flex flex-col items-center justify-center gap-4 bg-white hover:bg-gray-50 transition-colors cursor-pointer rounded-r-xl"
             style={{ minHeight: 340 }}
           >
             <div className="w-14 h-14 rounded-full bg-gray-100 flex items-center justify-center">
@@ -1774,9 +1825,6 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                                   Booking Confirmed
                                 </Label>
                               </div>
-                              <p className="text-xs text-gray-500 italic mt-1">
-                                OOH spend is entered as a total and is not tracked live
-                              </p>
                             </div>
                           );
                         }
@@ -1812,9 +1860,6 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                                   Booking Confirmed
                                 </Label>
                               </div>
-                              <p className="text-xs text-gray-500 italic mt-1">
-                                Radio spend is entered as a total and is not tracked live
-                              </p>
                             </div>
                           );
                         }
@@ -1918,7 +1963,9 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                       {(() => {
                         const category = channel.channelCategory || getChannelCategory(channel.channelName);
                         if (category === 'ooh') {
-                          return <div className="w-full px-2 py-1 text-center">{formatCurrency(channel.totalUpfrontSpend || 0)}</div>;
+                          const flightTotal = calculateTotalBudgetFromFlights(channel.flights || []);
+                          const oohDisplay = flightTotal > 0 ? flightTotal : (channel.totalUpfrontSpend || 0);
+                          return <div className="w-full px-2 py-1 text-center">{formatCurrency(oohDisplay)}</div>;
                         }
                         if (category === 'organic_social') {
                           return <div className="w-full px-2 py-1 text-center">{`${channel.postsPerWeek || 0} posts/week`}</div>;
@@ -2157,7 +2204,7 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                             data-week-index={weekIdx}
                             data-channel-id={channel.id}
                             colSpan={isInActiveSelection && isFirstSelectedCell ? selectionSpan : maxSpan}
-                            className={`border-l-2 border-l-gray-400 border border-gray-300 px-0 py-0 relative h-12 z-0 overflow-hidden ${
+                            className={`border-l-2 border-l-gray-400 border border-gray-300 px-0 py-0 relative h-12 z-0 overflow-visible ${
                               isOrganicWeek
                                 ? 'cursor-default'
                                 : isCellSelected || isInActiveSelection
@@ -2350,34 +2397,55 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                                       </div>
                                     )}
 
-                                    {/* Resize handles — shown when this flight is in "Change Dates" mode */}
-                                    {resizingFlight?.flightId === flight.id && resizingFlight?.channelId === channel.id && (() => {
+                                    {/* Resize handles — white pill centred on each edge, protrudes both sides */}
+                                    {isFirstWeek && (() => {
                                       const curRange = flightRanges.find(r => r.flight.id === flight.id);
                                       const origStartIdx = curRange?.startIdx ?? 0;
                                       const origEndIdx = curRange?.endIdx ?? 0;
+                                      const pillStyle: React.CSSProperties = {
+                                        position: 'absolute',
+                                        top: '20%',
+                                        bottom: '20%',
+                                        width: 14,
+                                        minHeight: 20,
+                                        cursor: 'ew-resize',
+                                        background: 'white',
+                                        borderRadius: 9999,
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        zIndex: 400,
+                                        boxShadow: '0 0 0 1.5px rgba(0,0,0,0.12), 0 2px 5px rgba(0,0,0,0.25)',
+                                      };
                                       return (
                                         <>
-                                          {/* Left (start) handle */}
+                                          {/* Left (start) pill handle */}
                                           <div
                                             onMouseDown={e => {
                                               e.stopPropagation();
                                               isEdgeDraggingRef.current = true;
                                               setEdgeDragState({ channelId: channel.id, flightId: flight.id, edge: 'start', currentIdx: origStartIdx, origStartIdx, origEndIdx });
                                             }}
-                                            style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 10, cursor: 'ew-resize', background: 'rgba(255,255,255,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 300 }}
+                                            className="opacity-70 group-hover:opacity-100 transition-opacity"
+                                            style={{ ...pillStyle, left: -7 }}
                                           >
-                                            <span style={{ fontSize: 8, color: 'rgba(255,255,255,0.9)', lineHeight: 1, userSelect: 'none' }}>⠿</span>
+                                            <svg width="9" height="7" viewBox="0 0 9 7" fill="none" style={{ pointerEvents: 'none', flexShrink: 0 }}>
+                                              <path d="M1 3.5H8M1 3.5L3 1.5M1 3.5L3 5.5M8 3.5L6 1.5M8 3.5L6 5.5" stroke="#444" strokeWidth="1.1" strokeLinecap="round" strokeLinejoin="round"/>
+                                            </svg>
                                           </div>
-                                          {/* Right (end) handle */}
+                                          {/* Right (end) pill handle */}
                                           <div
                                             onMouseDown={e => {
                                               e.stopPropagation();
                                               isEdgeDraggingRef.current = true;
                                               setEdgeDragState({ channelId: channel.id, flightId: flight.id, edge: 'end', currentIdx: origEndIdx, origStartIdx, origEndIdx });
                                             }}
-                                            style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 10, cursor: 'ew-resize', background: 'rgba(255,255,255,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 300 }}
+                                            className="opacity-70 group-hover:opacity-100 transition-opacity"
+                                            style={{ ...pillStyle, right: -7 }}
                                           >
-                                            <span style={{ fontSize: 8, color: 'rgba(255,255,255,0.9)', lineHeight: 1, userSelect: 'none' }}>⠿</span>
+                                            <svg width="9" height="7" viewBox="0 0 9 7" fill="none" style={{ pointerEvents: 'none', flexShrink: 0 }}>
+                                              <path d="M1 3.5H8M1 3.5L3 1.5M1 3.5L3 5.5M8 3.5L6 1.5M8 3.5L6 5.5" stroke="#444" strokeWidth="1.1" strokeLinecap="round" strokeLinejoin="round"/>
+                                            </svg>
                                           </div>
                                         </>
                                       );
@@ -2415,7 +2483,7 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                             data-week-index={weekIdx}
                             data-channel-id={channel.id}
                             colSpan={shouldShowInput ? selectionSpan : 1}
-                            className={`border-l-2 border-l-gray-400 border border-gray-300 px-0 py-0 relative h-12 z-0 overflow-hidden ${
+                            className={`border-l-2 border-l-gray-400 border border-gray-300 px-0 py-0 relative h-12 z-0 overflow-visible ${
                               isOrganicWeek
                                 ? 'cursor-default'
                                 : isCellSelected || isInActiveSelection
