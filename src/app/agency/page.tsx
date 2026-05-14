@@ -725,6 +725,7 @@ export default function AgencyDashboard() {
             </div>
             <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
               <KanbanBoard
+                key={kanbanView}
                 ref={kanbanRef}
                 actionPointClients={filteredActionPointClients}
                 amFilter={amFilter}

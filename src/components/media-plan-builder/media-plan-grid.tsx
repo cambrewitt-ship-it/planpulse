@@ -481,6 +481,9 @@ export function MediaPlanGrid({ channels: externalChannels, onChannelsChange, co
   const [openChannelMenu, setOpenChannelMenu] = useState<string | null>(null);
   const [channelMenuPos, setChannelMenuPos] = useState<{ top: number; left: number } | null>(null);
 
+  // Hovered flight — elevated to top z-index so resize handles and menus intercept correctly
+  const [hoveredFlightId, setHoveredFlightId] = useState<string | null>(null);
+
   // Flight resize ("Change Dates") state
   const [resizingFlight, setResizingFlight] = useState<{ channelId: string; flightId: string } | null>(null);
   const [edgeDragState, setEdgeDragState] = useState<{
@@ -488,6 +491,11 @@ export function MediaPlanGrid({ channels: externalChannels, onChannelsChange, co
     currentIdx: number; origStartIdx: number; origEndIdx: number;
   } | null>(null);
   const isEdgeDraggingRef = useRef(false);
+  // Refs for edge drag — avoid re-registering handlers on every mousemove
+  const edgeDragStateRef = useRef(edgeDragState);
+  const edgeDragRafRef = useRef<number | null>(null);
+  const lastEdgeDragWeekIdxRef = useRef<number>(-1);
+  edgeDragStateRef.current = edgeDragState;
 
   // Inline spend editing
   const [editingSpendFlight, setEditingSpendFlight] = useState<{
@@ -524,6 +532,11 @@ export function MediaPlanGrid({ channels: externalChannels, onChannelsChange, co
   } | null>(null);
   
   const isDraggingRef = useRef(false);
+  // Refs for new-flight drag — avoid re-registering handlers on every mousemove
+  const dragStateRef = useRef(dragState);
+  const dragRafRef = useRef<number | null>(null);
+  const lastDragWeekIdxRef = useRef<number>(-1);
+  dragStateRef.current = dragState;
   const budgetInputRef = useRef<HTMLInputElement>(null);
   const hasFocusedInputRef = useRef(false);
 
@@ -747,7 +760,7 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
     }
     
     // Don't start drag if clicking on resize handles
-    if (target.classList.contains('cursor-ew-resize')) {
+    if (target.closest('[data-resize-handle]')) {
       return;
     }
     
@@ -773,72 +786,71 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
 
   // Handle mouse move
   useEffect(() => {
+    if (!dragState.isDragging) return;
+
     const handleMouseMove = (e: MouseEvent) => {
-      if (!isDraggingRef.current || dragState.startWeekIdx === null) return;
-      
-      // Find which week cell we're over
-      const target = document.elementFromPoint(e.clientX, e.clientY);
-      const weekCell = target?.closest('[data-week-cell]');
-      if (weekCell) {
+      if (!isDraggingRef.current) return;
+      if (dragRafRef.current !== null) return; // already scheduled for this frame
+      dragRafRef.current = requestAnimationFrame(() => {
+        dragRafRef.current = null;
+        const ds = dragStateRef.current;
+        if (!ds.isDragging || ds.startWeekIdx === null) return;
+        const target = document.elementFromPoint(e.clientX, e.clientY);
+        const weekCell = target?.closest('[data-week-cell]');
+        if (!weekCell) return;
         const weekIdx = parseInt(weekCell.getAttribute('data-week-index') || '-1');
         const channelId = weekCell.getAttribute('data-channel-id');
-        
-        if (weekIdx >= 0 && channelId === dragState.channelId) {
-          setDragState((prev) => ({
-            ...prev,
-            currentWeekIdx: weekIdx,
-          }));
-        }
-      }
+        if (weekIdx < 0 || channelId !== ds.channelId) return;
+        if (weekIdx === lastDragWeekIdxRef.current) return; // no change
+        lastDragWeekIdxRef.current = weekIdx;
+        setDragState((prev) => ({ ...prev, currentWeekIdx: weekIdx }));
+      });
     };
 
     const handleMouseUp = () => {
-      if (isDraggingRef.current && dragState.startWeekIdx !== null && dragState.currentWeekIdx !== null) {
-        const startIdx = Math.min(dragState.startWeekIdx, dragState.currentWeekIdx);
-        const endIdx = Math.max(dragState.startWeekIdx, dragState.currentWeekIdx);
-        
-        const channel = channels.find(c => c.id === dragState.channelId);
+      if (dragRafRef.current !== null) {
+        cancelAnimationFrame(dragRafRef.current);
+        dragRafRef.current = null;
+      }
+      const ds = dragStateRef.current;
+      if (isDraggingRef.current && ds.startWeekIdx !== null && ds.currentWeekIdx !== null) {
+        const startIdx = Math.min(ds.startWeekIdx, ds.currentWeekIdx);
+        const endIdx = Math.max(ds.startWeekIdx, ds.currentWeekIdx);
+
+        const channel = channels.find(c => c.id === ds.channelId);
         if (channel) {
           // Check if selected range overlaps with any existing flights
           const selectedWeeks = weeks.slice(startIdx, endIdx + 1);
           const overlappingFlights = channel.flights.filter(flight => {
-            // Check if flight overlaps with selected range
-            const flightStart = flight.startWeek instanceof Date 
-              ? flight.startWeek 
+            const flightStart = flight.startWeek instanceof Date
+              ? flight.startWeek
               : new Date(flight.startWeek);
-            const flightEnd = flight.endWeek instanceof Date 
-              ? flight.endWeek 
+            const flightEnd = flight.endWeek instanceof Date
+              ? flight.endWeek
               : new Date(flight.endWeek);
             const selectionStart = selectedWeeks[0].weekStart;
             const selectionEnd = selectedWeeks[selectedWeeks.length - 1].weekEnd;
-            
-            // Normalize dates for comparison
             const normalizeDate = (date: Date) => {
               const normalized = new Date(date);
               normalized.setHours(0, 0, 0, 0);
               return normalized;
             };
-            
-            // Flight overlaps if it starts before selection ends and ends after selection starts
-            return normalizeDate(flightStart) <= normalizeDate(selectionEnd) && 
+            return normalizeDate(flightStart) <= normalizeDate(selectionEnd) &&
                    normalizeDate(flightEnd) >= normalizeDate(selectionStart);
           });
-          
+
           if (overlappingFlights.length > 0 && startIdx !== endIdx) {
-            // Delete overlapping flights only when the drag spans multiple cells
             const flightIdsToDelete = overlappingFlights.map(f => f.id);
             const updatedFlights = channel.flights.filter(f => !flightIdsToDelete.includes(f.id));
             const newTotalBudget = calculateTotalBudgetFromFlights(updatedFlights);
-
-            handleUpdateChannel(dragState.channelId!, {
+            handleUpdateChannel(ds.channelId!, {
               flights: updatedFlights,
               totalBudget: newTotalBudget,
             });
           } else if (overlappingFlights.length === 0) {
-            // No existing flights, show budget input (pre-fill from pending budget if set)
-            const pending = pendingBudgets[dragState.channelId!];
+            const pending = pendingBudgets[ds.channelId!];
             setActiveSelection({
-              channelId: dragState.channelId!,
+              channelId: ds.channelId!,
               startWeekIdx: startIdx,
               endWeekIdx: endIdx,
               budget: pending ? String(pending) : "",
@@ -846,8 +858,9 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
           }
         }
       }
-      
+
       isDraggingRef.current = false;
+      lastDragWeekIdxRef.current = -1;
       setDragState({
         channelId: null,
         startWeekIdx: null,
@@ -856,33 +869,44 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
       });
     };
 
-    if (dragState.isDragging) {
-      document.addEventListener('mousemove', handleMouseMove);
-      document.addEventListener('mouseup', handleMouseUp);
-      
-      return () => {
-        document.removeEventListener('mousemove', handleMouseMove);
-        document.removeEventListener('mouseup', handleMouseUp);
-      };
-    }
-  }, [dragState, channels, weeks]);
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dragState.isDragging, dragState.channelId]);
 
   // Edge drag (resize flight) mouse events
   useEffect(() => {
-    if (!edgeDragState) return;
+    if (!edgeDragState) {
+      lastEdgeDragWeekIdxRef.current = -1;
+      return;
+    }
+
     const handleMouseMove = (e: MouseEvent) => {
-      const target = document.elementFromPoint(e.clientX, e.clientY);
-      const weekCell = target?.closest('[data-week-cell]');
-      if (weekCell) {
+      if (edgeDragRafRef.current !== null) return; // already scheduled for this frame
+      edgeDragRafRef.current = requestAnimationFrame(() => {
+        edgeDragRafRef.current = null;
+        const target = document.elementFromPoint(e.clientX, e.clientY);
+        const weekCell = target?.closest('[data-week-cell]');
+        if (!weekCell) return;
         const weekIdx = parseInt(weekCell.getAttribute('data-week-index') || '-1');
-        if (weekIdx >= 0) {
-          setEdgeDragState(prev => prev ? { ...prev, currentIdx: weekIdx } : prev);
-        }
-      }
+        if (weekIdx < 0 || weekIdx === lastEdgeDragWeekIdxRef.current) return;
+        lastEdgeDragWeekIdxRef.current = weekIdx;
+        setEdgeDragState(prev => prev ? { ...prev, currentIdx: weekIdx } : prev);
+      });
     };
+
     const handleMouseUp = () => {
-      if (edgeDragState) {
-        const { channelId, flightId, edge, currentIdx, origStartIdx, origEndIdx } = edgeDragState;
+      if (edgeDragRafRef.current !== null) {
+        cancelAnimationFrame(edgeDragRafRef.current);
+        edgeDragRafRef.current = null;
+      }
+      const state = edgeDragStateRef.current;
+      if (state) {
+        const { channelId, flightId, edge, currentIdx, origStartIdx, origEndIdx } = state;
         const newStartIdx = edge === 'start' ? Math.min(currentIdx, origEndIdx) : origStartIdx;
         const newEndIdx = edge === 'end' ? Math.max(currentIdx, origStartIdx) : origEndIdx;
         handleResizeFlight(channelId, flightId, newStartIdx, newEndIdx);
@@ -890,14 +914,17 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
       setEdgeDragState(null);
       setResizingFlight(null);
       isEdgeDraggingRef.current = false;
+      lastEdgeDragWeekIdxRef.current = -1;
     };
+
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
     return () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [edgeDragState]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [edgeDragState !== null, edgeDragState?.flightId]);
 
   // Handle flight block click — activate spend editing for that flight
   const handleFlightBlockClick = (channelId: string, flight: MediaFlight, e: React.MouseEvent) => {
@@ -2317,14 +2344,16 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                                   <div
                                     key={`flight-${flight.id}-${weekIdx}`}
                                     data-flight-block
-                                    className={`absolute top-0 bottom-0 z-50 flex items-center justify-center text-white text-xs font-semibold cursor-pointer hover:opacity-90 transition-opacity group ${blockBgColor ? '' : channelBudgetColor}`}
+                                    className={`absolute top-0 bottom-0 flex items-center justify-center text-white text-xs font-semibold cursor-pointer hover:opacity-90 transition-opacity group ${blockBgColor ? '' : channelBudgetColor}`}
                                     style={{
                                       left: `${leftOffset}px`,
                                       width: `${blockWidth}px`,
-                                      zIndex: 10 + flightLayerIdx,
+                                      zIndex: hoveredFlightId === flight.id ? 500 : (10 + flightLayerIdx),
                                       fontFamily: 'var(--font-inter)',
                                       ...(blockBgColor ? { backgroundColor: blockBgColor } : {}),
                                     }}
+                                    onMouseEnter={() => setHoveredFlightId(flight.id)}
+                                    onMouseLeave={() => setHoveredFlightId(null)}
                                     onMouseDown={(e) => e.stopPropagation()}
                                     onClick={(e) => handleFlightBlockClick(channel.id, flight, e)}
                                     onDoubleClick={(e) => {
@@ -2353,11 +2382,13 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                                           onChange={e => setEditingSpendFlight(prev => prev ? { ...prev, value: e.target.value } : null)}
                                           onBlur={handleSaveEditedSpend}
                                           onKeyDown={e => { if (e.key === 'Enter') handleSaveEditedSpend(); if (e.key === 'Escape') setEditingSpendFlight(null); }}
+                                          onMouseDown={e => e.stopPropagation()}
                                           onClick={e => e.stopPropagation()}
-                                          style={{ width: Math.max(blockWidth - 24, 44), fontSize: 10, fontWeight: 600, color: 'white', background: 'transparent', border: '1px solid rgba(255,255,255,0.6)', borderRadius: 2, padding: '1px 3px', textAlign: 'center', outline: 'none' }}
+                                          style={{ width: Math.min(Math.max(blockWidth - 64, 36), 120), fontSize: 10, fontWeight: 600, color: 'white', background: 'transparent', border: '1px solid rgba(255,255,255,0.6)', borderRadius: 2, padding: '1px 3px', textAlign: 'center', outline: 'none' }}
                                         />
                                       ) : (
                                         <span
+                                          onMouseDown={e => e.stopPropagation()}
                                           onClick={(e) => { e.stopPropagation(); setEditingSpendFlight({ channelId: channel.id, flightId: flight.id, value: String(totalSpend) }); }}
                                           style={{ cursor: 'text' }}
                                           title="Click to edit"
@@ -2371,6 +2402,7 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                                     {isFirstWeek && (
                                       <div
                                         style={{ position: 'absolute', top: 1, right: 1, zIndex: 200 }}
+                                        onMouseDown={e => e.stopPropagation()}
                                         onClick={e => e.stopPropagation()}
                                       >
                                         <button
@@ -2421,11 +2453,13 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                                         <>
                                           {/* Left (start) pill handle */}
                                           <div
+                                            data-resize-handle
                                             onMouseDown={e => {
                                               e.stopPropagation();
                                               isEdgeDraggingRef.current = true;
                                               setEdgeDragState({ channelId: channel.id, flightId: flight.id, edge: 'start', currentIdx: origStartIdx, origStartIdx, origEndIdx });
                                             }}
+                                            onClick={e => e.stopPropagation()}
                                             className="opacity-70 group-hover:opacity-100 transition-opacity"
                                             style={{ ...pillStyle, left: -7 }}
                                           >
@@ -2435,11 +2469,13 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                                           </div>
                                           {/* Right (end) pill handle */}
                                           <div
+                                            data-resize-handle
                                             onMouseDown={e => {
                                               e.stopPropagation();
                                               isEdgeDraggingRef.current = true;
                                               setEdgeDragState({ channelId: channel.id, flightId: flight.id, edge: 'end', currentIdx: origEndIdx, origStartIdx, origEndIdx });
                                             }}
+                                            onClick={e => e.stopPropagation()}
                                             className="opacity-70 group-hover:opacity-100 transition-opacity"
                                             style={{ ...pillStyle, right: -7 }}
                                           >

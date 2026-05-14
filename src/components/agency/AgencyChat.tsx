@@ -241,6 +241,7 @@ export const AgencyChat = forwardRef<AgencyChatHandle, AgencyChatProps>(function
     try {
       const res = await fetch('/api/media-plan/parse-screenshot', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ image: image.base64, mimeType: image.mimeType }),
       });

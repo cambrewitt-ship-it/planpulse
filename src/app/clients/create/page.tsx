@@ -146,7 +146,7 @@ export default function CreateClientPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ── Step 2 ──
-  const [channels, setChannels] = useState<MediaPlanChannel[]>(() => [createEmptyChannel()]);
+  const [channels, setChannels] = useState<MediaPlanChannel[]>([]);
   const [commission, setCommission] = useState(0);
   const [savingPlan, setSavingPlan] = useState(false);
 

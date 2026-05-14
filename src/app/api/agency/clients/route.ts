@@ -245,10 +245,8 @@ export async function GET(request: NextRequest) {
         // range and stored dates differ from the request.
         const cacheHit =
           cachedSpend !== null &&
-          (
-            (cachedStart === dateRangeStart && cachedEnd === dateRangeEnd) ||
-            (cachedStart === null && cachedEnd === null)
-          );
+          cachedStart === dateRangeStart &&
+          cachedEnd === dateRangeEnd;
 
         let actualSpend: number;
         if (cacheHit) {

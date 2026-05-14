@@ -194,16 +194,17 @@ export async function GET(request: NextRequest) {
 
     /**
      * For HEALTH CHECK action points:
-     * - Determines if the completion is still valid based on completed_at + frequency.
-     * - Daily: complete for the current calendar day only.
-     * - Weekly/fortnightly/monthly: complete until 2 days before the next due date.
-     * - Returns nextDueDate: completed_at + interval (or today if never completed).
-     * - Returns isCompletedForCurrentPeriod: true if still within the valid window.
+     * - Uses the channel start date as the schedule anchor (matches Gantt/Calendar view).
+     * - Each occurrence is at channelStart + n × interval (n = 1, 2, 3 …).
+     * - A completion counts for the current period if completedAt ≥ previousOccurrence.
+     * - Once the current period is done, surfaces the next scheduled occurrence immediately.
+     * - Falls back to completion-based logic when no channel start date is available.
      */
     function getHealthCheckStatus(
       frequency: string,
       todayStr: string,
-      completedAt: string | null
+      completedAt: string | null,
+      channelStartDate: string | null
     ): { nextDueDate: string | null; isCompletedForCurrentPeriod: boolean } {
       if (frequency === 'daily') {
         const isComplete = completedAt ? completedAt.slice(0, 10) === todayStr : false;
@@ -216,18 +217,46 @@ export async function GET(request: NextRequest) {
       else if (frequency === 'monthly') intervalDays = 30;
       else return { nextDueDate: null, isCompletedForCurrentPeriod: false };
 
+      const intervalMs = intervalDays * 24 * 60 * 60 * 1000;
+      const todayMs = dateStrToMs(todayStr);
+
+      if (channelStartDate) {
+        const startMs = dateStrToMs(channelStartDate);
+        const elapsed = todayMs - startMs;
+        // n = number of complete intervals since channel start; first occurrence is n=1
+        const n = elapsed > 0 ? Math.floor(elapsed / intervalMs) : 0;
+
+        const currentOccMs = startMs + n * intervalMs;
+        const nextOccMs    = startMs + (n + 1) * intervalMs;
+        // Previous occurrence boundary — a completion on or after this counts for the current period
+        const prevOccMs    = n > 0 ? startMs + (n - 1) * intervalMs : startMs;
+
+        const completedMs = completedAt ? dateStrToMs(completedAt.slice(0, 10)) : null;
+
+        if (n === 0) {
+          // Before first occurrence — always surface it so it matches what the Timeline shows
+          const completedBeforeFirst = completedMs !== null && completedMs >= startMs;
+          return { nextDueDate: msToDateStr(nextOccMs), isCompletedForCurrentPeriod: completedBeforeFirst };
+        }
+
+        if (completedMs !== null && completedMs >= prevOccMs) {
+          // Current period is complete — surface next scheduled occurrence now (no hide window)
+          // This matches what the Gantt/Calendar shows so the two views stay in sync.
+          return { nextDueDate: msToDateStr(nextOccMs), isCompletedForCurrentPeriod: false };
+        }
+
+        // Current period NOT completed — due at the current scheduled occurrence (overdue or today)
+        return { nextDueDate: msToDateStr(currentOccMs), isCompletedForCurrentPeriod: false };
+      }
+
+      // Fallback: completion-based logic when no channel start date is available
       if (!completedAt) {
         return { nextDueDate: todayStr, isCompletedForCurrentPeriod: false };
       }
-
-      const completedMs = dateStrToMs(completedAt.slice(0, 10));
-      const intervalMs = intervalDays * 24 * 60 * 60 * 1000;
-      const nextDueMs = completedMs + intervalMs;
+      const completedMsNum = dateStrToMs(completedAt.slice(0, 10));
+      const nextDueMs = completedMsNum + intervalMs;
       const reappearMs = nextDueMs - 2 * 24 * 60 * 60 * 1000;
-      const todayMs = dateStrToMs(todayStr);
-
-      const isCompletedForCurrentPeriod = todayMs < reappearMs;
-      return { nextDueDate: msToDateStr(nextDueMs), isCompletedForCurrentPeriod };
+      return { nextDueDate: msToDateStr(nextDueMs), isCompletedForCurrentPeriod: todayMs < reappearMs };
     }
 
     // Helper function to calculate due date for SET UP action points
@@ -282,7 +311,8 @@ export async function GET(request: NextRequest) {
           const { nextDueDate, isCompletedForCurrentPeriod } = getHealthCheckStatus(
             ap.frequency,
             today,
-            completedAt
+            completedAt,
+            channelStartDate
           );
 
           if (isCompletedForCurrentPeriod) continue;

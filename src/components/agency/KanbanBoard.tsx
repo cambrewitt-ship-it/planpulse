@@ -48,6 +48,7 @@ interface KanbanCard {
   urgent: boolean;
   daysUntilDue: number | null;
   assignedTo: string | null;
+  frequency: string | null;
 }
 
 function getChannelIcon(channelType: string) {
@@ -359,6 +360,10 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
   const ganttPopupRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    setGanttPopup(null);
+  }, [view]);
+
+  useEffect(() => {
     if (!ganttPopup) return;
     function handleClick(e: MouseEvent) {
       if (ganttPopupRef.current && !ganttPopupRef.current.contains(e.target as Node)) {
@@ -437,6 +442,7 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
           urgent: daysUntilDue !== null && daysUntilDue < 0,
           daysUntilDue,
           assignedTo,
+          frequency: ap.frequency ?? null,
         });
       }
     }
@@ -911,6 +917,20 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
               const isInProgress = inProgressIds.has(card.id);
               const dotColor = card.urgent ? '#A0442A' : card.status === '1-2' ? '#A0442A' : card.status === '3-4' ? '#B07030' : '#4A6580';
               const dotX = (card.daysUntilDue! - startDay) * DAY_W;
+
+              // For health checks, generate upcoming recurring occurrence offsets (days from today)
+              const recurringOffsets: number[] = [];
+              if (card.tag === 'HEALTH CHECK' && card.frequency && card.daysUntilDue !== null) {
+                const intervalDays = card.frequency === 'weekly' ? 7 : card.frequency === 'fortnightly' ? 14 : card.frequency === 'monthly' ? 30 : 0;
+                if (intervalDays > 0) {
+                  for (let n = 1; n <= 20; n++) {
+                    const futureDays = card.daysUntilDue + n * intervalDays;
+                    if (futureDays > endDay) break;
+                    recurringOffsets.push(futureDays);
+                  }
+                }
+              }
+
               return (
                 <div key={card.id} style={{ position: 'relative', height: ROW_H, minWidth: totalW, borderBottom: '0.5px solid #F0EDE8', background: isInProgress ? '#FFFBF4' : 'transparent' }}>
                   {/* Grid columns */}
@@ -929,10 +949,22 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                       );
                     })}
                   </div>
+                  {/* Future recurring occurrence dots (health checks only) */}
+                  {recurringOffsets.map(futureDays => {
+                    const fx = (futureDays - startDay) * DAY_W;
+                    if (fx < 0 || fx > totalW) return null;
+                    return (
+                      <div key={futureDays} style={{
+                        position: 'absolute', left: fx + DAY_W / 2 - 3, top: '50%', transform: 'translateY(-50%)',
+                        width: 6, height: 6, borderRadius: '50%',
+                        background: dotColor, opacity: 0.25, zIndex: 1,
+                      }} />
+                    );
+                  })}
                   {/* Item — tick + dot + text, clickable */}
                   <div style={{
                     position: 'absolute', left: dotX, top: '50%', transform: 'translateY(-50%)',
-                    display: 'flex', alignItems: 'center', gap: 4, zIndex: 1,
+                    display: 'flex', alignItems: 'center', gap: 4, zIndex: 2,
                   }}>
                     {/* Tick to complete */}
                     <button
