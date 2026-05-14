@@ -2,118 +2,123 @@ import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { createClient } from '@/lib/supabase/server';
 
-function getFirstMondayOfYear(year: number): string {
-  const d = new Date(year, 0, 1);
-  const day = d.getDay(); // 0=Sun 1=Mon ... 6=Sat
-  const toAdd = day === 0 ? 1 : day === 1 ? 0 : 8 - day;
-  d.setDate(1 + toAdd);
-  return `${year}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+function buildVisionPrompt(): string {
+  return `You are reading a media plan spreadsheet. Work through it carefully, row by row.
+
+═══ STEP 1 — Column headers ═══
+List every weekly date header across the top of the timeline, left to right.
+Write: COLUMNS: 5/Jan, 12/Jan, 19/Jan, 26/Jan, 2/Feb, 9/Feb, 16/Feb, 23/Feb, 2/Mar ...
+Include the year if shown. These are week-commencing (W/C) Mondays.
+
+═══ STEP 2 — Each channel row ═══
+For every data row (skip header rows), output this block:
+
+ROW: [channel name] | [detail/format text] | [total budget shown, e.g. $12,000]
+FILLED: [see instructions below]
+
+━━ How to write the FILLED line ━━
+
+Scan left-to-right across EVERY column for this row.
+For each column: is the cell shaded / coloured / filled (even lightly)?
+
+• YES — include that column's W/C date.
+  If a dollar amount is written inside that cell, append it in parentheses: 16/Feb($6,000)
+  If no dollar amount, just write the date: 23/Feb
+
+• NO (white / blank) — do NOT include that date.
+  Instead, write a pipe character  |  to mark the gap between two separate groups.
+
+Collapse consecutive pipe symbols into one.
+
+Example — Radio with 3 separate bursts:
+FILLED: 9/Feb($6,000), 16/Feb, 23/Feb | 1/Jun($3,000) | 7/Sep($3,000), 14/Sep
+
+Example — Trade Me with monthly single-week blocks:
+FILLED: 1/Jun($1,000) | 6/Jul($1,000) | 3/Aug($1,000) | 7/Sep($1,000)
+
+Example — Google Ads active all year with monthly amounts:
+FILLED: 5/Jan($2,750), 12/Jan, 19/Jan, 26/Jan | 2/Feb($2,750), 9/Feb, 16/Feb, 23/Feb | ...
+
+━━ Organic rows ━━
+Rows with a full-year diagonal-stripe band and NO dollar amounts are organic social.
+Write:  FILLED: ORGANIC
+
+━━ Rows with no fill at all ━━
+Write:  FILLED: (none)
+
+Work top to bottom. Do not skip any row. Plain text only — no JSON.`;
 }
 
-function getLastMondayOfYear(year: number): string {
-  const d = new Date(year, 11, 31);
-  const day = d.getDay();
-  const toSub = day === 0 ? 6 : day - 1;
-  d.setDate(31 - toSub);
-  return `${year}-12-${String(d.getDate()).padStart(2, '0')}`;
-}
+function buildStructurePrompt(description: string, year: number): string {
+  return `Convert the media plan description below into a structured JSON object.
 
-function buildExtractionPrompt(): string {
-  const year = new Date().getFullYear();
-  const firstMonday = getFirstMondayOfYear(year);
-  const lastMonday = getLastMondayOfYear(year);
-  return `You are a media planning expert. Analyze this media plan screenshot and extract all channels, budgets, and flight dates.
+Plan year: ${year}. All dates are week-commencing (W/C) Mondays.
+Date conversion: "16/Feb" → "${year}-02-16", "2/Mar" → "${year}-03-02", "26/Jan" → "${year}-01-26"
+If a date like "29/Dec" clearly belongs to the prior year, use ${year - 1}.
 
-## Grid structure
-Weekly media plan. Each column = one week starting on a Monday (W/C date shown in column header, e.g. "16/Feb").
-Use the year visible in the column headers. If unclear, default to ${year}.
-If any column headers show "####": the first Monday of January ${year} is ${firstMonday}. Add 7 days per column to reconstruct missing dates.
+MEDIA PLAN DESCRIPTION:
+${description}
 
-## STEP A — Identify organic social channels FIRST
+━━━ HOW TO BUILD FLIGHTS FROM FILLED LINES ━━━
 
-Before doing anything else, check whether this channel is an organic social channel:
-Facebook (Organic), Instagram (Organic), LinkedIn (Organic), or TikTok used for organic posting (no spend).
+Each ROW's FILLED line contains comma-separated dates, with | separating distinct groups.
+Each | group = one flight object.
 
-If YES — organic channel:
-• The row appears as one wide uniform colored band or diagonal-striped band spanning most or all of the year.
-• Create ONE single flight spanning the full band: startDate = leftmost visible column's W/C Monday, endDate = rightmost visible column's W/C Monday.
-• If the full year is filled, use "${firstMonday}" to "${lastMonday}".
-• totalBudget = 0, monthlySpend = {} (empty — organic tracks posts, not spend).
-• TikTok organic → channelName "TikTok Ads", format "Organic posting", totalBudget 0.
-• SKIP Steps B–D below. Go directly to the next channel row.
+For each group:
+  startDate = first date in the group → convert to YYYY-MM-DD
+  endDate   = last date in the group  → convert to YYYY-MM-DD
 
-## STEP B — For NON-organic channels: use dollar amounts as flight anchors
+  The flight's budget = the dollar amount shown in parentheses somewhere in that group.
+  If no dollar amount in the group, budget = 0.
 
-Excel media plans show flight periods as SOLID COLORED RECTANGLES. A dollar amount (e.g. "$10,000") appears in the first or second column of each rectangle. Other columns in the same rectangle are the same color but have no number.
+Special cases:
+  FILLED: ORGANIC → one flight: startDate "${year}-01-06", endDate "${year}-12-29", totalBudget 0, monthlySpend {}
+  FILLED: (none)  → one flight: startDate "${year}-01-06", endDate "${year}-01-06", totalBudget 0, monthlySpend {}
 
-For each non-organic channel row:
+━━━ MONTHLY SPEND ━━━
+monthlySpend keys: "YYYY-M" (e.g. "${year}-2" for February)
+Weeks: every 7 days from startDate to endDate inclusive (startDate, startDate+7, startDate+14, ...)
+Each W/C week belongs to the calendar month its date falls in.
+Distribute flight budget proportionally: (weeks in that month) / (total weeks) × budget.
+Round to whole dollars; adjust the largest month so the sum equals the flight budget exactly.
+CRITICAL: SUM of all monthlySpend values across ALL flights = channel totalBudget exactly.
 
-1. List every dollar amount visible in the timeline. Note the W/C column it's in.
-2. For each dollar amount, extend LEFT: how many columns immediately to the left share the SAME solid fill? Those are part of this flight. STOP at any white/empty column.
-   Extend RIGHT the same way.
-3. Group dollar amounts inside the same unbroken colored rectangle into ONE flight.
-   Two dollar amounts separated by even ONE white/empty column = TWO separate flights.
-4. startDate = W/C of the leftmost column in this group. endDate = W/C of the rightmost column.
+━━━ CHANNEL NAME RULES ━━━
+channelName must be exactly one of:
+"Meta Ads", "Google Ads", "Display Ads", "Native Ads", "LinkedIn Ads", "TikTok Ads",
+"Instagram Ads", "YouTube Ads", "Snapchat Ads", "Reddit Ads",
+"Instagram (Organic)", "Facebook (Organic)", "LinkedIn (Organic)",
+"EDM / Email", "OOH", "Radio", "Linear TV", "SVOD", "BVOD", "Other"
 
-IMPORTANT: The dollar label is often in the 1st or 2nd cell of a multi-week block. The cells to the LEFT of the label (with the same solid fill but no number) are still part of the same flight.
+OOH sub-types — channelName = "OOH - [SUBTYPE]", leave customChannelName empty:
+  Bus Backs → "OOH - BUS BACKS"         Letterbox Drops → "OOH - LETTERBOX DROPS"
+  Bus Shelters → "OOH - BUS SHELTERS"   Billboards → "OOH - BILLBOARDS"
+  Digital Billboards/DOOH → "OOH - DIGITAL BILLBOARDS"
+  Transit/Transport → "OOH - TRANSIT"   Posters → "OOH - POSTERS"
+  Street Furniture → "OOH - STREET FURNITURE"
+  Any other OOH/Outdoor → "OOH - OUTDOOR"
 
-### What counts as a flight column
+No match and not OOH → channelName "Other", real name in customChannelName (e.g. "Trade Me").
+format: the detail column text.
+totalBudget: plain number, no $ or commas. Must equal sum of all flight budgets.
+percentOfInvestment: round(this channel totalBudget / sum of ALL channel totalBudgets × 100).
 
-FLIGHT COLUMN: Clearly visible solid fill — dark, medium, or bright — unmistakably distinct from the blank background.
-EMPTY COLUMN: Plain white or a very faint overall row tint. If you cannot clearly see a distinct fill, treat as EMPTY.
-WARNING: Some rows have a faint background tint across all columns. This is NOT a flight. Only cells with a NOTICEABLY STRONGER fill than surrounding blank cells are flight columns.
-
-## STEP C — Verify flight count
-
-After extracting flights for a channel:
-• Count distinct dollar amounts. Number of flights should equal that count (one per amount group).
-• If a flight spans more than 3 months with varying per-month amounts, it is likely multiple separate flights — re-examine for white gaps between them.
-• Two identical dollar amounts with a gap between them = two separate flights, not one.
-
-## STEP D — monthlySpend keys (non-organic only)
-Format: "YEAR-M" (e.g. "${year}-5" for May). Include only months within startDate–endDate.
-Single-month flight: put the full burst spend in that month's key.
-Multi-month flight: split spend proportionally by week count per calendar month.
-CRITICAL: SUM of all monthlySpend across ALL flights for a channel MUST equal totalBudget EXACTLY.
-
-## Return format
-Return ONLY a valid JSON object — no markdown, no explanation:
+━━━ OUTPUT ━━━
+Return ONLY valid JSON — no markdown, no explanation:
 {
   "channels": [
     {
-      "channelName": "Meta Ads",
+      "channelName": "...",
       "customChannelName": "",
-      "format": "Suburb targeting",
-      "totalBudget": 12000,
-      "percentOfInvestment": 11,
+      "format": "...",
+      "totalBudget": 0,
+      "percentOfInvestment": 0,
       "flights": [
-        { "startDate": "${year}-02-09", "endDate": "${year}-02-09", "monthlySpend": { "${year}-2": 1000 } },
-        { "startDate": "${year}-04-27", "endDate": "${year}-04-27", "monthlySpend": { "${year}-4": 500 } },
-        { "startDate": "${year}-05-04", "endDate": "${year}-05-04", "monthlySpend": { "${year}-5": 4000 } },
-        { "startDate": "${year}-06-01", "endDate": "${year}-06-01", "monthlySpend": { "${year}-6": 500 } }
+        { "startDate": "YYYY-MM-DD", "endDate": "YYYY-MM-DD", "monthlySpend": { "YYYY-M": 0 } }
       ]
     }
   ]
-}
-
-## Channel name rules
-channelName must be one of: "Meta Ads", "Google Ads", "Display Ads", "Native Ads", "LinkedIn Ads", "TikTok Ads", "Instagram Ads", "YouTube Ads", "Snapchat Ads", "Reddit Ads", "Instagram (Organic)", "Facebook (Organic)", "LinkedIn (Organic)", "EDM / Email", "OOH", "Radio", "Linear TV", "SVOD", "BVOD", "Other"
-• OOH variants → use "OOH - [SUBTYPE]" as the channelName, using these exact subtypes:
-  - Bus Backs → "OOH - BUS BACKS"
-  - Bus Shelters → "OOH - BUS SHELTERS"
-  - Billboards (static) → "OOH - BILLBOARDS"
-  - Digital Billboards / DOOH / Digital OOH → "OOH - DIGITAL BILLBOARDS"
-  - Letterbox Drops → "OOH - LETTERBOX DROPS"
-  - Transit / Transport → "OOH - TRANSIT"
-  - Posters → "OOH - POSTERS"
-  - Street Furniture → "OOH - STREET FURNITURE"
-  - Any other OOH/Outdoor variant → "OOH - OUTDOOR"
-  Leave customChannelName empty for OOH variants. Describe detail in format field.
-• No match and not OOH → "Other", real name in customChannelName (e.g. "Trade Me").
-• format: text from DETAIL column.
-• totalBudget: from TOTAL INVESTMENT column — grand total across ALL bursts. No $ or commas.
-• EVERY channel needs at least one flight. If no fills visible use "${firstMonday}" to "${lastMonday}".
-• percentOfInvestment: totalBudget ÷ sum of all channels × 100.`;
+}`;
 }
 
 export interface ParsedChannel {
@@ -160,9 +165,10 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const response = await anthropic.messages.create({
+    // Pass 1: Vision — enumerate filled columns per row
+    const visionResponse = await anthropic.messages.create({
       model: 'claude-opus-4-7',
-      max_tokens: 8192,
+      max_tokens: 6000,
       messages: [
         {
           role: 'user',
@@ -175,48 +181,62 @@ export async function POST(request: NextRequest) {
                 data: image,
               },
             },
-            {
-              type: 'text',
-              text: buildExtractionPrompt(),
-            },
+            { type: 'text', text: buildVisionPrompt() },
           ],
         },
       ],
     });
 
-    const text = response.content.find(b => b.type === 'text')?.text ?? '';
+    const description = visionResponse.content.find(b => b.type === 'text')?.text ?? '';
+    if (!description.trim()) {
+      return NextResponse.json({ error: 'Could not read the screenshot. Please try a clearer image.' }, { status: 500 });
+    }
+
+    const yearMatch = description.match(/\b(20\d{2})\b/);
+    const year = yearMatch ? parseInt(yearMatch[1]) : new Date().getFullYear();
+
+    // Pass 2: Text-only — convert description to structured JSON
+    const structureResponse = await anthropic.messages.create({
+      model: 'claude-opus-4-7',
+      max_tokens: 8192,
+      messages: [
+        {
+          role: 'user',
+          content: buildStructurePrompt(description, year),
+        },
+      ],
+    });
+
+    const structureText = structureResponse.content.find(b => b.type === 'text')?.text ?? '';
 
     let parsed: { channels: ParsedChannel[] } | null = null;
 
-    // 1. Try direct parse first
-    try { parsed = JSON.parse(text.trim()); } catch { /* fall through */ }
+    try { parsed = JSON.parse(structureText.trim()); } catch { /* fall through */ }
 
-    // 2. Strip any code fences and try again
     if (!parsed) {
-      const stripped = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+      const stripped = structureText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
       try { parsed = JSON.parse(stripped); } catch { /* fall through */ }
     }
 
-    // 3. Find the first {...} block in the text and try to parse that
     if (!parsed) {
-      const match = text.match(/\{[\s\S]*\}/);
+      const match = structureText.match(/\{[\s\S]*\}/);
       if (match) {
         try { parsed = JSON.parse(match[0]); } catch { /* fall through */ }
       }
     }
 
     if (!parsed || !Array.isArray(parsed.channels)) {
-      console.error('Could not parse Claude response. Raw text (first 1000 chars):', text.slice(0, 1000));
-      console.error('Full response content blocks:', JSON.stringify(response.content.map(b => ({ type: b.type, length: 'text' in b ? b.text.length : 0 }))));
+      console.error('Pass 1 description:', description.slice(0, 2000));
+      console.error('Pass 2 raw output:', structureText.slice(0, 1000));
       return NextResponse.json(
-        { error: 'Could not extract media plan data from screenshot. Please try a clearer image.', raw: text.slice(0, 500) },
+        { error: 'Could not extract media plan data from screenshot. Please try a clearer image.', raw: structureText.slice(0, 500) },
         { status: 500 }
       );
     }
 
     return NextResponse.json({ channels: parsed.channels });
   } catch (err: any) {
-    console.error('Error calling Claude for screenshot parsing:', err);
-    return NextResponse.json({ error: err.message ?? 'Failed to analyze screenshot' }, { status: 500 });
+    console.error('Error parsing screenshot:', err);
+    return NextResponse.json({ error: err.message ?? 'Failed to analyse screenshot' }, { status: 500 });
   }
 }
