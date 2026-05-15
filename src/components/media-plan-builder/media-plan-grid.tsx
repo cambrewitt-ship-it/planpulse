@@ -249,9 +249,9 @@ function lastMondayOfYear(year: number): string {
   return `${year}-12-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function parsedToMediaPlanChannels(parsed: ParsedChannel[]): MediaPlanChannel[] {
+function parsedToMediaPlanChannels(parsed: ParsedChannel[], gridYear?: number): MediaPlanChannel[] {
   const total = parsed.reduce((s, c) => s + (c.totalBudget || 0), 0);
-  const currentYear = new Date().getFullYear();
+  const currentYear = gridYear ?? new Date().getFullYear();
   const yearStart = firstMondayOfYear(currentYear);
   const yearEnd   = lastMondayOfYear(currentYear);
 
@@ -356,7 +356,7 @@ function parsedToMediaPlanChannels(parsed: ParsedChannel[]): MediaPlanChannel[] 
       normalisedFlights = dateFixedFlights;
     }
 
-    const flights: MediaFlight[] = normalisedFlights.map(f => {
+    const rawFlightsBuilt: MediaFlight[] = normalisedFlights.map(f => {
       let startWeek = toNearestMonday(f.startDate);        // snap to nearest Mon (fwd-biased)
       let endMonday = toContainingWeekMonday(f.endDate);   // snap to Monday of containing week
 
@@ -370,10 +370,29 @@ function parsedToMediaPlanChannels(parsed: ParsedChannel[]): MediaPlanChannel[] 
         id: `flight-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         startWeek,
         endWeek,
-        monthlySpend: f.monthlySpend,
+        monthlySpend: { ...f.monthlySpend },
         color,
       };
     });
+
+    // Merge flights whose gap is ≤ 63 days (9 weeks).
+    // Monthly budget-marker plans produce one single-week flight per month; those
+    // gaps (~4–5 weeks) get merged into one continuous block. Genuinely separate
+    // campaign bursts (Radio, seasonal OOH) have 12+ week gaps and stay separate.
+    const MERGE_GAP_MS = 63 * 24 * 60 * 60 * 1000;
+    rawFlightsBuilt.sort((a, b) => a.startWeek.getTime() - b.startWeek.getTime());
+    const flights: MediaFlight[] = [];
+    for (const f of rawFlightsBuilt) {
+      const prev = flights[flights.length - 1];
+      if (prev && f.startWeek.getTime() - prev.endWeek.getTime() <= MERGE_GAP_MS) {
+        if (f.endWeek.getTime() > prev.endWeek.getTime()) prev.endWeek = new Date(f.endWeek);
+        for (const [k, v] of Object.entries(f.monthlySpend)) {
+          prev.monthlySpend[k] = (prev.monthlySpend[k] || 0) + v;
+        }
+      } else {
+        flights.push(f);
+      }
+    }
 
     return {
       id: `channel-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -1307,11 +1326,11 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
           method: 'POST',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: base64, mimeType: file.type }),
+          body: JSON.stringify({ image: base64, mimeType: file.type, year: selectedYear }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? 'Failed to parse screenshot');
-        const converted = parsedToMediaPlanChannels(data.channels);
+        const converted = parsedToMediaPlanChannels(data.channels, selectedYear);
         setReviewChannels(converted);
       } catch (err: any) {
         setScreenshotError(err.message ?? 'Failed to analyse screenshot. Please try again.');
@@ -2958,6 +2977,13 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
               </Button>
               <Button
                 onClick={() => {
+                  // Navigate to the year of the parsed flights so they're immediately visible
+                  const firstFlightYear = reviewChannels?.[0]?.flights?.[0]?.startWeek instanceof Date
+                    ? reviewChannels[0].flights[0].startWeek.getFullYear()
+                    : null;
+                  if (firstFlightYear && firstFlightYear !== selectedYear) {
+                    setSelectedYear(firstFlightYear);
+                  }
                   setChannels(reviewChannels);
                   setReviewChannels(null);
                   setReviewImagePreview(null);
