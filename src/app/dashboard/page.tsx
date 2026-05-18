@@ -217,6 +217,7 @@ export default function ClientsPage() {
               selected={selectedClientId === client.id}
               onClick={() => setSelectedClientId(client.id)}
               accountManagers={accountManagers}
+              variant="clients"
             />
           ))}
         </div>

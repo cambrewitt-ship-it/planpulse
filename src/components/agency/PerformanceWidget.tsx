@@ -10,8 +10,12 @@ export interface PerfData {
   metric: string;
   actualLabel: string;
   targetLabel: string;
+  targetValue: number | null;
   color: string;
   hasData: boolean;
+  trend?: { pctChange: number; improving: boolean } | null;
+  trend24h?: { pctChange: number; improving: boolean } | null;
+  dailySeries: number[];  // last 7 days of metric values, oldest first (only days with data)
 }
 
 interface WidgetConfig {
@@ -56,6 +60,23 @@ function fmtMetric(value: number, metric: string): string {
   if (/roas/.test(mk)) return `${value.toFixed(1)}x`;
   if (/cpa|cpc|cpm|cpl/.test(mk)) return value >= 100 ? `$${Math.round(value)}` : `$${value.toFixed(2)}`;
   return value >= 1000 ? `${(value / 1000).toFixed(1)}k` : String(Math.round(value));
+}
+
+function metricFromDayRow(
+  row: { spend: number; impressions: number; clicks: number; conversions: number },
+  metric: string,
+): number | null {
+  const mk = metric.toLowerCase();
+  if (/cpa|cpl/.test(mk)) return row.conversions > 0 ? row.spend / row.conversions : null;
+  if (/cpc/.test(mk)) return row.clicks > 0 ? row.spend / row.clicks : null;
+  if (/cpm/.test(mk)) return row.impressions > 0 ? (row.spend / row.impressions) * 1000 : null;
+  if (/ctr/.test(mk)) return row.impressions > 0 ? (row.clicks / row.impressions) * 100 : null;
+  if (/roas/.test(mk)) return null; // not available in raw rows
+  if (/conversion/.test(mk)) return row.conversions;
+  if (/click/.test(mk)) return row.clicks;
+  if (/impression/.test(mk)) return row.impressions;
+  if (/spend/.test(mk)) return row.spend;
+  return null;
 }
 
 function calcNeedle(actual: number, target: number, metric: string): number {
@@ -376,15 +397,22 @@ export function PerformanceWidget({
   clientId,
   onNeedle,
   hideControls = false,
+  hideDisplay = false,
 }: {
   clientId: string;
   onNeedle?: (data: PerfData | null) => void;
   hideControls?: boolean;
+  hideDisplay?: boolean;
 }) {
   const [config, setConfig] = useState<WidgetConfig>(() => loadConfig(clientId));
   const [goals, setGoals] = useState<Goal[]>([]);
   const [combinedActuals, setCombinedActuals] = useState<Record<string, number>>({});
   const [ga4Actuals, setGa4Actuals] = useState<Record<string, number>>({});
+  const [last7DaysActuals, setLast7DaysActuals] = useState<Record<string, number>>({});
+  const [prev7DaysActuals, setPrev7DaysActuals] = useState<Record<string, number>>({});
+  const [yesterdayActuals, setYesterdayActuals] = useState<Record<string, number>>({});
+  const [dayBeforeActuals, setDayBeforeActuals] = useState<Record<string, number>>({});
+  const [last7DaysSeries, setLast7DaysSeries] = useState<Array<{ date: string; spend: number; impressions: number; clicks: number; conversions: number }>>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [ga4Events, setGa4Events] = useState<string[]>([]);
   const [metaEvents, setMetaEvents] = useState<Array<{ name: string; count: number }>>([]);
@@ -413,6 +441,11 @@ export function PerformanceWidget({
         setGoals(json.goals ?? []);
         setCombinedActuals(json.combinedActuals ?? {});
         setGa4Actuals(json.ga4Actuals ?? {});
+        setLast7DaysActuals(json.last7DaysActuals ?? {});
+        setPrev7DaysActuals(json.prev7DaysActuals ?? {});
+        setYesterdayActuals(json.yesterdayActuals ?? {});
+        setDayBeforeActuals(json.dayBeforeActuals ?? {});
+        setLast7DaysSeries(json.last7DaysSeries ?? []);
         setCampaigns(json.campaigns ?? []);
         setGa4Events(json.ga4Events ?? []);
         setMetaEvents(json.metaEvents ?? []);
@@ -427,7 +460,7 @@ export function PerformanceWidget({
     const primaryGoal = goals.find(g => g.is_primary) ?? goals[0] ?? null;
 
     if (!primaryGoal) {
-      const noData: PerfData = { needle: 0.5, metric: '', actualLabel: '', targetLabel: '', color: '#B5B0A5', hasData: false };
+      const noData: PerfData = { needle: 0.5, metric: '', actualLabel: '', targetLabel: '', targetValue: null, color: '#B5B0A5', hasData: false, trend: null, trend24h: null, dailySeries: [] };
       setPerfData(noData);
       onNeedleRef.current?.(noData);
       return;
@@ -437,14 +470,51 @@ export function PerformanceWidget({
     const actuals = config.metricSource === 'ga4' ? ga4Actuals : combinedActuals;
     const actual = actuals[mk] ?? null;
 
+    const lowerBetter = /cpa|cpc|cpm|cpl|cost/.test(mk);
+
+    // 7-day trend
+    const last7Val = last7DaysActuals[mk] ?? null;
+    const prev7Val = prev7DaysActuals[mk] ?? null;
+    const trend = (last7Val != null && prev7Val != null && prev7Val !== 0)
+      ? { pctChange: ((last7Val - prev7Val) / prev7Val) * 100, improving: lowerBetter ? last7Val < prev7Val : last7Val > prev7Val }
+      : null;
+
+    // 24h trend: yesterday vs day before yesterday
+    const yVal = yesterdayActuals[mk] ?? null;
+    const dbVal = dayBeforeActuals[mk] ?? null;
+    const trend24h = (yVal != null && dbVal != null && dbVal !== 0)
+      ? { pctChange: ((yVal - dbVal) / dbVal) * 100, improving: lowerBetter ? yVal < dbVal : yVal > dbVal }
+      : null;
+
+    // Daily sparkline series — oldest first
+    // CPA/CPL use cumulative spend÷conversions so sparse-conversion days don't drop out
+    let dailySeries: number[];
+    if (/cpa|cpl/.test(mk)) {
+      let cumSpend = 0, cumConv = 0;
+      dailySeries = last7DaysSeries.reduce<number[]>((acc, row) => {
+        cumSpend += row.spend;
+        cumConv += row.conversions;
+        if (cumConv > 0) acc.push(cumSpend / cumConv);
+        return acc;
+      }, []);
+    } else {
+      dailySeries = last7DaysSeries
+        .map(row => metricFromDayRow(row, primaryGoal.metric))
+        .filter((v): v is number => v !== null);
+    }
+
     if (actual == null || !primaryGoal.target_value) {
       const noData: PerfData = {
         needle: 0.5,
         metric: primaryGoal.metric,
         actualLabel: 'No data',
         targetLabel: primaryGoal.target_value ? fmtMetric(primaryGoal.target_value, primaryGoal.metric) : '—',
+        targetValue: primaryGoal.target_value ?? null,
         color: '#B5B0A5',
         hasData: false,
+        trend,
+        trend24h,
+        dailySeries,
       };
       setPerfData(noData);
       onNeedleRef.current?.(noData);
@@ -458,12 +528,16 @@ export function PerformanceWidget({
       metric: primaryGoal.metric,
       actualLabel: fmtMetric(actual, primaryGoal.metric),
       targetLabel: fmtMetric(primaryGoal.target_value, primaryGoal.metric),
+      targetValue: primaryGoal.target_value,
       color,
       hasData: true,
+      trend,
+      trend24h,
+      dailySeries,
     };
     setPerfData(data);
     onNeedleRef.current?.(data);
-  }, [goals, combinedActuals, ga4Actuals, config.metricSource]);
+  }, [goals, combinedActuals, ga4Actuals, last7DaysActuals, prev7DaysActuals, yesterdayActuals, dayBeforeActuals, last7DaysSeries, config.metricSource]);
 
   const handleSave = useCallback((newConfig: WidgetConfig) => {
     persistConfig(clientId, newConfig);
@@ -482,6 +556,8 @@ export function PerformanceWidget({
     (config.metricSource === 'ga4' && !config.ga4EventName) ||
     (config.metricSource === 'ad' && config.platform === 'meta-ads' && !config.metaActionType)
   );
+
+  if (hideDisplay) return null;
 
   return (
     <>

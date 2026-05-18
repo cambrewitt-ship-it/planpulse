@@ -228,7 +228,10 @@ function toNearestMonday(dateStr: string): Date {
 function toContainingWeekMonday(dateStr: string): Date {
   const d = new Date(dateStr + 'T00:00:00');
   const day = d.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
+  // For Sunday (day=0): round forward to next Monday instead of back 6 days
+  // (going back 6 would land in the previous week and can cross month boundaries unexpectedly)
+  // For all other days: round back to the Monday of the same week
+  const diff = day === 0 ? 1 : 1 - day;
   d.setDate(d.getDate() + diff);
   return d;
 }
@@ -277,12 +280,13 @@ function parsedToMediaPlanChannels(parsed: ParsedChannel[], gridYear?: number): 
     const dateFixedFlights = rawFlights.map(f => {
       const startDate = fixYear(f.startDate, yearStart);
       const endDate   = fixYear(f.endDate,   yearEnd);
-
       const remappedSpend: Record<string, number> = {};
       for (const [k, v] of Object.entries(f.monthlySpend || {})) {
         const parts = k.split('-');
         if (parts.length >= 2) {
-          remappedSpend[`${currentYear}-${parts.slice(1).join('-')}`] = v || 0;
+          const keyYear = parseInt(parts[0], 10);
+          const fixedKeyYear = (keyYear < 2026 || keyYear > 2030) ? currentYear : keyYear;
+          remappedSpend[`${fixedKeyYear}-${parts.slice(1).join('-')}`] = v || 0;
         }
       }
 
@@ -360,8 +364,8 @@ function parsedToMediaPlanChannels(parsed: ParsedChannel[], gridYear?: number): 
       let startWeek = toNearestMonday(f.startDate);        // snap to nearest Mon (fwd-biased)
       let endMonday = toContainingWeekMonday(f.endDate);   // snap to Monday of containing week
 
-      if (isNaN(startWeek.getTime())) startWeek = new Date(currentYear, 0, 5);
-      if (isNaN(endMonday.getTime())) endMonday = new Date(currentYear, 11, 28);
+      if (isNaN(startWeek.getTime())) startWeek = new Date(targetYear, 0, 5);
+      if (isNaN(endMonday.getTime())) endMonday = new Date(targetYear, 11, 28);
 
       const endWeek = new Date(endMonday);
       endWeek.setDate(endWeek.getDate() + 6);
@@ -2932,35 +2936,51 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {reviewChannels.map((ch, i) => {
-                  const startDate = ch.flights[0]?.startWeek;
-                  const endDate = ch.flights[ch.flights.length - 1]?.endWeek;
-                  const dateRange = startDate && endDate
-                    ? `${startDate.toLocaleDateString('en-AU', { month: 'short', year: 'numeric' })} – ${endDate.toLocaleDateString('en-AU', { month: 'short', year: 'numeric' })}`
-                    : 'No dates';
+                  const formatWC = (d: Date) => {
+                    const day = d.getDate();
+                    const month = d.toLocaleDateString('en-AU', { month: 'short' });
+                    return `w/c ${day} ${month}`;
+                  };
                   const color = ch.flights[0]?.color ?? '#6B7280';
                   return (
                     <div key={i} style={{
-                      display: 'flex', alignItems: 'center', gap: 12,
                       padding: '10px 14px', borderRadius: 10,
                       background: '#F5F3EF', border: '0.5px solid #E8E4DC',
                     }}>
-                      <div style={{ width: 10, height: 10, borderRadius: '50%', background: color, flexShrink: 0 }} />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: '#1C1917' }}>{ch.channelName}</div>
-                        {ch.format && <div style={{ fontSize: 11, color: '#8A8578', marginTop: 1 }}>{ch.format}</div>}
-                      </div>
-                      <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: '#1C1917' }}>
-                          ${ch.totalBudget.toLocaleString()}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <div style={{ width: 10, height: 10, borderRadius: '50%', background: color, flexShrink: 0 }} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: '#1C1917' }}>{ch.channelName}</div>
+                          {ch.format && <div style={{ fontSize: 11, color: '#8A8578', marginTop: 1 }}>{ch.format}</div>}
                         </div>
-                        <div style={{ fontSize: 11, color: '#8A8578', marginTop: 1 }}>{dateRange}</div>
+                        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: '#1C1917' }}>
+                            ${ch.totalBudget.toLocaleString()}
+                          </div>
+                        </div>
+                        <div style={{
+                          fontSize: 11, fontWeight: 600, color: '#8A8578',
+                          background: '#E8E4DC', borderRadius: 20, padding: '2px 8px', flexShrink: 0,
+                        }}>
+                          {ch.percentOfInvestment}%
+                        </div>
                       </div>
-                      <div style={{
-                        fontSize: 11, fontWeight: 600, color: '#8A8578',
-                        background: '#E8E4DC', borderRadius: 20, padding: '2px 8px', flexShrink: 0,
-                      }}>
-                        {ch.percentOfInvestment}%
-                      </div>
+                      {ch.flights.length > 0 && (
+                        <div style={{ marginTop: 6, paddingLeft: 22, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                          {ch.flights.map((fl, fi) => {
+                            const s = fl.startWeek instanceof Date ? fl.startWeek : new Date(fl.startWeek);
+                            const e = fl.endWeek instanceof Date ? fl.endWeek : new Date(fl.endWeek);
+                            const year = s.getFullYear();
+                            return (
+                              <div key={fi} style={{ fontSize: 11, color: '#6B6860' }}>
+                                <span style={{ fontWeight: 600, color: '#8A8578' }}>Flight {fi + 1}</span>
+                                {' '}
+                                {formatWC(s)} – {formatWC(e)} {year}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -2985,6 +3005,12 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                     setSelectedYear(firstFlightYear);
                   }
                   setChannels(reviewChannels);
+                  // Navigate the grid to the year of the loaded plan
+                  const firstFlight = reviewChannels[0]?.flights[0];
+                  if (firstFlight?.startWeek) {
+                    const planYear = (firstFlight.startWeek instanceof Date ? firstFlight.startWeek : new Date(firstFlight.startWeek)).getFullYear();
+                    if (planYear >= 2026) setSelectedYear(planYear);
+                  }
                   setReviewChannels(null);
                   setReviewImagePreview(null);
                 }}

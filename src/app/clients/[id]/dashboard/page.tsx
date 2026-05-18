@@ -203,10 +203,12 @@ export default function DashboardV2() {
   const [allActionPoints, setAllActionPoints] = useState<any[]>([]);
   const [actionPointsRefetchTrigger, setActionPointsRefetchTrigger] = useState(0);
   const [healthScore, setHealthScore] = useState<HealthScoreResult | null>(null);
+  const [healthScoreReady, setHealthScoreReady] = useState(false);
   const [perfHealthResult, setPerfHealthResult] = useState<PerformanceHealthResult | null>(null);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
   // Spend data scoped to the visible analytics period — fetched independently for channel cards.
   const [channelMonthSpendData, setChannelMonthSpendData] = useState<SpendDataPoint[]>([]);
+  const [isLoadingSpend, setIsLoadingSpend] = useState(true);
   const [spendApiErrors, setSpendApiErrors] = useState<string[]>([]);
   // Non-digital channel actuals
   const [organicSocialActuals, setOrganicSocialActuals] = useState<OrganicSocialActual[]>([]);
@@ -465,10 +467,12 @@ export default function DashboardV2() {
         }));
 
         setChannelMonthSpendData(enhanced);
+        setIsLoadingSpend(false);
       } catch (err) {
         if (!cancelled) {
           console.error('Error loading channel month spend data:', err);
           setChannelMonthSpendData([]);
+          setIsLoadingSpend(false);
         }
       }
     };
@@ -1265,6 +1269,8 @@ export default function DashboardV2() {
       },
       pacingStatus,
       performanceStatus,
+      planStart: campaignDates.start.toISOString().slice(0, 10),
+      planEnd: campaignDates.end.toISOString().slice(0, 10),
       gantt: {
         clients: ganttClients,
         channels: ganttChannels,
@@ -1287,6 +1293,7 @@ export default function DashboardV2() {
           })
           .filter(Boolean) as { client_id: string; channel_label: string; due_date: string }[],
       },
+      isLoadingScore: !healthScoreReady,
       onAccountManagerChange: handleAccountManagerChange,
       isSavingAccountManager,
       accountManagers,
@@ -1594,12 +1601,15 @@ export default function DashboardV2() {
         : 'No benchmark data available';
 
       setHealthScore(result);
+      if (!isLoadingSpend && !actionPointsStats.loading) {
+        setHealthScoreReady(true);
+      }
       setDashboardError(null);
     } catch (err) {
       console.error('Health score calculation failed:', err);
       setDashboardError('Health score could not be calculated. Other data is still available below.');
     }
-  }, [mediaPlanBuilderChannels, totalActualSpend, plannedBudget, actionPointsStats, channelCards, allBenchmarks, allPresets, clientChannelPresets]);
+  }, [mediaPlanBuilderChannels, totalActualSpend, plannedBudget, actionPointsStats, channelCards, allBenchmarks, allPresets, clientChannelPresets, isLoadingSpend]);
 
   // ── Action points data pipeline ─────────────────────────────────────────
   const handleActionPointsUpdate = useCallback((actionPoints: any[]) => {

@@ -1,11 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { startOfMonth, format } from 'date-fns';
+import { startOfMonth, subDays, format } from 'date-fns';
+import { sendTeamsAlert } from '@/lib/teams';
 
 type Params = { params: Promise<{ id: string }> | { id: string } };
 
 async function resolveId(params: Params['params']): Promise<string> {
   return (await Promise.resolve(params)).id;
+}
+
+function aggregateAdRows(rows: any[]): Record<string, number> {
+  let spend = 0, impressions = 0, clicks = 0, conversions = 0;
+  for (const r of rows) {
+    spend += Number(r.spend || 0);
+    impressions += Number(r.impressions || 0);
+    clicks += Number(r.clicks || 0);
+    conversions += Number(r.conversions || 0);
+  }
+  const result: Record<string, number> = { spend, impressions, clicks, conversions };
+  if (clicks > 0 && impressions > 0) result.ctr = (clicks / impressions) * 100;
+  if (clicks > 0) { result.cpl = spend / clicks; result.cpc = spend / clicks; }
+  if (conversions > 0) result.cpa = spend / conversions;
+  return result;
 }
 
 // Map media plan channel names to benchmark channel_name values
@@ -82,10 +98,13 @@ export async function GET(_req: NextRequest, { params }: Params) {
   const monthStart = format(startOfMonth(new Date()), 'yyyy-MM-dd');
   const today = format(new Date(), 'yyyy-MM-dd');
 
-  // Use filter platforms if provided, else derive from media plan channels
+  // Use filter platforms if provided, else derive from media plan channels,
+  // else fall back to both supported platforms so trend/series queries always run.
   const activePlatforms = filterPlatforms.length > 0
     ? filterPlatforms
-    : ([...new Set(channels.map(ch => ch.platform).filter(Boolean))] as string[]);
+    : channels.map(ch => ch.platform).filter(Boolean).length > 0
+      ? ([...new Set(channels.map(ch => ch.platform).filter(Boolean))] as string[])
+      : (['meta-ads', 'google-ads'] as string[]);
 
   let actuals: Record<string, {
     spend: number; impressions: number; clicks: number; conversions: number;
@@ -195,7 +214,80 @@ export async function GET(_req: NextRequest, { params }: Params) {
   if (totalClicks > 0) { combinedActuals.cpl = totalSpend / totalClicks; combinedActuals.cpc = totalSpend / totalClicks; }
   if (totalConversions > 0) combinedActuals.cpa = totalSpend / totalConversions;
 
-  // 6. GA4 actuals for the current month
+  // 6. 7-day trend: last 7 days vs prior 7 days
+  // 6b. 24h trend: yesterday vs day before yesterday (avoids partial-day today)
+  const todayDate = new Date();
+  const last7Start = format(subDays(todayDate, 6), 'yyyy-MM-dd');
+  const prev7Start = format(subDays(todayDate, 13), 'yyyy-MM-dd');
+  const prev7End = format(subDays(todayDate, 7), 'yyyy-MM-dd');
+  const yesterday = format(subDays(todayDate, 1), 'yyyy-MM-dd');
+  const dayBefore = format(subDays(todayDate, 2), 'yyyy-MM-dd');
+
+  let last7DaysActuals: Record<string, number> = {};
+  let prev7DaysActuals: Record<string, number> = {};
+  let yesterdayActuals: Record<string, number> = {};
+  let dayBeforeActuals: Record<string, number> = {};
+  let last7DaysSeries: Array<{ date: string; spend: number; impressions: number; clicks: number; conversions: number }> = [];
+
+  if (activePlatforms.length > 0) {
+    const trendBase = () => supabase
+      .from('ad_performance_metrics')
+      .select('spend, impressions, clicks, conversions')
+      .eq('client_id', clientId)
+      .in('platform', activePlatforms as ('google-ads' | 'meta-ads')[])
+      .not('campaign_id', 'like', 'manual-override-%');
+
+    const applyFilter = (q: ReturnType<typeof trendBase>) =>
+      filterCampaignIds.length > 0 ? q.in('campaign_id', filterCampaignIds) : q;
+
+    const seriesBase = () => supabase
+      .from('ad_performance_metrics')
+      .select('date, spend, impressions, clicks, conversions, meta_actions')
+      .eq('client_id', clientId)
+      .in('platform', activePlatforms as ('google-ads' | 'meta-ads')[])
+      .not('campaign_id', 'like', 'manual-override-%');
+
+    const applySeriesFilter = (q: ReturnType<typeof seriesBase>) =>
+      filterCampaignIds.length > 0 ? q.in('campaign_id', filterCampaignIds) : q;
+
+    const [{ data: last7Rows }, { data: prev7Rows }, { data: yesterdayRows }, { data: dayBeforeRows }, { data: seriesRows }] = await Promise.all([
+      applyFilter(trendBase()).gte('date', last7Start).lte('date', today),
+      applyFilter(trendBase()).gte('date', prev7Start).lte('date', prev7End),
+      applyFilter(trendBase()).eq('date', yesterday),
+      applyFilter(trendBase()).eq('date', dayBefore),
+      applySeriesFilter(seriesBase()).gte('date', last7Start).lte('date', today),
+    ]);
+
+    last7DaysActuals = aggregateAdRows(last7Rows ?? []);
+    prev7DaysActuals = aggregateAdRows(prev7Rows ?? []);
+    yesterdayActuals = aggregateAdRows(yesterdayRows ?? []);
+    dayBeforeActuals = aggregateAdRows(dayBeforeRows ?? []);
+
+    // Build ordered daily series (oldest → newest), one entry per date with data.
+    // Apply metaActionType conversion override per-day — same logic as the monthly override.
+    const byDate = new Map<string, { spend: number; impressions: number; clicks: number; conversions: number }>();
+    for (const row of seriesRows ?? []) {
+      const cur = byDate.get(row.date) ?? { spend: 0, impressions: 0, clicks: 0, conversions: 0 };
+      cur.spend += Number(row.spend || 0);
+      cur.impressions += Number(row.impressions || 0);
+      cur.clicks += Number(row.clicks || 0);
+      if (metaActionType && row.meta_actions) {
+        for (const act of (row.meta_actions as any[]) ?? []) {
+          if (act.action_type === metaActionType) cur.conversions += parseInt(act.value, 10) || 0;
+        }
+      } else {
+        cur.conversions += Number(row.conversions || 0);
+      }
+      byDate.set(row.date, cur);
+    }
+    for (let i = 6; i >= 0; i--) {
+      const d = format(subDays(todayDate, i), 'yyyy-MM-dd');
+      const agg = byDate.get(d);
+      if (agg) last7DaysSeries.push({ date: d, ...agg });
+    }
+  }
+
+  // 7. GA4 actuals for the current month
   const { data: ga4Rows } = await supabase
     .from('google_analytics_metrics')
     .select('metric_name, metric_value')
@@ -264,6 +356,11 @@ export async function GET(_req: NextRequest, { params }: Params) {
     channelActuals,
     combinedActuals,
     ga4Actuals,
+    last7DaysActuals,
+    prev7DaysActuals,
+    yesterdayActuals,
+    dayBeforeActuals,
+    last7DaysSeries,
     campaigns,
     ga4Events,
     metaEvents,
@@ -306,6 +403,17 @@ export async function POST(req: NextRequest, { params }: Params) {
       .single();
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    const { data: client } = await supabase.from('clients').select('name').eq('id', clientId).maybeSingle();
+    sendTeamsAlert({
+      title: 'Goal Updated',
+      text: `A campaign goal was updated for **${client?.name ?? 'a client'}**`,
+      color: '0078D4',
+      facts: [
+        { name: 'Channel', value: channel },
+        { name: 'Metric', value: metric },
+        ...(target_value != null ? [{ name: 'Target', value: String(target_value) }] : []),
+      ],
+    });
     return NextResponse.json({ goal: data });
   }
 
@@ -329,6 +437,17 @@ export async function POST(req: NextRequest, { params }: Params) {
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  const { data: client } = await supabase.from('clients').select('name').eq('id', clientId).maybeSingle();
+  sendTeamsAlert({
+    title: 'Goal Created',
+    text: `A new campaign goal was set for **${client?.name ?? 'a client'}**`,
+    color: '107C10',
+    facts: [
+      { name: 'Channel', value: channel },
+      { name: 'Metric', value: metric },
+      ...(target_value != null ? [{ name: 'Target', value: String(target_value) }] : []),
+    ],
+  });
   return NextResponse.json({ goal: data }, { status: 201 });
 }
 

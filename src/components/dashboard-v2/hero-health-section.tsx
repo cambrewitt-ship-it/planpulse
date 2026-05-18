@@ -61,6 +61,9 @@ export interface HeroHealthSectionProps {
     ctr: number;
     status: 'excellent' | 'good' | 'needs-attention';
   };
+  planStart?: string;
+  planEnd?: string;
+  isLoadingScore?: boolean;
   gantt?: HeroGanttProps;
   onAccountManagerChange?: (accountManager: string | null) => void;
   isSavingAccountManager?: boolean;
@@ -110,16 +113,30 @@ function Badge({ status, label }: { status: string; label: string }) {
 // Health Score Ring (SVG conic-gradient via stroke-dasharray trick)
 // ---------------------------------------------------------------------------
 
-function HealthRing({ score, status, perf }: {
+function HealthRing({ score, status, perf, loading }: {
   score: number;
   status: HealthScoreResult['status'];
   perf?: PerfData | null;
+  loading?: boolean;
 }) {
   const W = 144, H = 96;
   const sw = 10;
   const r = 62;
   const cx = W / 2;
   const cy = 70;
+
+  if (loading) {
+    const W = 144, H = 96, sw = 10, r = 62, cx = 72, cy = 70;
+    return (
+      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ fontFamily: "'DM Sans', system-ui, sans-serif", display: 'block' }}>
+        <path d={`M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}`} fill="none" stroke="#e5e7eb" strokeWidth={sw} strokeLinecap="round" />
+        <line x1={cx} y1={cy} x2={cx - r + sw / 2 + 4} y2={cy} stroke="#d1d5db" strokeWidth={2} strokeLinecap="round" />
+        <circle cx={cx} cy={cy} r={4.5} fill="#d1d5db" />
+        <rect x={cx - 14} y={cy + 12} width={28} height={14} rx={3} fill="#e5e7eb" className="animate-pulse" />
+        <rect x={cx - 16} y={cy + 28} width={32} height={8} rx={2} fill="#f3f4f6" className="animate-pulse" />
+      </svg>
+    );
+  }
 
   const usePerf = !!(perf?.hasData);
   const needle = usePerf ? perf!.needle : score / 100;
@@ -248,6 +265,9 @@ export default function HeroHealthSection({
   actionItemsCount,
   pacingStatus,
   performanceStatus,
+  planStart,
+  planEnd,
+  isLoadingScore = false,
   gantt,
   onAccountManagerChange,
   isSavingAccountManager = false,
@@ -401,9 +421,52 @@ export default function HeroHealthSection({
                     />
                   </div>
                 </div>
+                {/* Media plan time progress */}
+                <div className="mt-2 space-y-1">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Plan Timeline</span>
+                    <span className="text-xs text-gray-400">
+                      {completionPercentage >= 100
+                        ? 'Completed'
+                        : daysRemaining === 0
+                          ? 'Ends today'
+                          : `${daysRemaining}d remaining`}
+                    </span>
+                  </div>
+                  <div className="h-1.5 w-full rounded-full bg-gray-100 overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all duration-500"
+                      style={{
+                        width: `${Math.min(100, completionPercentage)}%`,
+                        backgroundColor: '#6366f1',
+                      }}
+                    />
+                  </div>
+                  {(planStart || planEnd) && (
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-xs text-gray-400">
+                        {planStart ? new Date(planStart).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''}
+                      </span>
+                      <span className="text-xs text-gray-400">
+                        {planEnd ? new Date(planEnd).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''}
+                      </span>
+                    </div>
+                  )}
+                </div>
               </div>
-              <div className="flex-shrink-0">
-                <HealthRing score={healthScore.overallScore} status={healthScore.status} perf={perfData} />
+              <div className="flex-shrink-0 flex flex-col items-center gap-1">
+                <HealthRing score={healthScore.overallScore} status={healthScore.status} perf={perfData} loading={isLoadingScore} />
+                {perfData?.trend && (
+                  <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border ${
+                    perfData.trend.improving
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                      : 'bg-red-50 text-red-700 border-red-200'
+                  }`}>
+                    <span>{perfData.trend.pctChange < 0 ? '↓' : '↑'}</span>
+                    <span>{Math.abs(perfData.trend.pctChange).toFixed(1)}%</span>
+                    <span className="font-normal opacity-70">7d</span>
+                  </div>
+                )}
               </div>
             </div>
 

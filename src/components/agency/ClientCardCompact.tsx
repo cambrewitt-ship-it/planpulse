@@ -127,6 +127,92 @@ function apColor(count: number): string {
   return '#B5B0A5';
 }
 
+// ── Sparkline: 7-day metric vs target ────────────────────────────────────
+
+function SparkLine({ perf }: { perf: PerfData | null }) {
+  const series = perf?.dailySeries ?? [];
+  const metric = perf?.metric ?? '';
+  const target = perf?.targetValue ?? null;
+
+  // Line colour from 24h trend, falling back to needle colour
+  let lineColor = perf?.color ?? '#B5B0A5';
+  if (perf?.trend24h) {
+    const { pctChange, improving } = perf.trend24h;
+    if (Math.abs(pctChange) > 3) lineColor = improving ? '#4A7C59' : '#A0442A';
+    else lineColor = '#B07030';
+  }
+
+  const label24h = perf?.trend24h
+    ? `${perf.trend24h.improving ? '↑' : '↓'} ${Math.abs(perf.trend24h.pctChange).toFixed(1)}% 24h`
+    : null;
+
+  // SVG geometry
+  const W = 100, H = 26, PAD_X = 1, PAD_Y = 2;
+  const lowerBetter = /cpa|cpc|cpm|cpl|cost/.test(metric.toLowerCase());
+
+  let pathD = '';
+  let targetY: number | null = null;
+  let pts: { x: number; y: number }[] = [];
+
+  if (series.length >= 1) {
+    const allVals = target != null ? [...series, target] : series;
+    const minV = Math.min(...allVals);
+    const maxV = Math.max(...allVals);
+    const range = maxV - minV || 1;
+
+    const toY = (v: number) => {
+      const score = lowerBetter ? (maxV - v) / range : (v - minV) / range;
+      return H - PAD_Y - score * (H - PAD_Y * 2);
+    };
+
+    pts = series.map((v, i) => ({
+      x: series.length === 1 ? W / 2 : PAD_X + (i / (series.length - 1)) * (W - PAD_X * 2),
+      y: toY(v),
+    }));
+
+    if (pts.length >= 2) {
+      pathD = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+    }
+    if (target != null) targetY = toY(target);
+  }
+
+  const lastPt = pts[pts.length - 1] ?? null;
+
+  return (
+    <div style={{ paddingTop: 3 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 2 }}>
+        <span style={{ fontSize: 9, fontWeight: 600, color: '#8A8578', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+          {metric || 'Performance'}
+        </span>
+        {label24h ? (
+          <span style={{ fontSize: 9, fontWeight: 700, color: lineColor }}>{label24h}</span>
+        ) : (
+          <span style={{ fontSize: 9, color: '#C5C0B8' }}>7d</span>
+        )}
+      </div>
+
+      {series.length >= 1 ? (
+        <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
+          {/* Target reference line */}
+          {targetY != null && (
+            <line x1={PAD_X} y1={targetY} x2={W - PAD_X} y2={targetY}
+              stroke="#C8C3BB" strokeWidth={0.75} strokeDasharray="2,2" />
+          )}
+          {/* Series line (only when 2+ points) */}
+          {pathD && <path d={pathD} fill="none" stroke={lineColor} strokeWidth={1.5}
+            strokeLinecap="round" strokeLinejoin="round" />}
+          {/* Latest value dot */}
+          {lastPt && <circle cx={lastPt.x} cy={lastPt.y} r={2} fill={lineColor} />}
+        </svg>
+      ) : (
+        <div style={{ height: H, display: 'flex', alignItems: 'center' }}>
+          <span style={{ fontSize: 9, color: '#C5C0B8' }}>No data</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main component ─────────────────────────────────────────────────────────
 
 interface ClientCardCompactProps {
@@ -136,10 +222,11 @@ interface ClientCardCompactProps {
   index?: number;
   onAccountManagerChange?: (clientId: string, am: string | null) => void;
   accountManagers?: AccountManager[];
+  variant?: 'agency' | 'clients';
 }
 
 export function ClientCardCompact({
-  client, selected, onClick, onAccountManagerChange, accountManagers = []
+  client, selected, onClick, onAccountManagerChange, accountManagers = [], variant = 'agency',
 }: ClientCardCompactProps) {
   const router = useRouter();
   const color = clientColor(client.id);
@@ -265,7 +352,19 @@ export function ClientCardCompact({
       {/* Row 2: Performance metric + Open Actions + Speedometer */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <PerformanceWidget clientId={client.id} onNeedle={handleNeedle} hideControls />
+          {variant === 'agency' ? (
+            /* Agency: hidden widget fetches data, we render pacing line */
+            <>
+              <PerformanceWidget clientId={client.id} onNeedle={handleNeedle} hideControls hideDisplay />
+              <SparkLine perf={perf} />
+            </>
+          ) : (
+            /* Clients: visible widget shows metric + source, pacing line below */
+            <div style={{ minWidth: 0 }}>
+              <PerformanceWidget clientId={client.id} onNeedle={handleNeedle} hideControls />
+              <SparkLine perf={perf} />
+            </div>
+          )}
         </div>
         <div style={{ width: 0.5, height: 40, background: '#E8E4DC', flexShrink: 0 }} />
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, flexShrink: 0 }}>

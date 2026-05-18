@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient as createServerClient } from '@/lib/supabase/server';
 import { createClient as createSupabaseAdmin } from '@supabase/supabase-js';
+import { sendTeamsAlert } from '@/lib/teams';
 
 const BUCKET_NAME = 'client-documents';
 
@@ -10,11 +11,10 @@ async function extractText(bytes: ArrayBuffer, fileName: string): Promise<string
 
   if (ext === 'pdf') {
     try {
-      // pdf-parse is CommonJS — use require via dynamic import interop
-      const mod = await import('pdf-parse');
-      const pdfParse = (mod as any).default ?? mod;
-      const result = await pdfParse(Buffer.from(bytes));
-      return (result.text as string)?.trim() || null;
+      const { PDFParse } = await import('pdf-parse');
+      const parser = new PDFParse({ data: Buffer.from(bytes) });
+      const result = await parser.getText();
+      return result.text?.trim() || null;
     } catch {
       return null;
     }
@@ -31,7 +31,11 @@ async function extractText(bytes: ArrayBuffer, fileName: string): Promise<string
   }
 
   if (['txt', 'csv', 'md'].includes(ext)) {
-    return Buffer.from(bytes).toString('utf-8').trim() || null;
+    try {
+      return Buffer.from(bytes).toString('utf-8').trim() || null;
+    } catch {
+      return null;
+    }
   }
 
   return null;
@@ -111,88 +115,114 @@ export async function POST(req: NextRequest, { params }: Params) {
       .single();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     const { data: am } = await supabase.from('account_managers').select('name').eq('user_id', session.user.id).maybeSingle();
+    const { data: client } = await supabase.from('clients').select('name').eq('id', clientId).maybeSingle();
+    sendTeamsAlert({
+      title: 'Document Added',
+      text: `**${file_name}** was added to **${client?.name ?? 'a client'}**`,
+      color: '0078D4',
+      facts: [
+        { name: 'Type', value: safeFileType },
+        { name: 'Added by', value: am?.name ?? 'Team member' },
+      ],
+    });
     return NextResponse.json({ document: { ...doc, uploader_name: am?.name ?? 'Team member' } }, { status: 201 });
   }
 
-  const formData = await req.formData();
-  const file = formData.get('file') as File | null;
-  const fileType = (formData.get('file_type') as string | null) ?? 'other';
+  try {
+    const formData = await req.formData();
+    const file = formData.get('file') as File | null;
+    const fileType = (formData.get('file_type') as string | null) ?? 'other';
 
-  if (!file) return NextResponse.json({ error: 'No file provided' }, { status: 400 });
+    if (!file) return NextResponse.json({ error: 'No file provided' }, { status: 400 });
 
-  const safeFileType = VALID_FILE_TYPES.includes(fileType) ? fileType : 'other';
+    const safeFileType = VALID_FILE_TYPES.includes(fileType) ? fileType : 'other';
 
-  // Use service role key for storage (bypasses RLS, can create buckets) — same pattern as logo upload
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!.replace(/\/$/, '');
-  const storageClient = serviceRoleKey
-    ? createSupabaseAdmin(supabaseUrl, serviceRoleKey)
-    : supabase;
+    // Use service role key for storage (bypasses RLS, can create buckets) — same pattern as logo upload
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+    const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '');
+    const storageClient = serviceRoleKey
+      ? createSupabaseAdmin(supabaseUrl, serviceRoleKey)
+      : supabase;
 
-  // Ensure bucket exists
-  const { error: bucketError } = await storageClient.storage.createBucket(BUCKET_NAME, {
-    public: false,
-    fileSizeLimit: 50 * 1024 * 1024,
-  });
-  const bucketReady = !bucketError || (
-    bucketError.message.toLowerCase().includes('already exist') ||
-    bucketError.message.toLowerCase().includes('duplicate') ||
-    (bucketError as any).statusCode === '409' ||
-    (bucketError as any).statusCode === 409
-  );
-  if (!bucketReady) {
-    const hint = !serviceRoleKey
-      ? ' — add SUPABASE_SERVICE_ROLE_KEY to .env.local, or create the "client-documents" bucket manually in Supabase Storage'
-      : '';
-    return NextResponse.json({ error: `Could not create storage bucket: ${bucketError!.message}${hint}` }, { status: 500 });
+    // Ensure bucket exists
+    const { error: bucketError } = await storageClient.storage.createBucket(BUCKET_NAME, {
+      public: false,
+      fileSizeLimit: 50 * 1024 * 1024,
+    });
+    const bucketReady = !bucketError || (
+      bucketError.message.toLowerCase().includes('already exist') ||
+      bucketError.message.toLowerCase().includes('duplicate') ||
+      (bucketError as any).statusCode === '409' ||
+      (bucketError as any).statusCode === 409
+    );
+    if (!bucketReady) {
+      const hint = !serviceRoleKey
+        ? ' — add SUPABASE_SERVICE_ROLE_KEY to .env.local, or create the "client-documents" bucket manually in Supabase Storage'
+        : '';
+      return NextResponse.json({ error: `Could not create storage bucket: ${bucketError!.message}${hint}` }, { status: 500 });
+    }
+
+    const timestamp = Date.now();
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const storagePath = `${clientId}/${timestamp}_${safeName}`;
+    const bytes = await file.arrayBuffer();
+
+    // Extract text for AI readability (PDF, DOCX, TXT, CSV)
+    const extractedText = await extractText(bytes, file.name);
+
+    const { error: uploadError } = await storageClient.storage
+      .from(BUCKET_NAME)
+      .upload(storagePath, bytes, { contentType: file.type || 'application/octet-stream', upsert: false });
+
+    if (uploadError) return NextResponse.json({ error: uploadError.message }, { status: 500 });
+
+    // Generate a signed URL (documents are private, not public)
+    const { data: signed } = await storageClient.storage
+      .from(BUCKET_NAME)
+      .createSignedUrl(storagePath, 60 * 60 * 24 * 7); // 7-day signed URL
+
+    const fileUrl = signed?.signedUrl ?? storagePath;
+
+    // Save metadata to client_documents — include extracted text if available
+    const { data: doc, error: dbError } = await supabase
+      .from('client_documents')
+      .insert({
+        client_id: clientId,
+        file_name: file.name,
+        file_url: fileUrl,
+        file_type: safeFileType,
+        text_content: extractedText ?? null,
+        is_text_doc: false,
+        uploaded_by: session.user.id,
+      })
+      .select()
+      .single();
+
+    if (dbError) return NextResponse.json({ error: dbError.message }, { status: 500 });
+
+    // Resolve uploader name
+    const { data: am } = await supabase
+      .from('account_managers')
+      .select('name')
+      .eq('user_id', session.user.id)
+      .maybeSingle();
+
+    const { data: client } = await supabase.from('clients').select('name').eq('id', clientId).maybeSingle();
+    sendTeamsAlert({
+      title: 'Document Uploaded',
+      text: `**${file.name}** was uploaded to **${client?.name ?? 'a client'}**`,
+      color: '0078D4',
+      facts: [
+        { name: 'Type', value: safeFileType },
+        { name: 'Uploaded by', value: am?.name ?? 'Team member' },
+      ],
+    });
+
+    return NextResponse.json({
+      document: { ...doc, uploader_name: am?.name ?? 'Team member', _storagePath: storagePath },
+    }, { status: 201 });
+  } catch (err: any) {
+    console.error('[documents/upload] unexpected error:', err);
+    return NextResponse.json({ error: err?.message ?? 'Upload failed' }, { status: 500 });
   }
-
-  const timestamp = Date.now();
-  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-  const path = `${clientId}/${timestamp}_${safeName}`;
-  const bytes = await file.arrayBuffer();
-
-  // Extract text for AI readability (PDF, DOCX, TXT, CSV)
-  const extractedText = await extractText(bytes, file.name);
-
-  const { error: uploadError } = await storageClient.storage
-    .from(BUCKET_NAME)
-    .upload(path, bytes, { contentType: file.type, upsert: false });
-
-  if (uploadError) return NextResponse.json({ error: uploadError.message }, { status: 500 });
-
-  // Generate a signed URL (documents are private, not public)
-  const { data: signed } = await storageClient.storage
-    .from(BUCKET_NAME)
-    .createSignedUrl(path, 60 * 60 * 24 * 7); // 7-day signed URL
-
-  const fileUrl = signed?.signedUrl ?? path;
-
-  // Save metadata to client_documents — include extracted text if available
-  const { data: doc, error: dbError } = await supabase
-    .from('client_documents')
-    .insert({
-      client_id: clientId,
-      file_name: file.name,
-      file_url: fileUrl,
-      file_type: safeFileType,
-      text_content: extractedText ?? null,
-      is_text_doc: false,
-      uploaded_by: session.user.id,
-    })
-    .select()
-    .single();
-
-  if (dbError) return NextResponse.json({ error: dbError.message }, { status: 500 });
-
-  // Resolve uploader name
-  const { data: am } = await supabase
-    .from('account_managers')
-    .select('name')
-    .eq('user_id', session.user.id)
-    .maybeSingle();
-
-  return NextResponse.json({
-    document: { ...doc, uploader_name: am?.name ?? 'Team member', _storagePath: path },
-  }, { status: 201 });
 }

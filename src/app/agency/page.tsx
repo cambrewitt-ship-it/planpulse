@@ -532,6 +532,7 @@ export default function AgencyDashboard() {
                   onClick={() => setSelectedClientId(client.id)}
                   index={idx}
                   accountManagers={accountManagers}
+                  variant="agency"
                 />
               ))}
             </div>
