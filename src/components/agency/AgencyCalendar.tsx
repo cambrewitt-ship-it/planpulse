@@ -10,11 +10,10 @@ import { useRouter } from 'next/navigation';
 import {
   ChevronLeft,
   ChevronRight,
-  CalendarDays,
 } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -363,36 +362,6 @@ function DayDetail({ date, events, clientMap, onClose }: DayDetailProps) {
   );
 }
 
-// ─── Legend ───────────────────────────────────────────────────────────────────
-
-function Legend() {
-  const items = [
-    { icon: '▶', label: 'Channel starts', color: '#10b981' },
-    { icon: '■', label: 'Channel ends', color: '#ef4444' },
-    { icon: '◇', label: 'Health check due', color: '#d97706' },
-    { icon: '⚡', label: 'Action points due', color: '#9333ea' },
-  ];
-  return (
-    <div className="flex flex-wrap gap-3">
-      {items.map((item) => (
-        <div key={item.label} className="flex items-center gap-1.5">
-          <div 
-            className="flex items-center justify-center w-5 h-5 rounded border text-[10px]"
-            style={{ 
-              backgroundColor: `${item.color}1A`,
-              borderColor: `${item.color}40`,
-              color: item.color,
-            }}
-          >
-            {item.icon}
-          </div>
-          <span className="text-xs text-muted-foreground">{item.label}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 // ─── Main component ───────────────────────────────────────────────────────────
 
 interface AgencyCalendarProps {
@@ -465,11 +434,6 @@ export function AgencyCalendar({ clients = [] }: AgencyCalendarProps) {
     else setMonth(m => m + 1);
   };
 
-  const goToday = () => {
-    setYear(now.getFullYear());
-    setMonth(now.getMonth() + 1);
-  };
-
   // Build calendar grid
   const grid = useMemo(() => buildCalendarGrid(year, month), [year, month]);
 
@@ -483,52 +447,17 @@ export function AgencyCalendar({ clients = [] }: AgencyCalendarProps) {
     return map;
   }, [events]);
 
-  const totalEvents = events.length;
-
-  // Label for the "go to today" button
-  const viewLabel = useMemo(() => {
-    const currentYear = now.getFullYear();
-    const currentMonth = now.getMonth() + 1;
-    const monthDiff = (year - currentYear) * 12 + (month - currentMonth);
-    if (monthDiff === 0) return 'This month';
-    if (monthDiff === 1) return 'Next month';
-    if (monthDiff === -1) return 'Last month';
-    if (monthDiff > 1) return `in ${monthDiff} months`;
-    return `${Math.abs(monthDiff)} months ago`;
-  }, [year, month, now]);
-
   return (
     <Card>
       <CardHeader className="pb-3">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <CardTitle className="flex items-center gap-2 text-xl">
-            <CalendarDays className="h-5 w-5" />
-            Agency Calendar
-            {!loading && totalEvents > 0 && (
-              <Badge variant="secondary" className="ml-1">
-                {totalEvents} {totalEvents === 1 ? 'event' : 'events'}
-              </Badge>
-            )}
-          </CardTitle>
-
-          {/* Navigation */}
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={prevMonth} className="h-8 w-8 p-0">
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <span className="text-sm font-semibold min-w-[130px] text-center">
-              {MONTH_NAMES[month - 1]} {year}
-            </span>
-            <Button variant="outline" size="sm" onClick={nextMonth} className="h-8 w-8 p-0">
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-            <Button variant="ghost" size="sm" onClick={goToday} className="h-8 text-xs">
-              {viewLabel}
-            </Button>
-          </div>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={prevMonth} className="h-8 w-8 p-0">
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <Button variant="outline" size="sm" onClick={nextMonth} className="h-8 w-8 p-0">
+            <ChevronRight className="h-4 w-4" />
+          </Button>
         </div>
-
-        <Legend />
       </CardHeader>
 
       <CardContent className="p-0">

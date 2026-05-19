@@ -364,8 +364,8 @@ function parsedToMediaPlanChannels(parsed: ParsedChannel[], gridYear?: number): 
       let startWeek = toNearestMonday(f.startDate);        // snap to nearest Mon (fwd-biased)
       let endMonday = toContainingWeekMonday(f.endDate);   // snap to Monday of containing week
 
-      if (isNaN(startWeek.getTime())) startWeek = new Date(targetYear, 0, 5);
-      if (isNaN(endMonday.getTime())) endMonday = new Date(targetYear, 11, 28);
+      if (isNaN(startWeek.getTime())) startWeek = new Date(currentYear, 0, 5);
+      if (isNaN(endMonday.getTime())) endMonday = new Date(currentYear, 11, 28);
 
       const endWeek = new Date(endMonday);
       endWeek.setDate(endWeek.getDate() + 6);
