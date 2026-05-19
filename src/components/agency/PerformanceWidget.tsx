@@ -120,9 +120,9 @@ function metaActionLabel(key: string): string {
 
 // ── Settings gear icon ────────────────────────────────────────────────────────
 
-function GearIcon() {
+function GearIcon({ size = 12 }: { size?: number }) {
   return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="12" cy="12" r="3" />
       <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
     </svg>
@@ -398,11 +398,13 @@ export function PerformanceWidget({
   onNeedle,
   hideControls = false,
   hideDisplay = false,
+  floatingGear = false,
 }: {
   clientId: string;
   onNeedle?: (data: PerfData | null) => void;
   hideControls?: boolean;
   hideDisplay?: boolean;
+  floatingGear?: boolean;
 }) {
   const [config, setConfig] = useState<WidgetConfig>(() => loadConfig(clientId));
   const [goals, setGoals] = useState<Goal[]>([]);
@@ -561,65 +563,21 @@ export function PerformanceWidget({
 
   return (
     <>
-      {/* Compact display row */}
-      <div style={{ paddingTop: 9, display: 'flex', alignItems: 'center', gap: 5 }}>
-        {/* Colour indicator dot */}
-        <div style={{ width: 6, height: 6, borderRadius: '50%', background: perfData?.color ?? '#B5B0A5', flexShrink: 0 }} />
-
-        {/* Metric + values */}
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'baseline', gap: 4, flexWrap: 'nowrap', overflow: 'hidden' }}>
-          {needsSetup ? (
-            <span style={{ fontSize: 10, color: '#B07030' }}>Set conversion event ↑</span>
-          ) : perfData?.metric ? (
-            <>
-              <span style={{ fontSize: 10, fontWeight: 700, color: '#1C1917', textTransform: 'uppercase', letterSpacing: '0.06em', flexShrink: 0 }}>
-                {perfData.metric}
-              </span>
-              {perfData.hasData ? (
-                <>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: perfData.color, lineHeight: 1, flexShrink: 0 }}>
-                    {perfData.actualLabel}
-                  </span>
-                  <span style={{ fontSize: 10, color: '#B5B0A5', flexShrink: 0 }}>/</span>
-                  <span style={{ fontSize: 10, color: '#8A8578', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {perfData.targetLabel} target
-                  </span>
-                </>
-              ) : (
-                <span style={{ fontSize: 10, color: '#B5B0A5' }}>
-                  {perfData.targetLabel !== '—' ? `— / ${perfData.targetLabel} target` : 'No data'}
-                </span>
-              )}
-            </>
-          ) : (
-            <span style={{ fontSize: 10, color: '#B5B0A5' }}>No goal set — click ⚙ to configure</span>
-          )}
-        </div>
-
-        {/* Source badge + settings button */}
-        {!hideControls && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0 }}>
-            <span style={{ fontSize: 9, color: '#8A8578', padding: '1px 5px', background: '#F0EDE8', borderRadius: 4, lineHeight: '16px', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {sourceBadge}
-            </span>
-            <button
-              onClick={e => { e.stopPropagation(); setShowModal(true); }}
-              title="Configure performance metric"
-              style={{ background: 'none', border: 'none', cursor: 'pointer', color: needsSetup ? '#B07030' : '#B5B0A5', padding: '2px', display: 'flex', alignItems: 'center', lineHeight: 1 }}
-            >
-              <GearIcon />
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Thin performance bar (only when data exists) */}
-      {perfData?.hasData && (
-        <div style={{ marginTop: 5, height: 2, background: '#F0EDE8', borderRadius: 1, overflow: 'hidden' }}>
-          <div style={{
-            height: '100%', width: `${Math.round(perfData.needle * 100)}%`,
-            background: perfData.color, borderRadius: 1, transition: 'width 0.4s',
-          }} />
+      {/* Gear button */}
+      {!hideControls && (
+        <div style={floatingGear ? { position: 'absolute', bottom: 10, left: 10 } : { display: 'flex', justifyContent: 'flex-end' }}>
+          <button
+            onClick={e => { e.stopPropagation(); setShowModal(true); }}
+            title="Configure performance metric"
+            style={{
+              display: 'flex', alignItems: 'center',
+              background: 'none', border: 'none',
+              cursor: 'pointer', padding: 4,
+              color: needsSetup ? '#B07030' : '#6B7280',
+            }}
+          >
+            <GearIcon size={floatingGear ? 18 : 12} />
+          </button>
         </div>
       )}
 

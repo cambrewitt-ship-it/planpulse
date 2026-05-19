@@ -641,7 +641,7 @@ function DraftRow({ text, dateValue, inputRef, onTextChange, onDateChange, onKey
           }}
           onKeyDown={onKeyDown}
           autoFocus={autoFocus}
-          placeholder={hasNotes ? 'New item… (Enter to add)' : 'Start typing…'}
+          placeholder={hasNotes ? 'New item…' : 'Start typing…'}
           style={{
             width: '100%',
             fontSize: 12,

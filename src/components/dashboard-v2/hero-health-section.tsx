@@ -3,13 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import type { HealthScoreResult } from '@/lib/utils/health-score';
 import { PerformanceWidget, type PerfData } from '@/components/agency/PerformanceWidget';
-import {
-  GanttCalendar,
-  type GanttClient,
-  type GanttChannel,
-  type GanttHealthCheck,
-  type GanttSetupPoint,
-} from '@/components/agency/GanttCalendar';
+import { Mail, Share2, Monitor, LayoutTemplate } from 'lucide-react';
 
 interface AccountManager {
   id: string;
@@ -21,15 +15,11 @@ interface AccountManager {
 // Props
 // ---------------------------------------------------------------------------
 
-interface HeroGanttProps {
-  clients: GanttClient[];
-  channels: GanttChannel[];
-  currentMonth: Date;
-  selectedDay: number | null;
-  onDaySelect: (day: number | null) => void;
-  filteredClientIds: string[];
-  healthChecks?: GanttHealthCheck[];
-  setupPoints?: GanttSetupPoint[];
+export interface LiveChannel {
+  id: string;
+  name: string;
+  type: string;
+  platform?: string;
 }
 
 export interface HeroHealthSectionProps {
@@ -64,10 +54,12 @@ export interface HeroHealthSectionProps {
   planStart?: string;
   planEnd?: string;
   isLoadingScore?: boolean;
-  gantt?: HeroGanttProps;
+  liveChannels?: LiveChannel[];
+  onChannelClick?: (channelId: string) => void;
   onAccountManagerChange?: (accountManager: string | null) => void;
   isSavingAccountManager?: boolean;
   accountManagers?: AccountManager[];
+  onConnect?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -99,6 +91,74 @@ const STATUS_COLORS: Record<string, { bg: string; text: string; border: string; 
   'needs-attention': { bg: 'bg-amber-50',  text: 'text-amber-700',   border: 'border-amber-200',   ring: '#f59e0b' },
 };
 
+function getLiveChannelColor(type: string, platform?: string): string {
+  if (type === 'paid_digital') {
+    if (platform === 'meta-ads') return '#1877F2';
+    if (platform === 'google-ads') return '#4285F4';
+    if (platform === 'tiktok-ads') return '#010101';
+    if (platform === 'linkedin-ads') return '#0A66C2';
+    if (platform === 'snapchat-ads') return '#FFFC00';
+    if (platform === 'pinterest-ads') return '#E60023';
+    return '#6366f1';
+  }
+  if (type === 'organic_social') return '#7C3AED';
+  if (type === 'edm') return '#EA580C';
+  if (type === 'ooh') return '#0369A1';
+  if (type === 'display_native') return '#0891B2';
+  return '#9CA3AF';
+}
+
+function ChannelIcon({ type, platform }: { type: string; platform?: string }) {
+  const s = 16;
+  if (type === 'paid_digital') {
+    if (platform === 'meta-ads') return (
+      <svg width={s} height={s} viewBox="0 0 24 24" fill="#1877F2" aria-label="Meta">
+        <path d="M12 2.04C6.5 2.04 2 6.53 2 12.06c0 5 3.66 9.15 8.44 9.9v-7h-2.54v-2.9h2.54V9.85c0-2.51 1.49-3.89 3.78-3.89 1.09 0 2.23.19 2.23.19v2.47h-1.26c-1.24 0-1.63.77-1.63 1.56v1.88h2.78l-.45 2.9h-2.33v7A10 10 0 0 0 22 12.06C22 6.53 17.5 2.04 12 2.04z"/>
+      </svg>
+    );
+    if (platform === 'google-ads') return (
+      <svg width={s} height={s} viewBox="0 0 24 24" aria-label="Google">
+        <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+        <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+        <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/>
+        <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+      </svg>
+    );
+    if (platform === 'tiktok-ads') return (
+      <svg width={s} height={s} viewBox="0 0 24 24" fill="currentColor" aria-label="TikTok">
+        <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-2.88 2.5 2.89 2.89 0 0 1-2.89-2.89 2.89 2.89 0 0 1 2.89-2.89c.28 0 .54.04.79.1V9.01a6.34 6.34 0 0 0-.79-.05 6.34 6.34 0 0 0-6.34 6.34 6.34 6.34 0 0 0 6.34 6.34 6.34 6.34 0 0 0 6.33-6.34V8.69a8.18 8.18 0 0 0 4.78 1.52V6.76a4.85 4.85 0 0 1-1.01-.07z"/>
+      </svg>
+    );
+    if (platform === 'linkedin-ads') return (
+      <svg width={s} height={s} viewBox="0 0 24 24" fill="#0A66C2" aria-label="LinkedIn">
+        <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 0 1-2.063-2.065 2.064 2.064 0 1 1 2.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
+      </svg>
+    );
+    if (platform === 'snapchat-ads') return (
+      <svg width={s} height={s} viewBox="0 0 24 24" fill="#FFFC00" stroke="#555" strokeWidth="0.3" aria-label="Snapchat">
+        <path d="M12.166 2C9.445 2 7.09 3.78 6.558 6.396l-.203 1.038-.98-.528C4.9 6.572 4.397 6.5 4 6.5c-.827 0-1.5.673-1.5 1.5 0 .698.478 1.3 1.14 1.47l1.32.343-.614 1.08C3.55 12.086 3 13.337 3 14.5c0 .828.448 1.5 1 1.5.163 0 .434-.06.734-.197.572-.26 1.302-.59 2.193-.59.48 0 .956.089 1.408.264l.028.073c.37.998 1.24 1.922 2.564 1.922.448 0 .874-.108 1.266-.265.392.157.818.265 1.266.265 1.323 0 2.194-.924 2.564-1.922l.073-.028c.452-.175.928-.264 1.408-.264.891 0 1.62.33 2.193.59.3.137.571.197.734.197.552 0 1-.672 1-1.5 0-1.163-.55-2.414-1.346-3.607l-.614-1.08 1.32-.343C21.522 9.3 22 8.698 22 8c0-.827-.673-1.5-1.5-1.5-.397 0-.9.072-1.375.406l-.98.528-.203-1.038C17.41 3.78 15.055 2 12.334 2h-.168z"/>
+      </svg>
+    );
+    if (platform === 'pinterest-ads') return (
+      <svg width={s} height={s} viewBox="0 0 24 24" fill="#E60023" aria-label="Pinterest">
+        <path d="M12 0C5.373 0 0 5.373 0 12c0 5.084 3.163 9.426 7.627 11.174-.105-.949-.2-2.405.042-3.441.218-.937 1.407-5.965 1.407-5.965s-.359-.719-.359-1.782c0-1.668.967-2.914 2.171-2.914 1.023 0 1.518.769 1.518 1.69 0 1.029-.655 2.568-.994 3.995-.283 1.194.599 2.169 1.777 2.169 2.133 0 3.772-2.249 3.772-5.495 0-2.873-2.064-4.882-5.012-4.882-3.414 0-5.418 2.561-5.418 5.207 0 1.031.397 2.138.893 2.738a.36.36 0 0 1 .083.345l-.333 1.36c-.053.22-.174.267-.402.161-1.499-.698-2.436-2.889-2.436-4.649 0-3.785 2.75-7.262 7.929-7.262 4.163 0 7.398 2.967 7.398 6.931 0 4.136-2.607 7.464-6.227 7.464-1.216 0-2.359-.632-2.75-1.378l-.748 2.853c-.271 1.043-1.002 2.35-1.492 3.146C9.57 23.812 10.763 24 12 24c6.627 0 12-5.373 12-12S18.627 0 12 0z"/>
+      </svg>
+    );
+    if (platform === 'reddit-ads') return (
+      <svg width={s} height={s} viewBox="0 0 24 24" fill="#FF4500" aria-label="Reddit">
+        <path d="M12 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0zm5.01 4.744c.688 0 1.25.561 1.25 1.249a1.25 1.25 0 0 1-2.498.056l-2.597-.547-.8 3.747c1.824.07 3.48.632 4.674 1.488.308-.309.73-.491 1.207-.491.968 0 1.754.786 1.754 1.754 0 .716-.435 1.333-1.01 1.614a3.111 3.111 0 0 1 .042.52c0 2.694-3.13 4.87-7.004 4.87-3.874 0-7.004-2.176-7.004-4.87 0-.183.015-.366.043-.534A1.748 1.748 0 0 1 4.028 12c0-.968.786-1.754 1.754-1.754.463 0 .898.196 1.207.49 1.207-.883 2.878-1.43 4.744-1.487l.885-4.182a.342.342 0 0 1 .14-.197.35.35 0 0 1 .238-.042l2.906.617a1.214 1.214 0 0 1 1.108-.701zM9.25 12C8.561 12 8 12.562 8 13.25c0 .687.561 1.248 1.25 1.248.687 0 1.248-.561 1.248-1.249 0-.688-.561-1.249-1.249-1.249zm5.5 0c-.687 0-1.248.561-1.248 1.25 0 .687.561 1.248 1.249 1.248.688 0 1.249-.561 1.249-1.249 0-.687-.562-1.249-1.25-1.249zm-5.466 3.99a.327.327 0 0 0-.231.094.33.33 0 0 0 0 .463c.842.842 2.484.913 2.961.913.477 0 2.105-.056 2.961-.913a.361.361 0 0 0 .029-.463.33.33 0 0 0-.464 0c-.547.533-1.684.73-2.512.73-.828 0-1.979-.196-2.512-.73a.326.326 0 0 0-.232-.095z"/>
+      </svg>
+    );
+    // Generic paid digital
+    return <LayoutTemplate size={s} color="#6366f1" />;
+  }
+  if (type === 'organic_social') return <Share2 size={s} color="#7C3AED" />;
+  if (type === 'edm') return <Mail size={s} color="#EA580C" />;
+  if (type === 'ooh') return <Monitor size={s} color="#0369A1" />;
+  if (type === 'display_native') return <LayoutTemplate size={s} color="#0891B2" />;
+  return <LayoutTemplate size={s} color="#9CA3AF" />;
+}
+
 function Badge({ status, label }: { status: string; label: string }) {
   const colors = STATUS_COLORS[status] ?? STATUS_COLORS['caution'];
   return (
@@ -113,11 +173,12 @@ function Badge({ status, label }: { status: string; label: string }) {
 // Health Score Ring (SVG conic-gradient via stroke-dasharray trick)
 // ---------------------------------------------------------------------------
 
-function HealthRing({ score, status, perf, loading }: {
+function HealthRing({ score, status, perf, loading, scale = 1 }: {
   score: number;
   status: HealthScoreResult['status'];
   perf?: PerfData | null;
   loading?: boolean;
+  scale?: number;
 }) {
   const W = 144, H = 96;
   const sw = 10;
@@ -128,7 +189,7 @@ function HealthRing({ score, status, perf, loading }: {
   if (loading) {
     const W = 144, H = 96, sw = 10, r = 62, cx = 72, cy = 70;
     return (
-      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ fontFamily: "'DM Sans', system-ui, sans-serif", display: 'block' }}>
+      <svg width={W * scale} height={H * scale} viewBox={`0 0 ${W} ${H}`} style={{ fontFamily: "'DM Sans', system-ui, sans-serif", display: 'block' }}>
         <path d={`M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}`} fill="none" stroke="#e5e7eb" strokeWidth={sw} strokeLinecap="round" />
         <line x1={cx} y1={cy} x2={cx - r + sw / 2 + 4} y2={cy} stroke="#d1d5db" strokeWidth={2} strokeLinecap="round" />
         <circle cx={cx} cy={cy} r={4.5} fill="#d1d5db" />
@@ -166,7 +227,7 @@ function HealthRing({ score, status, perf, loading }: {
 
   return (
     <svg
-      width={W} height={H}
+      width={W * scale} height={H * scale}
       viewBox={`0 0 ${W} ${H}`}
       style={{ fontFamily: "'DM Sans', system-ui, sans-serif", display: 'block' }}
     >
@@ -250,6 +311,255 @@ function MetricCard({ title, value, sub, badge, progress, children }: MetricCard
 }
 
 // ---------------------------------------------------------------------------
+// Perf Sparkline — MTD running metric time series for the hero card
+// ---------------------------------------------------------------------------
+
+function PerfSparkline({ clientId, perf, onConnect }: { clientId: string; perf: PerfData | null; onConnect?: () => void }) {
+  const [series, setSeries] = useState<Array<{ date: string; value: number }>>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!perf?.metric) return;
+    let config: { platform?: string; campaignIds?: string[]; metaActionType?: string } = {};
+    try {
+      const raw = localStorage.getItem(`perf_widget_${clientId}`);
+      if (raw) config = JSON.parse(raw);
+    } catch {}
+
+    const params = new URLSearchParams();
+    params.set('metric', perf.metric);
+    if (config.platform) params.set('platforms', config.platform);
+    if (config.campaignIds?.length) params.set('campaignIds', config.campaignIds.join(','));
+    if (config.metaActionType) params.set('metaActionType', config.metaActionType);
+
+    setLoading(true);
+    fetch(`/api/clients/${clientId}/perf-series?${params}`)
+      .then(r => r.json())
+      .then(data => { if (Array.isArray(data.series)) setSeries(data.series); })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [clientId, perf?.metric]);
+
+  // ── Layout constants (shared across all render states) ──────────────────────
+  const W = 300, H = 100;
+  const PL = 38, PR = 12, PT = 8, PB = 22;
+  const pw = W - PL - PR;
+  const ph = H - PT - PB;
+  const bottom = PT + ph;
+  const metric = perf?.metric ?? '';
+
+  // Skeleton SVG shell — axes + 10 Y gridlines + 30 X ticks
+  const yGridLines = Array.from({ length: 10 }, (_, i) => PT + (i / 9) * ph);
+  const xTicks = Array.from({ length: 30 }, (_, i) => PL + (i / 29) * pw);
+  const shellSvg = (
+    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
+      <line x1={PL} y1={PT} x2={PL} y2={bottom} stroke="#E5E7EB" strokeWidth={0.75} />
+      <line x1={PL} y1={bottom} x2={PL + pw} y2={bottom} stroke="#E5E7EB" strokeWidth={0.75} />
+      {yGridLines.map((y, i) => (
+        <line key={`y${i}`} x1={PL} y1={y} x2={PL + pw} y2={y} stroke="#F3F4F6" strokeWidth={0.5} />
+      ))}
+      {xTicks.map((x, i) => (
+        <line key={`x${i}`} x1={x} y1={bottom} x2={x} y2={bottom + 3} stroke="#E5E7EB" strokeWidth={0.75} />
+      ))}
+    </svg>
+  );
+
+  if (loading) {
+    return (
+      <div className="w-full">
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-xs text-gray-300 uppercase tracking-wide font-medium">{metric || '—'} · 30 day</span>
+        </div>
+        <div className="relative">
+          {shellSvg}
+          <div className="absolute inset-0 bg-gray-50/60 animate-pulse rounded" />
+        </div>
+      </div>
+    );
+  }
+
+  const cleanSeries = series.filter(s => s.value != null && isFinite(s.value) && !isNaN(s.value));
+  const noData = !perf?.hasData || cleanSeries.length < 1;
+
+  if (noData) {
+    return (
+      <div className="w-full">
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-xs text-gray-300 uppercase tracking-wide font-medium">Performance · 30 day</span>
+        </div>
+        <div className="relative">
+          {shellSvg}
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
+            <span className="text-[11px] font-bold tracking-widest text-gray-400 uppercase">No Data</span>
+            <button
+              onClick={() => onConnect ? onConnect() : (window.location.href = '/settings/connections')}
+              className="text-[10px] font-semibold px-3 py-1 rounded-full bg-gray-800 text-white hover:bg-gray-600 transition-colors cursor-pointer"
+            >
+              Connect
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const target = (perf.targetValue != null && isFinite(perf.targetValue)) ? perf.targetValue : null;
+  const mk = metric.toLowerCase();
+  const values = cleanSeries.map(s => s.value);
+  const dataMin = Math.min(...values);
+  const dataMax = Math.max(...values);
+
+  // Y scale anchored at target (target = vertical midpoint).
+  // Symmetric headroom: ±max(deviation_from_target × 1.25, target × 10%, 1).
+  // Falls back to a data-padded range when no target.
+  let chartMin: number, chartMax: number;
+  if (target !== null) {
+    const maxDev = Math.max(Math.abs(dataMin - target), Math.abs(dataMax - target));
+    const pad = Math.max(maxDev * 1.25, Math.abs(target) * 0.1, 1);
+    chartMin = target - pad;
+    chartMax = target + pad;
+  } else {
+    const r = (dataMax - dataMin) || Math.abs(dataMax) * 0.1 || 1;
+    chartMin = dataMin - r * 0.15;
+    chartMax = dataMax + r * 0.15;
+  }
+  const span = chartMax - chartMin || 1;
+
+  const toX = (i: number) =>
+    PL + (cleanSeries.length === 1 ? pw / 2 : (i / (cleanSeries.length - 1)) * pw);
+
+  // Standard convention: high values at top, low values at bottom.
+  const toY = (v: number) => {
+    const ratio = (chartMax - v) / span;
+    return PT + Math.max(0, Math.min(1, ratio)) * ph;
+  };
+
+  const pts = values.map((v, i) => ({ x: toX(i), y: toY(v) }));
+  const polyPts = pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+
+  const areaPath = [
+    `M ${pts[0].x.toFixed(1)} ${bottom}`,
+    `L ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`,
+    ...pts.slice(1).map(p => `L ${p.x.toFixed(1)} ${p.y.toFixed(1)}`),
+    `L ${pts[pts.length - 1].x.toFixed(1)} ${bottom}`,
+    'Z',
+  ].join(' ');
+
+  // Target is always at the vertical midpoint of the chart.
+  const targetY = target !== null ? PT + ph / 2 : null;
+
+  function fmtY(v: number): string {
+    if (/ctr/.test(mk)) return `${v.toFixed(1)}%`;
+    if (/cpa|cpc|cpm|cpl/.test(mk)) return v >= 100 ? `$${Math.round(v)}` : `$${v.toFixed(1)}`;
+    return v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(Math.round(v));
+  }
+
+  // Y axis: top tick = high value, bottom tick = low value (standard convention).
+  const yTicks = [
+    { y: PT,      label: fmtY(chartMax) },
+    { y: PT + ph, label: fmtY(chartMin) },
+  ];
+
+  let lineColor = perf.color ?? '#6366f1';
+  if (perf.trend24h) {
+    const { pctChange, improving } = perf.trend24h;
+    if (Math.abs(pctChange) > 3) lineColor = improving ? '#4A7C59' : '#A0442A';
+    else lineColor = '#B07030';
+  }
+
+  const gradId = `sg_${clientId}`;
+  const clipId = `sc_${clientId}`;
+
+  return (
+    <div className="w-full">
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-xs text-gray-400 uppercase tracking-wide font-medium">{metric} · 30 day</span>
+        {perf.trend24h && (
+          <span className={`text-xs font-semibold ${perf.trend24h.improving ? 'text-emerald-600' : 'text-red-600'}`}>
+            {perf.trend24h.pctChange < 0 ? '↓' : '↑'}{Math.abs(perf.trend24h.pctChange).toFixed(1)}% 24h
+          </span>
+        )}
+      </div>
+      <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
+        <defs>
+          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"   stopColor={lineColor} stopOpacity={0.2} />
+            <stop offset="100%" stopColor={lineColor} stopOpacity={0.01} />
+          </linearGradient>
+          <clipPath id={clipId}>
+            <rect x={PL} y={PT} width={pw} height={ph} />
+          </clipPath>
+        </defs>
+
+        {/* Axes */}
+        <line x1={PL} y1={PT} x2={PL} y2={bottom} stroke="#E5E7EB" strokeWidth={0.75} />
+        <line x1={PL} y1={bottom} x2={PL + pw} y2={bottom} stroke="#E5E7EB" strokeWidth={0.75} />
+
+        {/* Y axis: top + bottom ticks with short value labels */}
+        {yTicks.map(({ y, label }, i) => (
+          <g key={i}>
+            <line x1={PL - 3} y1={y} x2={PL} y2={y} stroke="#D1D5DB" strokeWidth={0.75} />
+            <text x={PL - 5} y={y + 4} textAnchor="end" fontSize={8} fill="#9CA3AF"
+              fontFamily="system-ui, sans-serif">{label}</text>
+          </g>
+        ))}
+
+        {/* Subtle horizontal grid lines */}
+        {[PT, PT + ph / 2, bottom].map((y, i) => (
+          <line key={i} x1={PL} y1={y} x2={PL + pw} y2={y} stroke="#F3F4F6" strokeWidth={0.5} />
+        ))}
+
+        {/* Target dashed line — always at vertical midpoint */}
+        {targetY !== null && (
+          <>
+            <line x1={PL} y1={targetY} x2={PL + pw} y2={targetY}
+              stroke="#9CA3AF" strokeWidth={1} strokeDasharray="3 3" />
+            <text
+              x={PL + pw}
+              y={targetY - 3}
+              textAnchor="end"
+              fontSize={7.5}
+              fill="#9CA3AF"
+              fontFamily="system-ui, sans-serif"
+            >
+              Target {target !== null ? fmtY(target) : ''}
+            </text>
+          </>
+        )}
+
+        {/* X axis ticks + date number labels (every 5th point to avoid crowding) */}
+        {cleanSeries.map((s, i) => {
+          const x = toX(i);
+          const d = new Date(`${s.date}T12:00:00`);
+          const label = isNaN(d.getTime()) ? '' : String(d.getDate());
+          const showLabel = i === 0 || i === cleanSeries.length - 1 || i % 5 === 0;
+          return (
+            <g key={i}>
+              <line x1={x} y1={bottom} x2={x} y2={bottom + 3} stroke="#D1D5DB" strokeWidth={0.75} />
+              {showLabel && (
+                <text x={x} y={bottom + 14} textAnchor="middle" fontSize={8} fill="#9CA3AF"
+                  fontFamily="system-ui, sans-serif">{label}</text>
+              )}
+            </g>
+          );
+        })}
+
+        {/* Area fill */}
+        <path d={areaPath} fill={`url(#${gradId})`} clipPath={`url(#${clipId})`} />
+
+        {/* Line */}
+        <polyline points={polyPts} fill="none" stroke={lineColor}
+          strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
+          clipPath={`url(#${clipId})`} />
+
+        {/* Latest value dot */}
+        <circle cx={pts[pts.length - 1].x} cy={pts[pts.length - 1].y} r={3} fill={lineColor} />
+      </svg>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main Component
 // ---------------------------------------------------------------------------
 
@@ -268,10 +578,12 @@ export default function HeroHealthSection({
   planStart,
   planEnd,
   isLoadingScore = false,
-  gantt,
+  liveChannels,
+  onChannelClick,
   onAccountManagerChange,
   isSavingAccountManager = false,
   accountManagers = [],
+  onConnect,
 }: HeroHealthSectionProps) {
   const [showAmMenu, setShowAmMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -316,14 +628,14 @@ export default function HeroHealthSection({
 
   const urgentTotal = actionItemsCount.urgent + actionItemsCount.thisWeek;
 
-  const hasGantt = !!(gantt && gantt.clients.length > 0 && gantt.channels.length > 0);
+  const hasLiveChannels = !!(liveChannels && liveChannels.length > 0);
 
   return (
     <div className="space-y-5">
-      {/* ── Top row: [client identity + spend + speedometer] | Gantt ── */}
-      <div className={`bg-white rounded-xl border border-gray-200 px-7 py-6 flex flex-col gap-7 xl:grid ${hasGantt ? 'xl:grid-cols-[minmax(0,1.8fr)_minmax(0,2.4fr)]' : ''} xl:items-start`}>
+      {/* ── Top row: [client identity + spend + speedometer] | Live Channels ── */}
+      <div className="bg-white rounded-xl border border-gray-200 px-7 py-6 grid grid-cols-1 xl:grid-cols-[5fr_5fr_2fr] gap-6 xl:items-stretch">
         {/* Col 1: avatar + name/notes + spend row (spend text + speedometer inline) */}
-        <div className="flex items-start gap-4 min-w-0 order-1">
+        <div className="flex items-start gap-4 min-w-0">
           <div className="flex flex-col items-center gap-3 flex-shrink-0">
             {client.logo_url ? (
               <img
@@ -399,12 +711,10 @@ export default function HeroHealthSection({
                 <span className="text-sm font-bold text-blue-600">{daysUntilStart} day{daysUntilStart !== 1 ? 's' : ''}</span>
               </div>
             ) : null}
-            {/* Spend + speedometer side-by-side */}
-            <div className="mt-3 flex items-center gap-6" style={{ display: completionPercentage <= 0 ? 'none' : 'flex' }}>
-              <div className="flex-1 space-y-1.5">
+            {/* Spend */}
+            <div className="mt-3 space-y-1.5" style={{ display: completionPercentage <= 0 ? 'none' : 'block' }}>
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Spend</span>
-                  <Badge status={pacingStatus.status} label={pacingLabel} />
                 </div>
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-2xl font-bold text-gray-900">{formatCurrency(currentSpend)}</span>
@@ -427,10 +737,8 @@ export default function HeroHealthSection({
                     <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Plan Timeline</span>
                     <span className="text-xs text-gray-400">
                       {completionPercentage >= 100
-                        ? 'Completed'
-                        : daysRemaining === 0
-                          ? 'Ends today'
-                          : `${daysRemaining}d remaining`}
+                        ? '100% completed'
+                        : `${formatPct(completionPercentage, 0)} completed`}
                     </span>
                   </div>
                   <div className="h-1.5 w-full rounded-full bg-gray-100 overflow-hidden">
@@ -453,45 +761,50 @@ export default function HeroHealthSection({
                     </div>
                   )}
                 </div>
-              </div>
-              <div className="flex-shrink-0 flex flex-col items-center gap-1">
-                <HealthRing score={healthScore.overallScore} status={healthScore.status} perf={perfData} loading={isLoadingScore} />
-                {perfData?.trend && (
-                  <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border ${
-                    perfData.trend.improving
-                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                      : 'bg-red-50 text-red-700 border-red-200'
-                  }`}>
-                    <span>{perfData.trend.pctChange < 0 ? '↓' : '↑'}</span>
-                    <span>{Math.abs(perfData.trend.pctChange).toFixed(1)}%</span>
-                    <span className="font-normal opacity-70">7d</span>
-                  </div>
-                )}
-              </div>
             </div>
 
-            {/* Performance metric widget — below spend graph */}
-            <div className="mt-1 border-t border-gray-100 pt-3">
-              <PerformanceWidget clientId={clientId} onNeedle={setPerfData} />
+          </div>
+        </div>
+
+        {/* Col 2: CPA/CTR Sparkline + metric widget + speedometer */}
+        <div className="min-w-0">
+          <div className="relative w-full border border-gray-100 rounded-lg bg-gray-50/80 px-4 py-4">
+            <PerformanceWidget clientId={clientId} onNeedle={setPerfData} floatingGear />
+            <div className="mt-3">
+              <PerfSparkline clientId={clientId} perf={perfData} onConnect={onConnect} />
+            </div>
+            <div className="absolute top-4 right-8 pointer-events-none flex flex-col items-center">
+              <HealthRing score={healthScore.overallScore} status={healthScore.status} perf={perfData} loading={isLoadingScore} scale={0.6} />
+              {perfData?.hasData && (
+                <p className="text-[10px] font-bold text-center leading-tight mt-0.5" style={{ color: perfData.color }}>
+                  {perfData.metric}
+                </p>
+              )}
             </div>
           </div>
         </div>
 
-        {/* Col 2: Gantt calendar (only when data exists) */}
-        {hasGantt && (
-          <div className="w-full min-w-0 order-2">
-            <div className="w-full max-h-64 overflow-x-auto overflow-y-hidden border border-gray-100 rounded-lg bg-gray-50/80 px-3 py-2">
-              <GanttCalendar
-                clients={gantt!.clients}
-                channels={gantt!.channels}
-                healthChecks={gantt!.healthChecks ?? []}
-                setupPoints={gantt!.setupPoints ?? []}
-                pointEvents={[]}
-                selectedDay={gantt!.selectedDay}
-                onDaySelect={gantt!.onDaySelect}
-                filteredClientIds={gantt!.filteredClientIds}
-                currentMonth={gantt!.currentMonth}
-              />
+        {/* Col 3: Live Channels — absolutely positioned so it never contributes to row height */}
+        {hasLiveChannels && (
+          <div className="min-w-0 relative">
+            <div className="absolute inset-0 border border-gray-100 rounded-lg bg-gray-50/80 px-4 pt-4 pb-0 flex flex-col overflow-hidden">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3 flex-shrink-0">Live Channels</p>
+              <div className="relative flex-1 min-h-0">
+                <div className="flex flex-col gap-2 overflow-y-auto h-full pr-0.5">
+                  {liveChannels!.map(ch => (
+                    <button
+                      key={ch.id}
+                      onClick={() => onChannelClick?.(ch.id)}
+                      className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-white hover:bg-blue-50 hover:border-blue-200 transition-all text-sm font-medium text-gray-700 cursor-pointer flex-shrink-0"
+                    >
+                      <span className="flex-shrink-0">
+                        <ChannelIcon type={ch.type} platform={ch.platform} />
+                      </span>
+                      {ch.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
         )}

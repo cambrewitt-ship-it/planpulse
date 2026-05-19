@@ -94,7 +94,7 @@ type Column = { label: string; items: ActionPoint[] };
 
 export default function ClientActionPointsList({ actionPoints, onToggle }: Props) {
   const [filterMode, setFilterMode] = useState<'priority' | 'channel'>('priority');
-  const [viewMode, setViewMode] = useState<'kanban' | 'list' | 'gantt'>('kanban');
+  const [viewMode, setViewMode] = useState<'kanban' | 'list' | 'gantt'>('gantt');
   const [listCompletedOpen, setListCompletedOpen] = useState(false);
 
   const incomplete = useMemo(() => actionPoints.filter(ap => !ap.completed), [actionPoints]);
@@ -154,6 +154,7 @@ export default function ClientActionPointsList({ actionPoints, onToggle }: Props
       border: '0.5px solid #E8E4DC',
       overflow: 'hidden',
       fontFamily: sansFont,
+      height: '100%',
     }}>
       {/* Header */}
       <div style={{ padding: '10px 13px 8px', borderBottom: '0.5px solid #E8E4DC', flexShrink: 0 }}>
@@ -222,7 +223,7 @@ export default function ClientActionPointsList({ actionPoints, onToggle }: Props
       {/* Horizontally scrollable kanban */}
       {viewMode === 'kanban' ? (
       <div style={{
-        minHeight: 300,
+        flex: 1,
         overflowX: 'auto',
         overflowY: 'hidden',
         display: 'flex',
@@ -326,7 +327,7 @@ export default function ClientActionPointsList({ actionPoints, onToggle }: Props
       </div>
       ) : viewMode === 'list' ? (
         /* List View */
-        <div style={{ overflowX: 'hidden', padding: '8px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '8px', display: 'flex', flexDirection: 'column', gap: 4 }}>
           {actionPoints.length === 0 ? (
             <div style={{ padding: '12px 10px', fontSize: 10, color: '#C5C0B8', fontStyle: 'italic', textAlign: 'center' }}>
               No action points
@@ -346,7 +347,7 @@ export default function ClientActionPointsList({ actionPoints, onToggle }: Props
                   <ListActionPointRow key={item.id} item={item} onToggle={onToggle} />
                 ))}
                 {listCompleted.length > 0 && (
-                  <div style={{ marginTop: 4 }}>
+                  <div style={{ marginTop: 4, flexShrink: 0 }}>
                     <button
                       onClick={() => setListCompletedOpen(v => !v)}
                       style={{
@@ -412,6 +413,7 @@ function ListActionPointRow({ item, onToggle }: { item: ActionPoint; onToggle: (
       padding: '8px 10px',
       opacity: effectiveCompleted || isCompleting ? 0.5 : 1,
       transition: 'opacity 0.4s',
+      flexShrink: 0,
     }}>
       {/* Circle checkbox */}
       <div
@@ -497,7 +499,7 @@ function GanttViewActionPoints({ actionPoints, onToggle }: { actionPoints: Actio
   const endDay = dueDays.length ? Math.max(14, Math.max(...dueDays) + 3) : 14;
   const dayCount = endDay - startDay + 1;
   const DAY_W = 28;
-  const ROW_H = 32;
+  const ROW_H = 48;
   const totalW = dayCount * DAY_W;
 
   // Group items by due date
@@ -532,8 +534,8 @@ function GanttViewActionPoints({ actionPoints, onToggle }: { actionPoints: Actio
   }, [dayCount, startDay]);
 
   return (
-    <div style={{ minHeight: 300, overflow: 'hidden', fontFamily: sansFont, display: 'flex', flexDirection: 'column' }}>
-      <div style={{ overflowX: 'auto', flex: 1 }}>
+    <div style={{ flex: 1, overflow: 'hidden', fontFamily: sansFont, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ overflowX: 'auto', overflowY: 'auto', flex: 1 }}>
         <div style={{ minWidth: totalW }}>
           {/* Month row */}
           <div style={{ display: 'flex', position: 'sticky', top: 0, zIndex: 3, background: '#FDFCF8' }}>
@@ -604,17 +606,17 @@ function GanttViewActionPoints({ actionPoints, onToggle }: { actionPoints: Actio
                   {/* Checkbox */}
                   <GanttItemCheckbox item={card} onToggle={onToggle} />
                   {/* Dot + text */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer', maxWidth: 160, paddingRight: 4 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', maxWidth: 220, paddingRight: 4 }}>
                     <div style={{
-                      width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
-                      background: dotColor, boxShadow: `0 0 0 2px ${dotColor}22`,
+                      width: 10, height: 10, borderRadius: '50%', flexShrink: 0,
+                      background: dotColor, boxShadow: `0 0 0 3px ${dotColor}22`,
                     }} />
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 9, lineHeight: 1.2, color: '#1C1917', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: 500 }}>
+                      <div style={{ fontSize: 11, lineHeight: 1.3, color: '#1C1917', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: 500 }}>
                         {card.text}
                       </div>
                       {card.channel_type && (
-                        <div style={{ fontSize: 7, color: '#B5B0A5', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        <div style={{ fontSize: 9, color: '#B5B0A5', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 2 }}>
                           {card.channel_type}
                         </div>
                       )}

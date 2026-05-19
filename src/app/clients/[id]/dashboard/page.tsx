@@ -55,7 +55,7 @@ import ClientActionPointsList from '@/components/dashboard-v2/client-action-poin
 import ChannelPerformanceCard from '@/components/dashboard-v2/channel-performance-card';
 import dynamic from 'next/dynamic';
 const InvoiceModal = dynamic(() => import('@/components/dashboard-v2/invoice-modal').then(m => m.InvoiceModal), { ssr: false });
-import type { GanttClient, GanttChannel } from '@/components/agency/GanttCalendar';
+import { GanttCalendar, type GanttClient, type GanttChannel } from '@/components/agency/GanttCalendar';
 import { FullscreenGanttView, type GanttAPMarker } from '@/components/agency/FullscreenGanttView';
 import { ClientIntelTab } from '@/components/dashboard-v2/client-intel-tab';
 
@@ -147,9 +147,11 @@ export default function DashboardV2() {
   const [isEditingClientNotes, setIsEditingClientNotes] = useState(false);
   const [editingClientNotes, setEditingClientNotes] = useState('');
   const [notesCollapsed, setNotesCollapsed] = useState(false);
+  const [notesActiveTab, setNotesActiveTab] = useState<'notes' | 'todo'>('notes');
   const [noteFiles, setNoteFiles] = useState<{ id: string; name: string }[]>([{ id: 'default', name: 'General' }]);
   const [activeFileId, setActiveFileId] = useState<string>('default');
   const [showFilesMenu, setShowFilesMenu] = useState(false);
+  const [showTodoMenu, setShowTodoMenu] = useState(false);
   const [newFileName, setNewFileName] = useState('');
   const [isSavingClientNotes, setIsSavingClientNotes] = useState(false);
   const [isSavingAccountManager, setIsSavingAccountManager] = useState(false);
@@ -1271,34 +1273,12 @@ export default function DashboardV2() {
       performanceStatus,
       planStart: campaignDates.start.toISOString().slice(0, 10),
       planEnd: campaignDates.end.toISOString().slice(0, 10),
-      gantt: {
-        clients: ganttClients,
-        channels: ganttChannels,
-        currentMonth: selectedMonth,
-        selectedDay: ganttSelectedDay,
-        onDaySelect: setGanttSelectedDay,
-        filteredClientIds: clientId ? [clientId] : [],
-        healthChecks: allActionPoints
-          .filter((ap: any) => ap.category === 'HEALTH CHECK' && ap.channel_type && !ap.completed)
-          .map((ap: any) => {
-            const due = computeGanttDueDate(ap);
-            return due ? { client_id: clientId, channel_label: ap.channel_type, due_date: due } : null;
-          })
-          .filter(Boolean) as { client_id: string; channel_label: string; due_date: string }[],
-        setupPoints: allActionPoints
-          .filter((ap: any) => ap.category === 'SET UP' && ap.channel_type && !ap.completed)
-          .map((ap: any) => {
-            const due = computeGanttDueDate(ap);
-            return due ? { client_id: clientId, channel_label: ap.channel_type, due_date: due } : null;
-          })
-          .filter(Boolean) as { client_id: string; channel_label: string; due_date: string }[],
-      },
       isLoadingScore: !healthScoreReady,
       onAccountManagerChange: handleAccountManagerChange,
       isSavingAccountManager,
       accountManagers,
     };
-  }, [client, clientId, adjustedHealthScore, campaignDates, totalActualSpend, plannedBudget, actionPointsStats, allActionPoints, ganttClients, ganttChannels, selectedMonth, ganttSelectedDay, setGanttSelectedDay, handleAccountManagerChange, isSavingAccountManager, accountManagers, perfHealthResult, computeGanttDueDate]);
+  }, [client, clientId, adjustedHealthScore, campaignDates, totalActualSpend, plannedBudget, actionPointsStats, handleAccountManagerChange, isSavingAccountManager, accountManagers, perfHealthResult]);
 
   // Calculate current week commencing (Monday of current week)
   const currentWeekCommencing = useMemo(() => {
@@ -1544,6 +1524,28 @@ export default function DashboardV2() {
       };
     }).sort((a, b) => channelSortOrder(a) - channelSortOrder(b));
   }, [mediaPlanBuilderChannels, channelMonthSpendData, spendApiErrors, selectedMonth, commission, analyticsDateRange.startDate, analyticsDateRange.endDate]);
+
+  const liveChannels = useMemo(() =>
+    channelCards.map((ch: any, idx: number) => {
+      if (ch.type === 'organic_social') return { id: `channel-card-organic-${ch.channel.id}`, name: ch.channel.channelName ?? 'Organic Social', type: ch.type };
+      if (ch.type === 'edm') return { id: `channel-card-edm-${ch.channel.id}`, name: ch.channel.channelName ?? 'EDM', type: ch.type };
+      if (ch.type === 'ooh') return { id: `channel-card-ooh-${ch.channel.id}`, name: ch.channel.channelName ?? 'OOH', type: ch.type };
+      if (ch.type === 'display_native') return { id: `channel-card-display-native-${ch.channel.id}`, name: ch.channel.channelName ?? 'Display & Native', type: ch.type };
+      if (ch.type === 'other') return { id: `channel-card-other-${ch.channel.id}`, name: ch.channel.channelName ?? 'Other', type: ch.type };
+      return { id: `channel-card-paid-${idx}-${ch.name}`, name: ch.name, type: ch.type, platform: ch.platform };
+    })
+  , [channelCards]);
+
+  const handleChannelClick = useCallback((channelId: string) => {
+    if (viewMode !== 'overview') {
+      setViewMode('overview');
+      setTimeout(() => {
+        document.getElementById(channelId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 150);
+    } else {
+      document.getElementById(channelId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [viewMode]);
 
   // ── Calculate health score whenever the relevant inputs change ────────────
   useEffect(() => {
@@ -1897,7 +1899,7 @@ export default function DashboardV2() {
                 </div>
               </div>
             ) : heroProps ? (
-              <HeroHealthSection {...heroProps} />
+              <HeroHealthSection {...heroProps} liveChannels={liveChannels} onChannelClick={handleChannelClick} onConnect={() => setViewMode('admin')} />
             ) : (
               /* Edge case: no media plan channels set up yet */
               <div className="bg-white rounded-xl border border-gray-200 p-8 text-center">
@@ -2002,24 +2004,27 @@ export default function DashboardV2() {
             {/* ── Overview: Notes + Action Points + Channels ── */}
             {viewMode === 'overview' && (
               <>
-                {/* Notes (left, collapsible) + Action Points list (right) */}
-                <div style={{ display: 'flex', gap: 16, alignItems: 'stretch' }}>
-                  {/* Notes panel */}
+                {/* Top row: [Notes + To Do combined card] | Gantt */}
+                <div style={{ display: 'flex', gap: 16, alignItems: 'start' }}>
+                  {/* Combined Notes + To Do card */}
                   <div style={{
-                    flexShrink: 0,
-                    width: notesCollapsed ? 48 : 460,
-                    transition: 'width 0.2s ease',
-                    position: 'relative',
+                    flex: 1,
+                    minWidth: 0,
+                    height: 240,
+                    maxHeight: 240,
                     overflow: 'hidden',
                     display: 'flex',
                     borderRadius: 12,
+                    transition: 'width 0.2s ease',
+                    position: 'relative',
+                    ...(notesCollapsed ? { width: 48, flexShrink: 0, flex: 'none' } : {}),
                   }}>
                     {notesCollapsed ? (
                       /* Collapsed pill */
                       <div
                         onClick={() => setNotesCollapsed(false)}
                         style={{
-                          height: '100%', width: '100%',
+                          height: 240, width: '100%',
                           background: '#1C1917',
                           borderRadius: 12,
                           cursor: 'pointer',
@@ -2029,68 +2034,88 @@ export default function DashboardV2() {
                           justifyContent: 'center',
                           gap: 6,
                         }}
-                        title="Expand notes"
+                        title="Expand"
                       >
-                        <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', letterSpacing: '0.1em', writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>Notes</span>
+                        <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', letterSpacing: '0.1em', writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>
+                          {notesActiveTab === 'notes' ? 'Notes' : 'To Do'}
+                        </span>
                         <span style={{ fontSize: 14, color: 'rgba(255,255,255,0.4)' }}>›</span>
                       </div>
                     ) : (
-                      <div style={{ display: 'flex', width: '100%', height: '100%', position: 'relative', borderRadius: 12, overflow: 'hidden' }}>
-                        {/* Dark textured left spine */}
-                        <div style={{
-                          width: 36,
-                          flexShrink: 0,
-                          background: '#1C1917',
-                          backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.035) 1px, transparent 1px)',
-                          backgroundSize: '5px 5px',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          alignItems: 'center',
-                          paddingTop: 10,
-                          gap: 10,
-                          position: 'relative',
-                          zIndex: 2,
-                        }}>
-                          {/* Hamburger button */}
-                          <button
-                            onClick={() => setShowFilesMenu(v => !v)}
-                            title="Files"
-                            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 0', display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'center' }}
+                      <div style={{ display: 'flex', width: '100%', height: 240, position: 'relative', borderRadius: 12, gap: 4, overflow: 'hidden' }}>
+                        {/* Spine wrapper — fixed 76px, both spines animate inside */}
+                        <div style={{ width: 76, flexShrink: 0, position: 'relative', height: '100%' }}>
+                          {/* Notes spine */}
+                          <div
+                            onClick={() => { setNotesActiveTab('notes'); setShowFilesMenu(false); setShowTodoMenu(false); }}
+                            style={{
+                              position: 'absolute', top: 0, bottom: 0,
+                              left: notesActiveTab === 'notes' ? 40 : 0,
+                              transition: 'left 0.28s cubic-bezier(0.4, 0, 0.2, 1), background 0.15s',
+                              width: 36,
+                              background: notesActiveTab === 'notes' ? '#1C1917' : '#2A2622',
+                              backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.035) 1px, transparent 1px)',
+                              backgroundSize: '5px 5px',
+                              display: 'flex', flexDirection: 'column', alignItems: 'center',
+                              paddingTop: 10, gap: 8,
+                              zIndex: notesActiveTab === 'notes' ? 2 : 1,
+                              cursor: notesActiveTab === 'notes' ? 'default' : 'pointer',
+                              borderRadius: '12px 0 0 12px',
+                            }}
                           >
-                            {[0,1,2].map(i => (
-                              <span key={i} style={{ width: 14, height: 1.5, background: showFilesMenu ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.5)', display: 'block', borderRadius: 1, transition: 'background 0.15s' }} />
-                            ))}
-                          </button>
-                          {/* Active file name — vertical */}
-                          <span style={{
-                            fontSize: 11,
-                            fontWeight: 700,
-                            color: '#FFFFFF',
-                            textTransform: 'uppercase',
-                            letterSpacing: '0.13em',
-                            writingMode: 'vertical-rl',
-                            transform: 'rotate(180deg)',
-                            marginTop: 2,
-                            maxHeight: 100,
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                          }}>
-                            {noteFiles.find(f => f.id === activeFileId)?.name ?? 'Notes'}
-                          </span>
-                          {/* Collapse arrow at bottom */}
-                          <button
-                            onClick={() => setNotesCollapsed(true)}
-                            title="Collapse notes"
-                            style={{ marginTop: 'auto', marginBottom: 8, background: 'transparent', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.5)', fontSize: 16, lineHeight: 1, padding: 2 }}
-                          >‹</button>
-                        </div>
+                            <button
+                              onClick={e => { e.stopPropagation(); setNotesActiveTab('notes'); setShowFilesMenu(v => !v); setShowTodoMenu(false); }}
+                              title="Files"
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 0', display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'center', flexShrink: 0 }}
+                            >
+                              {[0,1,2].map(i => (
+                                <span key={i} style={{ width: 14, height: 1.5, background: showFilesMenu && notesActiveTab === 'notes' ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.5)', display: 'block', borderRadius: 1, transition: 'background 0.15s' }} />
+                              ))}
+                            </button>
+                            <span style={{ fontSize: 9, fontWeight: 700, color: '#FFFFFF', textTransform: 'uppercase', letterSpacing: '0.13em', writingMode: 'vertical-rl', transform: 'rotate(180deg)', whiteSpace: 'nowrap', marginTop: 2 }}>Notes</span>
+                            {notesActiveTab === 'notes' && (
+                              <button onClick={e => { e.stopPropagation(); setNotesCollapsed(true); }} title="Collapse" style={{ marginTop: 'auto', marginBottom: 8, background: 'transparent', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.5)', fontSize: 16, lineHeight: 1, padding: 2 }}>‹</button>
+                            )}
+                          </div>
 
+                          {/* To Do spine */}
+                          <div
+                            onClick={() => { setNotesActiveTab('todo'); setShowFilesMenu(false); setShowTodoMenu(false); }}
+                            style={{
+                              position: 'absolute', top: 0, bottom: 0,
+                              left: notesActiveTab === 'todo' ? 40 : 0,
+                              transition: 'left 0.28s cubic-bezier(0.4, 0, 0.2, 1), background 0.15s',
+                              width: 36,
+                              background: notesActiveTab === 'todo' ? '#4A2220' : '#361918',
+                              backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.03) 1px, transparent 1px)',
+                              backgroundSize: '5px 5px',
+                              display: 'flex', flexDirection: 'column', alignItems: 'center',
+                              paddingTop: 10, gap: 8,
+                              zIndex: notesActiveTab === 'todo' ? 2 : 1,
+                              cursor: notesActiveTab === 'todo' ? 'default' : 'pointer',
+                              borderRadius: '12px 0 0 12px',
+                            }}
+                          >
+                            <button
+                              onClick={e => { e.stopPropagation(); setNotesActiveTab('todo'); setShowTodoMenu(v => !v); setShowFilesMenu(false); }}
+                              title="Options"
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 0', display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'center', flexShrink: 0 }}
+                            >
+                              {[0,1,2].map(i => (
+                                <span key={i} style={{ width: 14, height: 1.5, background: showTodoMenu && notesActiveTab === 'todo' ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.5)', display: 'block', borderRadius: 1, transition: 'background 0.15s' }} />
+                              ))}
+                            </button>
+                            <span style={{ fontSize: 9, fontWeight: 700, color: '#FFFFFF', textTransform: 'uppercase', letterSpacing: '0.13em', writingMode: 'vertical-rl', transform: 'rotate(180deg)', whiteSpace: 'nowrap', marginTop: 2 }}>To Do</span>
+                            {notesActiveTab === 'todo' && (
+                              <button onClick={e => { e.stopPropagation(); setNotesCollapsed(true); }} title="Collapse" style={{ marginTop: 'auto', marginBottom: 8, background: 'transparent', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.5)', fontSize: 16, lineHeight: 1, padding: 2 }}>‹</button>
+                            )}
+                          </div>
+                        </div>{/* end spine wrapper */}
 
-                        {/* Files slide-out panel */}
-                        {showFilesMenu && (
+                        {/* Files slide-out panel — only when Notes tab active */}
+                        {notesActiveTab === 'notes' && showFilesMenu && (
                           <div style={{
-                            position: 'absolute', top: 0, left: 36, width: 160, height: '100%',
+                            position: 'absolute', top: 0, left: 80, width: 160, height: '100%',
                             background: '#2C2925', zIndex: 10,
                             display: 'flex', flexDirection: 'column',
                             boxShadow: '2px 0 8px rgba(0,0,0,0.25)',
@@ -2128,7 +2153,6 @@ export default function DashboardV2() {
                                 </div>
                               ))}
                             </div>
-                            {/* Add new file */}
                             <div style={{ padding: '8px 12px', borderTop: '0.5px solid rgba(255,255,255,0.08)', display: 'flex', gap: 4 }}>
                               <input
                                 value={newFileName}
@@ -2157,22 +2181,73 @@ export default function DashboardV2() {
                           </div>
                         )}
 
-                        {/* Notes content */}
-                        <div style={{ flex: 1, position: 'relative', minWidth: 0 }}>
-                          <NotesChecklist activeClientId={`${clientId}:${activeFileId}`} />
+                        {/* To Do slide-out menu */}
+                        {notesActiveTab === 'todo' && showTodoMenu && (
+                          <div style={{
+                            position: 'absolute', top: 0, left: 80, width: 160, height: '100%',
+                            background: '#2C1715', zIndex: 10,
+                            display: 'flex', flexDirection: 'column',
+                            boxShadow: '2px 0 8px rgba(0,0,0,0.25)',
+                          }}>
+                            <div style={{ padding: '10px 12px 8px', borderBottom: '0.5px solid rgba(255,255,255,0.08)' }}>
+                              <div style={{ fontSize: 9, fontWeight: 600, color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>Options</div>
+                            </div>
+                            <div style={{ flex: 1, padding: '8px 0' }}>
+                              {(['Priority', 'Channel'] as const).map(label => (
+                                <div key={label} style={{ padding: '7px 12px', fontSize: 11, color: 'rgba(255,255,255,0.6)', cursor: 'default' }}>
+                                  {label}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Content area — switches between Notes and To Do */}
+                        <div style={{ flex: 1, position: 'relative', minWidth: 0, overflow: 'hidden', borderRadius: 12, height: '100%' }}>
+                          {notesActiveTab === 'notes' ? (
+                            <NotesChecklist activeClientId={`${clientId}:${activeFileId}`} />
+                          ) : (
+                            <ClientActionPointsList
+                              actionPoints={enrichedActionPoints}
+                              onToggle={handleToggleActionPoint}
+                            />
+                          )}
                         </div>
                       </div>
                     )}
-                  </div>
+                  </div>{/* end combined card */}
 
-                  {/* Action Points — grows with content */}
-                  <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
-                    <ClientActionPointsList
-                      actionPoints={enrichedActionPoints}
-                      onToggle={handleToggleActionPoint}
-                    />
-                  </div>
-                </div>
+                  {/* Right: Gantt timeline */}
+                  {ganttClients.length > 0 && ganttChannels.length > 0 && (
+                    <div style={{ width: '50vw', flexShrink: 0 }}>
+                      <div className="border border-gray-100 rounded-lg bg-gray-50/80 px-3 py-2 overflow-x-auto overflow-y-hidden" style={{ maxHeight: 240 }}>
+                        <GanttCalendar
+                          clients={ganttClients}
+                          channels={ganttChannels}
+                          healthChecks={allActionPoints
+                            .filter((ap: any) => ap.category === 'HEALTH CHECK' && ap.channel_type && !ap.completed)
+                            .map((ap: any) => {
+                              const due = computeGanttDueDate(ap);
+                              return due ? { client_id: clientId, channel_label: ap.channel_type, due_date: due } : null;
+                            })
+                            .filter(Boolean) as any[]}
+                          setupPoints={allActionPoints
+                            .filter((ap: any) => ap.category === 'SET UP' && ap.channel_type && !ap.completed)
+                            .map((ap: any) => {
+                              const due = computeGanttDueDate(ap);
+                              return due ? { client_id: clientId, channel_label: ap.channel_type, due_date: due } : null;
+                            })
+                            .filter(Boolean) as any[]}
+                          pointEvents={[]}
+                          selectedDay={ganttSelectedDay}
+                          onDaySelect={setGanttSelectedDay}
+                          filteredClientIds={clientId ? [clientId] : []}
+                          currentMonth={selectedMonth}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>{/* end top row */}
 
                 {loadingAnalytics ? (
                   <div className="bg-white rounded-xl border border-gray-200 p-6 animate-pulse">
@@ -2207,49 +2282,53 @@ export default function DashboardV2() {
                       {channelCards.map((ch, idx) => {
                         if (ch.type === 'organic_social') {
                           return (
-                            <OrganicSocialCard
-                              key={`organic-${ch.channel.id}`}
-                              channel={ch.channel}
-                              clientId={clientId}
-                              weekCommencing={currentWeekCommencing}
-                              actuals={organicSocialActuals}
-                              onRefresh={loadNonDigitalActuals}
-                              onUpdateChannel={handleUpdateChannel}
-                            />
+                            <div key={`organic-${ch.channel.id}`} id={`channel-card-organic-${ch.channel.id}`}>
+                              <OrganicSocialCard
+                                channel={ch.channel}
+                                clientId={clientId}
+                                weekCommencing={currentWeekCommencing}
+                                actuals={organicSocialActuals}
+                                onRefresh={loadNonDigitalActuals}
+                                onUpdateChannel={handleUpdateChannel}
+                              />
+                            </div>
                           );
                         }
 
                         if (ch.type === 'edm') {
                           return (
-                            <EdmCard
-                              key={`edm-${ch.channel.id}`}
-                              channel={ch.channel}
-                              clientId={clientId}
-                              actuals={edmActuals}
-                              onUpdateChannel={handleUpdateChannel}
-                            />
+                            <div key={`edm-${ch.channel.id}`} id={`channel-card-edm-${ch.channel.id}`}>
+                              <EdmCard
+                                channel={ch.channel}
+                                clientId={clientId}
+                                actuals={edmActuals}
+                                onUpdateChannel={handleUpdateChannel}
+                              />
+                            </div>
                           );
                         }
-                        
+
                         if (ch.type === 'ooh') {
                           return (
-                            <OohCard
-                              key={`ooh-${ch.channel.id}`}
-                              channel={ch.channel}
-                              clientId={clientId}
-                              onUpdateChannel={handleUpdateChannel}
-                            />
+                            <div key={`ooh-${ch.channel.id}`} id={`channel-card-ooh-${ch.channel.id}`}>
+                              <OohCard
+                                channel={ch.channel}
+                                clientId={clientId}
+                                onUpdateChannel={handleUpdateChannel}
+                              />
+                            </div>
                           );
                         }
 
                         if (ch.type === 'display_native') {
                           return (
-                            <DisplayNativeCard
-                              key={`display-native-${ch.channel.id}`}
-                              channel={ch.channel}
-                              clientId={clientId}
-                              onUpdateChannel={handleUpdateChannel}
-                            />
+                            <div key={`display-native-${ch.channel.id}`} id={`channel-card-display-native-${ch.channel.id}`}>
+                              <DisplayNativeCard
+                                channel={ch.channel}
+                                clientId={clientId}
+                                onUpdateChannel={handleUpdateChannel}
+                              />
+                            </div>
                           );
                         }
 
@@ -2261,20 +2340,19 @@ export default function DashboardV2() {
                             ? new Date(Math.min(...channelData.flights.map((f: any) => new Date(f.startWeek).getTime())))
                             : null;
                           return (
-                            <OtherChannelCard
-                              key={`other-${ch.channel.id}`}
-                              channel={ch.channel}
-                              clientId={clientId}
-                              channelStartDate={earliestStart}
-                              refetchTrigger={actionPointsRefetchTrigger}
-                              onUpdateChannel={handleUpdateChannel}
-                            />
+                            <div key={`other-${ch.channel.id}`} id={`channel-card-other-${ch.channel.id}`}>
+                              <OtherChannelCard
+                                channel={ch.channel}
+                                clientId={clientId}
+                                channelStartDate={earliestStart}
+                                refetchTrigger={actionPointsRefetchTrigger}
+                                onUpdateChannel={handleUpdateChannel}
+                              />
+                            </div>
                           );
                         }
 
                         // Paid digital - existing card
-                        // Find the earliest start date from mediaPlanBuilderChannels
-                        // Normalize channel names for comparison (same logic as normalizeChannelType)
                         const normalizeChannelName = (name: string) => name.toLowerCase().trim();
                         const channelData = mediaPlanBuilderChannels.find(
                           (mbCh: any) => normalizeChannelName(mbCh.channelName) === normalizeChannelName(ch.name)
@@ -2284,27 +2362,28 @@ export default function DashboardV2() {
                           : null;
 
                         return (
+                          <div key={`paid-${idx}-${ch.name}`} id={`channel-card-paid-${idx}-${ch.name}`}>
                             <ChannelPerformanceCard
-                            key={`paid-${idx}-${ch.name}`}
-                            channel={ch}
-                            selectedMonth={selectedMonth}
-                            dateRange={ch.isMultiMonth ? analyticsDateRange : undefined}
-                            onAdjust={() => handleAdjustChannel(ch.platform)}
-                            onViewReport={() => handleViewReport(ch.platform)}
-                            clientId={clientId}
-                            channelStartDate={earliestStartDate}
-                            refetchTrigger={actionPointsRefetchTrigger}
-                            benchmarks={allBenchmarks}
-                            presets={allPresets}
-                            clientChannelPresets={clientChannelPresets}
-                            onPresetSaved={(updated) => setClientChannelPresets(prev => {
-                              const idx2 = prev.findIndex(p => p.client_id === updated.client_id && p.channel_name === updated.channel_name);
-                              return idx2 >= 0
-                                ? prev.map((p, i) => i === idx2 ? updated : p)
-                                : [...prev, updated];
-                            })}
-                            onCampaignSelectionChange={handleCampaignSelectionChange}
-                          />
+                              channel={ch}
+                              selectedMonth={selectedMonth}
+                              dateRange={ch.isMultiMonth ? analyticsDateRange : undefined}
+                              onAdjust={() => handleAdjustChannel(ch.platform)}
+                              onViewReport={() => handleViewReport(ch.platform)}
+                              clientId={clientId}
+                              channelStartDate={earliestStartDate}
+                              refetchTrigger={actionPointsRefetchTrigger}
+                              benchmarks={allBenchmarks}
+                              presets={allPresets}
+                              clientChannelPresets={clientChannelPresets}
+                              onPresetSaved={(updated) => setClientChannelPresets(prev => {
+                                const idx2 = prev.findIndex(p => p.client_id === updated.client_id && p.channel_name === updated.channel_name);
+                                return idx2 >= 0
+                                  ? prev.map((p, i) => i === idx2 ? updated : p)
+                                  : [...prev, updated];
+                              })}
+                              onCampaignSelectionChange={handleCampaignSelectionChange}
+                            />
+                          </div>
                         );
                       })}
                     </div>

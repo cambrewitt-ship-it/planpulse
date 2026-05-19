@@ -127,88 +127,148 @@ function apColor(count: number): string {
   return '#B5B0A5';
 }
 
-// ── Sparkline: 7-day metric vs target ────────────────────────────────────
+// ── Sparkline: 30-day metric series fetched from API (matches hero card) ──────
 
-function SparkLine({ perf }: { perf: PerfData | null }) {
-  const series = perf?.dailySeries ?? [];
-  const metric = perf?.metric ?? '';
-  const target = perf?.targetValue ?? null;
+function SparkLine({ clientId, perf }: { clientId: string; perf: PerfData | null }) {
+  const [series, setSeries] = useState<Array<{ date: string; value: number }>>([]);
+  const [loading, setLoading] = useState(false);
 
-  // Line colour from 24h trend, falling back to needle colour
-  let lineColor = perf?.color ?? '#B5B0A5';
-  if (perf?.trend24h) {
+  useEffect(() => {
+    if (!perf?.metric) return;
+    let config: { platform?: string; campaignIds?: string[]; metaActionType?: string } = {};
+    try {
+      const raw = localStorage.getItem(`perf_widget_${clientId}`);
+      if (raw) config = JSON.parse(raw);
+    } catch {}
+
+    const params = new URLSearchParams();
+    params.set('metric', perf.metric);
+    if (config.platform) params.set('platforms', config.platform);
+    if (config.campaignIds?.length) params.set('campaignIds', config.campaignIds.join(','));
+    if (config.metaActionType) params.set('metaActionType', config.metaActionType);
+
+    setLoading(true);
+    fetch(`/api/clients/${clientId}/perf-series?${params}`)
+      .then(r => r.json())
+      .then(data => { if (Array.isArray(data.series)) setSeries(data.series); })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [clientId, perf?.metric]);
+
+  if (!perf?.hasData) return null;
+  if (loading) return <div style={{ width: '100%', height: 62, background: '#F5F3EF', borderRadius: 4 }} />;
+
+  const metric = perf.metric;
+  const cleanSeries = series.filter(s => s.value != null && isFinite(s.value) && !isNaN(s.value));
+  if (cleanSeries.length < 1) return null;
+
+  const target = (perf.targetValue != null && isFinite(perf.targetValue)) ? perf.targetValue : null;
+  const mk = metric.toLowerCase();
+  const values = cleanSeries.map(s => s.value);
+  const dataMin = Math.min(...values);
+  const dataMax = Math.max(...values);
+
+  let chartMin: number, chartMax: number;
+  if (target !== null) {
+    const maxDev = Math.max(Math.abs(dataMin - target), Math.abs(dataMax - target));
+    const pad = Math.max(maxDev * 1.25, Math.abs(target) * 0.1, 1);
+    chartMin = target - pad;
+    chartMax = target + pad;
+  } else {
+    const rng = (dataMax - dataMin) || Math.abs(dataMax) * 0.1 || 1;
+    chartMin = dataMin - rng * 0.15;
+    chartMax = dataMax + rng * 0.15;
+  }
+  const span = chartMax - chartMin || 1;
+
+  const W = 300, H = 72;
+  const PL = 30, PR = 8, PT = 5, PB = 16;
+  const pw = W - PL - PR;
+  const ph = H - PT - PB;
+
+  const toX = (i: number) =>
+    PL + (cleanSeries.length === 1 ? pw / 2 : (i / (cleanSeries.length - 1)) * pw);
+  const toY = (v: number) =>
+    PT + Math.max(0, Math.min(1, (chartMax - v) / span)) * ph;
+
+  const pts = values.map((v, i) => ({ x: toX(i), y: toY(v) }));
+  const polyPts = pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+  const bottom = PT + ph;
+  const areaPath = [
+    `M ${pts[0].x.toFixed(1)} ${bottom}`,
+    `L ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`,
+    ...pts.slice(1).map(p => `L ${p.x.toFixed(1)} ${p.y.toFixed(1)}`),
+    `L ${pts[pts.length - 1].x.toFixed(1)} ${bottom}`,
+    'Z',
+  ].join(' ');
+  const targetY = target !== null ? PT + ph / 2 : null;
+
+  function fmtY(v: number): string {
+    if (/ctr/.test(mk)) return `${v.toFixed(1)}%`;
+    if (/cpa|cpc|cpm|cpl/.test(mk)) return v >= 100 ? `$${Math.round(v)}` : `$${v.toFixed(1)}`;
+    return v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(Math.round(v));
+  }
+
+  let lineColor = perf.color ?? '#6366f1';
+  if (perf.trend24h) {
     const { pctChange, improving } = perf.trend24h;
     if (Math.abs(pctChange) > 3) lineColor = improving ? '#4A7C59' : '#A0442A';
     else lineColor = '#B07030';
   }
 
-  const label24h = perf?.trend24h
-    ? `${perf.trend24h.improving ? '↑' : '↓'} ${Math.abs(perf.trend24h.pctChange).toFixed(1)}% 24h`
-    : null;
-
-  // SVG geometry
-  const W = 100, H = 26, PAD_X = 1, PAD_Y = 2;
-  const lowerBetter = /cpa|cpc|cpm|cpl|cost/.test(metric.toLowerCase());
-
-  let pathD = '';
-  let targetY: number | null = null;
-  let pts: { x: number; y: number }[] = [];
-
-  if (series.length >= 1) {
-    const allVals = target != null ? [...series, target] : series;
-    const minV = Math.min(...allVals);
-    const maxV = Math.max(...allVals);
-    const range = maxV - minV || 1;
-
-    const toY = (v: number) => {
-      const score = lowerBetter ? (maxV - v) / range : (v - minV) / range;
-      return H - PAD_Y - score * (H - PAD_Y * 2);
-    };
-
-    pts = series.map((v, i) => ({
-      x: series.length === 1 ? W / 2 : PAD_X + (i / (series.length - 1)) * (W - PAD_X * 2),
-      y: toY(v),
-    }));
-
-    if (pts.length >= 2) {
-      pathD = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
-    }
-    if (target != null) targetY = toY(target);
-  }
-
-  const lastPt = pts[pts.length - 1] ?? null;
+  const gradId = `sg_${clientId}`;
+  const clipId = `sc_${clientId}`;
 
   return (
-    <div style={{ paddingTop: 3 }}>
+    <div style={{ paddingTop: 4 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 2 }}>
         <span style={{ fontSize: 9, fontWeight: 600, color: '#8A8578', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-          {metric || 'Performance'}
+          {metric} · 30d
         </span>
-        {label24h ? (
-          <span style={{ fontSize: 9, fontWeight: 700, color: lineColor }}>{label24h}</span>
-        ) : (
-          <span style={{ fontSize: 9, color: '#C5C0B8' }}>7d</span>
+        {perf.trend24h && (
+          <span style={{ fontSize: 9, fontWeight: 700, color: perf.trend24h.improving ? '#4A7C59' : '#A0442A' }}>
+            {perf.trend24h.pctChange < 0 ? '↓' : '↑'}{Math.abs(perf.trend24h.pctChange).toFixed(1)}% 24h
+          </span>
         )}
       </div>
-
-      {series.length >= 1 ? (
-        <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
-          {/* Target reference line */}
-          {targetY != null && (
-            <line x1={PAD_X} y1={targetY} x2={W - PAD_X} y2={targetY}
-              stroke="#C8C3BB" strokeWidth={0.75} strokeDasharray="2,2" />
-          )}
-          {/* Series line (only when 2+ points) */}
-          {pathD && <path d={pathD} fill="none" stroke={lineColor} strokeWidth={1.5}
-            strokeLinecap="round" strokeLinejoin="round" />}
-          {/* Latest value dot */}
-          {lastPt && <circle cx={lastPt.x} cy={lastPt.y} r={2} fill={lineColor} />}
-        </svg>
-      ) : (
-        <div style={{ height: H, display: 'flex', alignItems: 'center' }}>
-          <span style={{ fontSize: 9, color: '#C5C0B8' }}>No data</span>
-        </div>
-      )}
+      <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
+        <defs>
+          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={lineColor} stopOpacity={0.2} />
+            <stop offset="100%" stopColor={lineColor} stopOpacity={0.01} />
+          </linearGradient>
+          <clipPath id={clipId}>
+            <rect x={PL} y={PT} width={pw} height={ph} />
+          </clipPath>
+        </defs>
+        <line x1={PL} y1={PT} x2={PL} y2={bottom} stroke="#E5E7EB" strokeWidth={0.75} />
+        <line x1={PL} y1={bottom} x2={PL + pw} y2={bottom} stroke="#E5E7EB" strokeWidth={0.75} />
+        {[{ y: PT, label: fmtY(chartMax) }, { y: bottom, label: fmtY(chartMin) }].map(({ y, label }, i) => (
+          <g key={i}>
+            <line x1={PL - 3} y1={y} x2={PL} y2={y} stroke="#D1D5DB" strokeWidth={0.75} />
+            <text x={PL - 5} y={y + 3} textAnchor="end" fontSize={7} fill="#9CA3AF" fontFamily="system-ui, sans-serif">{label}</text>
+          </g>
+        ))}
+        {targetY !== null && (
+          <line x1={PL} y1={targetY} x2={PL + pw} y2={targetY} stroke="#9CA3AF" strokeWidth={1} strokeDasharray="3 3" />
+        )}
+        {cleanSeries.map((s, i) => {
+          const x = toX(i);
+          const d = new Date(`${s.date}T12:00:00`);
+          const label = isNaN(d.getTime()) ? '' : String(d.getDate());
+          const show = i === 0 || i === cleanSeries.length - 1 || i % 7 === 0;
+          return (
+            <g key={i}>
+              <line x1={x} y1={bottom} x2={x} y2={bottom + 2} stroke="#D1D5DB" strokeWidth={0.75} />
+              {show && <text x={x} y={bottom + 11} textAnchor="middle" fontSize={7} fill="#9CA3AF" fontFamily="system-ui, sans-serif">{label}</text>}
+            </g>
+          );
+        })}
+        <path d={areaPath} fill={`url(#${gradId})`} clipPath={`url(#${clipId})`} />
+        <polyline points={polyPts} fill="none" stroke={lineColor} strokeWidth={2}
+          strokeLinecap="round" strokeLinejoin="round" clipPath={`url(#${clipId})`} />
+        <circle cx={pts[pts.length - 1].x} cy={pts[pts.length - 1].y} r={3} fill={lineColor} />
+      </svg>
     </div>
   );
 }
@@ -356,13 +416,13 @@ export function ClientCardCompact({
             /* Agency: hidden widget fetches data, we render pacing line */
             <>
               <PerformanceWidget clientId={client.id} onNeedle={handleNeedle} hideControls hideDisplay />
-              <SparkLine perf={perf} />
+              <SparkLine clientId={client.id} perf={perf} />
             </>
           ) : (
             /* Clients: visible widget shows metric + source, pacing line below */
             <div style={{ minWidth: 0 }}>
               <PerformanceWidget clientId={client.id} onNeedle={handleNeedle} hideControls />
-              <SparkLine perf={perf} />
+              <SparkLine clientId={client.id} perf={perf} />
             </div>
           )}
         </div>

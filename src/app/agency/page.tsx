@@ -148,6 +148,7 @@ export default function AgencyDashboard() {
   const kanbanRef = useRef<KanbanBoardHandle>(null);
   const chatRef = useRef<AgencyChatHandle>(null);
   const [kanbanView, setKanbanView] = useState<'kanban' | 'list' | 'gantt'>('kanban');
+  const [activeCardTab, setActiveCardTab] = useState<'clients' | 'todo'>('todo');
   const today = useMemo(() => new Date(), []);
   const monthLabel = `${MONTH_NAMES[today.getMonth()]} ${today.getFullYear()}`;
 
@@ -502,181 +503,142 @@ export default function AgencyDashboard() {
         boxSizing: 'border-box',
       }}>
 
-        {/* ── Column 1: Today + Clients ────────────────── */}
+        {/* ── Column 1: Today + Notes ──────────────────── */}
         <div style={{ width: 240, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 12, minHeight: 0 }}>
           <TodayCard clients={filteredClients} today={today} />
 
-          {/* Clients list */}
-          <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8, flexShrink: 0 }}>
-              <span style={{ fontSize: 11, fontWeight: 400, color: '#B5B0A5', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-                Clients ({filteredClients.length})
-              </span>
-              <div style={{ flex: 1 }} />
-              {dotCounts.red > 0 && (
-                <span style={{ fontSize: 11, color: '#A0442A', marginLeft: 5, opacity: 0.6 }}>● {dotCounts.red}</span>
-              )}
-              {dotCounts.amber > 0 && (
-                <span style={{ fontSize: 11, color: '#B07030', marginLeft: 5, opacity: 0.6 }}>● {dotCounts.amber}</span>
-              )}
-              {dotCounts.green > 0 && (
-                <span style={{ fontSize: 11, color: '#4A7C59', marginLeft: 5, opacity: 0.6 }}>● {dotCounts.green}</span>
-              )}
-            </div>
-            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: 4 }}>
-              {filteredClients.map((client, idx) => (
-                <ClientCardCompact
-                  key={client.id}
-                  client={client}
-                  selected={selectedClientId === client.id}
-                  onClick={() => setSelectedClientId(client.id)}
-                  index={idx}
-                  accountManagers={accountManagers}
-                  variant="agency"
-                />
-              ))}
-            </div>
-            <button style={{
-              width: '100%', marginTop: 6, padding: '9px 0', flexShrink: 0,
-              border: '0.5px dashed #D5D0C5', borderRadius: 12,
-              background: 'transparent', color: '#B5B0A5', fontSize: 13,
-              cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif",
+          {/* Notes — dark spine + files panel + content */}
+          <div
+            style={{
+              flex: 1,
+              minHeight: 0,
+              display: 'flex',
+              flexDirection: 'row',
+              position: 'relative',
+              borderRadius: 18,
+              overflow: 'hidden',
+              border: '0.5px solid #C8C4BC',
+            }}
+          >
+            {/* Dark textured left spine */}
+            <div style={{
+              width: 36, flexShrink: 0,
+              background: '#1C1917',
+              backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.035) 1px, transparent 1px)',
+              backgroundSize: '5px 5px',
+              display: 'flex', flexDirection: 'column', alignItems: 'center',
+              paddingTop: 10, gap: 10, position: 'relative', zIndex: 2,
             }}>
-              + Add Client
-            </button>
+              <button
+                onClick={() => setShowFilesMenu(v => !v)}
+                title="Files"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 0', display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'center' }}
+              >
+                {[0, 1, 2].map(i => (
+                  <span key={i} style={{ width: 14, height: 1.5, background: showFilesMenu ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.5)', display: 'block', borderRadius: 1, transition: 'background 0.15s' }} />
+                ))}
+              </button>
+              <span style={{
+                fontSize: 11, fontWeight: 700, color: '#FFFFFF',
+                textTransform: 'uppercase', letterSpacing: '0.13em',
+                writingMode: 'vertical-rl', transform: 'rotate(180deg)',
+                marginTop: 2, maxHeight: 120, overflow: 'hidden',
+                textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}>
+                {noteFiles.find(f => f.id === activeFileId)?.name ?? 'Notes'}
+              </span>
+            </div>
+
+            {/* Files slide-out panel */}
+            {showFilesMenu && (
+              <div style={{
+                position: 'absolute', top: 0, left: 36, width: 160, height: '100%',
+                background: '#2C2925', zIndex: 10,
+                display: 'flex', flexDirection: 'column',
+                boxShadow: '2px 0 8px rgba(0,0,0,0.25)',
+              }}>
+                <div style={{ padding: '10px 12px 8px', borderBottom: '0.5px solid rgba(255,255,255,0.08)' }}>
+                  <div style={{ fontSize: 9, fontWeight: 600, color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>Files</div>
+                </div>
+                <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
+                  {noteFiles.map(file => (
+                    <div
+                      key={file.id}
+                      onClick={() => { setActiveFileId(file.id); setShowFilesMenu(false); }}
+                      style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        padding: '7px 12px', cursor: 'pointer',
+                        background: activeFileId === file.id ? 'rgba(255,255,255,0.09)' : 'transparent',
+                        transition: 'background 0.1s',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                        <svg width="10" height="12" viewBox="0 0 10 12" fill="none" style={{ flexShrink: 0 }}>
+                          <rect x="0.5" y="0.5" width="9" height="11" rx="1.5" stroke={activeFileId === file.id ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.25)'} strokeWidth="0.8" fill="none"/>
+                          <path d="M2.5 4h5M2.5 6h5M2.5 8h3" stroke={activeFileId === file.id ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.18)'} strokeWidth="0.7" strokeLinecap="round"/>
+                        </svg>
+                        <span style={{ fontSize: 11, color: activeFileId === file.id ? '#FFFFFF' : 'rgba(255,255,255,0.5)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {file.name}
+                        </span>
+                      </div>
+                      {noteFiles.length > 1 && (
+                        <button
+                          onClick={e => { e.stopPropagation(); deleteNoteFile(file.id); }}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.2)', fontSize: 13, padding: 0, lineHeight: 1, flexShrink: 0 }}
+                        >×</button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <div style={{ padding: '8px 12px', borderTop: '0.5px solid rgba(255,255,255,0.08)', display: 'flex', gap: 4 }}>
+                  <input
+                    value={newFileName}
+                    onChange={e => setNewFileName(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && addNoteFile()}
+                    placeholder="New file…"
+                    style={{
+                      flex: 1, fontSize: 10,
+                      background: 'rgba(255,255,255,0.06)',
+                      border: '0.5px solid rgba(255,255,255,0.12)',
+                      borderRadius: 3, color: '#fff',
+                      padding: '3px 6px', outline: 'none',
+                      fontFamily: "'DM Sans', system-ui, sans-serif",
+                    }}
+                  />
+                  <button
+                    onClick={addNoteFile}
+                    style={{
+                      background: 'rgba(255,255,255,0.1)', border: 'none',
+                      borderRadius: 3, color: '#fff', fontSize: 15,
+                      width: 22, cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}
+                  >+</button>
+                </div>
+              </div>
+            )}
+
+            {/* Notes content */}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <NotesChecklist activeClientId={`agency:${activeFileId}`} />
+            </div>
           </div>
         </div>
 
-        {/* ── Column 2: Chat + Notes ────────────────────── */}
+        {/* ── Column 2: AI Chat (full height) ──────────── */}
         <div style={{ width: 380, flexShrink: 0, alignSelf: 'stretch', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-          <AgencyChat ref={chatRef} notesSlot={
-            /* Notes — dark spine + files panel + content */
-            <div
-              style={{
-                height: '100%',
-                display: 'flex',
-                flexDirection: 'row',
-                position: 'relative',
-                borderRadius: 18,
-                overflow: 'hidden',
-                border: '0.5px solid #C8C4BC',
-              }}
-            >
-              {/* Dark textured left spine */}
-              <div style={{
-                width: 36, flexShrink: 0,
-                background: '#1C1917',
-                backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.035) 1px, transparent 1px)',
-                backgroundSize: '5px 5px',
-                display: 'flex', flexDirection: 'column', alignItems: 'center',
-                paddingTop: 10, gap: 10, position: 'relative', zIndex: 2,
-              }}>
-                <button
-                  onClick={() => setShowFilesMenu(v => !v)}
-                  title="Files"
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 0', display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'center' }}
-                >
-                  {[0, 1, 2].map(i => (
-                    <span key={i} style={{ width: 14, height: 1.5, background: showFilesMenu ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.5)', display: 'block', borderRadius: 1, transition: 'background 0.15s' }} />
-                  ))}
-                </button>
-                <span style={{
-                  fontSize: 11, fontWeight: 700, color: '#FFFFFF',
-                  textTransform: 'uppercase', letterSpacing: '0.13em',
-                  writingMode: 'vertical-rl', transform: 'rotate(180deg)',
-                  marginTop: 2, maxHeight: 120, overflow: 'hidden',
-                  textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                }}>
-                  {noteFiles.find(f => f.id === activeFileId)?.name ?? 'Notes'}
-                </span>
-              </div>
-
-              {/* Files slide-out panel */}
-              {showFilesMenu && (
-                <div style={{
-                  position: 'absolute', top: 0, left: 36, width: 160, height: '100%',
-                  background: '#2C2925', zIndex: 10,
-                  display: 'flex', flexDirection: 'column',
-                  boxShadow: '2px 0 8px rgba(0,0,0,0.25)',
-                }}>
-                  <div style={{ padding: '10px 12px 8px', borderBottom: '0.5px solid rgba(255,255,255,0.08)' }}>
-                    <div style={{ fontSize: 9, fontWeight: 600, color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>Files</div>
-                  </div>
-                  <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
-                    {noteFiles.map(file => (
-                      <div
-                        key={file.id}
-                        onClick={() => { setActiveFileId(file.id); setShowFilesMenu(false); }}
-                        style={{
-                          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                          padding: '7px 12px', cursor: 'pointer',
-                          background: activeFileId === file.id ? 'rgba(255,255,255,0.09)' : 'transparent',
-                          transition: 'background 0.1s',
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                          <svg width="10" height="12" viewBox="0 0 10 12" fill="none" style={{ flexShrink: 0 }}>
-                            <rect x="0.5" y="0.5" width="9" height="11" rx="1.5" stroke={activeFileId === file.id ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.25)'} strokeWidth="0.8" fill="none"/>
-                            <path d="M2.5 4h5M2.5 6h5M2.5 8h3" stroke={activeFileId === file.id ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.18)'} strokeWidth="0.7" strokeLinecap="round"/>
-                          </svg>
-                          <span style={{ fontSize: 11, color: activeFileId === file.id ? '#FFFFFF' : 'rgba(255,255,255,0.5)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {file.name}
-                          </span>
-                        </div>
-                        {noteFiles.length > 1 && (
-                          <button
-                            onClick={e => { e.stopPropagation(); deleteNoteFile(file.id); }}
-                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.2)', fontSize: 13, padding: 0, lineHeight: 1, flexShrink: 0 }}
-                          >×</button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                  <div style={{ padding: '8px 12px', borderTop: '0.5px solid rgba(255,255,255,0.08)', display: 'flex', gap: 4 }}>
-                    <input
-                      value={newFileName}
-                      onChange={e => setNewFileName(e.target.value)}
-                      onKeyDown={e => e.key === 'Enter' && addNoteFile()}
-                      placeholder="New file…"
-                      style={{
-                        flex: 1, fontSize: 10,
-                        background: 'rgba(255,255,255,0.06)',
-                        border: '0.5px solid rgba(255,255,255,0.12)',
-                        borderRadius: 3, color: '#fff',
-                        padding: '3px 6px', outline: 'none',
-                        fontFamily: "'DM Sans', system-ui, sans-serif",
-                      }}
-                    />
-                    <button
-                      onClick={addNoteFile}
-                      style={{
-                        background: 'rgba(255,255,255,0.1)', border: 'none',
-                        borderRadius: 3, color: '#fff', fontSize: 15,
-                        width: 22, cursor: 'pointer',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      }}
-                    >+</button>
-                  </div>
-                </div>
-              )}
-
-              {/* Notes content */}
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <NotesChecklist activeClientId={`agency:${activeFileId}`} />
-              </div>
-            </div>
-          } />
+          <AgencyChat ref={chatRef} />
         </div>
 
         {/* ── Column 3: Kanban + Gantt stacked ─────────── */}
         <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
 
-          {/* Kanban container */}
+          {/* Tabbed card: Clients / To Do */}
           <div style={{
             background: '#FDFCF8',
             border: '1px solid rgba(232,228,220,0.7)',
             borderRadius: 18,
-            padding: '15px 17px',
+            padding: 0,
             boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)',
             minWidth: 0,
             display: 'flex',
@@ -684,60 +646,110 @@ export default function AgencyDashboard() {
             overflow: 'hidden',
             height: 360,
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12, flexShrink: 0 }}>
-              <span style={{
-                fontSize: 14, fontWeight: 700, color: '#1C1917',
-              }}>
-                Action Points
-              </span>
-              <button
-                onClick={() => kanbanRef.current?.startAdding()}
-                style={{
-                  marginLeft: 8,
-                  display: 'flex', alignItems: 'center', gap: 3,
-                  fontSize: 10, color: '#FFFFFF',
-                  background: '#1C1917', border: 'none',
-                  borderRadius: 12, padding: '3px 8px', cursor: 'pointer',
-                  fontFamily: "'DM Sans', system-ui, sans-serif",
-                }}
-              >
-                <Plus size={9} />
-                Add action point
-              </button>
-              <div style={{ marginLeft: 8, display: 'flex', border: '0.5px solid #E8E4DC', borderRadius: 10, overflow: 'hidden' }}>
-                {(['kanban', 'list', 'gantt'] as const).map(v => (
+            {/* ── Tab bar ── */}
+            <div style={{ display: 'flex', flexShrink: 0, borderBottom: '1.5px solid #E8E4DC', position: 'relative' }}>
+              {(['clients', 'todo'] as const).map(tab => {
+                const isActive = activeCardTab === tab;
+                return (
                   <button
-                    key={v}
-                    onClick={() => setKanbanView(v)}
+                    key={tab}
+                    onClick={() => setActiveCardTab(tab)}
                     style={{
-                      fontSize: 10, padding: '3px 8px', cursor: 'pointer',
-                      fontFamily: "'DM Sans', system-ui, sans-serif", fontWeight: 500,
-                      color: kanbanView === v ? '#4A6580' : '#B5B0A5',
-                      background: kanbanView === v ? 'rgba(74,101,128,0.08)' : 'transparent',
-                      border: 'none', borderLeft: v === 'kanban' ? 'none' : '0.5px solid #E8E4DC',
-                      textTransform: 'capitalize',
+                      flex: 1,
+                      padding: isActive ? '12px 0 13.5px' : '14px 0 10px',
+                      fontSize: 14,
+                      fontWeight: isActive ? 700 : 500,
+                      color: isActive ? '#1C1917' : '#FFFFFF',
+                      background: isActive ? '#FDFCF8' : '#3D3A36',
+                      border: 'none',
+                      borderBottom: isActive ? '1.5px solid #FDFCF8' : '1.5px solid transparent',
+                      marginBottom: isActive ? -1.5 : 0,
+                      cursor: 'pointer',
+                      fontFamily: "'DM Sans', system-ui, sans-serif",
+                      transition: 'all 0.15s',
+                      letterSpacing: isActive ? '-0.01em' : 0,
+                      position: 'relative',
+                      zIndex: isActive ? 2 : 1,
                     }}
-                  >{v}</button>
-                ))}
+                  >
+                    {tab === 'clients' ? 'Clients' : 'To Do'}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* ── Tab: Clients ── */}
+            {activeCardTab === 'clients' && (
+              <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: '8px 10px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 8, rowGap: 0 }}>
+                  {filteredClients.map((client, idx) => (
+                    <ClientCardCompact
+                      key={client.id}
+                      client={client}
+                      selected={selectedClientId === client.id}
+                      onClick={() => setSelectedClientId(client.id)}
+                      index={idx}
+                      accountManagers={accountManagers}
+                      variant="agency"
+                    />
+                  ))}
+                </div>
               </div>
-              <span style={{ marginLeft: 'auto', fontSize: 11, color: '#B5B0A5' }}>
-                {filteredActionPointClients.reduce((sum, c) => sum + c.totalOutstanding, 0)} total
-              </span>
-            </div>
-            <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
-              <KanbanBoard
-                key={kanbanView}
-                ref={kanbanRef}
-                actionPointClients={filteredActionPointClients}
-                amFilter={amFilter}
-                onActionPointCompleted={() => fetchData(true)}
-                accountManagers={accountManagers}
-                view={kanbanView}
-                onAskAI={(prompt) => chatRef.current?.sendMessage(prompt)}
-                clients={clients.map(c => ({ id: c.id, name: c.name }))}
-                onAccountManagerCreated={fetchAccountManagers}
-              />
-            </div>
+            )}
+
+            {/* ── Tab: To Do (Action Points) ── */}
+            {activeCardTab === 'todo' && (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', padding: '10px 17px 0', marginBottom: 10, flexShrink: 0 }}>
+                  <button
+                    onClick={() => kanbanRef.current?.startAdding()}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 3,
+                      fontSize: 10, color: '#FFFFFF',
+                      background: '#1C1917', border: 'none',
+                      borderRadius: 12, padding: '3px 8px', cursor: 'pointer',
+                      fontFamily: "'DM Sans', system-ui, sans-serif",
+                    }}
+                  >
+                    <Plus size={9} />
+                    Add action point
+                  </button>
+                  <div style={{ marginLeft: 8, display: 'flex', border: '0.5px solid #E8E4DC', borderRadius: 10, overflow: 'hidden' }}>
+                    {(['kanban', 'list', 'gantt'] as const).map(v => (
+                      <button
+                        key={v}
+                        onClick={() => setKanbanView(v)}
+                        style={{
+                          fontSize: 10, padding: '3px 8px', cursor: 'pointer',
+                          fontFamily: "'DM Sans', system-ui, sans-serif", fontWeight: 500,
+                          color: kanbanView === v ? '#4A6580' : '#B5B0A5',
+                          background: kanbanView === v ? 'rgba(74,101,128,0.08)' : 'transparent',
+                          border: 'none', borderLeft: v === 'kanban' ? 'none' : '0.5px solid #E8E4DC',
+                          textTransform: 'capitalize',
+                        }}
+                      >{v}</button>
+                    ))}
+                  </div>
+                  <span style={{ marginLeft: 'auto', fontSize: 11, color: '#B5B0A5' }}>
+                    {filteredActionPointClients.reduce((sum, c) => sum + c.totalOutstanding, 0)} total
+                  </span>
+                </div>
+                <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: '0 17px 12px' }}>
+                  <KanbanBoard
+                    key={kanbanView}
+                    ref={kanbanRef}
+                    actionPointClients={filteredActionPointClients}
+                    amFilter={amFilter}
+                    onActionPointCompleted={() => fetchData(true)}
+                    accountManagers={accountManagers}
+                    view={kanbanView}
+                    onAskAI={(prompt) => chatRef.current?.sendMessage(prompt)}
+                    clients={clients.map(c => ({ id: c.id, name: c.name }))}
+                    onAccountManagerCreated={fetchAccountManagers}
+                  />
+                </div>
+              </>
+            )}
           </div>
 
           {/* Gantt / Calendar */}

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
-import { Send } from 'lucide-react';
+import { Send, RefreshCw } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
 interface ParsedChannel {
@@ -36,12 +36,12 @@ function channelColor(name: string): string {
 }
 
 const QUICK_ACTIONS = [
-  { label: 'Daily briefing', prompt: 'Give me a daily briefing — how are all our clients doing today?' },
-  { label: 'Topline results', prompt: 'Give me a topline results check across all clients — for each client summarise their actual spend vs planned spend, key performance highlights, and flag any significant variances or issues I should be aware of.' },
-  { label: 'Channel health', prompt: 'Do a channel health check — for each client show me channel pacing, spend vs plan, and flag any channels that are over or under pacing.' },
-  { label: 'Overdue tasks', prompt: 'What action points are overdue right now?' },
-  { label: 'Red clients', prompt: 'Which clients have red health status and why?' },
-  { label: 'Channel specs', prompt: 'What channel specs and notes do we have in our library?' },
+  { label: 'Daily briefing', prompt: 'Give me a daily briefing — how are all our clients doing today?', icon: '☀' },
+  { label: 'Topline results', prompt: 'Give me a topline results check across all clients — for each client summarise their actual spend vs planned spend, key performance highlights, and flag any significant variances or issues I should be aware of.', icon: '▲' },
+  { label: 'Channel health', prompt: 'Do a channel health check — for each client show me channel pacing, spend vs plan, and flag any channels that are over or under pacing.', icon: '⬡' },
+  { label: 'Overdue tasks', prompt: 'What action points are overdue right now?', icon: '⚑' },
+  { label: 'Red clients', prompt: 'Which clients have red health status and why?', icon: '◉' },
+  { label: 'Channel specs', prompt: 'What channel specs and notes do we have in our library?', icon: '≡' },
 ];
 
 // Height of the chat card when idle / notes visible
@@ -162,6 +162,10 @@ export const AgencyChat = forwardRef<AgencyChatHandle, AgencyChatProps>(function
   const [isLoading, setIsLoading] = useState(false);
   const [toolInProgress, setToolInProgress] = useState<string | null>(null);
   const [firstName, setFirstName] = useState<string | null>(null);
+  const [dailyBriefing, setDailyBriefing] = useState<string | null>(null);
+  const [briefingLoading, setBriefingLoading] = useState(true);
+  const [briefingDisplayed, setBriefingDisplayed] = useState('');
+  const [briefingTick, setBriefingTick] = useState(0);
   // notesOpen = true means notes is visible below (chat retracted to CHAT_CARD_H)
   const [notesOpen, setNotesOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -199,6 +203,33 @@ export const AgencyChat = forwardRef<AgencyChatHandle, AgencyChatProps>(function
       setFirstName(typeof name === 'string' && name.trim() ? name.trim() : null);
     });
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadBriefing = () => {
+      setBriefingLoading(true);
+      fetch('/api/agency/daily-briefing')
+        .then(r => r.json())
+        .then(data => { if (!cancelled) setDailyBriefing(data.briefing ?? null); })
+        .catch(() => { if (!cancelled) setDailyBriefing(null); })
+        .finally(() => { if (!cancelled) setBriefingLoading(false); });
+    };
+    loadBriefing();
+    const interval = setInterval(loadBriefing, 12 * 60 * 60 * 1000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [briefingTick]);
+
+  useEffect(() => {
+    if (!dailyBriefing) return;
+    setBriefingDisplayed('');
+    let i = 0;
+    const interval = setInterval(() => {
+      i++;
+      setBriefingDisplayed(dailyBriefing.slice(0, i));
+      if (i >= dailyBriefing.length) clearInterval(interval);
+    }, 18);
+    return () => clearInterval(interval);
+  }, [dailyBriefing]);
 
   useEffect(() => {
     if (!notesOpen) {
@@ -461,7 +492,7 @@ export const AgencyChat = forwardRef<AgencyChatHandle, AgencyChatProps>(function
   // Chat card height:
   //   idle or notes-open  → CHAT_CARD_H (360px)
   //   active + collapsed  → full column height (animated drop over notes)
-  const chatCardHeight = (!isEmpty && !notesOpen) ? (colHeight || 800) : CHAT_CARD_H;
+  const chatCardHeight = notesOpen ? CHAT_CARD_H : (colHeight || 800);
 
   // When spine is visible, shift chat card right so spine doesn't overlap content
   const spineVisible = !isEmpty && !notesOpen && !!notesSlot;
@@ -512,10 +543,77 @@ export const AgencyChat = forwardRef<AgencyChatHandle, AgencyChatProps>(function
         {isEmpty ? (
           /* ── Idle: Gemini-style prompt ── */
           <div style={{ padding: '18px 16px 14px', display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-            <div style={{ marginBottom: 14 }}>
-              <div style={{ fontSize: 13, color: '#8A8578', fontWeight: 400, marginBottom: 2 }}>Agency Assistant</div>
+            {/* Top half — label at top, spacer fills remainder */}
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                  <div style={{ width: 28, height: 28, borderRadius: 8, border: '2px solid #1C1917', overflow: 'hidden', flexShrink: 0 }}>
+                    <img src="/favicon.ico" alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  </div>
+                  <span style={{ fontSize: 16, color: '#8A8578', fontWeight: 700 }}>AI Agent</span>
+                  <span style={{ fontSize: 12, color: '#B5B0A5', fontWeight: 400 }}>·</span>
+                  <span style={{ fontSize: 12, color: '#B5B0A5', fontWeight: 500 }}>Daily Briefing</span>
+                  <button
+                    onClick={() => setBriefingTick(t => t + 1)}
+                    disabled={briefingLoading}
+                    title="Refresh briefing"
+                    style={{
+                      marginLeft: 'auto', background: 'none', border: 'none',
+                      cursor: briefingLoading ? 'default' : 'pointer',
+                      color: '#C4BDB5', padding: 2, display: 'flex', alignItems: 'center',
+                      transition: 'color 0.15s',
+                    }}
+                    onMouseEnter={e => { if (!briefingLoading) e.currentTarget.style.color = '#8A8578'; }}
+                    onMouseLeave={e => { e.currentTarget.style.color = '#C4BDB5'; }}
+                  >
+                    <RefreshCw size={13} style={{ animation: briefingLoading ? 'spin 1s linear infinite' : 'none' }} />
+                  </button>
+                </div>
+                {/* Daily briefing */}
+                {briefingLoading ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0' }}>
+                    <span style={{ fontSize: 11.5, color: '#B5B0A5' }}>Generating briefing…</span>
+                    <span style={{ display: 'flex', gap: 2 }}>
+                      {[0, 1, 2].map(i => (
+                        <span key={i} style={{
+                          width: 3, height: 3, borderRadius: '50%', background: '#C4BDB5',
+                          animation: `chatBounce 1.2s ease-in-out ${i * 0.2}s infinite`,
+                          display: 'inline-block',
+                        }} />
+                      ))}
+                    </span>
+                  </div>
+                ) : dailyBriefing ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                    {briefingDisplayed.split('\n').filter(l => l.trim()).map((line, i, arr) => {
+                      const isLast = i === arr.length - 1;
+                      const isTyping = briefingDisplayed.length < dailyBriefing.length;
+                      const text = line.replace(/^•\s*/, '');
+                      const parts = text.split(/([+\-]?\d+(?:\.\d+)?%?)/g);
+                      return (
+                        <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                          <span style={{ color: '#8A8578', fontSize: 15.5, lineHeight: 1.55, flexShrink: 0, marginTop: 1 }}>•</span>
+                          <span style={{ fontSize: 15.5, fontWeight: 400, lineHeight: 1.55, color: '#1C1917' }}>
+                            {parts.map((part, j) =>
+                              /^[+\-]?\d+(?:\.\d+)?%?$/.test(part)
+                                ? <strong key={j} style={{ fontWeight: 700 }}>{part}</strong>
+                                : part
+                            )}
+                            {isLast && isTyping && (
+                              <span style={{ display: 'inline-block', width: 1.5, height: '0.85em', background: '#8A8578', marginLeft: 1, verticalAlign: 'text-bottom', animation: 'briefingCursor 0.7s step-end infinite' }} />
+                            )}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 10, marginTop: 16, flexShrink: 0 }}>
               <div style={{ fontSize: 18, fontWeight: 600, color: '#1C1917', lineHeight: 1.25 }}>
-                {firstName ? `Hi ${firstName}!` : 'Welcome back'}
+                Where should we start?
               </div>
             </div>
 
@@ -594,23 +692,36 @@ export const AgencyChat = forwardRef<AgencyChatHandle, AgencyChatProps>(function
             </div>
             </div>
 
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {QUICK_ACTIONS.map(action => (
-                <button
-                  key={action.label}
-                  onClick={() => send(action.prompt)}
-                  style={{
-                    padding: '6px 12px', borderRadius: 20,
-                    border: '0.5px solid #E0DCD4', background: '#F7F5F2',
-                    color: '#5C564F', fontSize: 11.5, fontWeight: 400,
-                    cursor: 'pointer', ...font, transition: 'all 0.15s', whiteSpace: 'nowrap',
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.background = '#EDE9E1'; e.currentTarget.style.borderColor = '#D5D0C5'; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = '#F7F5F2'; e.currentTarget.style.borderColor = '#E0DCD4'; }}
-                >
-                  {action.label}
-                </button>
-              ))}
+            {/* Bottom half — quick action cards */}
+            <div style={{ flex: 1, paddingTop: 14, overflow: 'hidden', display: 'flex', alignItems: 'flex-start', justifyContent: 'center' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
+                {QUICK_ACTIONS.map(action => (
+                  <button
+                    key={action.label}
+                    onClick={() => send(action.prompt)}
+                    style={{
+                      padding: '10px 18px',
+                      borderRadius: 999,
+                      border: '1px solid #4A5568',
+                      background: '#3D4A5C',
+                      color: '#FFFFFF',
+                      fontSize: 13,
+                      fontWeight: 500,
+                      cursor: 'pointer',
+                      ...font,
+                      transition: 'opacity 0.15s, transform 0.1s',
+                      whiteSpace: 'nowrap',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 7,
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.opacity = '0.8'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.transform = 'translateY(0)'; }}
+                  >
+                    {action.label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         ) : (
@@ -1030,6 +1141,14 @@ export const AgencyChat = forwardRef<AgencyChatHandle, AgencyChatProps>(function
         @keyframes chatBounce {
           0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
           40% { transform: translateY(-3px); opacity: 1; }
+        }
+        @keyframes briefingCursor {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0; }
+        }
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
         }
         .chat-glow-spin {
           position: absolute;
