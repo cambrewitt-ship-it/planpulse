@@ -2200,13 +2200,21 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                         weekToStartFlights.set(range.startIdx, []);
                       }
                       weekToStartFlights.get(range.startIdx)!.push(range);
-                      
+
                       // Mark weeks covered by colspan (only if not already covered by active selection)
                       for (let i = range.startIdx + 1; i <= range.endIdx; i++) {
                         if (!hasActiveSelection || i < activeSelection.startWeekIdx || i > activeSelection.endWeekIdx) {
                           coveredByColspan.add(i);
                         }
                       }
+                    });
+
+                    // Weeks immediately adjacent (1 column) to any flight edge — block new-flight creation
+                    // to prevent accidental triggers when extending via resize handle
+                    const flightAdjacentWeeks = new Set<number>();
+                    flightRanges.forEach(({ startIdx, endIdx }) => {
+                      if (startIdx > 0) flightAdjacentWeeks.add(startIdx - 1);
+                      if (endIdx < weeks.length - 1) flightAdjacentWeeks.add(endIdx + 1);
                     });
                     
                     const cells: React.ReactNode[] = [];
@@ -2227,11 +2235,14 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                         activeSelection.startWeekIdx === weekIdx;
                       
                       // Check if this is part of an active selection that spans multiple cells
-                      const isInActiveSelection = activeSelection && 
+                      const isInActiveSelection = activeSelection &&
                         activeSelection.channelId === channel.id &&
                         weekIdx >= activeSelection.startWeekIdx &&
                         weekIdx <= activeSelection.endWeekIdx;
-                      
+
+                      // Block new-flight creation 1 column adjacent to any existing flight edge
+                      const isAdjacentToFlight = !isOrganicSocial && flightAdjacentWeeks.has(weekIdx);
+
                       // For organic_social, check if week is in range
                       const isOrganicWeek = isOrganicSocial && isWeekInOrganicRange(weekIdx);
                       
@@ -2257,14 +2268,15 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                             className={`border-l-2 border-l-gray-400 border border-gray-300 px-0 py-0 relative h-12 z-0 overflow-visible ${
                               isOrganicWeek
                                 ? 'cursor-default'
+                                : isAdjacentToFlight
+                                  ? 'cursor-ew-resize'
                                 : isCellSelected || isInActiveSelection
                                   ? 'bg-blue-200 border-2 border-blue-500 rounded-none cursor-crosshair'
                                   : `${channelColors.bg} cursor-crosshair`
                             }`}
                             style={{ width: cellWidth, minWidth: cellWidth, maxWidth: cellWidth, ...(isOrganicWeek ? getOrganicStripeStyle(channel.channelName) : {}) }}
                             onMouseDown={(e) => {
-                              // Prevent interaction for organic_social weeks
-                              if (isOrganicWeek) {
+                              if (isOrganicWeek || isAdjacentToFlight) {
                                 e.preventDefault();
                                 e.stopPropagation();
                                 return;
@@ -2374,6 +2386,9 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                                       zIndex: hoveredFlightId === flight.id ? 500 : (10 + flightLayerIdx),
                                       fontFamily: 'var(--font-inter)',
                                       ...(blockBgColor ? { backgroundColor: blockBgColor } : {}),
+                                      // During edge drag, pass pointer events through so elementFromPoint
+                                      // finds the underlying td cells (not this block) for correct week tracking
+                                      ...(edgeDragState?.flightId === flight.id ? { pointerEvents: 'none' } : {}),
                                     }}
                                     onMouseEnter={() => setHoveredFlightId(flight.id)}
                                     onMouseLeave={() => setHoveredFlightId(null)}
@@ -2483,7 +2498,7 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                                               setEdgeDragState({ channelId: channel.id, flightId: flight.id, edge: 'start', currentIdx: origStartIdx, origStartIdx, origEndIdx });
                                             }}
                                             onClick={e => e.stopPropagation()}
-                                            className="opacity-70 group-hover:opacity-100 transition-opacity"
+                                            className="opacity-100"
                                             style={{ ...pillStyle, left: -7 }}
                                           >
                                             <svg width="9" height="7" viewBox="0 0 9 7" fill="none" style={{ pointerEvents: 'none', flexShrink: 0 }}>
@@ -2499,7 +2514,7 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                                               setEdgeDragState({ channelId: channel.id, flightId: flight.id, edge: 'end', currentIdx: origEndIdx, origStartIdx, origEndIdx });
                                             }}
                                             onClick={e => e.stopPropagation()}
-                                            className="opacity-70 group-hover:opacity-100 transition-opacity"
+                                            className="opacity-100"
                                             style={{ ...pillStyle, right: -7 }}
                                           >
                                             <svg width="9" height="7" viewBox="0 0 9 7" fill="none" style={{ pointerEvents: 'none', flexShrink: 0 }}>
@@ -2545,14 +2560,15 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                             className={`border-l-2 border-l-gray-400 border border-gray-300 px-0 py-0 relative h-12 z-0 overflow-visible ${
                               isOrganicWeek
                                 ? 'cursor-default'
+                                : isAdjacentToFlight
+                                  ? 'cursor-ew-resize'
                                 : isCellSelected || isInActiveSelection
                                   ? 'bg-blue-200 border-2 border-blue-500 rounded-none cursor-crosshair'
                                   : `${channelColors.bg} cursor-crosshair`
                             }`}
                             style={{ width: cellWidth, minWidth: cellWidth, maxWidth: cellWidth, ...(isOrganicWeek ? getOrganicStripeStyle(channel.channelName) : {}) }}
                             onMouseDown={(e) => {
-                              // Prevent interaction for organic_social weeks
-                              if (isOrganicWeek) {
+                              if (isOrganicWeek || isAdjacentToFlight) {
                                 e.preventDefault();
                                 e.stopPropagation();
                                 return;
