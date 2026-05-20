@@ -218,6 +218,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
   // 6b. 24h trend: yesterday vs day before yesterday (avoids partial-day today)
   const todayDate = new Date();
   const last7Start = format(subDays(todayDate, 6), 'yyyy-MM-dd');
+  const last30Start = format(subDays(todayDate, 29), 'yyyy-MM-dd');
   const prev7Start = format(subDays(todayDate, 13), 'yyyy-MM-dd');
   const prev7End = format(subDays(todayDate, 7), 'yyyy-MM-dd');
   const yesterday = format(subDays(todayDate, 1), 'yyyy-MM-dd');
@@ -227,7 +228,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
   let prev7DaysActuals: Record<string, number> = {};
   let yesterdayActuals: Record<string, number> = {};
   let dayBeforeActuals: Record<string, number> = {};
-  let last7DaysSeries: Array<{ date: string; spend: number; impressions: number; clicks: number; conversions: number }> = [];
+  let last30DaysSeries: Array<{ date: string; spend: number; impressions: number; clicks: number; conversions: number }> = [];
 
   if (activePlatforms.length > 0) {
     const trendBase = () => supabase
@@ -255,7 +256,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
       applyFilter(trendBase()).gte('date', prev7Start).lte('date', prev7End),
       applyFilter(trendBase()).eq('date', yesterday),
       applyFilter(trendBase()).eq('date', dayBefore),
-      applySeriesFilter(seriesBase()).gte('date', last7Start).lte('date', today),
+      applySeriesFilter(seriesBase()).gte('date', last30Start).lte('date', today),
     ]);
 
     last7DaysActuals = aggregateAdRows(last7Rows ?? []);
@@ -280,10 +281,10 @@ export async function GET(_req: NextRequest, { params }: Params) {
       }
       byDate.set(row.date, cur);
     }
-    for (let i = 6; i >= 0; i--) {
+    for (let i = 29; i >= 0; i--) {
       const d = format(subDays(todayDate, i), 'yyyy-MM-dd');
       const agg = byDate.get(d);
-      if (agg) last7DaysSeries.push({ date: d, ...agg });
+      if (agg) last30DaysSeries.push({ date: d, ...agg });
     }
   }
 
@@ -360,7 +361,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
     prev7DaysActuals,
     yesterdayActuals,
     dayBeforeActuals,
-    last7DaysSeries,
+    last30DaysSeries,
     campaigns,
     ga4Events,
     metaEvents,

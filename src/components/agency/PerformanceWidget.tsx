@@ -15,7 +15,7 @@ export interface PerfData {
   hasData: boolean;
   trend?: { pctChange: number; improving: boolean } | null;
   trend24h?: { pctChange: number; improving: boolean } | null;
-  dailySeries: number[];  // last 7 days of metric values, oldest first (only days with data)
+  dailySeries: number[];  // last 30 days of metric values, oldest first (only days with data)
 }
 
 interface WidgetConfig {
@@ -414,7 +414,7 @@ export function PerformanceWidget({
   const [prev7DaysActuals, setPrev7DaysActuals] = useState<Record<string, number>>({});
   const [yesterdayActuals, setYesterdayActuals] = useState<Record<string, number>>({});
   const [dayBeforeActuals, setDayBeforeActuals] = useState<Record<string, number>>({});
-  const [last7DaysSeries, setLast7DaysSeries] = useState<Array<{ date: string; spend: number; impressions: number; clicks: number; conversions: number }>>([]);
+  const [last30DaysSeries, setLast30DaysSeries] = useState<Array<{ date: string; spend: number; impressions: number; clicks: number; conversions: number }>>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [ga4Events, setGa4Events] = useState<string[]>([]);
   const [metaEvents, setMetaEvents] = useState<Array<{ name: string; count: number }>>([]);
@@ -447,7 +447,7 @@ export function PerformanceWidget({
         setPrev7DaysActuals(json.prev7DaysActuals ?? {});
         setYesterdayActuals(json.yesterdayActuals ?? {});
         setDayBeforeActuals(json.dayBeforeActuals ?? {});
-        setLast7DaysSeries(json.last7DaysSeries ?? []);
+        setLast30DaysSeries(json.last30DaysSeries ?? []);
         setCampaigns(json.campaigns ?? []);
         setGa4Events(json.ga4Events ?? []);
         setMetaEvents(json.metaEvents ?? []);
@@ -493,14 +493,14 @@ export function PerformanceWidget({
     let dailySeries: number[];
     if (/cpa|cpl/.test(mk)) {
       let cumSpend = 0, cumConv = 0;
-      dailySeries = last7DaysSeries.reduce<number[]>((acc, row) => {
+      dailySeries = last30DaysSeries.reduce<number[]>((acc, row) => {
         cumSpend += row.spend;
         cumConv += row.conversions;
         if (cumConv > 0) acc.push(cumSpend / cumConv);
         return acc;
       }, []);
     } else {
-      dailySeries = last7DaysSeries
+      dailySeries = last30DaysSeries
         .map(row => metricFromDayRow(row, primaryGoal.metric))
         .filter((v): v is number => v !== null);
     }
@@ -539,7 +539,7 @@ export function PerformanceWidget({
     };
     setPerfData(data);
     onNeedleRef.current?.(data);
-  }, [goals, combinedActuals, ga4Actuals, last7DaysActuals, prev7DaysActuals, yesterdayActuals, dayBeforeActuals, last7DaysSeries, config.metricSource]);
+  }, [goals, combinedActuals, ga4Actuals, last7DaysActuals, prev7DaysActuals, yesterdayActuals, dayBeforeActuals, last30DaysSeries, config.metricSource]);
 
   const handleSave = useCallback((newConfig: WidgetConfig) => {
     persistConfig(clientId, newConfig);

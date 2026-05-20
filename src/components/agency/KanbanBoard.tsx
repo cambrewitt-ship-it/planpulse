@@ -3,7 +3,7 @@
 
 import { useState, useRef, useEffect, forwardRef, useImperativeHandle, type ForwardedRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Facebook, Search, Linkedin, Music, Radio, Plus, X, Check } from 'lucide-react';
+import { Facebook, Search, Linkedin, Music, Radio, Plus, X, Check, Clock } from 'lucide-react';
 import type { AgencyClientActionPoints } from '@/app/api/agency/action-points/route';
 import { getChannelLogo } from '@/lib/utils/channel-icons';
 
@@ -271,6 +271,156 @@ function AssignMenu({ card, onAssign, accountManagers = [], variant = 'default',
   );
 }
 
+// ── Delay Channel Modal ───────────────────────────────────────────────────────
+
+interface DelayChannelModalProps {
+  clientId: string;
+  clientName: string;
+  channelType: string;
+  overdueCount: number;
+  onClose: () => void;
+  onDelayed: () => void;
+}
+
+function DelayChannelModal({ clientId, clientName, channelType, overdueCount, onClose, onDelayed }: DelayChannelModalProps) {
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const defaultDate = tomorrow.toISOString().split('T')[0];
+
+  const [newStartDate, setNewStartDate] = useState(defaultDate);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleDelay() {
+    if (!newStartDate) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/clients/${clientId}/media-plan-builder/delay-channel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channelName: channelType, newStartDate }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setError(body.error || 'Failed to delay channel');
+        return;
+      }
+      onDelayed();
+      onClose();
+    } catch {
+      setError('Failed to delay channel');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return typeof document !== 'undefined' ? createPortal(
+    <div
+      style={{
+        position: 'fixed', inset: 0, zIndex: 99998,
+        background: 'rgba(0,0,0,0.35)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}
+      onClick={onClose}
+    >
+      <div
+        style={{
+          background: '#FDFCF8', borderRadius: 10,
+          border: '0.5px solid #D5D0C5',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.14)',
+          width: 320, padding: '20px 22px',
+          fontFamily: "'DM Sans', system-ui, sans-serif",
+        }}
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 14 }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 4 }}>
+              <Clock size={14} color="#B07030" />
+              <span style={{ fontSize: 14, fontWeight: 600, color: '#1C1917' }}>Delay channel</span>
+            </div>
+            <div style={{ fontSize: 11, color: '#8A8578' }}>
+              {clientName} · {channelType}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#8A8578', padding: 2 }}
+          >
+            <X size={14} />
+          </button>
+        </div>
+
+        {/* Warning */}
+        <div style={{
+          background: '#F5EDE9', border: '0.5px solid rgba(160,68,42,0.25)',
+          borderRadius: 6, padding: '8px 10px', marginBottom: 16, fontSize: 11, color: '#A0442A',
+        }}>
+          {overdueCount} SET UP action point{overdueCount > 1 ? 's are' : ' is'} overdue for this channel.
+          Delaying will push all upcoming flights forward.
+        </div>
+
+        {/* Date input */}
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ display: 'block', fontSize: 11, fontWeight: 500, color: '#8A8578', marginBottom: 5 }}>
+            Push channel start to
+          </label>
+          <input
+            type="date"
+            value={newStartDate}
+            min={new Date().toISOString().split('T')[0]}
+            onChange={e => setNewStartDate(e.target.value)}
+            style={{
+              width: '100%', fontSize: 12, padding: '6px 10px',
+              border: '0.5px solid #D5D0C5', borderRadius: 5,
+              background: '#fff', outline: 'none', color: '#1C1917',
+              fontFamily: "'DM Sans', system-ui, sans-serif",
+              boxSizing: 'border-box',
+            }}
+          />
+        </div>
+
+        {error && (
+          <p style={{ fontSize: 11, color: '#A0442A', marginBottom: 10 }}>{error}</p>
+        )}
+
+        {/* Actions */}
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            onClick={() => void handleDelay()}
+            disabled={saving || !newStartDate}
+            style={{
+              flex: 1, fontSize: 12, fontWeight: 600, padding: '7px 0',
+              borderRadius: 6, border: 'none',
+              background: saving || !newStartDate ? '#D5D0C5' : '#B07030',
+              color: '#fff', cursor: saving || !newStartDate ? 'default' : 'pointer',
+              fontFamily: "'DM Sans', system-ui, sans-serif",
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+            }}
+          >
+            <Clock size={12} />
+            {saving ? 'Delaying…' : 'Delay channel'}
+          </button>
+          <button
+            onClick={onClose}
+            style={{
+              fontSize: 12, padding: '7px 14px',
+              borderRadius: 6, border: '0.5px solid #D5D0C5',
+              background: 'transparent', color: '#8A8578',
+              cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif",
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  ) : null;
+}
+
 export interface KanbanBoardHandle {
   startAdding: () => void;
 }
@@ -354,6 +504,14 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
       return next;
     });
   }
+
+  // Delay channel modal state
+  const [delayModal, setDelayModal] = useState<{
+    clientId: string;
+    clientName: string;
+    channelType: string;
+    overdueCount: number;
+  } | null>(null);
 
   // Gantt popup state
   const [ganttPopup, setGanttPopup] = useState<{ card: KanbanCard; x: number; y: number } | null>(null);
@@ -638,6 +796,21 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
     if (b.daysUntilDue === null) return -1;
     return a.daysUntilDue - b.daysUntilDue;
   });
+
+  // Channels with SET UP action points overdue by 3+ days — eligible for Delay button.
+  // Key: `${clientId}::${channelType}` → { clientId, clientName, channelType, overdueCount }
+  const delayEligibleChannels = new Map<string, { clientId: string; clientName: string; channelType: string; overdueCount: number }>();
+  for (const card of overdueCards) {
+    if (card.tag === 'SET UP' && card.daysUntilDue !== null && card.daysUntilDue <= -3) {
+      const key = `${card.clientId}::${card.channelType}`;
+      const existing = delayEligibleChannels.get(key);
+      if (existing) {
+        existing.overdueCount++;
+      } else {
+        delayEligibleChannels.set(key, { clientId: card.clientId, clientName: card.clientName, channelType: card.channelType, overdueCount: 1 });
+      }
+    }
+  }
 
   return (
     <>
@@ -1120,6 +1293,15 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                 </div>
               </div>
               </div>
+              {card.tag === 'SET UP' && card.daysUntilDue !== null && card.daysUntilDue <= -3 && (() => {
+                const info = delayEligibleChannels.get(`${card.clientId}::${card.channelType}`);
+                return (
+                  <button type="button" onClick={(e) => { e.stopPropagation(); setDelayModal({ clientId: card.clientId, clientName: card.clientName, channelType: card.channelType, overdueCount: info?.overdueCount ?? 1 }); }} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, width: '100%', padding: '5px 8px', background: 'rgba(176,112,48,0.08)', borderTop: '0.5px solid rgba(176,112,48,0.3)', borderLeft: 'none', borderRight: 'none', borderBottom: 'none', cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif", fontSize: 10, fontWeight: 600, color: '#B07030', letterSpacing: '0.05em', textTransform: 'uppercase' as const }}>
+                    <Clock size={10} />
+                    Delay Channel
+                  </button>
+                );
+              })()}
             </div>
             </div>
             </div>
@@ -1182,6 +1364,15 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                           </div>
                         </div>
                       </div>
+                      {card.tag === 'SET UP' && card.daysUntilDue !== null && card.daysUntilDue <= -3 && (() => {
+                        const info = delayEligibleChannels.get(`${card.clientId}::${card.channelType}`);
+                        return (
+                          <button type="button" onClick={(e) => { e.stopPropagation(); setDelayModal({ clientId: card.clientId, clientName: card.clientName, channelType: card.channelType, overdueCount: info?.overdueCount ?? 1 }); }} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, width: '100%', padding: '5px 8px', background: 'rgba(176,112,48,0.08)', borderTop: '0.5px solid rgba(176,112,48,0.3)', borderLeft: 'none', borderRight: 'none', borderBottom: 'none', cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif", fontSize: 10, fontWeight: 600, color: '#B07030', letterSpacing: '0.05em', textTransform: 'uppercase' as const }}>
+                            <Clock size={10} />
+                            Delay Channel
+                          </button>
+                        );
+                      })()}
                     </div>
                     </div>
                     </div>
@@ -1457,6 +1648,18 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
         </div>
       </div>,
       document.body
+    )}
+
+    {/* Delay channel modal */}
+    {delayModal && (
+      <DelayChannelModal
+        clientId={delayModal.clientId}
+        clientName={delayModal.clientName}
+        channelType={delayModal.channelType}
+        overdueCount={delayModal.overdueCount}
+        onClose={() => setDelayModal(null)}
+        onDelayed={() => { onActionPointCompleted?.(); }}
+      />
     )}
     </>
   );

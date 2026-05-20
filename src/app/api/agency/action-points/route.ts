@@ -123,6 +123,9 @@ export async function GET(request: NextRequest) {
     // Build lookups: client_id -> channelName -> start/end date
     const channelStartDates = new Map<string, Map<string, string | null>>();
     const channelEndDates = new Map<string, Map<string, string | null>>();
+    // Upcoming (future) start dates per channel — used for SET UP due date calculation.
+    // Null means the channel has no future flights, so SET UP should be suppressed.
+    const channelSetUpStartDates = new Map<string, Map<string, string | null>>();
 
     const today = toDateStr(new Date());
 
@@ -130,15 +133,18 @@ export async function GET(request: NextRequest) {
       const channels = new Set<string>();
       const startDates = new Map<string, string | null>();
       const endDates = new Map<string, string | null>();
+      const setUpStartDates = new Map<string, string | null>();
 
       if (plan.channels && Array.isArray(plan.channels)) {
         for (const ch of plan.channels as any[]) {
           if (ch.channelName) {
             const normalizedName = normalizeChannelName(ch.channelName);
 
-            // Find earliest flight start date and latest end date for this channel
+            // Find earliest flight start date, latest end date, and earliest
+            // *upcoming* (>= today) flight start (used for SET UP action points)
             let earliestStart: string | null = null;
             let latestEnd: string | null = null;
+            let nextUpcomingStart: string | null = null;
             const flights: any[] = ch.flights || [];
 
             for (const flight of flights) {
@@ -146,6 +152,11 @@ export async function GET(request: NextRequest) {
                 const startDate = toDateStr(flight.startWeek);
                 if (!earliestStart || startDate < earliestStart) {
                   earliestStart = startDate;
+                }
+                if (startDate >= today) {
+                  if (!nextUpcomingStart || startDate < nextUpcomingStart) {
+                    nextUpcomingStart = startDate;
+                  }
                 }
               }
               if (flight.endWeek) {
@@ -164,9 +175,11 @@ export async function GET(request: NextRequest) {
               if (!existingStart) {
                 startDates.set(normalizedName, earliestStart);
                 endDates.set(normalizedName, latestEnd);
+                setUpStartDates.set(normalizedName, nextUpcomingStart);
               } else if (earliestStart && earliestStart > existingStart) {
                 startDates.set(normalizedName, earliestStart);
                 endDates.set(normalizedName, latestEnd);
+                setUpStartDates.set(normalizedName, nextUpcomingStart);
               }
             }
           }
@@ -177,6 +190,7 @@ export async function GET(request: NextRequest) {
         clientChannels.set(plan.client_id, channels);
         channelStartDates.set(plan.client_id, startDates);
         channelEndDates.set(plan.client_id, endDates);
+        channelSetUpStartDates.set(plan.client_id, setUpStartDates);
       }
     }
 
@@ -283,6 +297,7 @@ export async function GET(request: NextRequest) {
       const clientCompletion = completionLookup.get(client.id) || new Map<string, { completed: boolean; completedAt: string | null; assignedTo: string | null }>();
       const clientStartDates = channelStartDates.get(client.id) || new Map<string, string | null>();
       const clientEndDates = channelEndDates.get(client.id) || new Map<string, string | null>();
+      const clientSetUpStartDates = channelSetUpStartDates.get(client.id) || new Map<string, string | null>();
 
       // Group outstanding action points by channel
       const channelMap = new Map<string, AgencyActionPoint[]>();
@@ -304,7 +319,12 @@ export async function GET(request: NextRequest) {
 
         if (ap.category === 'SET UP') {
           if (isCompleted) continue;
-          calculatedDueDate = calculateSetUpDueDate(ap, channelStartDate);
+          // Only show SET UP actions for channels with an upcoming (future) flight.
+          // If a channel has already started and no future flight exists, we assume
+          // set-up was done when the plan was originally configured.
+          const nextUpcomingStart = clientSetUpStartDates.get(apChannelNorm) ?? null;
+          if (!nextUpcomingStart) continue;
+          calculatedDueDate = calculateSetUpDueDate(ap, nextUpcomingStart);
         } else if (ap.category === 'HEALTH CHECK') {
           if (!ap.frequency) continue;
 
