@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { Plus, Trash2, ChevronLeft, ChevronRight, MoreHorizontal, Upload, X, CheckCircle, AlertCircle, Loader2 } from "lucide-react";
+import { Plus, Trash2, ChevronLeft, ChevronRight, MoreHorizontal, Upload, X, CheckCircle, AlertCircle, Loader2, FileSpreadsheet } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -39,6 +39,31 @@ interface ParsedChannel {
     endDate: string;
     monthlySpend: Record<string, number>;
   }>;
+}
+
+interface XlsxCandidateRow {
+  rowNumber: number;
+  labelText: string;
+  hasColoredCells: boolean;
+  hasMergedCells: boolean;
+  colorSamples: string[];
+  isLikelyTotals: boolean;
+}
+
+interface XlsxProbeResult {
+  detectedYear: number | null;
+  dateHeaderRowNumber: number;
+  dateHeaders: Array<{ colNumber: number; label: string; isoDate: string | null }>;
+  candidateRows: XlsxCandidateRow[];
+  warnings: string[];
+  labelColumns: Array<{ colNumber: number; header: string }>;
+}
+
+interface XlsxClarificationState {
+  probeResult: XlsxProbeResult;
+  confirmedYear: number;
+  selectedRowNumbers: Set<number>;
+  detailColumnIndex: number | null;
 }
 
 export interface MediaFlight {
@@ -569,6 +594,14 @@ export function MediaPlanGrid({ channels: externalChannels, onChannelsChange, co
   const [reviewChannels, setReviewChannels] = useState<MediaPlanChannel[] | null>(null);
   const [reviewImagePreview, setReviewImagePreview] = useState<string | null>(null);
   const screenshotInputRef = useRef<HTMLInputElement>(null);
+
+  // XLSX upload state
+  const [isProbing, setIsProbing] = useState(false);
+  const [isParsingXlsx, setIsParsingXlsx] = useState(false);
+  const [xlsxError, setXlsxError] = useState<string | null>(null);
+  const [xlsxClarification, setXlsxClarification] = useState<XlsxClarificationState | null>(null);
+  const [pendingXlsxFile, setPendingXlsxFile] = useState<File | null>(null);
+  const xlsxInputRef = useRef<HTMLInputElement>(null);
   
   // Focus budget input when activeSelection changes (only once per selection)
   useEffect(() => {
@@ -1346,6 +1379,91 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
     reader.readAsDataURL(file);
   };
 
+  const handleXlsxUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+
+    const validType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    if (file.type !== validType && !file.name.endsWith('.xlsx')) {
+      setXlsxError('Please upload a .xlsx Excel file.');
+      return;
+    }
+    if (file.size > 20 * 1024 * 1024) {
+      setXlsxError('File must be smaller than 20 MB.');
+      return;
+    }
+
+    setIsProbing(true);
+    setXlsxError(null);
+    setXlsxClarification(null);
+    setPendingXlsxFile(file);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('year', String(selectedYear));
+
+      const res = await fetch('/api/media-plan/probe-xlsx', {
+        method: 'POST',
+        credentials: 'include',
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? 'Failed to read Excel file');
+
+      const probe: XlsxProbeResult = data.probe;
+      const defaultSelected = new Set(
+        probe.candidateRows
+          .filter(r => !r.isLikelyTotals)
+          .map(r => r.rowNumber)
+      );
+
+      setXlsxClarification({
+        probeResult: probe,
+        confirmedYear: probe.detectedYear ?? selectedYear,
+        selectedRowNumbers: defaultSelected,
+        detailColumnIndex: probe.labelColumns.length > 1 ? probe.labelColumns[1].colNumber - 1 : null,
+      });
+    } catch (err: any) {
+      setXlsxError(err.message ?? 'Failed to read Excel file. Please try again.');
+      setPendingXlsxFile(null);
+    } finally {
+      setIsProbing(false);
+    }
+  };
+
+  const handleClarificationConfirm = async (state: XlsxClarificationState) => {
+    if (!pendingXlsxFile) return;
+    setXlsxClarification(null);
+    setIsParsingXlsx(true);
+    setXlsxError(null);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', pendingXlsxFile);
+      formData.append('year', String(state.confirmedYear));
+      formData.append('dateHeaderRow', String(state.probeResult.dateHeaderRowNumber));
+      formData.append('channelRows', JSON.stringify(Array.from(state.selectedRowNumbers)));
+      formData.append('detailColumnIndex', state.detailColumnIndex !== null ? String(state.detailColumnIndex) : 'null');
+
+      const res = await fetch('/api/media-plan/parse-xlsx', {
+        method: 'POST',
+        credentials: 'include',
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? 'Failed to extract media plan');
+
+      const converted = parsedToMediaPlanChannels(data.channels, state.confirmedYear);
+      setReviewChannels(converted);
+    } catch (err: any) {
+      setXlsxError(err.message ?? 'Failed to extract media plan. Please try again.');
+    } finally {
+      setIsParsingXlsx(false);
+    }
+  };
+
   return (
     <div className="w-full overflow-hidden border border-gray-300 rounded-lg relative">
       {/* Year Navigation and Commission Header */}
@@ -1390,8 +1508,8 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
           <Button variant="outline" size="icon" className="h-7 w-7 text-base" onClick={() => setCellWidth(w => Math.min(60, w + 8))} title="Zoom in">+</Button>
         </div>
 
-        {/* Upload Screenshot */}
-        <div className="flex items-center gap-2">
+        {/* Upload buttons */}
+        <div className="flex items-center gap-2 flex-wrap">
           <input
             ref={screenshotInputRef}
             type="file"
@@ -1399,12 +1517,19 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
             className="hidden"
             onChange={handleScreenshotUpload}
           />
+          <input
+            ref={xlsxInputRef}
+            type="file"
+            accept="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.xlsx"
+            className="hidden"
+            onChange={handleXlsxUpload}
+          />
           <Button
             variant="outline"
             size="sm"
             className="h-8 gap-1.5 text-xs"
             onClick={() => screenshotInputRef.current?.click()}
-            disabled={isParsingScreenshot}
+            disabled={isParsingScreenshot || isProbing || isParsingXlsx}
             title="Upload a media plan screenshot and let AI extract the channels and budgets"
           >
             {isParsingScreenshot ? (
@@ -1414,9 +1539,24 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
             )}
             {isParsingScreenshot ? 'Analysing…' : 'Upload Screenshot'}
           </Button>
-          {screenshotError && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 gap-1.5 text-xs"
+            onClick={() => xlsxInputRef.current?.click()}
+            disabled={isParsingScreenshot || isProbing || isParsingXlsx}
+            title="Upload an Excel media plan for accurate extraction using cell colours and merged cells"
+          >
+            {(isProbing || isParsingXlsx) ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <FileSpreadsheet className="h-3.5 w-3.5" />
+            )}
+            {isProbing ? 'Reading…' : isParsingXlsx ? 'Extracting…' : 'Upload Excel'}
+          </Button>
+          {(screenshotError || xlsxError) && (
             <span className="text-xs text-red-500 flex items-center gap-1">
-              <AlertCircle className="h-3 w-3" /> {screenshotError}
+              <AlertCircle className="h-3 w-3" /> {screenshotError || xlsxError}
             </span>
           )}
         </div>
@@ -1449,7 +1589,7 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
         <div className="flex w-full overflow-hidden rounded-xl" style={{ minHeight: 340 }}>
           <button
             onClick={() => screenshotInputRef.current?.click()}
-            disabled={isParsingScreenshot}
+            disabled={isParsingScreenshot || isProbing || isParsingXlsx}
             className="flex-1 flex flex-col items-center justify-center gap-4 border-r border-blue-500 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed rounded-l-xl"
             style={{ minHeight: 340, background: 'linear-gradient(135deg, #1e3a8a 0%, #1d4ed8 100%)' }}
           >
@@ -1462,9 +1602,29 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
             </div>
             <div className="text-center">
               <div className="text-lg font-semibold text-white">
-                {isParsingScreenshot ? 'Analysing…' : 'Upload Media Plan Screenshot'}
+                {isParsingScreenshot ? 'Analysing…' : 'Upload Screenshot'}
               </div>
-              <div className="text-sm text-white/70 mt-1">AI will extract your channels and budgets automatically</div>
+              <div className="text-sm text-white/70 mt-1">AI reads your plan from an image</div>
+            </div>
+          </button>
+          <button
+            onClick={() => xlsxInputRef.current?.click()}
+            disabled={isParsingScreenshot || isProbing || isParsingXlsx}
+            className="flex-1 flex flex-col items-center justify-center gap-4 border-r border-emerald-600 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ minHeight: 340, background: 'linear-gradient(135deg, #064e3b 0%, #059669 100%)' }}
+          >
+            <div className="w-14 h-14 rounded-full bg-white/20 flex items-center justify-center">
+              {(isProbing || isParsingXlsx) ? (
+                <Loader2 className="w-7 h-7 text-white animate-spin" />
+              ) : (
+                <FileSpreadsheet className="w-7 h-7 text-white" />
+              )}
+            </div>
+            <div className="text-center">
+              <div className="text-lg font-semibold text-white">
+                {isProbing ? 'Reading…' : isParsingXlsx ? 'Extracting…' : 'Upload Excel'}
+              </div>
+              <div className="text-sm text-white/70 mt-1">Most accurate — reads cell colours &amp; merged cells directly</div>
             </div>
           </button>
           <button
@@ -1476,7 +1636,7 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
               <Plus className="w-7 h-7 text-gray-500" />
             </div>
             <div className="text-center">
-              <div className="text-lg font-semibold text-gray-700">Enter Media Plan Details Manually</div>
+              <div className="text-lg font-semibold text-gray-700">Enter Manually</div>
               <div className="text-sm text-gray-400 mt-1">Add channels and flights one by one</div>
             </div>
           </button>
@@ -2902,6 +3062,204 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
               </>
             ) : null;
           })()}
+        </div>,
+        document.body
+      )}
+
+      {/* XLSX clarification modal */}
+      {xlsxClarification && typeof window !== 'undefined' && createPortal(
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 999998,
+            background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: 24, fontFamily: "'DM Sans', system-ui, sans-serif",
+          }}
+          onClick={() => setXlsxClarification(null)}
+        >
+          <div
+            style={{
+              background: '#FDFCF8', borderRadius: 16, maxWidth: 560, width: '100%',
+              maxHeight: '85vh', overflow: 'hidden', display: 'flex', flexDirection: 'column',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div style={{ padding: '20px 24px 16px', borderBottom: '0.5px solid #E8E4DC', display: 'flex', alignItems: 'center', gap: 10 }}>
+              <FileSpreadsheet style={{ color: '#059669', width: 20, height: 20, flexShrink: 0 }} />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 15, fontWeight: 600, color: '#1C1917' }}>Confirm your plan structure</div>
+                <div style={{ fontSize: 12, color: '#8A8578', marginTop: 1 }}>Check what we detected before we extract the data</div>
+              </div>
+              <button
+                onClick={() => setXlsxClarification(null)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#8A8578', padding: 4, borderRadius: 6, display: 'flex', alignItems: 'center' }}
+              >
+                <X style={{ width: 18, height: 18 }} />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+              {/* Warnings */}
+              {xlsxClarification.probeResult.warnings.map((w, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '10px 12px', background: '#FFFBEB', border: '0.5px solid #F59E0B', borderRadius: 8, fontSize: 12, color: '#92400E' }}>
+                  <AlertCircle style={{ width: 14, height: 14, flexShrink: 0, marginTop: 1 }} />
+                  {w}
+                </div>
+              ))}
+
+              {/* Section 1: Plan year */}
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 600, color: '#8A8578', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Plan Year</div>
+                <input
+                  type="number"
+                  min={2020}
+                  max={2040}
+                  value={xlsxClarification.confirmedYear}
+                  onChange={e => {
+                    const yr = parseInt(e.target.value);
+                    if (yr >= 2020 && yr <= 2040) setXlsxClarification(s => s ? { ...s, confirmedYear: yr } : s);
+                  }}
+                  style={{
+                    width: 100, padding: '7px 12px', borderRadius: 8,
+                    border: '0.5px solid #E8E4DC', fontSize: 14, background: '#F5F3EF',
+                    color: '#1C1917', outline: 'none',
+                  }}
+                />
+                {xlsxClarification.probeResult.detectedYear && (
+                  <div style={{ fontSize: 11, color: '#8A8578', marginTop: 5 }}>
+                    Year detected from date headers in your file.
+                  </div>
+                )}
+              </div>
+
+              {/* Section 2: Date header preview */}
+              {xlsxClarification.probeResult.dateHeaders.length > 0 && (
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: '#8A8578', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
+                    Date columns detected — {xlsxClarification.probeResult.dateHeaders.length} weeks
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                    {xlsxClarification.probeResult.dateHeaders.slice(0, 12).map((dh, i) => (
+                      <span key={i} style={{ fontSize: 11, padding: '3px 8px', background: '#E8F5E9', color: '#1B5E20', borderRadius: 4, fontWeight: 500 }}>
+                        {dh.label}
+                      </span>
+                    ))}
+                    {xlsxClarification.probeResult.dateHeaders.length > 12 && (
+                      <span style={{ fontSize: 11, padding: '3px 8px', color: '#8A8578', borderRadius: 4 }}>
+                        +{xlsxClarification.probeResult.dateHeaders.length - 12} more
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Section 3: Channel row selection */}
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 600, color: '#8A8578', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
+                  Channel rows — {xlsxClarification.selectedRowNumbers.size} of {xlsxClarification.probeResult.candidateRows.length} selected
+                </div>
+                {xlsxClarification.probeResult.candidateRows.length === 0 ? (
+                  <div style={{ fontSize: 13, color: '#8A8578', padding: '8px 12px', background: '#F5F3EF', borderRadius: 8 }}>
+                    No channel rows detected. Your file may use an unsupported layout.
+                  </div>
+                ) : (
+                  <div style={{ maxHeight: 200, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {xlsxClarification.probeResult.candidateRows.map(row => {
+                      const checked = xlsxClarification.selectedRowNumbers.has(row.rowNumber);
+                      return (
+                        <label
+                          key={row.rowNumber}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
+                            borderRadius: 8, border: '0.5px solid #E8E4DC',
+                            background: checked ? '#F5F3EF' : '#FDFCF8',
+                            cursor: 'pointer', userSelect: 'none',
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => setXlsxClarification(s => {
+                              if (!s) return s;
+                              const next = new Set(s.selectedRowNumbers);
+                              if (checked) next.delete(row.rowNumber); else next.add(row.rowNumber);
+                              return { ...s, selectedRowNumbers: next };
+                            })}
+                            style={{ width: 14, height: 14, flexShrink: 0, cursor: 'pointer' }}
+                          />
+                          <span style={{ flex: 1, fontSize: 13, color: '#1C1917', fontWeight: checked ? 500 : 400 }}>
+                            {row.labelText}
+                          </span>
+                          {row.isLikelyTotals && (
+                            <span style={{ fontSize: 10, color: '#9CA3AF', background: '#F3F4F6', borderRadius: 4, padding: '2px 6px', flexShrink: 0 }}>
+                              totals row
+                            </span>
+                          )}
+                          {!row.hasColoredCells && !row.hasMergedCells && !row.isLikelyTotals && (
+                            <span style={{ fontSize: 10, color: '#F59E0B', background: '#FFFBEB', borderRadius: 4, padding: '2px 6px', flexShrink: 0 }}>
+                              no colour
+                            </span>
+                          )}
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Section 4: Format/detail column */}
+              {xlsxClarification.probeResult.labelColumns.length > 1 && (
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: '#8A8578', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
+                    Format / detail column
+                  </div>
+                  <select
+                    value={xlsxClarification.detailColumnIndex !== null ? String(xlsxClarification.detailColumnIndex) : ''}
+                    onChange={e => setXlsxClarification(s => s ? {
+                      ...s,
+                      detailColumnIndex: e.target.value !== '' ? parseInt(e.target.value) : null
+                    } : s)}
+                    style={{
+                      padding: '7px 12px', borderRadius: 8, border: '0.5px solid #E8E4DC',
+                      fontSize: 13, background: '#F5F3EF', color: '#1C1917', outline: 'none', cursor: 'pointer',
+                    }}
+                  >
+                    <option value="">None</option>
+                    {xlsxClarification.probeResult.labelColumns.map(col => (
+                      <option key={col.colNumber} value={String(col.colNumber - 1)}>
+                        {col.header || `Column ${col.colNumber}`}
+                      </option>
+                    ))}
+                  </select>
+                  <div style={{ fontSize: 11, color: '#8A8578', marginTop: 5 }}>
+                    Which column in your Excel contains the channel format or detail text?
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div style={{ padding: '16px 24px', borderTop: '0.5px solid #E8E4DC', display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <Button variant="outline" onClick={() => setXlsxClarification(null)}>
+                Cancel
+              </Button>
+              <Button
+                disabled={xlsxClarification.selectedRowNumbers.size === 0 || isParsingXlsx}
+                onClick={() => handleClarificationConfirm(xlsxClarification)}
+                style={{ background: '#1C1917', color: '#FDFCF8', border: 'none' }}
+              >
+                {isParsingXlsx ? (
+                  <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />Extracting…</>
+                ) : (
+                  'Extract Plan →'
+                )}
+              </Button>
+            </div>
+          </div>
         </div>,
         document.body
       )}
