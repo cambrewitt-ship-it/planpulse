@@ -1,5 +1,3 @@
-const WEBHOOK_URL = process.env.TEAMS_WEBHOOK_URL;
-
 type Fact = { name: string; value: string };
 
 interface AlertOptions {
@@ -9,12 +7,14 @@ interface AlertOptions {
   facts?: Fact[];
   actionUrl?: string;
   actionLabel?: string;
+  webhookUrl?: string;
 }
 
-async function post(payload: object): Promise<void> {
-  if (!WEBHOOK_URL) return;
+async function post(payload: object, webhookUrl?: string): Promise<void> {
+  const url = webhookUrl ?? process.env.TEAMS_WEBHOOK_URL;
+  if (!url) return;
   try {
-    await fetch(WEBHOOK_URL, {
+    await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -24,7 +24,7 @@ async function post(payload: object): Promise<void> {
   }
 }
 
-export async function sendTeamsAlert({ title, text, color = '0078D4', facts, actionUrl, actionLabel }: AlertOptions): Promise<void> {
+export async function sendTeamsAlert({ title, text, color = '0078D4', facts, actionUrl, actionLabel, webhookUrl }: AlertOptions): Promise<void> {
   const section: Record<string, unknown> = { activityTitle: `**${title}**`, activityText: text };
   if (facts?.length) section.facts = facts;
 
@@ -40,7 +40,7 @@ export async function sendTeamsAlert({ title, text, color = '0078D4', facts, act
     payload.potentialAction = [{ '@type': 'OpenUri', name: actionLabel ?? 'Open', targets: [{ os: 'default', uri: actionUrl }] }];
   }
 
-  await post(payload);
+  await post(payload, webhookUrl);
 }
 
 export interface ClientBriefingRow {
@@ -51,7 +51,7 @@ export interface ClientBriefingRow {
   budget_health_pct: number | null;
 }
 
-export async function sendTeamsDailyBriefing(clients: ClientBriefingRow[], appUrl?: string): Promise<void> {
+export async function sendTeamsDailyBriefing(clients: ClientBriefingRow[], appUrl?: string, webhookUrl?: string): Promise<void> {
   const red = clients.filter(c => c.status === 'red');
   const amber = clients.filter(c => c.status === 'amber');
   const green = clients.filter(c => c.status === 'green');
@@ -94,5 +94,5 @@ export async function sendTeamsDailyBriefing(clients: ClientBriefingRow[], appUr
     payload.potentialAction = [{ '@type': 'OpenUri', name: 'Open Dashboard', targets: [{ os: 'default', uri: appUrl }] }];
   }
 
-  await post(payload);
+  await post(payload, webhookUrl);
 }

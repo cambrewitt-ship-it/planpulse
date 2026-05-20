@@ -248,7 +248,9 @@ export async function POST(request: NextRequest) {
   const bytes = await file.arrayBuffer();
   const workbook = new ExcelJS.Workbook();
   try {
-    await workbook.xlsx.load(bytes as Buffer);
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-expect-error ExcelJS types expect legacy non-generic Buffer
+    await workbook.xlsx.load(Buffer.from(bytes));
   } catch {
     return NextResponse.json({ error: 'Could not read the Excel file.' }, { status: 400 });
   }

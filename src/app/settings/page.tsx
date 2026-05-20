@@ -7,7 +7,8 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Plus, Trash2, Upload } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Plus, Trash2, Upload, Save } from 'lucide-react';
 import type { User as SupabaseUser } from '@supabase/supabase-js';
 
 interface AccountManager {
@@ -42,10 +43,19 @@ export default function SettingsPage() {
   const logoInputRef = useRef<HTMLInputElement>(null);
   const [logoUploadClientId, setLogoUploadClientId] = useState<string | null>(null);
 
+  // Teams integration state
+  const [teamsWebhookUrl, setTeamsWebhookUrl] = useState('');
+  const [teamsBotSecret, setTeamsBotSecret] = useState('');
+  const [dailyBriefingEnabled, setDailyBriefingEnabled] = useState(false);
+  const [anomalyAlertsEnabled, setAnomalyAlertsEnabled] = useState(false);
+  const [integrationLoading, setIntegrationLoading] = useState(false);
+  const [integrationSaving, setIntegrationSaving] = useState(false);
+
   useEffect(() => {
     checkUser();
     fetchAccountManagers();
     fetchClients();
+    fetchIntegration();
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -165,6 +175,53 @@ export default function SettingsPage() {
     }
   };
 
+  const fetchIntegration = async () => {
+    try {
+      setIntegrationLoading(true);
+      const res = await fetch('/api/settings/integrations');
+      if (!res.ok) return;
+      const { integration } = await res.json();
+      if (integration) {
+        setTeamsWebhookUrl(integration.teams_webhook_url ?? '');
+        setTeamsBotSecret(integration.teams_bot_hmac_secret ?? '');
+        setDailyBriefingEnabled(integration.daily_briefing_enabled ?? false);
+        setAnomalyAlertsEnabled(integration.anomaly_alerts_enabled ?? false);
+      }
+    } catch (e) {
+      console.error('Error fetching integration:', e);
+    } finally {
+      setIntegrationLoading(false);
+    }
+  };
+
+  const handleSaveIntegration = async () => {
+    try {
+      setIntegrationSaving(true);
+      setError(null);
+      const res = await fetch('/api/settings/integrations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          teams_webhook_url: teamsWebhookUrl,
+          teams_bot_hmac_secret: teamsBotSecret,
+          daily_briefing_enabled: dailyBriefingEnabled,
+          anomaly_alerts_enabled: anomalyAlertsEnabled,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        setError(data.error ?? 'Failed to save integration settings');
+        return;
+      }
+      setSuccess('Integration settings saved');
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (e) {
+      setError('Failed to save integration settings');
+    } finally {
+      setIntegrationSaving(false);
+    }
+  };
+
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !logoUploadClientId) return;
@@ -249,6 +306,7 @@ export default function SettingsPage() {
             <TabsTrigger value="account">Account</TabsTrigger>
             <TabsTrigger value="team">Team</TabsTrigger>
             <TabsTrigger value="clients">Clients</TabsTrigger>
+            <TabsTrigger value="integrations">Integrations</TabsTrigger>
           </TabsList>
 
           <TabsContent value="account" className="mt-6">
@@ -422,6 +480,103 @@ export default function SettingsPage() {
                       </div>
                     ))}
                   </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="integrations" className="mt-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Microsoft Teams</CardTitle>
+                <CardDescription>
+                  Connect PlanPulse to your Teams workspace for daily briefings, anomaly alerts, and the @PlanPulse bot.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {integrationLoading ? (
+                  <div className="text-sm text-muted-foreground py-4">Loading...</div>
+                ) : (
+                  <>
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="teams-webhook">Incoming Webhook URL</Label>
+                        <Input
+                          id="teams-webhook"
+                          type="url"
+                          value={teamsWebhookUrl}
+                          onChange={(e) => setTeamsWebhookUrl(e.target.value)}
+                          placeholder="https://your-org.webhook.office.com/webhookb2/..."
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Used to send daily briefings and alerts to your Teams channel.
+                          Create an Incoming Webhook connector in your Teams channel settings.
+                        </p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="teams-secret">Bot HMAC Secret</Label>
+                        <Input
+                          id="teams-secret"
+                          type="password"
+                          value={teamsBotSecret}
+                          onChange={(e) => setTeamsBotSecret(e.target.value)}
+                          placeholder="Paste the secret from your Teams Outgoing Webhook"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Used to verify inbound @PlanPulse messages. Copy from Teams Admin → Manage Team → Apps → Outgoing Webhooks.
+                          Set the callback URL to: <code className="font-mono bg-gray-100 px-1 rounded">{typeof window !== 'undefined' ? window.location.origin : ''}/api/bots/teams/{typeof window !== 'undefined' ? '<your-user-id>' : ''}</code>
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3 border-t pt-4">
+                      <p className="text-sm font-medium" style={{ color: '#1C1917' }}>Notifications</p>
+
+                      <div className="flex items-start gap-3">
+                        <Checkbox
+                          id="daily-briefing"
+                          checked={dailyBriefingEnabled}
+                          onCheckedChange={(v) => setDailyBriefingEnabled(Boolean(v))}
+                          disabled={!teamsWebhookUrl}
+                        />
+                        <div className="space-y-0.5">
+                          <Label htmlFor="daily-briefing" className="cursor-pointer font-medium text-sm">
+                            Daily briefing
+                          </Label>
+                          <p className="text-xs text-muted-foreground">
+                            Sends a health summary to your Teams channel at 8 AM on weekdays.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-start gap-3">
+                        <Checkbox
+                          id="anomaly-alerts"
+                          checked={anomalyAlertsEnabled}
+                          onCheckedChange={(v) => setAnomalyAlertsEnabled(Boolean(v))}
+                          disabled={!teamsWebhookUrl}
+                        />
+                        <div className="space-y-0.5">
+                          <Label htmlFor="anomaly-alerts" className="cursor-pointer font-medium text-sm">
+                            Anomaly alerts
+                          </Label>
+                          <p className="text-xs text-muted-foreground">
+                            Sends an alert when a client goes red, spend pacing crosses ±30%, or new tasks become overdue. Checks every 2 hours.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <Button
+                      onClick={handleSaveIntegration}
+                      disabled={integrationSaving}
+                      className="mt-2"
+                    >
+                      <Save className="h-4 w-4 mr-2" />
+                      {integrationSaving ? 'Saving...' : 'Save integration settings'}
+                    </Button>
+                  </>
                 )}
               </CardContent>
             </Card>
