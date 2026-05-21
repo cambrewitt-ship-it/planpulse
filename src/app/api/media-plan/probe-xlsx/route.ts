@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/server';
 export interface CandidateRow {
   rowNumber: number;
   labelText: string;
+  sectionLabel: string; // col-1 section label when labelText comes from col 2+
   hasColoredCells: boolean;
   hasMergedCells: boolean;
   colorSamples: string[];
@@ -21,17 +22,38 @@ export interface ProbeResult {
   labelColumns: Array<{ colNumber: number; header: string }>;
 }
 
-function isColoredFill(argb: string | undefined): boolean {
-  if (!argb) return false;
-  const hex = argb.toUpperCase();
-  if (hex.startsWith('00')) return false;        // transparent
-  if (hex === 'FFFFFFFF') return false;           // white
-  if (hex.length < 6) return false;
-  const r = parseInt(hex.slice(-6, -4), 16);
-  const g = parseInt(hex.slice(-4, -2), 16);
-  const b = parseInt(hex.slice(-2), 16);
-  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-  return luminance < 0.92;
+function isFillColored(fill: ExcelJS.Fill | undefined): boolean {
+  if (!fill || fill.type !== 'pattern') return false;
+  const pf = fill as any;
+  if (pf.pattern === 'none') return false;
+  const fg = pf.fgColor;
+  if (!fg) return false;
+
+  // Explicit ARGB color
+  if (fg.argb) {
+    const hex = (fg.argb as string).toUpperCase();
+    if (hex.startsWith('00')) return false;   // transparent
+    if (hex === 'FFFFFFFF') return false;      // white
+    if (hex.length < 6) return false;
+    const r = parseInt(hex.slice(-6, -4), 16);
+    const g2 = parseInt(hex.slice(-4, -2), 16);
+    const b = parseInt(hex.slice(-2), 16);
+    const luminance = (0.299 * r + 0.587 * g2 + 0.114 * b) / 255;
+    return luminance < 0.92;
+  }
+
+  // Theme color — tint ≥ 0.9 approaches white (uncolored)
+  if (fg.theme !== undefined) {
+    const tint = fg.tint ?? 0;
+    return tint < 0.9;
+  }
+
+  // Indexed color — index 65 = "no fill"
+  if (fg.indexed !== undefined) {
+    return fg.indexed !== 65;
+  }
+
+  return false;
 }
 
 function cellColFromRef(ref: string): number {
@@ -53,7 +75,11 @@ function formatDateLabel(d: Date): string {
 }
 
 function isDateLike(cell: ExcelJS.Cell): { isDate: boolean; date: Date | null } {
-  const v = cell.value;
+  let v: any = cell.value;
+  // Unwrap formula result — formula cells return { formula, result } not the value directly
+  if (v !== null && typeof v === 'object' && !Array.isArray(v) && 'result' in v) {
+    v = (v as ExcelJS.CellFormulaValue).result;
+  }
   if (v instanceof Date && !isNaN(v.getTime())) return { isDate: true, date: v };
   if (typeof v === 'number' && v > 1 && v < 100000) {
     // Excel date serial
@@ -138,17 +164,22 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  function getMasterFill(rowNum: number, colNum: number): string | undefined {
+  function getMasterFill(rowNum: number, colNum: number): ExcelJS.Fill | undefined {
     for (const mr of mergedRanges) {
       if (rowNum >= mr.startRow && rowNum <= mr.endRow && colNum >= mr.startCol && colNum <= mr.endCol) {
-        const masterCell = ws.getCell(mr.startRow, mr.startCol);
-        const fill = masterCell.fill as ExcelJS.Fill | undefined;
-        if (fill && fill.type === 'pattern') {
-          return (fill as any).fgColor?.argb as string | undefined;
-        }
+        return ws.getCell(mr.startRow, mr.startCol).fill as ExcelJS.Fill | undefined;
       }
     }
-    return undefined;
+    return ws.getCell(rowNum, colNum).fill as ExcelJS.Fill | undefined;
+  }
+
+  function getMasterValue(rowNum: number, colNum: number): any {
+    for (const mr of mergedRanges) {
+      if (rowNum >= mr.startRow && rowNum <= mr.endRow && colNum >= mr.startCol && colNum <= mr.endCol) {
+        return ws.getCell(mr.startRow, mr.startCol).value;
+      }
+    }
+    return ws.getCell(rowNum, colNum).value;
   }
 
   // Step 1: Find date header row (scan rows 1–15)
@@ -217,9 +248,19 @@ export async function POST(request: NextRequest) {
   for (let rn = dateHeaderRowNumber + 1; rn <= ws.rowCount; rn++) {
     const row = ws.getRow(rn);
 
-    // Get label from first non-date column
-    const labelCell = ws.getCell(rn, 1);
-    const rawLabel = String(labelCell.value ?? '').trim();
+    // Get label — use getMasterValue so merge-slave cells return the master's text.
+    // For multi-column plans (3+ label cols) prefer col 2 as the channel name
+    // since col 1 is typically a merged section header (e.g. "BRAND AWARENESS")
+    const col1Label = String(getMasterValue(rn, 1) ?? '').trim();
+    let rawLabel = col1Label;
+    let sectionLabel = '';
+    if (labelColumns.length >= 3 && labelColumns[1]) {
+      const col2Label = String(getMasterValue(rn, labelColumns[1].colNumber) ?? '').trim();
+      if (col2Label && col2Label !== col1Label) {
+        rawLabel = col2Label;
+        sectionLabel = col1Label;
+      }
+    }
     if (!rawLabel || /^\d+(\.\d+)?$/.test(rawLabel)) continue; // skip blank or purely numeric
 
     // Check for colored or merged cells in the date range
@@ -228,18 +269,12 @@ export async function POST(request: NextRequest) {
     const colorSamples: string[] = [];
 
     for (let c = firstDateCol; c <= lastDateCol; c++) {
-      const cell = ws.getCell(rn, c);
-
-      // Check own fill
-      const fill = cell.fill as ExcelJS.Fill | undefined;
-      const ownArgb = fill && fill.type === 'pattern' ? (fill as any).fgColor?.argb as string | undefined : undefined;
-
-      // Check master fill (if this cell is part of a merge)
-      const masterArgb = getMasterFill(rn, c);
-
-      const argb = ownArgb || masterArgb;
-      if (isColoredFill(argb)) {
+      // getMasterFill handles merge lookup automatically; it now returns the full Fill object
+      const masterFill = getMasterFill(rn, c);
+      if (isFillColored(masterFill)) {
         hasColoredCells = true;
+        // Keep an ARGB sample if available (for UI hints only)
+        const argb = (masterFill as any)?.fgColor?.argb as string | undefined;
         if (colorSamples.length < 3 && argb) colorSamples.push(argb);
       }
 
@@ -263,6 +298,7 @@ export async function POST(request: NextRequest) {
     candidateRows.push({
       rowNumber: rn,
       labelText: rawLabel,
+      sectionLabel,
       hasColoredCells,
       hasMergedCells,
       colorSamples,
@@ -275,7 +311,7 @@ export async function POST(request: NextRequest) {
   }
 
   const result: ProbeResult = {
-    detectedYear,
+    detectedYear: detectedYear ?? clientYear ?? new Date().getFullYear(),
     dateHeaderRowNumber,
     dateHeaders: dateHeaders.slice(0, 60), // cap for payload size
     candidateRows,

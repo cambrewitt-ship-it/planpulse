@@ -44,6 +44,7 @@ interface ParsedChannel {
 interface XlsxCandidateRow {
   rowNumber: number;
   labelText: string;
+  sectionLabel?: string;
   hasColoredCells: boolean;
   hasMergedCells: boolean;
   colorSamples: string[];
@@ -3192,7 +3193,9 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                             style={{ width: 14, height: 14, flexShrink: 0, cursor: 'pointer' }}
                           />
                           <span style={{ flex: 1, fontSize: 13, color: '#1C1917', fontWeight: checked ? 500 : 400 }}>
-                            {row.labelText}
+                            {row.sectionLabel ? (
+                              <><span style={{ color: '#8A8578' }}>{row.sectionLabel} / </span>{row.labelText}</>
+                            ) : row.labelText}
                           </span>
                           {row.isLikelyTotals && (
                             <span style={{ fontSize: 10, color: '#9CA3AF', background: '#F3F4F6', borderRadius: 4, padding: '2px 6px', flexShrink: 0 }}>
@@ -3215,7 +3218,7 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
               {xlsxClarification.probeResult.labelColumns.length > 1 && (
                 <div>
                   <div style={{ fontSize: 11, fontWeight: 600, color: '#8A8578', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
-                    Format / detail column
+                    Channel name column
                   </div>
                   <select
                     value={xlsxClarification.detailColumnIndex !== null ? String(xlsxClarification.detailColumnIndex) : ''}
@@ -3236,7 +3239,7 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                     ))}
                   </select>
                   <div style={{ fontSize: 11, color: '#8A8578', marginTop: 5 }}>
-                    Which column in your Excel contains the channel format or detail text?
+                    Which column contains the channel name? (e.g. Radio, Meta, Search)
                   </div>
                 </div>
               )}

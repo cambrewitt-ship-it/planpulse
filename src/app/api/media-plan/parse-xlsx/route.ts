@@ -23,17 +23,39 @@ const OOH_SUBTYPES: Record<string, string> = {
   'outdoor': 'OOH - OUTDOOR',
 };
 
-function isColoredFill(argb: string | undefined): boolean {
-  if (!argb) return false;
-  const hex = argb.toUpperCase();
-  if (hex.startsWith('00')) return false;
-  if (hex === 'FFFFFFFF') return false;
-  if (hex.length < 6) return false;
-  const r = parseInt(hex.slice(-6, -4), 16);
-  const g = parseInt(hex.slice(-4, -2), 16);
-  const b = parseInt(hex.slice(-2), 16);
-  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-  return luminance < 0.92;
+function isFillColored(fill: ExcelJS.Fill | undefined): boolean {
+  if (!fill || fill.type !== 'pattern') return false;
+  const pf = fill as any;
+  if (pf.pattern === 'none') return false;
+  const fg = pf.fgColor;
+  if (!fg) return false;
+
+  // Explicit ARGB color
+  if (fg.argb) {
+    const hex = (fg.argb as string).toUpperCase();
+    if (hex.startsWith('00')) return false;   // transparent
+    if (hex === 'FFFFFFFF') return false;      // white
+    if (hex.length < 6) return false;
+    const r = parseInt(hex.slice(-6, -4), 16);
+    const g2 = parseInt(hex.slice(-4, -2), 16);
+    const b = parseInt(hex.slice(-2), 16);
+    const luminance = (0.299 * r + 0.587 * g2 + 0.114 * b) / 255;
+    return luminance < 0.92;
+  }
+
+  // Theme color — any theme with tint not near-white is colored
+  // (theme 0 = background, theme 1 = text/black, themes 4-9 = accents)
+  if (fg.theme !== undefined) {
+    const tint = fg.tint ?? 0;
+    return tint < 0.9; // tint ≥ 0.9 approaches white
+  }
+
+  // Indexed color — index 65 = "no fill" (automatic / no color)
+  if (fg.indexed !== undefined) {
+    return fg.indexed !== 65;
+  }
+
+  return false;
 }
 
 function cellColFromRef(ref: string): number {
@@ -290,11 +312,12 @@ export async function POST(request: NextRequest) {
     return ws.getCell(rowNum, colNum);
   }
 
-  function getMasterFillArgb(rowNum: number, colNum: number): string | undefined {
-    const master = getMasterCell(rowNum, colNum);
-    const fill = master.fill as ExcelJS.Fill | undefined;
-    if (fill && fill.type === 'pattern') return (fill as any).fgColor?.argb as string | undefined;
-    return undefined;
+  function getMasterFill(rowNum: number, colNum: number): ExcelJS.Fill | undefined {
+    return getMasterCell(rowNum, colNum).fill as ExcelJS.Fill | undefined;
+  }
+
+  function getMasterCellValue(rowNum: number, colNum: number): any {
+    return getMasterCell(rowNum, colNum).value;
   }
 
   // Build date column map from header row
@@ -302,7 +325,11 @@ export async function POST(request: NextRequest) {
   const headerRow = ws.getRow(dateHeaderRow);
   headerRow.eachCell({ includeEmpty: false }, (cell, colNum) => {
     let d: Date | null = null;
-    const v = cell.value;
+    let v: any = cell.value;
+    // Unwrap formula result — formula cells return { formula, result } not the value directly
+    if (v !== null && typeof v === 'object' && !Array.isArray(v) && 'result' in v) {
+      v = (v as ExcelJS.CellFormulaValue).result;
+    }
     if (v instanceof Date && !isNaN(v.getTime())) {
       d = v;
     } else if (typeof v === 'number' && v > 1 && v < 100000) {
@@ -351,13 +378,28 @@ export async function POST(request: NextRequest) {
   }> = [];
 
   for (const rowNum of channelRows) {
-    const labelCell = ws.getCell(rowNum, 1);
-    const rawName = String(labelCell.value ?? '').trim();
+    // Use getMasterCellValue so that merge-slave rows in the section/channel columns
+    // correctly read the master cell's label (not null)
+    const col1Label = String(getMasterCellValue(rowNum, 1) ?? '').trim();
+
+    // Auto-detect channel name column:
+    // When detailColIndex is set and there is at least one more label column after it
+    // (i.e. detailColIndex+1 is not the last label col before dates), treat detailColIndex
+    // as the channel name column (col 1 is a section header in multi-level plans).
+    // Otherwise col 1 is the channel name and detailColIndex is the format/detail column.
+    const lastLabelColNumber = firstDateCol - 1;
+    const channelIsInDetailCol = detailColIndex !== null && (detailColIndex + 1) < lastLabelColNumber;
+
+    const rawName = channelIsInDetailCol
+      ? (String(getMasterCellValue(rowNum, detailColIndex! + 1) ?? '').trim() || col1Label)
+      : col1Label;
+
     if (!rawName) continue;
 
-    const formatText = detailColIndex !== null
-      ? String(ws.getCell(rowNum, detailColIndex + 1).value ?? '').trim()
-      : '';
+    // Format/detail: use the direct cell (not master) so each sub-row keeps its own detail text
+    const formatText = channelIsInDetailCol
+      ? String(ws.getCell(rowNum, detailColIndex! + 2).value ?? '').trim()
+      : (detailColIndex !== null ? String(ws.getCell(rowNum, detailColIndex + 1).value ?? '').trim() : '');
 
     // Collect merged ranges that start on this row within the date range
     const rowMerges = mergedRanges.filter(mr =>
@@ -370,23 +412,20 @@ export async function POST(request: NextRequest) {
     const mergeBlocks: Array<{ startCol: number; endCol: number; masterCell: ExcelJS.Cell }> = [];
     for (const mr of rowMerges) {
       const masterCell = ws.getCell(mr.startRow, mr.startCol);
-      const fill = masterCell.fill as ExcelJS.Fill | undefined;
-      const argb = fill && fill.type === 'pattern' ? (fill as any).fgColor?.argb as string | undefined : undefined;
-      if (isColoredFill(argb)) {
+      if (isFillColored(masterCell.fill as ExcelJS.Fill | undefined)) {
         mergeBlocks.push({ startCol: mr.startCol, endCol: mr.endCol, masterCell });
       }
     }
 
     // Collect individual colored cells (not merge slaves)
-    type CellBlock = { col: number; argb: string; dollar: number | null };
+    type CellBlock = { col: number; dollar: number | null };
     const individualCells: CellBlock[] = [];
     for (const col of dateCols) {
       if (isMergeSlave(rowNum, col)) continue;
       if (mergeBlocks.some(mb => col >= mb.startCol && col <= mb.endCol)) continue;
       const cell = ws.getCell(rowNum, col);
-      const argb = getMasterFillArgb(rowNum, col);
-      if (isColoredFill(argb)) {
-        individualCells.push({ col, argb: argb!, dollar: extractDollarAmount(cell) });
+      if (isFillColored(getMasterFill(rowNum, col))) {
+        individualCells.push({ col, dollar: extractDollarAmount(cell) });
       }
     }
 
