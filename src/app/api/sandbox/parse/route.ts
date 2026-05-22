@@ -50,23 +50,32 @@ function parseFlexDate(raw: string, year: number): Date | null {
   return null;
 }
 
-function isFillColored(fill: ExcelJS.Fill | undefined): boolean {
+// solidOnly: require pattern==='solid' (use for individual cells to exclude hatch/pattern fills)
+function isFillColored(fill: ExcelJS.Fill | undefined, solidOnly = false): boolean {
   if (!fill || fill.type !== 'pattern') return false;
   const pf = fill as any;
   if (pf.pattern === 'none') return false;
+  if (solidOnly && pf.pattern !== 'solid') return false;
   const fg = pf.fgColor;
   if (!fg) return false;
   if (fg.argb) {
     const hex = (fg.argb as string).toUpperCase();
-    if (hex.startsWith('00')) return false;
-    if (hex === 'FFFFFFFF') return false;
+    if (hex.startsWith('00')) return false; // transparent
+    if (hex === 'FFFFFFFF') return false;   // pure white
     const r = parseInt(hex.slice(-6, -4), 16);
     const g = parseInt(hex.slice(-4, -2), 16);
     const b = parseInt(hex.slice(-2), 16);
-    return (0.299 * r + 0.587 * g + 0.114 * b) / 255 < 0.92;
+    return (0.299 * r + 0.587 * g + 0.114 * b) / 255 < 0.90; // tightened from 0.92
   }
-  if (fg.theme !== undefined) return (fg.tint ?? 0) < 0.9;
-  if (fg.indexed !== undefined) return fg.indexed !== 65;
+  if (fg.theme !== undefined) {
+    // Theme 0 (Background1) and 2 (Background2) are white/near-white in almost all themes
+    if (fg.theme === 0 || fg.theme === 2) return false;
+    return (fg.tint ?? 0) < 0.9;
+  }
+  if (fg.indexed !== undefined) {
+    // 65 = no fill sentinel; 1 and 9 are both white in the OOXML indexed palette
+    return fg.indexed !== 65 && fg.indexed !== 1 && fg.indexed !== 9;
+  }
   return false;
 }
 
@@ -186,6 +195,9 @@ export async function POST(request: NextRequest) {
   const file = formData.get('file') as File | null;
   if (!file) return NextResponse.json({ error: 'No file provided' }, { status: 400 });
 
+  const yearParam = formData.get('year');
+  const userYear = yearParam ? parseInt(String(yearParam), 10) : null;
+
   // Load workbook
   const bytes = await file.arrayBuffer();
   const workbook = new ExcelJS.Workbook();
@@ -242,27 +254,51 @@ export async function POST(request: NextRequest) {
 
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   const colMap = await detectColumns(ws, anthropic);
+  if (userYear) colMap.year = userYear;
 
-  // Build date column map from date header row
+  // Build date column map from date header row with year-rollover-aware assignment.
+  // We collect month/day first (in column order), then assign years sequentially so
+  // a plan that starts in Dec of the previous year gets the right year on every column.
   const dateColMap = new Map<number, Date>(); // col → Monday Date
-  const dateRow = ws.getRow(colMap.dateHeaderRow);
-  dateRow.eachCell({ includeEmpty: false }, (cell, colNum) => {
-    let v = cell.value;
-    if (v !== null && typeof v === 'object' && 'result' in (v as any)) v = (v as any).result;
-    let d: Date | null = null;
-    if (v instanceof Date && !isNaN(v.getTime())) {
-      d = v;
-    } else if (typeof v === 'number' && v > 1 && v < 100000) {
-      const candidate = new Date(new Date(1899, 11, 30).getTime() + v * 86400000);
-      if (!isNaN(candidate.getTime())) d = candidate;
-    } else if (typeof v === 'string') {
-      d = parseFlexDate(v, colMap.year);
+  {
+    const rawColDates: Array<{ col: number; month: number; day: number }> = [];
+    const dateRow = ws.getRow(colMap.dateHeaderRow);
+    dateRow.eachCell({ includeEmpty: false }, (cell, colNum) => {
+      let v = cell.value;
+      if (v !== null && typeof v === 'object' && 'result' in (v as any)) v = (v as any).result;
+      let d: Date | null = null;
+      if (v instanceof Date && !isNaN(v.getTime())) {
+        d = v;
+      } else if (typeof v === 'number' && v > 1 && v < 100000) {
+        const candidate = new Date(new Date(1899, 11, 30).getTime() + v * 86400000);
+        if (!isNaN(candidate.getTime())) d = candidate;
+      } else if (typeof v === 'string') {
+        d = parseFlexDate(v, colMap.year);
+      }
+      if (d && !isNaN(d.getTime())) {
+        rawColDates.push({ col: colNum, month: d.getMonth(), day: d.getDate() });
+      }
+    });
+
+    if (rawColDates.length > 0) {
+      // If the plan starts in December before rolling into the new year (e.g. 28-Dec → 5-Jan),
+      // the December weeks belong to year-1, not the plan year.
+      let currentYear = colMap.year;
+      if (rawColDates.length >= 2 && rawColDates[0].month === 11 && rawColDates[1].month < 6) {
+        currentYear = colMap.year - 1;
+      }
+      let prevMonth = rawColDates[0].month;
+      for (const { col, month, day } of rawColDates) {
+        // Month dropped significantly → year rolled over (e.g. Dec→Jan)
+        if (month < prevMonth - 3) currentYear++;
+        prevMonth = month;
+        const d = new Date(currentYear, month, day);
+        if (!isNaN(d.getTime())) {
+          dateColMap.set(col, toMonday(d));
+        }
+      }
     }
-    if (d && !isNaN(d.getTime())) {
-      d = new Date(colMap.year, d.getMonth(), d.getDate());
-      dateColMap.set(colNum, toMonday(d));
-    }
-  });
+  }
 
   if (dateColMap.size === 0) {
     return NextResponse.json({ error: 'Could not identify date columns.' }, { status: 400 });
@@ -285,12 +321,15 @@ export async function POST(request: NextRequest) {
 
   // Build weeks array
   const weekDates = dateCols.map(c => dateColMap.get(c)!);
-  const weeks: Week[] = weekDates.map(d => ({
-    weekStart: isoDate(d),
-    label: weekLabel(d),
-    month: monthLabel(d),
-    year: d.getFullYear(),
-  }));
+  const weeks: Week[] = weekDates.map(d => {
+    const thu = new Date(d.getTime() + 3 * 86400000); // Thursday determines the month
+    return {
+      weekStart: isoDate(d),
+      label: weekLabel(d),
+      month: monthLabel(thu),
+      year: thu.getFullYear(),
+    };
+  });
 
   // Extract data rows
   const colorAssignMap = new Map<string, string>(); // channel → color
@@ -390,7 +429,7 @@ export async function POST(request: NextRequest) {
     for (const col of dateCols) {
       if (processedCols.has(col) || isSlave(rowNum, col)) continue;
       const cell = ws.getCell(rowNum, col);
-      if (!isFillColored(cell.fill as ExcelJS.Fill)) continue;
+      if (!isFillColored(cell.fill as ExcelJS.Fill, true)) continue; // solidOnly for individual cells
       let budget = 0;
       let v = cell.value;
       if (v !== null && typeof v === 'object' && 'result' in (v as any)) v = (v as any).result;

@@ -4,7 +4,10 @@ import React, { useCallback, useState } from "react";
 import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, Loader2, ArrowRight } from "lucide-react";
 import type { SandboxPlan, PlanRow } from "./types";
 
-type Step = "drop" | "parsing" | "review" | "error";
+type Step = "drop" | "year" | "parsing" | "review" | "error";
+
+const CURRENT_YEAR = new Date().getFullYear();
+const YEAR_OPTIONS = [CURRENT_YEAR - 1, CURRENT_YEAR, CURRENT_YEAR + 1, CURRENT_YEAR + 2];
 
 interface Props {
   onPlanLoaded: (plan: SandboxPlan) => void;
@@ -24,8 +27,11 @@ export function UploadWizard({ onPlanLoaded }: Props) {
   const [parsedPlan, setParsedPlan] = useState<SandboxPlan | null>(null);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [parseProgress, setParseProgress] = useState("");
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [pendingScratch, setPendingScratch] = useState(false);
+  const [selectedYear, setSelectedYear] = useState<number>(CURRENT_YEAR);
 
-  const parseFile = useCallback(async (file: File) => {
+  const parseFile = useCallback(async (file: File, year: number) => {
     if (!file.name.match(/\.(xlsx?|xls)$/i)) {
       setErrorMsg("Please upload an Excel file (.xlsx or .xls)");
       setStep("error");
@@ -37,6 +43,7 @@ export function UploadWizard({ onPlanLoaded }: Props) {
 
     const formData = new FormData();
     formData.append("file", file);
+    formData.append("year", String(year));
 
     try {
       setParseProgress("Identifying columns and flights...");
@@ -61,14 +68,59 @@ export function UploadWizard({ onPlanLoaded }: Props) {
     e.preventDefault();
     setIsDraggingOver(false);
     const file = e.dataTransfer.files[0];
-    if (file) parseFile(file);
-  }, [parseFile]);
+    if (file) { setPendingFile(file); setPendingScratch(false); setStep("year"); }
+  }, []);
 
   const handleFileInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) parseFile(file);
+    if (file) { setPendingFile(file); setPendingScratch(false); setStep("year"); }
     e.target.value = "";
-  }, [parseFile]);
+  }, []);
+
+  const handleYearConfirm = useCallback(() => {
+    if (pendingScratch) {
+      const year = selectedYear;
+      const jan1 = new Date(year, 0, 1);
+      const dayOfWeek = jan1.getDay();
+      const daysToMonday = dayOfWeek === 0 ? 1 : dayOfWeek === 1 ? 0 : 8 - dayOfWeek;
+      const firstMonday = new Date(year, 0, 1 + daysToMonday);
+      firstMonday.setHours(0, 0, 0, 0);
+
+      const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      const monthsFull = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+      const weeks = Array.from({ length: 13 }, (_, i) => {
+        const d = new Date(firstMonday);
+        d.setDate(firstMonday.getDate() + i * 7);
+        const thu = new Date(d.getTime() + 3 * 86400000); // Thursday determines the month
+        const iso = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        return {
+          weekStart: iso,
+          label: `${d.getDate()}-${months[d.getMonth()]}`,
+          month: monthsFull[thu.getMonth()],
+          year: thu.getFullYear(),
+        };
+      });
+
+      const plan: SandboxPlan = {
+        id: Math.random().toString(36).slice(2),
+        title: "New Media Plan",
+        asAtLabel: "",
+        weeks,
+        rows: [{
+          id: Math.random().toString(36).slice(2),
+          funnel: "AWARENESS",
+          channel: "Channel 1",
+          detail: "",
+          audience: "",
+          flights: [],
+        }],
+        updatedAt: new Date().toISOString(),
+      };
+      onPlanLoaded(plan);
+    } else if (pendingFile) {
+      parseFile(pendingFile, selectedYear);
+    }
+  }, [pendingScratch, pendingFile, selectedYear, parseFile, onPlanLoaded]);
 
   // ── Drop zone ──────────────────────────────────────────────────────────────
   if (step === "drop") {
@@ -107,48 +159,56 @@ export function UploadWizard({ onPlanLoaded }: Props) {
           </div>
 
           <button
-            onClick={() => {
-              // Build an empty starter plan starting first Monday of 2026
-              const monday = (() => {
-                const d = new Date(2026, 0, 5); // 5 Jan 2026 is first Monday
-                d.setHours(0, 0, 0, 0);
-                return d;
-              })();
-
-              const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-              const monthsFull = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
-              const weeks = Array.from({ length: 13 }, (_, i) => {
-                const d = new Date(monday);
-                d.setDate(monday.getDate() + i * 7);
-                const iso = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-                return {
-                  weekStart: iso,
-                  label: `${d.getDate()}-${months[d.getMonth()]}`,
-                  month: monthsFull[d.getMonth()],
-                  year: d.getFullYear(),
-                };
-              });
-
-              const plan: SandboxPlan = {
-                id: Math.random().toString(36).slice(2),
-                title: "New Media Plan",
-                asAtLabel: "",
-                weeks,
-                rows: [{
-                  id: Math.random().toString(36).slice(2),
-                  funnel: "AWARENESS",
-                  channel: "Channel 1",
-                  detail: "",
-                  audience: "",
-                  flights: [],
-                }],
-                updatedAt: new Date().toISOString(),
-              };
-              onPlanLoaded(plan);
-            }}
+            onClick={() => { setPendingFile(null); setPendingScratch(true); setStep("year"); }}
             className="w-full py-3 px-4 border border-gray-300 rounded-xl text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-colors"
           >
             Start from scratch (blank plan)
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Year selection ─────────────────────────────────────────────────────────
+  if (step === "year") {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50 p-8">
+        <div className="w-full max-w-sm">
+          <div className="text-center mb-8">
+            <h1 className="text-2xl font-bold text-gray-900">Select plan year</h1>
+            <p className="text-gray-500 mt-1 text-sm">
+              {pendingFile ? `${pendingFile.name}` : "Blank plan"} · choose the year this plan covers
+            </p>
+          </div>
+
+          <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6">
+            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
+              Plan year
+            </label>
+            <select
+              value={selectedYear}
+              onChange={e => setSelectedYear(Number(e.target.value))}
+              className="w-full border border-gray-300 rounded-lg px-4 py-3 text-lg font-semibold text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              {YEAR_OPTIONS.map(y => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+          </div>
+
+          <button
+            onClick={handleYearConfirm}
+            className="w-full py-3 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
+          >
+            {pendingFile ? "Analyse plan" : "Create blank plan"}
+            <ArrowRight className="w-4 h-4" />
+          </button>
+
+          <button
+            onClick={() => setStep("drop")}
+            className="w-full mt-3 py-2.5 text-sm text-gray-500 hover:text-gray-700 transition-colors"
+          >
+            Back
           </button>
         </div>
       </div>

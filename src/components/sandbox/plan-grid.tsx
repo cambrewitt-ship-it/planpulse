@@ -58,8 +58,9 @@ function generateWeeksForYear(year: number, count: number): Week[] {
   return Array.from({ length: count }, (_, i) => {
     const d = new Date(firstMonday);
     d.setDate(firstMonday.getDate() + i * 7);
+    const thu = new Date(d.getTime() + 3 * 86400000); // Thursday determines the month
     const iso = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-    return { weekStart: iso, label: `${d.getDate()}-${short[d.getMonth()]}`, month: full[d.getMonth()], year: d.getFullYear() };
+    return { weekStart: iso, label: `${d.getDate()}-${short[d.getMonth()]}`, month: full[thu.getMonth()], year: thu.getFullYear() };
   });
 }
 
@@ -432,6 +433,14 @@ export function PlanGrid({ plan, onPlanChange, onUpload }: Props) {
   const rowSpans = useMemo(() => computeRowSpans(rows), [rows]);
   const monthGroups = useMemo(() => groupWeeksByMonth(weeks), [weeks]);
   const totals = useMemo(() => weekTotals(rows, weeks), [rows, weeks]);
+  const monthTotals = useMemo(() => {
+    let wi = 0;
+    return monthGroups.map(mg => {
+      let sum = 0;
+      for (let i = 0; i < mg.count; i++) sum += totals[wi++] ?? 0;
+      return Math.round(sum);
+    });
+  }, [monthGroups, totals]);
 
   const flightGroups = useMemo(() => {
     const groups = new Map<string, number[]>();
@@ -907,9 +916,10 @@ const endDrag = useCallback(() => {
                 style={{ position: "sticky", left: LEFT_OFFSETS.total, zIndex: 10 }}>
                 {fmt(grandTotal)}
               </td>
-              {totals.map((t, i) => (
-                <td key={weeks[i].weekStart} className="border border-gray-200 text-center text-xs font-semibold text-gray-700 bg-gray-50">
-                  {t > 0 ? fmt(Math.round(t)) : ""}
+              {monthGroups.map((mg, i) => (
+                <td key={`${mg.month}-${mg.year}`} colSpan={mg.count}
+                  className="border border-gray-200 text-center text-xs font-semibold text-gray-700 bg-gray-50">
+                  {monthTotals[i] > 0 ? fmt(monthTotals[i]) : ""}
                 </td>
               ))}
             </tr>
