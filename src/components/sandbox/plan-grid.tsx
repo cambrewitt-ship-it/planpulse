@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { Plus, Trash2, Upload, Download, X, Check, Edit2 } from "lucide-react";
-import type { SandboxPlan, PlanRow, Flight, Week } from "./types";
+import type { SandboxPlan, PlanRow, Flight, Week, FeeRow } from "./types";
 import { FLIGHT_COLORS } from "./types";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -199,9 +199,10 @@ interface BudgetPromptProps {
   defaultColor: string;
   onConfirm: (budget: number, color: string) => void;
   onCancel: () => void;
+  pos: { x: number; y: number };
 }
 
-function BudgetPrompt({ defaultColor, onConfirm, onCancel }: BudgetPromptProps) {
+function BudgetPrompt({ defaultColor, onConfirm, onCancel, pos }: BudgetPromptProps) {
   const [budget, setBudget] = useState("");
   const [color, setColor] = useState(defaultColor);
   const ref = useRef<HTMLDivElement>(null);
@@ -214,9 +215,16 @@ function BudgetPrompt({ defaultColor, onConfirm, onCancel }: BudgetPromptProps) 
     return () => document.removeEventListener("mousedown", handler);
   }, [onCancel]);
 
+  const modalW = 256;
+  const modalH = 290;
+  const left = Math.min(Math.max(8, pos.x - modalW / 2), (typeof window !== 'undefined' ? window.innerWidth : 1200) - modalW - 8);
+  const top = pos.y + modalH > (typeof window !== 'undefined' ? window.innerHeight : 800) - 16
+    ? pos.y - modalH - 8
+    : pos.y + 8;
+
   return (
-    <div ref={ref} className="fixed inset-0 z-50 flex items-center justify-center bg-black/20">
-      <div className="bg-white border border-gray-200 rounded-2xl shadow-2xl p-5 w-64">
+    <div ref={ref} className="fixed z-50" style={{ left, top }}>
+      <div className="bg-white border border-gray-200 rounded-2xl shadow-2xl p-5" style={{ width: modalW }}>
         <h3 className="text-sm font-semibold text-gray-900 mb-3">New flight</h3>
         <label className="text-xs text-gray-500 block mb-1">Budget</label>
         <input
@@ -378,6 +386,145 @@ function ResizeHandle({ side, onMouseDown }: ResizeHandleProps) {
   );
 }
 
+// ── Fee row renderer ──────────────────────────────────────────────────────────
+
+const FEE_SUGGESTIONS = [
+  "Set Up Fee",
+  "Management Fee",
+  "Community Management",
+  "Reporting Dashboard",
+  "Retainer",
+  "Creative Fee",
+  "Strategy Fee",
+  "Analytics Fee",
+];
+
+interface FeeRowRendererProps {
+  fee: FeeRow;
+  weekCount: number;
+  stickyBase: string;
+  onUpdateName: (name: string) => void;
+  onUpdateAmount: (amount: number) => void;
+  onDelete: () => void;
+}
+
+function FeeRowRenderer({ fee, weekCount, stickyBase, onUpdateName, onUpdateAmount, onDelete }: FeeRowRendererProps) {
+  const [editingField, setEditingField] = useState<'name' | 'amount' | null>(null);
+  const [draftName, setDraftName] = useState(fee.name);
+  const [draftAmount, setDraftAmount] = useState(String(fee.amount || ""));
+
+  return (
+    <tr style={{ height: ROW_H }} className="group">
+      <td
+        colSpan={4}
+        className={`${stickyBase} bg-amber-50/60 border-amber-100`}
+        style={{ position: "sticky", left: 0, zIndex: 10 }}
+        onDoubleClick={() => { setDraftName(fee.name); setEditingField('name'); }}
+      >
+        {editingField === 'name' ? (
+          <input
+            autoFocus
+            value={draftName}
+            onChange={e => setDraftName(e.target.value)}
+            onBlur={() => { onUpdateName(draftName); setEditingField(null); }}
+            onKeyDown={e => {
+              if (e.key === 'Enter' || e.key === 'Escape') { onUpdateName(draftName); setEditingField(null); }
+            }}
+            className="w-full bg-transparent border-none outline-none text-xs font-medium text-amber-900"
+          />
+        ) : (
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-amber-900">{fee.name}</span>
+            <span className="text-[10px] text-amber-600 bg-amber-100 rounded px-1 py-0.5 font-medium tracking-wide">NON-MEDIA</span>
+            <Edit2 className="w-2.5 h-2.5 text-amber-300 opacity-0 group-hover:opacity-100 transition-opacity" />
+          </div>
+        )}
+      </td>
+      <td
+        className={`${stickyBase} text-right align-middle bg-amber-50/60 border-amber-100`}
+        style={{ position: "sticky", left: LEFT_OFFSETS.total, zIndex: 10 }}
+        onDoubleClick={() => { setDraftAmount(String(fee.amount || "")); setEditingField('amount'); }}
+      >
+        {editingField === 'amount' ? (
+          <input
+            autoFocus
+            type="number"
+            value={draftAmount}
+            onChange={e => setDraftAmount(e.target.value)}
+            onBlur={() => { onUpdateAmount(Math.max(0, parseInt(draftAmount) || 0)); setEditingField(null); }}
+            onKeyDown={e => {
+              if (e.key === 'Enter' || e.key === 'Escape') { onUpdateAmount(Math.max(0, parseInt(draftAmount) || 0)); setEditingField(null); }
+            }}
+            className="w-full bg-transparent border-none outline-none text-xs text-right font-medium"
+          />
+        ) : (
+          <div className="flex items-center justify-end gap-1">
+            <span className="font-medium text-amber-900">{fee.amount > 0 ? fmt(fee.amount) : <span className="text-gray-300">—</span>}</span>
+            <button
+              onClick={onDelete}
+              className="text-gray-200 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+              title="Delete fee"
+            >
+              <Trash2 className="w-3 h-3" />
+            </button>
+          </div>
+        )}
+      </td>
+      <td
+        colSpan={weekCount}
+        className="border border-amber-100 bg-amber-50/20"
+      />
+    </tr>
+  );
+}
+
+// ── Fee menu (toolbar button + dropdown) ──────────────────────────────────────
+
+function FeeMenu({ onAdd }: { onAdd: (name: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="flex items-center gap-1.5 px-3 py-1.5 border border-amber-300 text-amber-700 bg-amber-50 rounded-lg text-xs font-medium hover:bg-amber-100 transition-colors"
+      >
+        <Plus className="w-3.5 h-3.5" /> Add fee
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-xl shadow-xl z-50 py-1 w-48">
+          {FEE_SUGGESTIONS.map(name => (
+            <button
+              key={name}
+              onClick={() => { onAdd(name); setOpen(false); }}
+              className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-amber-50 hover:text-amber-800 transition-colors"
+            >
+              {name}
+            </button>
+          ))}
+          <div className="border-t border-gray-100 mt-1 pt-1">
+            <button
+              onClick={() => { onAdd("New Fee"); setOpen(false); }}
+              className="w-full text-left px-3 py-2 text-xs text-gray-400 hover:bg-gray-50 transition-colors"
+            >
+              Custom fee…
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main PlanGrid component ───────────────────────────────────────────────────
 
 interface DragState {
@@ -407,11 +554,13 @@ interface Props {
 export function PlanGrid({ plan, onPlanChange, onUpload }: Props) {
   const [rows, setRows] = useState<PlanRow[]>(plan.rows);
   const [weeks, setWeeks] = useState<Week[]>(plan.weeks);
+  const [fees, setFees] = useState<FeeRow[]>(plan.fees ?? []);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [resizeState, setResizeState] = useState<ResizeState | null>(null);
   const [editingFlight, setEditingFlight] = useState<EditingFlight | null>(null);
   const [showBudgetPrompt, setShowBudgetPrompt] = useState(false);
   const [pendingDrag, setPendingDrag] = useState<DragState | null>(null);
+  const [dragEndPos, setDragEndPos] = useState<{ x: number; y: number } | null>(null);
   const [showAddRow, setShowAddRow] = useState(false);
   const [selectedColor, setSelectedColor] = useState(FLIGHT_COLORS[0]);
   const flightAnchorRef = useRef<HTMLElement | null>(null);
@@ -424,11 +573,11 @@ export function PlanGrid({ plan, onPlanChange, onUpload }: Props) {
   const planYear = weeks[0]?.year ?? new Date().getFullYear();
   const yearOptions = Array.from({ length: 7 }, (_, i) => new Date().getFullYear() - 2 + i);
 
-  // Sync rows + weeks to parent
+  // Sync rows + weeks + fees to parent
   useEffect(() => {
-    onPlanChange({ ...plan, rows, weeks, updatedAt: new Date().toISOString() });
+    onPlanChange({ ...plan, rows, weeks, fees, updatedAt: new Date().toISOString() });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, weeks]);
+  }, [rows, weeks, fees]);
 
   const rowSpans = useMemo(() => computeRowSpans(rows), [rows]);
   const monthGroups = useMemo(() => groupWeeksByMonth(weeks), [weeks]);
@@ -453,7 +602,7 @@ export function PlanGrid({ plan, onPlanChange, onUpload }: Props) {
     return groups;
   }, [rows]);
 
-  const grandTotal = rows.reduce((s, r) => s + totalForRow(r), 0);
+  const grandTotal = rows.reduce((s, r) => s + totalForRow(r), 0) + fees.reduce((s, f) => s + f.amount, 0);
 
   // ── Year change ───────────────────────────────────────────────────────────
 
@@ -510,6 +659,20 @@ export function PlanGrid({ plan, onPlanChange, onUpload }: Props) {
     setEditingFlight(null);
   }, [updateRow]);
 
+  // ── Fee helpers ───────────────────────────────────────────────────────────
+
+  const addFee = useCallback((name: string) => {
+    setFees(prev => [...prev, { id: uid(), name, amount: 0 }]);
+  }, []);
+
+  const updateFee = useCallback((feeId: string, updates: Partial<Omit<FeeRow, 'id'>>) => {
+    setFees(prev => prev.map(f => f.id === feeId ? { ...f, ...updates } : f));
+  }, []);
+
+  const deleteFee = useCallback((feeId: string) => {
+    setFees(prev => prev.filter(f => f.id !== feeId));
+  }, []);
+
   // ── Drag-to-create ────────────────────────────────────────────────────────
 
   const startDrag = useCallback((rowId: string, weekIdx: number) => {
@@ -517,15 +680,16 @@ export function PlanGrid({ plan, onPlanChange, onUpload }: Props) {
     setDragState({ rowId, startIdx: weekIdx, endIdx: weekIdx });
   }, []);
 
-const endDrag = useCallback(() => {
+const endDrag = useCallback((clientX: number, clientY: number) => {
     if (!dragState) return;
     setPendingDrag(dragState);
+    setDragEndPos({ x: clientX, y: clientY });
     setDragState(null);
     setShowBudgetPrompt(true);
   }, [dragState]);
 
   useEffect(() => {
-    const up = () => { if (isDragging) endDrag(); };
+    const up = (e: MouseEvent) => { if (isDragging) endDrag(e.clientX, e.clientY); };
     window.addEventListener("mouseup", up);
     return () => window.removeEventListener("mouseup", up);
   }, [isDragging, endDrag]);
@@ -636,9 +800,11 @@ const endDrag = useCallback(() => {
 
     const cells: React.ReactNode[] = [];
     let i = 0;
-    const isThisRowDragging = dragState?.rowId === row.id;
-    const dragLo = isThisRowDragging ? Math.min(dragState!.startIdx, dragState!.endIdx) : -1;
-    const dragHi = isThisRowDragging ? Math.max(dragState!.startIdx, dragState!.endIdx) : -1;
+    const activeHighlight = dragState?.rowId === row.id
+      ? dragState
+      : (showBudgetPrompt && pendingDrag?.rowId === row.id ? pendingDrag : null);
+    const dragLo = activeHighlight ? Math.min(activeHighlight.startIdx, activeHighlight.endIdx) : -1;
+    const dragHi = activeHighlight ? Math.max(activeHighlight.startIdx, activeHighlight.endIdx) : -1;
     const flightRowSpan = (row.flightGroupId && row.isMasterRow)
       ? (flightGroups.get(row.flightGroupId)?.length ?? 1)
       : 1;
@@ -647,7 +813,7 @@ const endDrag = useCallback(() => {
       const week = weeks[i];
       const flight = flightAtWeek(row, week.weekStart);
 
-      if (isThisRowDragging && i >= dragLo && i <= dragHi && !flight) {
+      if (activeHighlight && i >= dragLo && i <= dragHi && !flight) {
         cells.push(
           <td
             key={week.weekStart}
@@ -796,6 +962,7 @@ const endDrag = useCallback(() => {
         >
           <Plus className="w-3.5 h-3.5" /> Add row
         </button>
+        <FeeMenu onAdd={addFee} />
         <button
           onClick={onUpload}
           className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-xs font-medium hover:bg-gray-50 transition-colors"
@@ -907,6 +1074,18 @@ const endDrag = useCallback(() => {
               );
             })}
 
+            {fees.map(fee => (
+              <FeeRowRenderer
+                key={fee.id}
+                fee={fee}
+                weekCount={weeks.length}
+                stickyBase={stickyBase}
+                onUpdateName={name => updateFee(fee.id, { name })}
+                onUpdateAmount={amount => updateFee(fee.id, { amount })}
+                onDelete={() => deleteFee(fee.id)}
+              />
+            ))}
+
             <tr className="bg-gray-50 font-semibold" style={{ height: ROW_H }}>
               <td colSpan={4} className={`${stickyBase} font-bold bg-gray-800 text-white`}
                 style={{ position: "sticky", left: 0, zIndex: 10 }}>
@@ -927,16 +1106,18 @@ const endDrag = useCallback(() => {
         </table>
       </div>
 
-      {showBudgetPrompt && pendingDrag && (
+      {showBudgetPrompt && pendingDrag && dragEndPos && (
         <BudgetPrompt
           defaultColor={selectedColor}
+          pos={dragEndPos}
           onConfirm={(budget, color) => {
             addFlight(pendingDrag.rowId, pendingDrag.startIdx, pendingDrag.endIdx, budget, color);
             setSelectedColor(color);
             setShowBudgetPrompt(false);
             setPendingDrag(null);
+            setDragEndPos(null);
           }}
-          onCancel={() => { setShowBudgetPrompt(false); setPendingDrag(null); }}
+          onCancel={() => { setShowBudgetPrompt(false); setPendingDrag(null); setDragEndPos(null); }}
         />
       )}
 

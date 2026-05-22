@@ -24,12 +24,19 @@ export interface PlanRow {
   isMasterRow?: boolean;  // true = renders the flight cell with rowspan; false = skips it
 }
 
+export interface FeeRow {
+  id: string;
+  name: string;
+  amount: number;
+}
+
 export interface SandboxPlan {
   id: string;
   title: string;
   asAtLabel: string;
   weeks: Week[];
   rows: PlanRow[];
+  fees?: FeeRow[];
   updatedAt: string;
 }
 
