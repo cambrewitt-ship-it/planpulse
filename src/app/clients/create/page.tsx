@@ -16,6 +16,8 @@ import {
   Check,
   Building2,
   BarChart2,
+  Target,
+  FileText,
   Wifi,
   List,
   GitBranch,
@@ -26,12 +28,15 @@ import {
   Plus,
   Trash2,
 } from 'lucide-react';
-import { MediaPlanGrid, MediaPlanChannel, createEmptyChannel } from '@/components/media-plan-builder/media-plan-grid';
+import { MediaPlanChannel, MediaFlight } from '@/components/media-plan-builder/media-plan-grid';
+import { UploadWizard } from '@/components/sandbox/upload-wizard';
+import { PlanGrid } from '@/components/sandbox/plan-grid';
+import type { SandboxPlan } from '@/components/sandbox/types';
 import Image from 'next/image';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type Step = 1 | 2 | 3 | 4 | 5;
+type Step = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 type PlatformId = 'facebook' | 'google-ads' | 'google-analytics' | 'linkedin' | 'tiktok';
 
 interface Platform {
@@ -71,14 +76,22 @@ interface MetaCampaign {
   accountName: string | null;
 }
 
+interface IntelDocument {
+  id: string;
+  file_name: string;
+  file_type: string;
+}
+
 // ── Static data ───────────────────────────────────────────────────────────────
 
 const STEPS: { num: Step; label: string; icon: React.ElementType }[] = [
   { num: 1, label: 'Details', icon: Building2 },
   { num: 2, label: 'Plan', icon: BarChart2 },
-  { num: 3, label: 'Connect', icon: Wifi },
-  { num: 4, label: 'Accounts', icon: List },
-  { num: 5, label: 'Campaigns', icon: GitBranch },
+  { num: 3, label: 'Goal', icon: Target },
+  { num: 4, label: 'Connect', icon: Wifi },
+  { num: 5, label: 'Accounts', icon: List },
+  { num: 6, label: 'Campaigns', icon: GitBranch },
+  { num: 7, label: 'Intel', icon: FileText },
 ];
 
 const PLATFORMS: Platform[] = [
@@ -87,6 +100,31 @@ const PLATFORMS: Platform[] = [
   { id: 'google-analytics', label: 'Google Analytics', description: 'Website & app analytics' },
   { id: 'linkedin', label: 'LinkedIn Ads', description: 'B2B advertising', comingSoon: true },
   { id: 'tiktok', label: 'TikTok Ads', description: 'Short-form video ads', comingSoon: true },
+];
+
+const GOAL_METRICS = [
+  { value: 'cpa', label: 'CPA – Cost per Acquisition' },
+  { value: 'cpc', label: 'CPC – Cost per Click' },
+  { value: 'cpl', label: 'CPL – Cost per Lead' },
+  { value: 'roas', label: 'ROAS – Return on Ad Spend' },
+  { value: 'ctr', label: 'CTR – Click-through Rate (%)' },
+  { value: 'cpm', label: 'CPM – Cost per 1,000 Impressions' },
+  { value: 'conversions', label: 'Conversions' },
+  { value: 'clicks', label: 'Clicks' },
+  { value: 'impressions', label: 'Impressions' },
+  { value: 'spend', label: 'Spend (Budget)' },
+];
+
+const INTEL_FILE_TYPES = [
+  { value: 'brief', label: 'Brief' },
+  { value: 'brand_guidelines', label: 'Brand Guidelines' },
+  { value: 'biz_info', label: 'Business Info' },
+  { value: 'tov', label: 'Tone of Voice' },
+  { value: 'contract', label: 'Contract' },
+  { value: 'rate_card', label: 'Rate Card' },
+  { value: 'media_schedule', label: 'Media Schedule' },
+  { value: 'handover_notes', label: 'Handover Notes' },
+  { value: 'other', label: 'Other' },
 ];
 
 // ── Platform SVG logos ────────────────────────────────────────────────────────
@@ -147,10 +185,25 @@ export default function CreateClientPage() {
 
   // ── Step 2 ──
   const [channels, setChannels] = useState<MediaPlanChannel[]>([]);
-  const [commission, setCommission] = useState(0);
-  const [savingPlan, setSavingPlan] = useState(false);
+  const [commission] = useState(0);
+  const [sandboxPlan, setSandboxPlan] = useState<SandboxPlan | null>(null);
+  const [sandboxPlanHydrated, setSandboxPlanHydrated] = useState(false);
 
-  // ── Step 3: platform connection status ──
+  // ── Step 3: Performance Goal ──
+  const [goalMetric, setGoalMetric] = useState('');
+  const [goalTarget, setGoalTarget] = useState('');
+  const [goalChannel, setGoalChannel] = useState('');
+  const [goalSaving, setGoalSaving] = useState(false);
+
+  // ── Step 4: Client Intel Hub ──
+  const [intelDocs, setIntelDocs] = useState<IntelDocument[]>([]);
+  const [intelUploading, setIntelUploading] = useState(false);
+  const [intelError, setIntelError] = useState<string | null>(null);
+  const [intelFileType, setIntelFileType] = useState('other');
+  const [intelDragOver, setIntelDragOver] = useState(false);
+  const intelFileRef = useRef<HTMLInputElement>(null);
+
+  // ── Step 5: platform connection status ──
   const [connectionStatus, setConnectionStatus] = useState<Record<PlatformId, boolean>>({
     facebook: false,
     'google-ads': false,
@@ -161,7 +214,7 @@ export default function CreateClientPage() {
   const [connectingPlatform, setConnectingPlatform] = useState<PlatformId | null>(null);
   const [isCheckingConnections, setIsCheckingConnections] = useState(false);
 
-  // ── Step 4: Meta accounts ──
+  // ── Step 6: Meta accounts ──
   const [metaDiscovered, setMetaDiscovered] = useState<DiscoveredMetaAccount[]>([]);
   const [metaSelected, setMetaSelected] = useState<Set<string>>(new Set());
   const [metaLoading, setMetaLoading] = useState(false);
@@ -170,7 +223,7 @@ export default function CreateClientPage() {
   const [metaSaving, setMetaSaving] = useState(false);
   const [metaSaved, setMetaSaved] = useState(false);
 
-  // ── Step 4: Google Ads accounts ──
+  // ── Step 6: Google Ads accounts ──
   const [gadsCustomerId, setGadsCustomerId] = useState('');
   const [gadsAccountName, setGadsAccountName] = useState('');
   const [gadsSaved, setGadsSaved] = useState<SavedGadsAccount[]>([]);
@@ -178,7 +231,7 @@ export default function CreateClientPage() {
   const [gadsLoading, setGadsLoading] = useState(false);
   const [gadsMsg, setGadsMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // ── Step 4: Google Analytics properties ──
+  // ── Step 6: Google Analytics properties ──
   const [gaDiscovered, setGaDiscovered] = useState<DiscoveredGAAccount[]>([]);
   const [gaSelected, setGaSelected] = useState<Set<string>>(new Set());
   const [gaLoading, setGaLoading] = useState(false);
@@ -186,7 +239,7 @@ export default function CreateClientPage() {
   const [gaSaving, setGaSaving] = useState(false);
   const [gaSaved, setGaSaved] = useState(false);
 
-  // ── Step 5: campaigns ──
+  // ── Step 7: campaigns ──
   const [metaCampaigns, setMetaCampaigns] = useState<MetaCampaign[]>([]);
   const [channelCampaignMap, setChannelCampaignMap] = useState<Record<string, string[]>>({});
   const [campaignsLoading, setCampaignsLoading] = useState(false);
@@ -196,10 +249,32 @@ export default function CreateClientPage() {
 
   // ── Helpers ───────────────────────────────────────────────────────────────────
 
+  const saveChannelsToApi = async (chs: MediaPlanChannel[]) => {
+    if (!clientId || chs.length === 0) return;
+    const serialized = chs.map((ch) => ({
+      ...ch,
+      flights: (ch.flights ?? []).map((f: any) => ({
+        ...f,
+        startWeek: f.startWeek instanceof Date ? f.startWeek.toISOString() : f.startWeek,
+        endWeek: f.endWeek instanceof Date ? f.endWeek.toISOString() : f.endWeek,
+      })),
+    }));
+    await fetch(`/api/clients/${clientId}/media-plan-builder`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channels: serialized, commission }),
+    });
+  };
+
   const goToDashboard = () =>
     router.push(clientId ? `/clients/${clientId}/dashboard` : '/dashboard');
 
   const namedChannels = channels.filter((ch) => ch.channelName?.trim());
+
+  const linkableChannels = namedChannels.filter((ch) => {
+    const name = ((ch.customChannelName || ch.channelName) ?? '').toLowerCase();
+    return ['meta', 'facebook', 'instagram', 'google', 'youtube', 'search', 'display', 'shopping', 'pmax', 'performance max'].some((kw) => name.includes(kw));
+  });
 
   // ── Step 1 handlers ───────────────────────────────────────────────────────────
 
@@ -214,6 +289,7 @@ export default function CreateClientPage() {
 
   const handleCreateClient = async () => {
     if (!clientName.trim()) return;
+    if (clientId) { setStep(2); return; }
     setCreating(true);
     try {
       const client = await createDbClient(clientName.trim());
@@ -249,24 +325,137 @@ export default function CreateClientPage() {
 
   // ── Step 2 handlers ───────────────────────────────────────────────────────────
 
-  const handleSaveMediaPlan = async () => {
-    if (!clientId) return;
-    setSavingPlan(true);
-    try {
-      await fetch(`/api/clients/${clientId}/media-plan-builder`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ channels, commission }),
+  const sandboxPlanToChannels = (plan: SandboxPlan): MediaPlanChannel[] => {
+    const MS_PER_WEEK = 7 * 24 * 60 * 60 * 1000;
+    // Collect flights per channel, deduped by flight ID (skip slave rows which share a flight group)
+    const channelMap = new Map<string, { subType?: string; flightMap: Map<string, { startWeek: string; endWeek: string; budget: number; color: string; id: string }> }>();
+
+    for (const row of plan.rows) {
+      const key = row.channel?.trim();
+      if (!key) continue;
+      if (!channelMap.has(key)) channelMap.set(key, { subType: row.detail?.trim() || undefined, flightMap: new Map() });
+      if (row.isMasterRow === false) continue;
+      for (const f of row.flights ?? []) {
+        if (f.startWeek && f.endWeek && !channelMap.get(key)!.flightMap.has(f.id)) {
+          channelMap.get(key)!.flightMap.set(f.id, f);
+        }
+      }
+    }
+
+    return Array.from(channelMap.entries()).map(([channelName, { subType, flightMap }]) => {
+      const mediaFlights: MediaFlight[] = Array.from(flightMap.values()).map((sbFlight) => {
+        const startDate = new Date(sbFlight.startWeek);
+        const endDate = new Date(sbFlight.endWeek);
+        const numWeeks = Math.max(1, Math.round((endDate.getTime() - startDate.getTime()) / MS_PER_WEEK) + 1);
+        const weeklyBudget = sbFlight.budget / numWeeks;
+
+        const monthlySpend: Record<string, number> = {};
+        let week = new Date(startDate);
+        while (week <= endDate) {
+          const monthKey = `${week.getFullYear()}-${String(week.getMonth() + 1).padStart(2, '0')}`;
+          monthlySpend[monthKey] = (monthlySpend[monthKey] ?? 0) + weeklyBudget;
+          week = new Date(week.getTime() + MS_PER_WEEK);
+        }
+
+        return { id: `sb-${sbFlight.id}`, startWeek: startDate, endWeek: endDate, monthlySpend, color: sbFlight.color, weeklyBudget };
       });
-    } catch {}
-    setSavingPlan(false);
-    setStep(3);
+
+      const totalBudget = mediaFlights.reduce((sum, f) => sum + Object.values(f.monthlySpend).reduce((a, b) => a + b, 0), 0);
+
+      return {
+        id: `sandbox-${channelName.replace(/\s+/g, '-').toLowerCase()}`,
+        channelName,
+        channelSubType: subType,
+        format: '',
+        percentOfInvestment: 0,
+        totalBudget,
+        flights: mediaFlights,
+      };
+    });
   };
 
-  // ── Step 3 handlers ───────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!clientId) return;
+    const raw = localStorage.getItem(`planpulse_sandbox_plan_${clientId}`);
+    if (raw) {
+      const plan: SandboxPlan = JSON.parse(raw);
+      setSandboxPlan(plan);
+      setChannels(sandboxPlanToChannels(plan));
+    }
+    setSandboxPlanHydrated(true);
+  }, [clientId]);
+
+  const handleSandboxPlanChange = (updated: SandboxPlan) => {
+    setSandboxPlan(updated);
+    setChannels(sandboxPlanToChannels(updated));
+    try { localStorage.setItem(`planpulse_sandbox_plan_${clientId}`, JSON.stringify(updated)); } catch {}
+  };
+  const handleSandboxPlanLoaded = (loaded: SandboxPlan) => handleSandboxPlanChange(loaded);
+  const handleSandboxPlanUpload = () => {
+    setSandboxPlan(null);
+    setChannels([]);
+    try { localStorage.removeItem(`planpulse_sandbox_plan_${clientId}`); } catch {}
+  };
+
+  // ── Step 3 handlers: Performance Goal ────────────────────────────────────────
+
+  const handleSaveGoal = async () => {
+    if (!clientId) { setStep(4); return; }
+    if (!goalMetric || !goalTarget) { setStep(4); return; }
+    setGoalSaving(true);
+    try {
+      await fetch(`/api/clients/${clientId}/goals`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          channel: goalChannel.trim() || 'Overall',
+          metric: goalMetric,
+          target_value: parseFloat(goalTarget),
+          is_primary: true,
+        }),
+      });
+    } catch {}
+    setGoalSaving(false);
+    setStep(4);
+  };
+
+  // ── Step 4 handlers: Client Intel Hub ────────────────────────────────────────
+
+  const handleIntelUpload = async (file: File) => {
+    if (!clientId) return;
+    setIntelUploading(true);
+    setIntelError(null);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('file_type', intelFileType);
+      const res = await fetch(`/api/clients/${clientId}/documents`, { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok) { setIntelError(data.error ?? 'Upload failed'); return; }
+      setIntelDocs(prev => [{ id: data.document.id, file_name: data.document.file_name, file_type: data.document.file_type }, ...prev]);
+    } catch {
+      setIntelError('Upload failed. Please try again.');
+    }
+    setIntelUploading(false);
+  };
+
+  const handleIntelFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) handleIntelUpload(file);
+    e.target.value = '';
+  };
+
+  const handleIntelDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIntelDragOver(false);
+    const file = e.dataTransfer.files[0];
+    if (file) handleIntelUpload(file);
+  };
+
+  // ── Step 5 handlers: Connect Platforms ───────────────────────────────────────
 
   useEffect(() => {
-    if (step === 3 && clientId) fetchConnectionStatus();
+    if (step === 4 && clientId) fetchConnectionStatus();
   }, [step, clientId]);
 
   const fetchConnectionStatus = async () => {
@@ -330,15 +519,15 @@ export default function CreateClientPage() {
 
   const anyConnected = Object.values(connectionStatus).some(Boolean);
 
-  // When advancing from Step 3 to Step 4, load accounts for connected platforms
-  const handleAdvanceToStep4 = async () => {
-    setStep(4);
+  // When advancing from Step 4 to Step 5, load accounts for connected platforms
+  const handleAdvanceToStep5 = async () => {
+    setStep(5);
     if (connectionStatus.facebook) discoverMetaAccounts();
     if (connectionStatus['google-ads']) fetchGadsAccounts();
     if (connectionStatus['google-analytics']) discoverGaAccounts();
   };
 
-  // ── Step 4: Meta Ads ──────────────────────────────────────────────────────────
+  // ── Step 6: Meta Ads ──────────────────────────────────────────────────────────
 
   const discoverMetaAccounts = async () => {
     setMetaLoading(true);
@@ -391,7 +580,7 @@ export default function CreateClientPage() {
     setMetaSaving(false);
   };
 
-  // ── Step 4: Google Ads ────────────────────────────────────────────────────────
+  // ── Step 6: Google Ads ────────────────────────────────────────────────────────
 
   const fetchGadsAccounts = async () => {
     setGadsLoading(true);
@@ -442,7 +631,7 @@ export default function CreateClientPage() {
     } catch {}
   };
 
-  // ── Step 4: Google Analytics ──────────────────────────────────────────────────
+  // ── Step 6: Google Analytics ──────────────────────────────────────────────────
 
   const discoverGaAccounts = async () => {
     setGaLoading(true);
@@ -499,10 +688,10 @@ export default function CreateClientPage() {
     setGaSaving(false);
   };
 
-  // ── Step 5 handlers ───────────────────────────────────────────────────────────
+  // ── Step 7 handlers ───────────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (step === 5 && connectionStatus.facebook) loadCampaigns();
+    if (step === 6 && connectionStatus.facebook) loadCampaigns();
   }, [step]);
 
   useEffect(() => {
@@ -521,7 +710,9 @@ export default function CreateClientPage() {
       const res = await fetch(clientId ? `/api/ads/meta/campaigns?clientId=${clientId}` : '/api/ads/meta/campaigns');
       if (res.ok) {
         const data = await res.json();
-        setMetaCampaigns(data.campaigns ?? []);
+        const raw: MetaCampaign[] = data.campaigns ?? [];
+        const unique = Array.from(new Map(raw.map((c) => [c.id, c])).values());
+        setMetaCampaigns(unique);
       }
     } catch {}
     setCampaignsLoading(false);
@@ -552,7 +743,7 @@ export default function CreateClientPage() {
       });
     } catch {}
     setCampaignsSaving(false);
-    goToDashboard();
+    setStep(7);
   };
 
   // ── Render ─────────────────────────────────────────────────────────────────────
@@ -563,12 +754,19 @@ export default function CreateClientPage() {
 
         {/* Back */}
         <div className="mb-8">
-          <Link href="/dashboard">
-            <Button variant="outline" size="sm">
+          {step === 1 ? (
+            <Link href="/dashboard">
+              <Button variant="outline" size="sm">
+                <ArrowLeft className="h-4 w-4 mr-2" />
+                Back to Clients
+              </Button>
+            </Link>
+          ) : (
+            <Button variant="outline" size="sm" onClick={() => setStep((prev) => (prev - 1) as Step)}>
               <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to Clients
+              Back
             </Button>
-          </Link>
+          )}
         </div>
 
         {/* Step indicator */}
@@ -588,7 +786,7 @@ export default function CreateClientPage() {
                   </span>
                 </div>
                 {i < STEPS.length - 1 && (
-                  <div className={`w-12 h-0.5 mx-2 mb-5 flex-shrink-0 ${step > s.num ? 'bg-green-400' : 'bg-gray-200'}`} />
+                  <div className={`w-10 h-0.5 mx-2 mb-5 flex-shrink-0 ${step > s.num ? 'bg-green-400' : 'bg-gray-200'}`} />
                 )}
               </div>
             );
@@ -641,35 +839,192 @@ export default function CreateClientPage() {
         )}
 
         {/* ── Step 2: Media Plan Builder ─────────────────────────────────────── */}
-        {step === 2 && clientId && (
+        {step === 2 && clientId && sandboxPlanHydrated && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-xl font-semibold">Media Plan Builder</h2>
-                <p className="text-sm text-gray-500 mt-1">Configure media channels and budget allocation</p>
+                <p className="text-sm text-gray-500 mt-1">Upload or build your media plan</p>
               </div>
-              <div className="flex gap-2">
-                <Button variant="outline" onClick={() => setStep(3)}>Skip for now</Button>
-                <Button onClick={handleSaveMediaPlan} disabled={savingPlan}>
-                  {savingPlan ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving...</> : <>Save & Continue<ArrowRight className="h-4 w-4 ml-2" /></>}
-                </Button>
+              <Button onClick={async () => { await saveChannelsToApi(channels); setStep(3); }}>
+                Continue<ArrowRight className="h-4 w-4 ml-2" />
+              </Button>
+            </div>
+            {sandboxPlan ? (
+              <div style={{ height: 'calc(100vh - 220px)', borderRadius: 12, border: '1px solid rgba(232,228,220,0.7)', boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', overflow: 'hidden' }}>
+                <PlanGrid
+                  plan={sandboxPlan}
+                  onPlanChange={handleSandboxPlanChange}
+                  onUpload={handleSandboxPlanUpload}
+                  outerStyle={{ height: '100%' }}
+                />
               </div>
-            </div>
-            <div className="rounded-lg p-6" style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07)' }}>
-              <MediaPlanGrid channels={channels} onChannelsChange={setChannels} commission={commission} onCommissionChange={setCommission} />
-            </div>
+            ) : (
+              <div style={{ borderRadius: 12, border: '1px solid rgba(232,228,220,0.7)', boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', overflow: 'hidden' }}>
+                <UploadWizard onPlanLoaded={handleSandboxPlanLoaded} />
+              </div>
+            )}
           </div>
         )}
 
-        {/* ── Step 3: Connect Platforms ──────────────────────────────────────── */}
+        {/* ── Step 3: Performance Goal ───────────────────────────────────────── */}
         {step === 3 && clientId && (
-          <div className="max-w-xl mx-auto space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-xl font-semibold">Connect Ad Platforms</h2>
-                <p className="text-sm text-gray-500 mt-1">Connect whichever platforms you run ads on for this client</p>
+          <Card className="max-w-lg mx-auto" style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18 }}>
+            <CardHeader>
+              <CardTitle>Performance Goal</CardTitle>
+              <CardDescription>Set a primary KPI target for this client</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              <div className="grid gap-2">
+                <Label htmlFor="goal-metric">Primary KPI</Label>
+                <select
+                  id="goal-metric"
+                  value={goalMetric}
+                  onChange={(e) => setGoalMetric(e.target.value)}
+                  className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                >
+                  <option value="">Select a metric…</option>
+                  {GOAL_METRICS.map((m) => (
+                    <option key={m.value} value={m.value}>{m.label}</option>
+                  ))}
+                </select>
               </div>
-              <button onClick={goToDashboard} className="text-xs text-gray-400 hover:text-gray-600 underline">Skip for now</button>
+
+              <div className="grid gap-2">
+                <Label htmlFor="goal-target">Target Value</Label>
+                <Input
+                  id="goal-target"
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={goalTarget}
+                  onChange={(e) => setGoalTarget(e.target.value)}
+                  placeholder="e.g. 25.00"
+                />
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="goal-channel">
+                  Channel <span className="text-gray-400 font-normal text-xs">(optional — defaults to Overall)</span>
+                </Label>
+                <Input
+                  id="goal-channel"
+                  value={goalChannel}
+                  onChange={(e) => setGoalChannel(e.target.value)}
+                  placeholder="e.g. Meta Ads, Google Ads, Overall…"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <Button
+                  onClick={handleSaveGoal}
+                  disabled={goalSaving}
+                  className="flex-1"
+                >
+                  {goalSaving
+                    ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving…</>
+                    : goalMetric && goalTarget
+                      ? <>Save Goal & Continue<ArrowRight className="h-4 w-4 ml-2" /></>
+                      : <>Continue<ArrowRight className="h-4 w-4 ml-2" /></>
+                  }
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* ── Step 7: Client Intel Hub (optional final step) ─────────────────── */}
+        {step === 7 && clientId && (
+          <div className="max-w-xl mx-auto space-y-4">
+            <div>
+              <h2 className="text-xl font-semibold">Client Intel Hub</h2>
+              <p className="text-sm text-gray-500 mt-1">Upload documents for this client's intel hub — briefs, contracts, brand guidelines, and more. This step is optional.</p>
+            </div>
+
+            <Card style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18 }}>
+              <CardContent className="pt-6 space-y-4">
+
+                {/* File type selector */}
+                <div className="grid gap-2">
+                  <Label htmlFor="intel-file-type">Document Type</Label>
+                  <select
+                    id="intel-file-type"
+                    value={intelFileType}
+                    onChange={(e) => setIntelFileType(e.target.value)}
+                    className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                  >
+                    {INTEL_FILE_TYPES.map((t) => (
+                      <option key={t.value} value={t.value}>{t.label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Drop zone */}
+                <div
+                  onDragOver={(e) => { e.preventDefault(); setIntelDragOver(true); }}
+                  onDragLeave={() => setIntelDragOver(false)}
+                  onDrop={handleIntelDrop}
+                  onClick={() => intelFileRef.current?.click()}
+                  className={`flex flex-col items-center justify-center gap-3 p-8 rounded-xl border-2 border-dashed cursor-pointer transition-colors ${intelDragOver ? 'border-blue-400 bg-blue-50' : 'border-gray-200 bg-white hover:border-blue-300 hover:bg-gray-50'}`}
+                >
+                  {intelUploading ? (
+                    <><Loader2 className="h-7 w-7 animate-spin text-blue-500" /><p className="text-sm text-gray-500">Uploading…</p></>
+                  ) : (
+                    <>
+                      <Upload className="h-7 w-7 text-gray-400" />
+                      <div className="text-center">
+                        <p className="text-sm font-medium text-gray-700">Drop a file or click to browse</p>
+                        <p className="text-xs text-gray-400 mt-1">PDF, DOCX, TXT, CSV — up to 50 MB</p>
+                      </div>
+                    </>
+                  )}
+                </div>
+                <input
+                  ref={intelFileRef}
+                  type="file"
+                  accept=".pdf,.doc,.docx,.txt,.csv,.md,.xls,.xlsx,.ppt,.pptx"
+                  className="hidden"
+                  onChange={handleIntelFileInput}
+                />
+
+                {intelError && (
+                  <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3">{intelError}</p>
+                )}
+
+                {/* Uploaded files list */}
+                {intelDocs.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Uploaded</p>
+                    {intelDocs.map((doc) => {
+                      const typeLabel = INTEL_FILE_TYPES.find(t => t.value === doc.file_type)?.label ?? doc.file_type;
+                      return (
+                        <div key={doc.id} className="flex items-center gap-3 p-2.5 rounded-lg border border-green-200 bg-green-50">
+                          <CheckCircle2 className="h-4 w-4 text-green-600 flex-shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-gray-900 truncate">{doc.file_name}</p>
+                            <p className="text-xs text-gray-400">{typeLabel}</p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+              </CardContent>
+            </Card>
+
+            <Button onClick={goToDashboard} className="w-full">
+              Finish Setup<Check className="h-4 w-4 ml-2" />
+            </Button>
+          </div>
+        )}
+
+        {/* ── Step 4: Connect Platforms ──────────────────────────────────────── */}
+        {step === 4 && clientId && (
+          <div className="max-w-xl mx-auto space-y-4">
+            <div>
+              <h2 className="text-xl font-semibold">Connect Ad Platforms</h2>
+              <p className="text-sm text-gray-500 mt-1">Connect whichever platforms you run ads on for this client</p>
             </div>
 
             <Card style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18 }}>
@@ -722,34 +1077,26 @@ export default function CreateClientPage() {
             </Card>
 
             <Button
-              onClick={handleAdvanceToStep4}
+              onClick={handleAdvanceToStep5}
               disabled={isCheckingConnections}
               className="w-full"
-              variant={anyConnected ? 'default' : 'outline'}
             >
-              {anyConnected ? (
-                <>Continue to Load Accounts<ArrowRight className="h-4 w-4 ml-2" /></>
-              ) : (
-                <>Skip accounts — go to dashboard</>
-              )}
+              Continue to Load Accounts<ArrowRight className="h-4 w-4 ml-2" />
             </Button>
           </div>
         )}
 
-        {/* ── Step 4: Configure Accounts ─────────────────────────────────────── */}
-        {step === 4 && (
+        {/* ── Step 5: Configure Accounts ─────────────────────────────────────── */}
+        {step === 5 && (
           <div className="max-w-2xl mx-auto space-y-5">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-xl font-semibold">Load Ad Accounts</h2>
-                <p className="text-sm text-gray-500 mt-1">Select the accounts you want to track for this client</p>
-              </div>
-              <button onClick={goToDashboard} className="text-xs text-gray-400 hover:text-gray-600 underline">Skip for now</button>
+            <div>
+              <h2 className="text-xl font-semibold">Load Ad Accounts</h2>
+              <p className="text-sm text-gray-500 mt-1">Select the accounts you want to track for this client</p>
             </div>
 
             {!anyConnected && (
               <div className="p-4 rounded-xl border border-amber-200 bg-amber-50 text-sm text-amber-800">
-                No platforms connected yet. Go back to connect a platform first, or skip to the dashboard.
+                No platforms connected yet. Go back to connect a platform first.
               </div>
             )}
 
@@ -929,27 +1276,24 @@ export default function CreateClientPage() {
 
             {/* Continue button */}
             <Button
-              onClick={() => connectionStatus.facebook ? setStep(5) : goToDashboard()}
+              onClick={() => connectionStatus.facebook ? setStep(6) : setStep(7)}
               className="w-full"
             >
               {connectionStatus.facebook ? (
                 <>Continue to Link Campaigns<ArrowRight className="h-4 w-4 ml-2" /></>
               ) : (
-                <>Finish Setup<Check className="h-4 w-4 ml-2" /></>
+                <>Continue<ArrowRight className="h-4 w-4 ml-2" /></>
               )}
             </Button>
           </div>
         )}
 
-        {/* ── Step 5: Link Campaigns ─────────────────────────────────────────── */}
-        {step === 5 && (
+        {/* ── Step 6: Link Campaigns ─────────────────────────────────────────── */}
+        {step === 6 && (
           <div className="max-w-2xl mx-auto space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-xl font-semibold">Link Campaigns</h2>
-                <p className="text-sm text-gray-500 mt-1">Assign a Meta campaign to each channel in your media plan</p>
-              </div>
-              <button onClick={goToDashboard} className="text-xs text-gray-400 hover:text-gray-600 underline">Skip for now</button>
+            <div>
+              <h2 className="text-xl font-semibold">Link Campaigns</h2>
+              <p className="text-sm text-gray-500 mt-1">Assign campaigns to your Meta and Google channels</p>
             </div>
 
             <Card style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18 }}>
@@ -959,9 +1303,9 @@ export default function CreateClientPage() {
                     <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
                     <p className="text-sm text-gray-500">Loading campaigns from Meta&hellip;</p>
                   </div>
-                ) : namedChannels.length === 0 ? (
+                ) : linkableChannels.length === 0 ? (
                   <div className="py-10 text-center space-y-2">
-                    <p className="text-sm text-gray-500">No media channels configured.</p>
+                    <p className="text-sm text-gray-500">No Meta or Google channels found in your media plan.</p>
                     <p className="text-xs text-gray-400">You can link campaigns from the client dashboard after setting up your media plan.</p>
                   </div>
                 ) : (
@@ -971,7 +1315,7 @@ export default function CreateClientPage() {
                         No campaigns found in your saved Meta accounts. You can link campaigns later from the client dashboard.
                       </div>
                     )}
-                    {namedChannels.map((channel) => {
+                    {linkableChannels.map((channel) => {
                       const selectedIds = channelCampaignMap[channel.id] ?? [];
                       const [dropOpen, setDropOpen] = [
                         openCampaignDropdown === channel.id,
@@ -1009,7 +1353,7 @@ export default function CreateClientPage() {
                             <svg className="h-4 w-4 text-gray-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
                           </button>
                           {dropOpen && (
-                            <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
+                            <div className="absolute z-50 top-full right-0 mt-1 w-96 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
                               <div className="p-2 border-b border-gray-100">
                                 <input
                                   autoFocus
@@ -1030,21 +1374,25 @@ export default function CreateClientPage() {
                                       <button
                                         key={c.id}
                                         type="button"
+                                        onMouseDown={(e) => e.preventDefault()}
                                         onClick={() => {
+                                          const chId = channel.id;
+                                          const cId = c.id;
                                           setChannelCampaignMap(prev => {
-                                            const cur = prev[channel.id] ?? [];
+                                            const cur = prev[chId] ?? [];
+                                            const isSelected = cur.includes(cId);
                                             return {
                                               ...prev,
-                                              [channel.id]: checked ? cur.filter(id => id !== c.id) : [...cur, c.id],
+                                              [chId]: isSelected ? cur.filter(id => id !== cId) : [...cur, cId],
                                             };
                                           });
                                         }}
                                         className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50 text-left"
                                       >
                                         <span className={`flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center ${checked ? 'bg-blue-600 border-blue-600' : 'border-gray-300'}`}>
-                                          {checked && <svg className="w-2.5 h-2.5 text-white" viewBox="0 0 10 10" fill="currentColor"><path d="M1.5 5l2.5 2.5 4.5-4.5" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                                          {checked && <svg className="w-2.5 h-2.5 text-white" viewBox="0 0 10 10" fill="none" stroke="currentColor"><path d="M1.5 5l2.5 2.5 4.5-4.5" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
                                         </span>
-                                        <span className="truncate text-gray-700">{c.name}</span>
+                                        <span className="text-gray-700 break-words">{c.name}</span>
                                       </button>
                                     );
                                   })
@@ -1054,6 +1402,7 @@ export default function CreateClientPage() {
                                 <div className="p-2 border-t border-gray-100">
                                   <button
                                     type="button"
+                                    onMouseDown={(e) => e.preventDefault()}
                                     onClick={() => setChannelCampaignMap(prev => ({ ...prev, [channel.id]: [] }))}
                                     className="text-xs text-gray-400 hover:text-gray-600"
                                   >
@@ -1068,7 +1417,7 @@ export default function CreateClientPage() {
                       );
                     })}
                     <Button onClick={saveCampaigns} disabled={campaignsSaving} className="w-full mt-2">
-                      {campaignsSaving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving&hellip;</> : <>Finish Setup<Check className="h-4 w-4 ml-2" /></>}
+                      {campaignsSaving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving&hellip;</> : <>Next<ArrowRight className="h-4 w-4 ml-2" /></>}
                     </Button>
                   </div>
                 )}
