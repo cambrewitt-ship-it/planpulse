@@ -549,9 +549,10 @@ interface Props {
   plan: SandboxPlan;
   onPlanChange: (plan: SandboxPlan) => void;
   onUpload: () => void;
+  outerStyle?: React.CSSProperties;
 }
 
-export function PlanGrid({ plan, onPlanChange, onUpload }: Props) {
+export function PlanGrid({ plan, onPlanChange, onUpload, outerStyle }: Props) {
   const [rows, setRows] = useState<PlanRow[]>(plan.rows);
   const [weeks, setWeeks] = useState<Week[]>(plan.weeks);
   const [fees, setFees] = useState<FeeRow[]>(plan.fees ?? []);
@@ -921,7 +922,7 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
   const stickyHeader = "border border-gray-200 bg-gray-800 text-white text-xs font-semibold uppercase tracking-wide px-2 py-2";
 
   return (
-    <div className="flex flex-col h-screen bg-gray-100">
+    <div className="flex flex-col h-screen bg-gray-100" style={outerStyle}>
       {/* Toolbar */}
       <div className="flex items-center gap-3 px-4 py-2.5 bg-white border-b border-gray-200 shadow-sm flex-shrink-0">
         <div>
