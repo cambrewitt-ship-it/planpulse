@@ -396,12 +396,15 @@ function ConfigModal({ clientId, initialConfig, goals, campaigns, ga4Events, met
 export function PerformanceWidget({
   clientId,
   onNeedle,
+  onFetched,
   hideControls = false,
   hideDisplay = false,
   floatingGear = false,
 }: {
   clientId: string;
   onNeedle?: (data: PerfData | null) => void;
+  /** Fires once after the goals API fetch settles (success or error). Use to gate loading states. */
+  onFetched?: () => void;
   hideControls?: boolean;
   hideDisplay?: boolean;
   floatingGear?: boolean;
@@ -424,6 +427,8 @@ export function PerformanceWidget({
 
   const onNeedleRef = useRef(onNeedle);
   onNeedleRef.current = onNeedle;
+  const onFetchedRef = useRef(onFetched);
+  onFetchedRef.current = onFetched;
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -439,20 +444,23 @@ export function PerformanceWidget({
     fetch(`/api/clients/${clientId}/goals?${params}`)
       .then(r => r.ok ? r.json() : null)
       .then(json => {
-        if (!json || cancelled) return;
-        setGoals(json.goals ?? []);
-        setCombinedActuals(json.combinedActuals ?? {});
-        setGa4Actuals(json.ga4Actuals ?? {});
-        setLast7DaysActuals(json.last7DaysActuals ?? {});
-        setPrev7DaysActuals(json.prev7DaysActuals ?? {});
-        setYesterdayActuals(json.yesterdayActuals ?? {});
-        setDayBeforeActuals(json.dayBeforeActuals ?? {});
-        setLast30DaysSeries(json.last30DaysSeries ?? []);
-        setCampaigns(json.campaigns ?? []);
-        setGa4Events(json.ga4Events ?? []);
-        setMetaEvents(json.metaEvents ?? []);
+        if (cancelled) return;
+        if (json) {
+          setGoals(json.goals ?? []);
+          setCombinedActuals(json.combinedActuals ?? {});
+          setGa4Actuals(json.ga4Actuals ?? {});
+          setLast7DaysActuals(json.last7DaysActuals ?? {});
+          setPrev7DaysActuals(json.prev7DaysActuals ?? {});
+          setYesterdayActuals(json.yesterdayActuals ?? {});
+          setDayBeforeActuals(json.dayBeforeActuals ?? {});
+          setLast30DaysSeries(json.last30DaysSeries ?? []);
+          setCampaigns(json.campaigns ?? []);
+          setGa4Events(json.ga4Events ?? []);
+          setMetaEvents(json.metaEvents ?? []);
+        }
+        onFetchedRef.current?.();
       })
-      .catch(() => {});
+      .catch(() => { if (!cancelled) onFetchedRef.current?.(); });
 
     return () => { cancelled = true; };
   }, [clientId, config]);

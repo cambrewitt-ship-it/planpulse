@@ -350,6 +350,24 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Could not read date columns from the specified header row.' }, { status: 400 });
   }
 
+  // Strip trailing isolated date columns separated from the main cluster by more than
+  // 2× the typical column step. This removes spurious "Total" or summary columns at the
+  // end of the sheet whose numeric cell values look like Excel date serials.
+  {
+    const allCols = Array.from(dateColMap.keys()).sort((a, b) => a - b);
+    if (allCols.length >= 3) {
+      const steps = allCols.slice(1).map((c, i) => c - allCols[i]).sort((a, b) => a - b);
+      const medStep = steps[Math.floor(steps.length / 2)];
+      for (let i = allCols.length - 1; i > 0; i--) {
+        if (allCols[i] - allCols[i - 1] > medStep * 2) {
+          dateColMap.delete(allCols[i]);
+        } else {
+          break;
+        }
+      }
+    }
+  }
+
   const dateCols = Array.from(dateColMap.keys()).sort((a, b) => a - b);
   const firstDateCol = dateCols[0];
   const lastDateCol  = dateCols[dateCols.length - 1];
@@ -401,11 +419,13 @@ export async function POST(request: NextRequest) {
       ? String(ws.getCell(rowNum, detailColIndex! + 2).value ?? '').trim()
       : (detailColIndex !== null ? String(ws.getCell(rowNum, detailColIndex + 1).value ?? '').trim() : '');
 
-    // Collect merged ranges that start on this row within the date range
+    // Collect merged ranges on this row that overlap the date column range.
+    // Include merges that START before firstDateCol (e.g. starting in a label column)
+    // as long as they extend into the date range — those are valid flight blocks.
     const rowMerges = mergedRanges.filter(mr =>
       mr.startRow === rowNum &&
-      mr.startCol >= firstDateCol &&
-      mr.startCol <= lastDateCol
+      mr.endCol >= firstDateCol &&    // must reach at least the first date column
+      mr.startCol <= lastDateCol      // must start before the last date column
     );
 
     // Build a set of columns covered by merges
@@ -435,29 +455,25 @@ export async function POST(request: NextRequest) {
     // From merge blocks first
     for (const mb of mergeBlocks) {
       const masterCell = mb.masterCell;
-      const startDate = dateColMap.get(mb.startCol);
-      // Find the closest date col at or before endCol
-      let endDateCol = mb.endCol;
-      while (endDateCol > mb.startCol && !dateColMap.has(endDateCol)) endDateCol--;
+      // Start: search forward from mb.startCol to find the first date column in range
+      // (handles merges that begin in a label column before firstDateCol)
+      let startDateCol = Math.max(mb.startCol, firstDateCol);
+      while (startDateCol <= mb.endCol && !dateColMap.has(startDateCol)) startDateCol++;
+      const startDate = dateColMap.get(startDateCol);
+      // End: search backward from mb.endCol to find the last date column in range
+      let endDateCol = Math.min(mb.endCol, lastDateCol);
+      while (endDateCol > startDateCol && !dateColMap.has(endDateCol)) endDateCol--;
       const endDate = dateColMap.get(endDateCol);
       if (!startDate || !endDate) continue;
 
       const flightEnd = new Date(endDate);
       flightEnd.setDate(flightEnd.getDate() + 6); // through Sunday of end week
 
+      // ExcelJS returns the master cell's value for every slave cell in a merged range,
+      // so only read from the master to avoid N× multiplication.
       const cellSpendMap = new Map<number, number>();
       const dollar = extractDollarAmount(masterCell);
-      if (dollar !== null) cellSpendMap.set(mb.startCol, dollar);
-
-      // Also scan each col in merge range for additional spend cells
-      for (let c = mb.startCol; c <= mb.endCol; c++) {
-        if (c === mb.startCol) continue;
-        const d = extractDollarAmount(ws.getCell(rowNum, c));
-        if (d !== null) {
-          const colKey = dateColMap.has(c) ? c : mb.startCol;
-          cellSpendMap.set(colKey, (cellSpendMap.get(colKey) ?? 0) + d);
-        }
-      }
+      if (dollar !== null) cellSpendMap.set(startDateCol, dollar);
 
       const totalBudget = Array.from(cellSpendMap.values()).reduce((s, v) => s + v, 0);
       flights.push({ startDate, endDate: flightEnd, totalBudget, cellSpendMap });
@@ -499,6 +515,27 @@ export async function POST(request: NextRequest) {
         runCells.push(curr);
       }
       commitRun();
+    }
+
+    // If no budget was found inside the colored flight cells, scan label columns
+    // (all columns before the first date column) for a dollar amount and use it
+    // as the channel budget distributed across flights.
+    const labelBudget = (() => {
+      for (let c = 1; c < firstDateCol; c++) {
+        const cell = ws.getCell(rowNum, c);
+        const d = extractDollarAmount(cell);
+        // Require >= 500 to avoid false positives from year values (2026), row counts, etc.
+        if (d !== null && d >= 500) return d;
+      }
+      return null;
+    })();
+
+    const totalFlightBudget = flights.reduce((s, f) => s + f.totalBudget, 0);
+    if (labelBudget !== null && totalFlightBudget === 0 && flights.length > 0) {
+      const perFlight = Math.round(labelBudget / flights.length);
+      flights.forEach((f, i) => {
+        f.totalBudget = i === flights.length - 1 ? labelBudget - perFlight * (flights.length - 1) : perFlight;
+      });
     }
 
     rawChannels.push({ rawName, formatText, flights });

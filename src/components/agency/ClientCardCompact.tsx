@@ -132,6 +132,7 @@ function apColor(count: number): string {
 function SparkLine({ clientId, perf }: { clientId: string; perf: PerfData | null }) {
   const [series, setSeries] = useState<Array<{ date: string; value: number }>>([]);
   const [loading, setLoading] = useState(false);
+  const [fetched, setFetched] = useState(false);
 
   useEffect(() => {
     if (!perf?.metric) return;
@@ -147,16 +148,19 @@ function SparkLine({ clientId, perf }: { clientId: string; perf: PerfData | null
     if (config.campaignIds?.length) params.set('campaignIds', config.campaignIds.join(','));
     if (config.metaActionType) params.set('metaActionType', config.metaActionType);
 
+    setFetched(false);
     setLoading(true);
     fetch(`/api/clients/${clientId}/perf-series?${params}`)
       .then(r => r.json())
       .then(data => { if (Array.isArray(data.series)) setSeries(data.series); })
       .catch(() => {})
-      .finally(() => setLoading(false));
+      .finally(() => { setLoading(false); setFetched(true); });
   }, [clientId, perf?.metric]);
 
+  // Show spinner while the series fetch is in flight
+  if (loading || (perf?.hasData && !fetched)) return <GraphSpinner />;
+
   if (!perf?.hasData) return null;
-  if (loading) return <div style={{ width: '100%', height: 62, background: '#F5F3EF', borderRadius: 4 }} />;
 
   const metric = perf.metric;
   const cleanSeries = series.filter(s => s.value != null && isFinite(s.value) && !isNaN(s.value));
@@ -273,6 +277,33 @@ function SparkLine({ clientId, perf }: { clientId: string; perf: PerfData | null
   );
 }
 
+// ── Subtle arc spinner shown while graph data is loading ──────────────────
+
+function GraphSpinner() {
+  return (
+    <div style={{ width: '100%', height: 66, paddingTop: 4, position: 'relative' }}>
+      <style>{`
+        @keyframes cardArcSpin {
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
+      {/* Faint baseline to fill the space naturally */}
+      <svg width="100%" height="100%" viewBox="0 0 300 62" preserveAspectRatio="none" style={{ display: 'block', position: 'absolute', inset: 0 }}>
+        <line x1="0" y1="54" x2="300" y2="54" stroke="#F0EDE8" strokeWidth="0.75" />
+      </svg>
+      {/* Centred spinning arc */}
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <svg width={18} height={18} viewBox="0 0 18 18" style={{ display: 'block' }}>
+          <g style={{ animation: 'cardArcSpin 1.2s linear infinite', transformOrigin: '9px 9px' }}>
+            <circle cx={9} cy={9} r={6.5} fill="none" stroke="#EAE7E1" strokeWidth={1.5} />
+            <path d="M 9 2.5 A 6.5 6.5 0 0 1 15.5 9" fill="none" stroke="#8A8578" strokeWidth={1.5} strokeLinecap="round" />
+          </g>
+        </svg>
+      </div>
+    </div>
+  );
+}
+
 // ── Main component ─────────────────────────────────────────────────────────
 
 interface ClientCardCompactProps {
@@ -322,6 +353,7 @@ export function ClientCardCompact({
   }
 
   const [perf, setPerf] = useState<PerfData | null>(null);
+  const [perfReady, setPerfReady] = useState(false);
   const handleNeedle = useCallback((data: PerfData | null) => setPerf(data), []);
 
   const outstanding = Math.max(0, client.totalActionPoints - client.completedActionPoints);
@@ -412,15 +444,17 @@ export function ClientCardCompact({
       {/* Row 2: Performance metric + Open Actions + Speedometer */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          {variant === 'agency' ? (
-            /* Agency: hidden widget fetches data, we render pacing line */
-            <>
-              <PerformanceWidget clientId={client.id} onNeedle={handleNeedle} hideControls hideDisplay />
-              <SparkLine clientId={client.id} perf={perf} />
-            </>
+          {/* Hidden widget: fetches goals data and signals when the API has actually settled */}
+          <div style={{ display: 'none' }}>
+            <PerformanceWidget clientId={client.id} onNeedle={handleNeedle} onFetched={() => setPerfReady(true)} hideControls hideDisplay />
+          </div>
+          {!perfReady ? (
+            <GraphSpinner />
+          ) : variant === 'agency' ? (
+            <SparkLine clientId={client.id} perf={perf} />
           ) : (
-            /* Clients: visible widget shows metric + source, pacing line below */
             <div style={{ minWidth: 0 }}>
+              {/* Visible widget (shows metric label) — only mounted after data is ready */}
               <PerformanceWidget clientId={client.id} onNeedle={handleNeedle} hideControls />
               <SparkLine clientId={client.id} perf={perf} />
             </div>
@@ -434,7 +468,17 @@ export function ClientCardCompact({
         <div style={{ width: 0.5, height: 40, background: '#E8E4DC', flexShrink: 0 }} />
         <div style={{ width: 62, height: 48, flexShrink: 0, overflow: 'hidden' }}>
           <div style={{ transform: 'scale(0.7)', transformOrigin: 'left top' }}>
-            {perf?.hasData ? (
+            {!perfReady ? (
+              /* Tiny centred spinner in the speedometer space */
+              <div style={{ width: 88, height: 68, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <svg width={14} height={14} viewBox="0 0 14 14" style={{ display: 'block' }}>
+                  <g style={{ animation: 'cardArcSpin 1.2s linear infinite', transformOrigin: '7px 7px' }}>
+                    <circle cx={7} cy={7} r={5} fill="none" stroke="#EAE7E1" strokeWidth={1.5} />
+                    <path d="M 7 2 A 5 5 0 0 1 12 7" fill="none" stroke="#B5B0A5" strokeWidth={1.5} strokeLinecap="round" />
+                  </g>
+                </svg>
+              </div>
+            ) : perf?.hasData ? (
               <Speedometer needle={perf.needle} color={perf.color} sublabel="Performance" />
             ) : (
               <Speedometer needle={0.5} color="#B5B0A5" />

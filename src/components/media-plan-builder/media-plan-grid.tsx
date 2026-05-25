@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { Plus, Trash2, ChevronLeft, ChevronRight, MoreHorizontal, Upload, X, CheckCircle, AlertCircle, Loader2, FileSpreadsheet } from "lucide-react";
+import { Plus, Trash2, ChevronLeft, ChevronRight, MoreHorizontal, Upload, X, CheckCircle, AlertCircle, Loader2, FileSpreadsheet, ClipboardPaste, Layers, ImageIcon } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -83,7 +83,7 @@ export interface MediaPlanChannel {
   percentOfInvestment: number;
   totalBudget: number;
   flights: MediaFlight[];
-  channelCategory?: 'paid_digital' | 'organic_social' | 'edm' | 'ooh' | 'display_native' | 'radio' | 'other';
+  channelCategory?: 'paid_digital' | 'organic_social' | 'edm' | 'ooh' | 'display_native' | 'radio' | 'other' | 'fee';
   channelSubType?: string; // e.g. "Instagram", "Facebook", "LinkedIn"
   postsPerWeek?: number;
   sendFrequency?: string; // e.g. "weekly", "fortnightly", "monthly"
@@ -254,10 +254,9 @@ function toNearestMonday(dateStr: string): Date {
 function toContainingWeekMonday(dateStr: string): Date {
   const d = new Date(dateStr + 'T00:00:00');
   const day = d.getDay();
-  // For Sunday (day=0): round forward to next Monday instead of back 6 days
-  // (going back 6 would land in the previous week and can cross month boundaries unexpectedly)
-  // For all other days: round back to the Monday of the same week
-  const diff = day === 0 ? 1 : 1 - day;
+  // Sunday (day=0): go back 6 days to the Monday that opened this week.
+  // All other days: go back to Monday of the same week.
+  const diff = day === 0 ? -6 : 1 - day;
   d.setDate(d.getDate() + diff);
   return d;
 }
@@ -276,6 +275,338 @@ function lastMondayOfYear(year: number): string {
   const toSub = day === 0 ? 6 : day - 1;
   d.setDate(31 - toSub);
   return `${year}-12-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// ─── Client-side TSV parser (no AI needed for structured spreadsheet pastes) ───
+
+const MONTH_NAMES: Record<string, number> = {
+  jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3,
+  apr: 4, april: 4, may: 5, jun: 6, june: 6, jul: 7, july: 7,
+  aug: 8, august: 8, sep: 9, sept: 9, september: 9, oct: 10, october: 10,
+  nov: 11, november: 11, dec: 12, december: 12,
+};
+
+interface TSVColumn {
+  label: string;
+  iso?: string;      // weekly: "2026-01-05" (Monday of W/C)
+  monthKey?: string; // monthly: "2026-1"
+}
+
+interface TSVParseResult {
+  type: 'weekly' | 'monthly';
+  columns: TSVColumn[];
+  rows: Array<{
+    rawName: string;
+    channelName: string;
+    customChannelName?: string;
+    spend: Record<string, number>;
+    total: number;
+  }>;
+}
+
+function _parseWCDate(raw: string, year: number): Date | null {
+  const s = raw.trim()
+    .replace(/^w\/c[\s\-]*/i, '')
+    .replace(/(\d+)\s*(st|nd|rd|th)/gi, '$1')
+    .trim();
+  if (!s) return null;
+  let m: RegExpMatchArray | null;
+  m = s.match(/^(\d{1,2})[\s\-\/]([a-zA-Z]+)$/);
+  if (m) { const mo = MONTH_NAMES[m[2].toLowerCase()]; if (mo) return new Date(year, mo - 1, parseInt(m[1])); }
+  m = s.match(/^([a-zA-Z]+)[\s\-\/](\d{1,2})$/);
+  if (m) { const mo = MONTH_NAMES[m[1].toLowerCase()]; if (mo) return new Date(year, mo - 1, parseInt(m[2])); }
+  m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (m) return new Date(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3]));
+  m = s.match(/^(\d{1,2})\/(\d{1,2})(?:\/\d{2,4})?$/);
+  if (m) return new Date(year, parseInt(m[2]) - 1, parseInt(m[1]));
+  return null;
+}
+
+function _parseMonthOnly(raw: string): number | null {
+  return MONTH_NAMES[raw.trim().toLowerCase().replace(/\./g, '')] ?? null;
+}
+
+function _parseMoney(raw: string): number | null {
+  if (!raw) return null;
+  const s = raw.replace(/[$,\s]/g, '').replace(/k$/i, '000').replace(/m$/i, '000000');
+  const n = parseFloat(s);
+  return isNaN(n) || n <= 0 ? null : n;
+}
+
+// Funnel stage labels and column header labels that are NOT channel names
+const _FUNNEL_STAGES = new Set([
+  'awareness', 'consideration', 'conversion', 'performance', 'brand', 'acquisition',
+  'retention', 'loyalty', 'advocacy', 'reach', 'engagement', 'traffic', 'leads', 'sales',
+  'funnel', 'always on', 'always-on', 'paid', 'organic', 'upper funnel', 'mid funnel',
+  'lower funnel', 'top of funnel', 'bottom of funnel', 'tofu', 'mofu', 'bofu',
+]);
+const _COL_HEADERS = new Set([
+  'funnel', 'channel', 'detail', 'audience', 'audience segment', 'format', 'creative',
+  'media type', 'platform', 'tactic', 'objective', 'total', 'total investment', 'investment',
+  'budget', 'media spend', 'notes', 'week commencing', 'w/c', 'as at',
+]);
+const _SKIP_ROW = /^(total|sub\s*total|grand\s*total|gst|set\s*up|setup|production|management\s*fee|agency\s*fee|admin|section|category|media\s*type|channel\s*type)\b/i;
+
+// Channel normalisation: order matters — more specific first
+const _CHANNEL_KW: Array<{ kws: string[]; ch: string }> = [
+  { kws: ['youtube', 'yt ads'], ch: 'YouTube Ads' },
+  { kws: ['google', 'sem', 'gdn', 'pmax', 'performance max', 'search ads', 'shopping', 'paid search', 'google search', 'brand search'], ch: 'Google Ads' },
+  { kws: ['tiktok', 'tik tok'], ch: 'TikTok Ads' },
+  { kws: ['snapchat'], ch: 'Snapchat Ads' },
+  { kws: ['reddit'], ch: 'Reddit Ads' },
+  { kws: ['instagram (organic)', 'instagram organic', 'ig organic', 'ig posting'], ch: 'Instagram (Organic)' },
+  { kws: ['facebook (organic)', 'facebook organic', 'fb organic', 'fb posting'], ch: 'Facebook (Organic)' },
+  { kws: ['linkedin (organic)', 'linkedin organic', 'linkedin posting'], ch: 'LinkedIn (Organic)' },
+  { kws: ['meta', 'facebook', 'fb', 'instagram', 'paid social', 'social media ads', 'social advertising'], ch: 'Meta Ads' },
+  { kws: ['linkedin'], ch: 'LinkedIn Ads' },
+  { kws: ['display', 'programmatic', 'banner', 'dsp', 'trading desk'], ch: 'Display Ads' },
+  { kws: ['native', 'outbrain', 'taboola', 'sponsored content', 'content discovery'], ch: 'Native Ads' },
+  { kws: ['edm', 'email', 'e-newsletter', 'newsletter', 'mailchimp', 'klaviyo', 'hubspot'], ch: 'EDM / Email' },
+  { kws: ['radio', 'podcast', 'spotify ads', 'streaming audio'], ch: 'Radio' },
+  { kws: ['linear tv', 'free to air', 'fta', 'television'], ch: 'Linear TV' },
+  { kws: ['bvod', 'broadcast vod', 'catchup tv', 'catch-up tv'], ch: 'BVOD' },
+  { kws: ['svod', 'streaming tv', 'connected tv', 'ctv'], ch: 'SVOD' },
+  { kws: ['ooh', 'out of home', 'outdoor', 'billboard', 'bus back', 'bus shelter', 'letterbox', 'poster', 'dooh', 'digital ooh'], ch: 'OOH' },
+];
+
+function _normalizeChannel(raw: string): { channelName: string; customChannelName?: string } {
+  const lower = raw.toLowerCase().trim();
+  for (const { kws, ch } of _CHANNEL_KW) {
+    if (kws.some(kw => lower === kw || lower.startsWith(kw + ' ') || lower.startsWith(kw + '/') || lower.includes(' ' + kw) || lower.includes('-' + kw))) return { channelName: ch };
+  }
+  return { channelName: 'Other', customChannelName: raw };
+}
+
+function _isoDate(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// Parse a single CSV line, respecting quoted fields so "$12,000" isn't split on the comma
+function _parseCsvLine(line: string): string[] {
+  const cells: string[] = [];
+  let i = 0;
+  while (i <= line.length) {
+    if (i === line.length) { cells.push(''); break; }
+    if (line[i] === '"') {
+      let j = i + 1;
+      let val = '';
+      while (j < line.length) {
+        if (line[j] === '"' && line[j + 1] === '"') { val += '"'; j += 2; }
+        else if (line[j] === '"') { j++; break; }
+        else { val += line[j++]; }
+      }
+      cells.push(val.trim());
+      if (j < line.length && line[j] === ',') j++;
+      i = j;
+    } else {
+      const end = line.indexOf(',', i);
+      if (end === -1) { cells.push(line.slice(i).trim()); break; }
+      cells.push(line.slice(i, end).trim());
+      i = end + 1;
+    }
+  }
+  return cells;
+}
+
+function parseTSVPaste(text: string, year: number): TSVParseResult | null {
+  // Auto-detect delimiter: prefer tab (Excel copy-paste), fall back to comma (CSV file)
+  const firstLine = text.split(/\r?\n/)[0] ?? '';
+  const isCSV = !firstLine.includes('\t') && firstLine.includes(',');
+
+  const lines = text
+    .split(/\r?\n/)
+    .map(line => (isCSV ? _parseCsvLine(line) : line.split('\t').map(c => c.trim())))
+    .filter(row => row.some(c => c !== ''));
+  if (lines.length < 2) return null;
+
+  type ColEntry = { colIdx: number; iso?: string; monthKey?: string; label: string };
+
+  // Step 1: Scan first 8 rows — pick the row with the MOST date-like columns.
+  // This correctly chooses "30-Mar 6-Apr 13-Apr…" (13 cols) over "APR MAY JUNE" (3 cols).
+  let headerRowIdx = -1;
+  let colMap: ColEntry[] = [];
+  let maxDateCols = 2; // require at least 3
+
+  for (let ri = 0; ri < Math.min(8, lines.length); ri++) {
+    const row = lines[ri];
+    const found: ColEntry[] = [];
+    for (let ci = 0; ci < row.length; ci++) {
+      const cell = row[ci];
+      if (!cell) continue;
+      const d = _parseWCDate(cell, year);
+      if (d) { found.push({ colIdx: ci, iso: _isoDate(d), label: cell }); continue; }
+      const mo = _parseMonthOnly(cell);
+      if (mo) found.push({ colIdx: ci, monthKey: `${year}-${mo}`, label: cell });
+    }
+    if (found.length > maxDateCols) { maxDateCols = found.length; headerRowIdx = ri; colMap = found; }
+  }
+  if (headerRowIdx === -1) return null;
+
+  const type: 'weekly' | 'monthly' = colMap.some(c => !!c.iso) ? 'weekly' : 'monthly';
+  const minDateColIdx = Math.min(...colMap.map(c => c.colIdx));
+
+  // Step 2: Identify the channel column and total-budget column from header labels.
+  // The header row itself may contain both date columns AND text label columns
+  // (e.g. "FUNNEL CHANNEL DETAIL AUDIENCE TOTAL_INVESTMENT 30-Mar 6-Apr …").
+  let channelColIdx = 0;
+  let totalColIdx = -1;
+
+  // Scan current header row AND rows before it for text labels
+  for (let ri = 0; ri <= headerRowIdx; ri++) {
+    for (let ci = 0; ci < minDateColIdx && ci < lines[ri].length; ci++) {
+      const lbl = (lines[ri][ci] ?? '').toLowerCase().trim();
+      if (/^(channel|media|platform|outlet|tactic)$/.test(lbl)) channelColIdx = ci;
+      if (/total/.test(lbl)) totalColIdx = ci;
+    }
+  }
+
+  // Step 3: Parse data rows. Handle:
+  // • Funnel-stage labels in column 0 (AWARENESS, CONVERSION) — skip as channel name
+  // • Merged cells: inherit last non-empty channel name when a cell is blank
+  // • Multiple detail rows for the same channel (LinkedIn Fintech + Money Moments) — merge spend
+  const channelMap = new Map<string, { rawName: string; channelName: string; customChannelName?: string; spend: Record<string, number>; total: number }>();
+  let lastChannelCell = '';
+
+  for (let ri = headerRowIdx + 1; ri < lines.length; ri++) {
+    const row = lines[ri];
+    if (!row.some(c => c !== '')) continue;
+
+    // Resolve channel cell: try channel column, then scan all text columns left-to-right
+    let channelCell = (row[channelColIdx] ?? '').trim();
+    if (!channelCell || _FUNNEL_STAGES.has(channelCell.toLowerCase()) || _COL_HEADERS.has(channelCell.toLowerCase())) {
+      // Try other text columns before the date area
+      for (let ci = 0; ci < minDateColIdx; ci++) {
+        if (ci === channelColIdx) continue;
+        const v = (row[ci] ?? '').trim();
+        if (v && !_FUNNEL_STAGES.has(v.toLowerCase()) && !_COL_HEADERS.has(v.toLowerCase()) && !/^[\$\d]/.test(v)) {
+          channelCell = v;
+          break;
+        }
+      }
+    }
+    // Merged cell: inherit from the row above
+    if (!channelCell) channelCell = lastChannelCell;
+    else lastChannelCell = channelCell;
+
+    if (!channelCell) continue;
+    if (_SKIP_ROW.test(channelCell)) continue;
+    if (_FUNNEL_STAGES.has(channelCell.toLowerCase())) continue;
+    if (_COL_HEADERS.has(channelCell.toLowerCase())) continue;
+    if (/^[\$\d]/.test(channelCell)) continue;
+
+    // Extract spend from date columns
+    const spend: Record<string, number> = {};
+    for (const col of colMap) {
+      const amt = _parseMoney(row[col.colIdx] ?? '');
+      if (amt !== null) {
+        const key = col.iso ?? col.monthKey!;
+        spend[key] = (spend[key] ?? 0) + amt;
+      }
+    }
+    if (Object.keys(spend).length === 0) continue;
+
+    const rowSpendTotal = Object.values(spend).reduce((a, b) => a + b, 0);
+    // Prefer TOTAL INVESTMENT column value when present; fall back to summed spend
+    const rowTotal = (totalColIdx >= 0 ? (_parseMoney(row[totalColIdx] ?? '') ?? 0) : 0) || rowSpendTotal;
+
+    const { channelName, customChannelName } = _normalizeChannel(channelCell);
+    const mapKey = channelName === 'Other' ? (customChannelName ?? channelCell) : channelName;
+
+    const existing = channelMap.get(mapKey);
+    if (existing) {
+      for (const [k, v] of Object.entries(spend)) existing.spend[k] = (existing.spend[k] ?? 0) + v;
+      existing.total += rowTotal;
+    } else {
+      channelMap.set(mapKey, { rawName: channelCell, channelName, customChannelName, spend, total: rowTotal });
+    }
+  }
+
+  const rows = [...channelMap.values()].filter(r => Object.keys(r.spend).length > 0);
+  if (rows.length === 0) return null;
+  return { type, columns: colMap.map(c => ({ label: c.label, iso: c.iso, monthKey: c.monthKey })), rows };
+}
+
+function tsvToMediaPlanChannels(result: TSVParseResult): MediaPlanChannel[] {
+  const grandTotal = result.rows.reduce((s, r) => s + r.total, 0);
+  return result.rows.map(row => {
+    const color = getFlightHexColor(row.channelName);
+    const flights: MediaFlight[] = [];
+
+    if (result.type === 'weekly') {
+      const dates = Object.keys(row.spend).sort();
+      if (dates.length > 0) {
+        // All W/C dates from colMap, used to extend flights over merged-cell slaves
+        const allWCDates = result.columns.filter(c => !!c.iso).map(c => c.iso!).sort();
+        const lastWC = allWCDates[allWCDates.length - 1] ?? dates[dates.length - 1];
+
+        // Group spend dates into flights (gap > 7 days = new flight)
+        const groups: string[][] = [[dates[0]]];
+        for (let i = 1; i < dates.length; i++) {
+          const gap = (new Date(dates[i] + 'T00:00:00').getTime() - new Date(dates[i - 1] + 'T00:00:00').getTime()) / 86_400_000;
+          if (gap <= 7) groups[groups.length - 1].push(dates[i]);
+          else groups.push([dates[i]]);
+        }
+
+        for (let gi = 0; gi < groups.length; gi++) {
+          const group = groups[gi];
+          const fStart = group[0];
+          const lastSpend = group[group.length - 1];
+          const fSpend: Record<string, number> = {};
+          for (const iso of group) {
+            const d = new Date(iso + 'T00:00:00');
+            const mk = `${d.getFullYear()}-${d.getMonth() + 1}`;
+            fSpend[mk] = (fSpend[mk] ?? 0) + row.spend[iso];
+          }
+
+          // Extend to cover merged-cell slaves that paste as empty cells.
+          // Non-last flight: fill to last W/C before next group starts (closes the gap).
+          // Last flight: fill to last W/C column if within 56 days of last spend AND
+          //   there are 2+ spend dates total (single-week campaigns like Reddit stay put).
+          let flightEnd: string;
+          if (gi < groups.length - 1) {
+            const nextStart = groups[gi + 1][0];
+            const wcsBeforeNext = allWCDates.filter(d => d < nextStart);
+            flightEnd = wcsBeforeNext.length > 0 ? wcsBeforeNext[wcsBeforeNext.length - 1] : lastSpend;
+          } else {
+            const daysDiff = (new Date(lastWC + 'T00:00:00').getTime() - new Date(lastSpend + 'T00:00:00').getTime()) / 86_400_000;
+            flightEnd = (dates.length >= 2 && daysDiff >= 0 && daysDiff <= 56) ? lastWC : lastSpend;
+          }
+
+          const sw = new Date(fStart + 'T00:00:00');
+          const ew = new Date(flightEnd + 'T00:00:00');
+          ew.setDate(ew.getDate() + 6);
+          flights.push({ id: `flight-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, startWeek: sw, endWeek: ew, monthlySpend: { ...fSpend }, color });
+        }
+      }
+    } else {
+      const keys = Object.keys(row.spend).sort();
+      if (keys.length > 0) {
+        const pk = (mk: string) => { const [y, m] = mk.split('-').map(Number); return { y, m }; };
+        let fStart = keys[0], fEnd = keys[0], fSpend: Record<string, number> = { [keys[0]]: row.spend[keys[0]] };
+        const pushM = () => {
+          const { y: sy, m: sm } = pk(fStart); const { y: ey, m: em } = pk(fEnd);
+          flights.push({ id: `flight-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, startWeek: new Date(sy, sm - 1, 1), endWeek: new Date(ey, em, 0), monthlySpend: { ...fSpend }, color });
+        };
+        for (let i = 1; i < keys.length; i++) {
+          const { y: py, m: pm } = pk(keys[i - 1]); const { y: cy, m: cm } = pk(keys[i]);
+          if (cy * 12 + cm === py * 12 + pm + 1) { fEnd = keys[i]; fSpend[keys[i]] = row.spend[keys[i]]; }
+          else { pushM(); fStart = keys[i]; fEnd = keys[i]; fSpend = { [keys[i]]: row.spend[keys[i]] }; }
+        }
+        pushM();
+      }
+    }
+
+    return {
+      id: generateChannelId(),
+      channelName: row.channelName,
+      customChannelName: row.customChannelName ?? '',
+      format: '',
+      totalBudget: row.total,
+      percentOfInvestment: grandTotal > 0 ? Math.round((row.total / grandTotal) * 100) : 0,
+      flights,
+      channelCategory: getChannelCategory(row.channelName),
+    };
+  });
 }
 
 function parsedToMediaPlanChannels(parsed: ParsedChannel[], gridYear?: number): MediaPlanChannel[] {
@@ -312,7 +643,10 @@ function parsedToMediaPlanChannels(parsed: ParsedChannel[], gridYear?: number): 
         if (parts.length >= 2) {
           const keyYear = parseInt(parts[0], 10);
           const fixedKeyYear = (keyYear < 2026 || keyYear > 2030) ? currentYear : keyYear;
-          remappedSpend[`${fixedKeyYear}-${parts.slice(1).join('-')}`] = v || 0;
+          // Parse month as number to strip zero-padding ("09" → 9) so keys match
+          // getMonthKey() format of "YYYY-M" (not "YYYY-MM").
+          const monthNum = parseInt(parts[1], 10);
+          remappedSpend[`${fixedKeyYear}-${monthNum}`] = v || 0;
         }
       }
 
@@ -387,8 +721,8 @@ function parsedToMediaPlanChannels(parsed: ParsedChannel[], gridYear?: number): 
     }
 
     const rawFlightsBuilt: MediaFlight[] = normalisedFlights.map(f => {
-      let startWeek = toNearestMonday(f.startDate);        // snap to nearest Mon (fwd-biased)
-      let endMonday = toContainingWeekMonday(f.endDate);   // snap to Monday of containing week
+      let startWeek = toNearestMonday(f.startDate);
+      let endMonday = toContainingWeekMonday(f.endDate);
 
       if (isNaN(startWeek.getTime())) startWeek = new Date(currentYear, 0, 5);
       if (isNaN(endMonday.getTime())) endMonday = new Date(currentYear, 11, 28);
@@ -405,11 +739,10 @@ function parsedToMediaPlanChannels(parsed: ParsedChannel[], gridYear?: number): 
       };
     });
 
-    // Merge flights whose gap is ≤ 63 days (9 weeks).
-    // Monthly budget-marker plans produce one single-week flight per month; those
-    // gaps (~4–5 weeks) get merged into one continuous block. Genuinely separate
-    // campaign bursts (Radio, seasonal OOH) have 12+ week gaps and stay separate.
-    const MERGE_GAP_MS = 63 * 24 * 60 * 60 * 1000;
+    // Only merge flights that are directly adjacent or overlapping (≤ 6 days gap).
+    // Flights with any real gap between them represent distinct campaign bursts and
+    // must stay separate — the Excel colored blocks define the flight boundaries.
+    const MERGE_GAP_MS = 6 * 24 * 60 * 60 * 1000;
     rawFlightsBuilt.sort((a, b) => a.startWeek.getTime() - b.startWeek.getTime());
     const flights: MediaFlight[] = [];
     for (const f of rawFlightsBuilt) {
@@ -545,6 +878,12 @@ export function MediaPlanGrid({ channels: externalChannels, onChannelsChange, co
   const edgeDragRafRef = useRef<number | null>(null);
   const lastEdgeDragWeekIdxRef = useRef<number>(-1);
   edgeDragStateRef.current = edgeDragState;
+  // Scroll container ref + live values kept current each render for X-based week detection
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const cellWidthRef = useRef(cellWidth);
+  const weeksCountRef = useRef(0);
+  // Measured at drag-start: distance from container left to the first week column (avoids hardcoding)
+  const fixedColumnsWidthRef = useRef(0);
 
   // Inline spend editing
   const [editingSpendFlight, setEditingSpendFlight] = useState<{
@@ -603,7 +942,64 @@ export function MediaPlanGrid({ channels: externalChannels, onChannelsChange, co
   const [xlsxClarification, setXlsxClarification] = useState<XlsxClarificationState | null>(null);
   const [pendingXlsxFile, setPendingXlsxFile] = useState<File | null>(null);
   const xlsxInputRef = useRef<HTMLInputElement>(null);
+
+  // Paste-to-parse state
+  const [isPasteModalOpen, setIsPasteModalOpen] = useState(false);
+  const [pasteText, setPasteText] = useState('');
+  const [isParsingPaste, setIsParsingPaste] = useState(false);
+  const [isNormalizingChannels, setIsNormalizingChannels] = useState(false);
+  const [pasteError, setPasteError] = useState<string | null>(null);
+  const [pasteStartDate, setPasteStartDate] = useState('');
+  const [pasteEndDate, setPasteEndDate] = useState('');
+  const csvFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Auto-parse pasted text as structured TSV/CSV — no AI needed when columns are detected
+  const tsvPreview = useMemo(() => {
+    if (!pasteText.trim()) return null;
+    return parseTSVPaste(pasteText, selectedYear);
+  }, [pasteText, selectedYear]);
   
+  // Combined upload modal state (Excel + screenshot together for max accuracy)
+  const [isCombinedModalOpen, setIsCombinedModalOpen] = useState(false);
+  const [combinedXlsxFile, setCombinedXlsxFile] = useState<File | null>(null);
+  const [combinedScreenshotFile, setCombinedScreenshotFile] = useState<File | null>(null);
+  const [combinedScreenshotPreview, setCombinedScreenshotPreview] = useState<string | null>(null);
+  const [isCombinedParsing, setIsCombinedParsing] = useState(false);
+  const [combinedError, setCombinedError] = useState<string | null>(null);
+  const combinedXlsxInputRef = useRef<HTMLInputElement>(null);
+  const combinedScreenshotInputRef = useRef<HTMLInputElement>(null);
+
+  const closeCombinedModal = () => {
+    setIsCombinedModalOpen(false);
+    setCombinedXlsxFile(null);
+    setCombinedScreenshotFile(null);
+    setCombinedScreenshotPreview(null);
+    setCombinedError(null);
+  };
+
+  const handleCombinedParse = async () => {
+    if (!combinedXlsxFile && !combinedScreenshotFile) return;
+    setIsCombinedParsing(true);
+    setCombinedError(null);
+    try {
+      const fd = new FormData();
+      if (combinedXlsxFile) fd.append('file', combinedXlsxFile);
+      if (combinedScreenshotFile) fd.append('screenshot', combinedScreenshotFile);
+      fd.append('year', String(selectedYear));
+      const res = await fetch('/api/media-plan/parse-combined', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? 'Failed to analyse files');
+      const converted = parsedToMediaPlanChannels(data.channels, selectedYear);
+      setReviewChannels(converted);
+      if (combinedScreenshotPreview) setReviewImagePreview(combinedScreenshotPreview);
+      closeCombinedModal();
+    } catch (err: any) {
+      setCombinedError(err.message ?? 'Failed to analyse. Please check your files and try again.');
+    } finally {
+      setIsCombinedParsing(false);
+    }
+  };
+
   // Focus budget input when activeSelection changes (only once per selection)
   useEffect(() => {
     if (activeSelection && budgetInputRef.current && !hasFocusedInputRef.current) {
@@ -621,6 +1017,9 @@ export function MediaPlanGrid({ channels: externalChannels, onChannelsChange, co
   // Generate weeks and filter to only include weeks that start in the selected year
   const allWeeks = generateWeeklyDateRanges(startDate, endDate);
   const weeks = allWeeks.filter(week => week.weekStart.getFullYear() === selectedYear);
+  // Keep drag refs current every render so closures in useEffect always see latest values
+  cellWidthRef.current = cellWidth;
+  weeksCountRef.current = weeks.length;
   
   // Calculate current week commencing (Monday of current week)
   const getCurrentWeekCommencing = (): Date => {
@@ -946,11 +1345,13 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
       if (edgeDragRafRef.current !== null) return; // already scheduled for this frame
       edgeDragRafRef.current = requestAnimationFrame(() => {
         edgeDragRafRef.current = null;
-        const target = document.elementFromPoint(e.clientX, e.clientY);
-        const weekCell = target?.closest('[data-week-cell]');
-        if (!weekCell) return;
-        const weekIdx = parseInt(weekCell.getAttribute('data-week-index') || '-1');
-        if (weekIdx < 0 || weekIdx === lastEdgeDragWeekIdxRef.current) return;
+        if (!scrollContainerRef.current) return;
+        const container = scrollContainerRef.current;
+        const containerRect = container.getBoundingClientRect();
+        // fixedColumnsWidthRef is measured at drag-start from the actual DOM position of week-0
+        const xInWeeks = e.clientX - containerRect.left + container.scrollLeft - fixedColumnsWidthRef.current;
+        const weekIdx = Math.max(0, Math.min(weeksCountRef.current - 1, Math.floor(xInWeeks / cellWidthRef.current)));
+        if (weekIdx === lastEdgeDragWeekIdxRef.current) return;
         lastEdgeDragWeekIdxRef.current = weekIdx;
         setEdgeDragState(prev => prev ? { ...prev, currentIdx: weekIdx } : prev);
       });
@@ -1465,6 +1866,80 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
     }
   };
 
+  const closePasteModal = () => {
+    setIsPasteModalOpen(false);
+    setPasteText('');
+    setPasteError(null);
+    setPasteStartDate('');
+    setPasteEndDate('');
+  };
+
+  const handlePasteParse = async () => {
+    if (!pasteText.trim()) return;
+
+    // Structured TSV/CSV detected — convert directly, then AI-normalise any unrecognised channels
+    if (tsvPreview) {
+      let channels = tsvToMediaPlanChannels(tsvPreview);
+
+      const otherChannels = channels.filter(c => c.channelName === 'Other' && c.customChannelName);
+      if (otherChannels.length > 0) {
+        setIsNormalizingChannels(true);
+        try {
+          const names = otherChannels.map(c => c.customChannelName!);
+          const normRes = await fetch('/api/media-plan/normalize-channels', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ names }),
+          });
+          if (normRes.ok) {
+            const normData = await normRes.json();
+            const mappings: Array<{ channelName: string; customChannelName: string }> = normData.mappings ?? [];
+            channels = channels.map(ch => {
+              if (ch.channelName !== 'Other' || !ch.customChannelName) return ch;
+              const idx = names.indexOf(ch.customChannelName);
+              const mapping = idx >= 0 ? mappings[idx] : null;
+              if (!mapping || mapping.channelName === 'Other') return ch;
+              return {
+                ...ch,
+                channelName: mapping.channelName,
+                customChannelName: mapping.customChannelName || '',
+                channelCategory: getChannelCategory(mapping.channelName),
+              };
+            });
+          }
+        } catch { /* fall through — use original channels */ }
+        finally { setIsNormalizingChannels(false); }
+      }
+
+      setReviewChannels(channels);
+      closePasteModal();
+      return;
+    }
+
+    // Unstructured / plain text — fall back to AI
+    setIsParsingPaste(true);
+    setPasteError(null);
+    try {
+      const body: Record<string, any> = { text: pasteText, year: selectedYear };
+      if (pasteStartDate) body.startDate = pasteStartDate;
+      if (pasteEndDate) body.endDate = pasteEndDate;
+      const res = await fetch('/api/media-plan/parse-paste', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? 'Failed to parse pasted data');
+      const converted = parsedToMediaPlanChannels(data.channels, selectedYear);
+      setReviewChannels(converted);
+      closePasteModal();
+    } catch (err: any) {
+      setPasteError(err.message ?? 'Failed to parse. Try adding the campaign period dates and ensure channel names are visible.');
+    } finally {
+      setIsParsingPaste(false);
+    }
+  };
+
   return (
     <div className="w-full overflow-hidden border border-gray-300 rounded-lg relative">
       {/* Year Navigation and Commission Header */}
@@ -1555,6 +2030,29 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
             )}
             {isProbing ? 'Reading…' : isParsingXlsx ? 'Extracting…' : 'Upload Excel'}
           </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 gap-1.5 text-xs"
+            onClick={() => { setIsPasteModalOpen(true); setPasteError(null); }}
+            disabled={isParsingScreenshot || isProbing || isParsingXlsx || isParsingPaste}
+            title="Paste copied cells from Excel or Google Sheets — AI extracts channels and budgets"
+          >
+            <ClipboardPaste className="h-3.5 w-3.5" />
+            Paste Data
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 gap-1.5 text-xs font-medium"
+            onClick={() => { setIsCombinedModalOpen(true); setCombinedError(null); }}
+            disabled={isParsingScreenshot || isProbing || isParsingXlsx || isCombinedParsing}
+            title="Upload both Excel + screenshot together for maximum accuracy — AI reconciles both sources"
+            style={{ borderColor: '#7C3AED', color: '#7C3AED' }}
+          >
+            <Layers className="h-3.5 w-3.5" />
+            Best Accuracy
+          </Button>
           {(screenshotError || xlsxError) && (
             <span className="text-xs text-red-500 flex items-center gap-1">
               <AlertCircle className="h-3 w-3" /> {screenshotError || xlsxError}
@@ -1629,6 +2127,26 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
             </div>
           </button>
           <button
+            onClick={() => { setIsPasteModalOpen(true); setPasteError(null); }}
+            disabled={isParsingScreenshot || isProbing || isParsingXlsx || isParsingPaste}
+            className="flex-1 flex flex-col items-center justify-center gap-4 border-r border-violet-600 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ minHeight: 340, background: 'linear-gradient(135deg, #3b0764 0%, #7c3aed 100%)' }}
+          >
+            <div className="w-14 h-14 rounded-full bg-white/20 flex items-center justify-center">
+              {isParsingPaste ? (
+                <Loader2 className="w-7 h-7 text-white animate-spin" />
+              ) : (
+                <ClipboardPaste className="w-7 h-7 text-white" />
+              )}
+            </div>
+            <div className="text-center">
+              <div className="text-lg font-semibold text-white">
+                {isParsingPaste ? 'Parsing…' : 'Paste Data'}
+              </div>
+              <div className="text-sm text-white/70 mt-1">Copy cells from Excel or Sheets — AI extracts the rest</div>
+            </div>
+          </button>
+          <button
             onClick={handleAddChannel}
             className="flex-1 flex flex-col items-center justify-center gap-4 bg-white hover:bg-gray-50 transition-colors cursor-pointer rounded-r-xl"
             style={{ minHeight: 340 }}
@@ -1643,7 +2161,7 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
           </button>
         </div>
       ) : (
-      <div className="overflow-x-auto w-full">
+      <div ref={scrollContainerRef} className="overflow-x-auto w-full">
         <table className="border-collapse w-full">
           <thead className="bg-gray-100 sticky top-0 z-10">
             {/* Month header row */}
@@ -1731,9 +2249,9 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                   {currentWeekIndex >= 0 && weekIdx === currentWeekIndex && (
                     <div
                       className="absolute top-0 bottom-0 pointer-events-none"
-                      style={{ left: `${currentDayPosition}px`, width: '2px', background: '#8A8578', zIndex: 9999, overflow: 'visible' }}
+                      style={{ left: `${currentDayPosition}px`, width: '2px', background: '#EF4444', zIndex: 9999, overflow: 'visible' }}
                     >
-                      <div style={{ position: 'absolute', top: 0, left: '-4px', width: '9px', height: '9px', borderRadius: '50%', background: '#8A8578' }} />
+                      <div style={{ position: 'absolute', top: 0, left: '-4px', width: '9px', height: '9px', borderRadius: '50%', background: '#EF4444' }} />
                     </div>
                   )}
                   <div className="transform -rotate-90 origin-center whitespace-nowrap">
@@ -2303,15 +2821,16 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                           {currentWeekIndex >= 0 && weekIdx === currentWeekIndex && (
                             <div
                               className="absolute top-0 bottom-0 pointer-events-none"
-                              style={{ left: `${currentDayPosition}px`, width: '2px', background: '#8A8578', zIndex: 9999 }}
+                              style={{ left: `${currentDayPosition}px`, width: '2px', background: '#EF4444', zIndex: 9999 }}
                             />
                           )}
                         </td>
                       ));
                     }
                     
-                    // Calculate flight ranges
-                    const flightRanges = channel.flights.map((flight) => {
+                    // DOM ranges — committed positions, no drag override.
+                    // Used for colSpan/table structure so the DOM is stable during drag (no reflow flicker).
+                    const flightRangesDom = channel.flights.map((flight) => {
                       let startIdx = -1;
                       let endIdx = -1;
 
@@ -2323,8 +2842,10 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                       });
 
                       return { flight, startIdx, endIdx };
-                    }).filter((f) => f.startIdx !== -1).map(range => {
-                      // Override indices live during edge drag
+                    }).filter((f) => f.startIdx !== -1);
+
+                    // Visual ranges — drag override applied. Used only for the block's width/left offset.
+                    const flightRanges = flightRangesDom.map(range => {
                       if (edgeDragState?.flightId === range.flight.id && edgeDragState?.channelId === channel.id) {
                         const { edge, currentIdx, origStartIdx, origEndIdx } = edgeDragState;
                         return edge === 'start'
@@ -2342,10 +2863,11 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                       return `rgba(${r}, ${g}, ${b}, ${opacity})`;
                     };
                     
-                    // Track which weeks are covered by colspan
+                    // Track which weeks are covered by colspan — use DOM ranges so colSpan is
+                    // stable during drag (no table reflow / flicker on every mousemove frame).
                     const coveredByColspan = new Set<number>();
-                    const weekToStartFlights = new Map<number, typeof flightRanges>();
-                    
+                    const weekToStartFlights = new Map<number, typeof flightRangesDom>();
+
                     // Check if there's an active selection for this channel
                     const hasActiveSelection = activeSelection && activeSelection.channelId === channel.id;
                     if (hasActiveSelection) {
@@ -2354,9 +2876,9 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                         coveredByColspan.add(i);
                       }
                     }
-                    
-                    // Group flights by their start week
-                    flightRanges.forEach((range) => {
+
+                    // Group flights by their DOM start week (keeps colSpan stable during drag)
+                    flightRangesDom.forEach((range) => {
                       if (!weekToStartFlights.has(range.startIdx)) {
                         weekToStartFlights.set(range.startIdx, []);
                       }
@@ -2370,10 +2892,9 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                       }
                     });
 
-                    // Weeks immediately adjacent (1 column) to any flight edge — block new-flight creation
-                    // to prevent accidental triggers when extending via resize handle
+                    // Adjacent weeks — use DOM ranges so cursor changes at committed edges
                     const flightAdjacentWeeks = new Set<number>();
-                    flightRanges.forEach(({ startIdx, endIdx }) => {
+                    flightRangesDom.forEach(({ startIdx, endIdx }) => {
                       if (startIdx > 0) flightAdjacentWeeks.add(startIdx - 1);
                       if (endIdx < weeks.length - 1) flightAdjacentWeeks.add(endIdx + 1);
                     });
@@ -2419,6 +2940,11 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                           ? activeSelection.endWeekIdx - activeSelection.startWeekIdx + 1
                           : maxSpan;
                         
+                        // Elevate z-index during drag so the overflowing block paints above sibling tds
+                        const isDraggedCell = flightsStartingHere.some(
+                          r => edgeDragState?.flightId === r.flight.id && edgeDragState?.channelId === channel.id
+                        );
+
                         cells.push(
                           <td
                             key={`week-${weekIdx}`}
@@ -2426,7 +2952,7 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                             data-week-index={weekIdx}
                             data-channel-id={channel.id}
                             colSpan={isInActiveSelection && isFirstSelectedCell ? selectionSpan : maxSpan}
-                            className={`border-l-2 border-l-gray-400 border border-gray-300 px-0 py-0 relative h-12 z-0 overflow-visible ${
+                            className={`border-l-2 border-l-gray-400 border border-gray-300 px-0 py-0 relative h-12 overflow-visible ${
                               isOrganicWeek
                                 ? 'cursor-default'
                                 : isAdjacentToFlight
@@ -2435,7 +2961,7 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                                   ? 'bg-blue-200 border-2 border-blue-500 rounded-none cursor-crosshair'
                                   : `${channelColors.bg} cursor-crosshair`
                             }`}
-                            style={{ width: cellWidth, minWidth: cellWidth, maxWidth: cellWidth, ...(isOrganicWeek ? getOrganicStripeStyle(channel.channelName) : {}) }}
+                            style={{ width: cellWidth, minWidth: cellWidth, maxWidth: cellWidth, zIndex: isDraggedCell ? 2 : 0, ...(isOrganicWeek ? getOrganicStripeStyle(channel.channelName) : {}) }}
                             onMouseDown={(e) => {
                               if (isOrganicWeek || isAdjacentToFlight) {
                                 e.preventDefault();
@@ -2449,7 +2975,7 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                             {currentWeekIndex >= 0 && weekIdx === currentWeekIndex && (
                               <div
                                 className="absolute top-0 bottom-0 pointer-events-none"
-                                style={{ left: `${currentDayPosition}px`, width: '2px', background: '#8A8578', zIndex: 9999 }}
+                                style={{ left: `${currentDayPosition}px`, width: '2px', background: '#EF4444', zIndex: 9999 }}
                               />
                             )}
                             {/* Inline budget input spanning across selected cells */}
@@ -2508,26 +3034,28 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                                 </div>
                               );
                             })()}
-                            {/* Render all flights that overlap this week, stacked */}
-                            {!isOrganicSocial && flightRanges
-                              .filter(({ startIdx, endIdx }) => weekIdx >= startIdx && weekIdx <= endIdx)
-                              .map(({ flight, startIdx, endIdx }, flightLayerIdx) => {
-                                const isFirstWeek = weekIdx === startIdx;
-                                
-                                // Aggregate monthly spend
+                            {/* Render flight blocks — one per flight that starts at this DOM week.
+                                DOM ranges keep colSpan stable; visual ranges drive block dimensions. */}
+                            {!isOrganicSocial && flightRangesDom
+                              .filter(({ startIdx }) => startIdx === weekIdx)
+                              .map(({ flight, startIdx: domStartIdx, endIdx: domEndIdx }, flightLayerIdx) => {
+                                const visualRange = flightRanges.find(r => r.flight.id === flight.id)!;
+                                const visualStartIdx = visualRange.startIdx;
+                                const visualEndIdx = visualRange.endIdx;
+
+                                // Spend from committed DOM range
                                 const monthsInFlight = new Set<string>();
-                                for (let i = startIdx; i <= endIdx; i++) {
+                                for (let i = domStartIdx; i <= domEndIdx; i++) {
                                   monthsInFlight.add(getMonthKey(weeks[i].weekStart));
                                 }
                                 const totalSpend = Array.from(monthsInFlight).reduce((sum, monthKey) => {
                                   return sum + (flight.monthlySpend[monthKey] || 0);
                                 }, 0);
-                                
-                                // Calculate block position and width
-                                const flightSpan = endIdx - startIdx + 1;
-                                const blockWidth = flightSpan * cellWidth;
-                                const leftOffset = (weekIdx - startIdx) * cellWidth;
-                                
+
+                                // Visual block size — leftOffset can be negative (start dragged left)
+                                const blockWidth = (visualEndIdx - visualStartIdx + 1) * cellWidth;
+                                const leftOffset = (visualStartIdx - domStartIdx) * cellWidth;
+
                                 const flightStatus = flightStatusMap.get(flight.id);
                                 const channelBudgetColor = getChannelBudgetColor(channel.channelName);
                                 const blockBgColor = flightStatus === 'booked'
@@ -2547,8 +3075,6 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                                       zIndex: hoveredFlightId === flight.id ? 500 : (10 + flightLayerIdx),
                                       fontFamily: 'var(--font-inter)',
                                       ...(blockBgColor ? { backgroundColor: blockBgColor } : {}),
-                                      // During edge drag, pass pointer events through so elementFromPoint
-                                      // finds the underlying td cells (not this block) for correct week tracking
                                       ...(edgeDragState?.flightId === flight.id ? { pointerEvents: 'none' } : {}),
                                     }}
                                     onMouseEnter={() => setHoveredFlightId(flight.id)}
@@ -2564,16 +3090,16 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                                   >
                                     {/* Today line */}
                                     {currentWeekIndex >= 0 &&
-                                     currentWeekIndex >= startIdx &&
-                                     currentWeekIndex <= endIdx && (
+                                     currentWeekIndex >= visualStartIdx &&
+                                     currentWeekIndex <= visualEndIdx && (
                                       <div
                                         className="absolute top-0 bottom-0 pointer-events-none"
-                                        style={{ left: `${(currentWeekIndex - startIdx) * cellWidth + currentDayPosition}px`, width: '2px', background: '#8A8578', zIndex: 9999 }}
+                                        style={{ left: `${(currentWeekIndex - visualStartIdx) * cellWidth + currentDayPosition}px`, width: '2px', background: '#EF4444', zIndex: 9999 }}
                                       />
                                     )}
 
                                     {/* Spend number — click to edit */}
-                                    {isFirstWeek && (totalSpend > 0 || (editingSpendFlight?.flightId === flight.id && editingSpendFlight?.channelId === channel.id)) && (
+                                    {(totalSpend > 0 || (editingSpendFlight?.flightId === flight.id && editingSpendFlight?.channelId === channel.id)) && (
                                       editingSpendFlight?.flightId === flight.id && editingSpendFlight?.channelId === channel.id ? (
                                         <input
                                           autoFocus
@@ -2597,42 +3123,39 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                                       )
                                     )}
 
-                                    {/* 3-dots menu (first week only) */}
-                                    {isFirstWeek && (
-                                      <div
-                                        style={{ position: 'absolute', top: 1, right: 1, zIndex: 200 }}
-                                        onMouseDown={e => e.stopPropagation()}
-                                        onClick={e => e.stopPropagation()}
-                                      >
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            if (openFlightMenu === flight.id) {
-                                              setOpenFlightMenu(null);
-                                              setFlightMenuPos(null);
-                                            } else {
-                                              const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                                              setFlightMenuPos({ top: rect.bottom + 2, right: window.innerWidth - rect.right });
-                                              setOpenFlightMenu(flight.id);
-                                            }
-                                          }}
-                                          style={{ background: 'rgba(255,255,255,0.22)', border: 'none', borderRadius: 2, padding: '0 4px', cursor: 'pointer', fontSize: 11, color: 'white', lineHeight: '14px', height: 14 }}
-                                        >···</button>
-                                      </div>
-                                    )}
+                                    {/* 3-dots menu */}
+                                    <div
+                                      style={{ position: 'absolute', top: 1, right: 1, zIndex: 200 }}
+                                      onMouseDown={e => e.stopPropagation()}
+                                      onClick={e => e.stopPropagation()}
+                                    >
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          if (openFlightMenu === flight.id) {
+                                            setOpenFlightMenu(null);
+                                            setFlightMenuPos(null);
+                                          } else {
+                                            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                            setFlightMenuPos({ top: rect.bottom + 2, right: window.innerWidth - rect.right });
+                                            setOpenFlightMenu(flight.id);
+                                          }
+                                        }}
+                                        style={{ background: 'rgba(255,255,255,0.22)', border: 'none', borderRadius: 2, padding: '0 4px', cursor: 'pointer', fontSize: 11, color: 'white', lineHeight: '14px', height: 14 }}
+                                      >···</button>
+                                    </div>
 
                                     {/* Status badge */}
-                                    {isFirstWeek && flightStatusMap.has(flight.id) && (
+                                    {flightStatusMap.has(flight.id) && (
                                       <div style={{ position: 'absolute', bottom: 1, left: 2, fontSize: 7, fontWeight: 700, color: 'white', background: 'rgba(0,0,0,0.28)', borderRadius: 2, padding: '1px 3px', letterSpacing: '0.05em', textTransform: 'uppercase', pointerEvents: 'none' }}>
                                         {flightStatusMap.get(flight.id) === 'in_progress' ? 'In Prog' : 'Booked'}
                                       </div>
                                     )}
 
-                                    {/* Resize handles — white pill centred on each edge, protrudes both sides */}
-                                    {isFirstWeek && (() => {
-                                      const curRange = flightRanges.find(r => r.flight.id === flight.id);
-                                      const origStartIdx = curRange?.startIdx ?? 0;
-                                      const origEndIdx = curRange?.endIdx ?? 0;
+                                    {/* Resize handles — white pill centred on each edge */}
+                                    {(() => {
+                                      const origStartIdx = domStartIdx;
+                                      const origEndIdx = domEndIdx;
                                       const pillStyle: React.CSSProperties = {
                                         position: 'absolute',
                                         top: '20%',
@@ -2656,6 +3179,11 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                                             onMouseDown={e => {
                                               e.stopPropagation();
                                               isEdgeDraggingRef.current = true;
+                                              if (scrollContainerRef.current) {
+                                                const sc = scrollContainerRef.current;
+                                                const w0 = sc.querySelector('[data-week-index="0"]');
+                                                if (w0) fixedColumnsWidthRef.current = w0.getBoundingClientRect().left - sc.getBoundingClientRect().left + sc.scrollLeft;
+                                              }
                                               setEdgeDragState({ channelId: channel.id, flightId: flight.id, edge: 'start', currentIdx: origStartIdx, origStartIdx, origEndIdx });
                                             }}
                                             onClick={e => e.stopPropagation()}
@@ -2672,6 +3200,11 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                                             onMouseDown={e => {
                                               e.stopPropagation();
                                               isEdgeDraggingRef.current = true;
+                                              if (scrollContainerRef.current) {
+                                                const sc = scrollContainerRef.current;
+                                                const w0 = sc.querySelector('[data-week-index="0"]');
+                                                if (w0) fixedColumnsWidthRef.current = w0.getBoundingClientRect().left - sc.getBoundingClientRect().left + sc.scrollLeft;
+                                              }
                                               setEdgeDragState({ channelId: channel.id, flightId: flight.id, edge: 'end', currentIdx: origEndIdx, origStartIdx, origEndIdx });
                                             }}
                                             onClick={e => e.stopPropagation()}
@@ -2691,8 +3224,9 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                           </td>
                         );
                       } else if (!coveredByColspan.has(weekIdx)) {
-                        // Empty cell or cell with overlapping flights that don't start here
-                        const overlappingFlights = flightRanges.filter(
+                        // Empty cell or cell with overlapping flights that don't start here.
+                        // Use DOM ranges so visually-extended blocks don't ghost into uncovered cells.
+                        const overlappingFlights = flightRangesDom.filter(
                           ({ startIdx, endIdx }) => weekIdx >= startIdx && weekIdx <= endIdx && startIdx !== weekIdx
                         );
                         
@@ -2741,7 +3275,7 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                             {currentWeekIndex >= 0 && weekIdx === currentWeekIndex && (
                               <div
                                 className="absolute top-0 bottom-0 pointer-events-none"
-                                style={{ left: `${currentDayPosition}px`, width: '2px', background: '#8A8578', zIndex: 9999 }}
+                                style={{ left: `${currentDayPosition}px`, width: '2px', background: '#EF4444', zIndex: 9999 }}
                               />
                             )}
                             {/* Pending budget hint — drag to set flights */}
@@ -2829,7 +3363,7 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                                    currentWeekIndex <= endIdx && (
                                     <div
                                       className="absolute top-0 bottom-0 pointer-events-none"
-                                      style={{ left: `${(currentWeekIndex - startIdx) * cellWidth + currentDayPosition}px`, width: '2px', background: '#8A8578', zIndex: 1000 }}
+                                      style={{ left: `${(currentWeekIndex - startIdx) * cellWidth + currentDayPosition}px`, width: '2px', background: '#EF4444', zIndex: 1000 }}
                                     />
                                   )}
                                 </div>
@@ -2850,9 +3384,12 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
 
             {/* Totals Row */}
             {channels.length > 0 && (() => {
-              // Calculate total budget across all channels (auto-calculated from flights)
-              const totalBudget = channels.reduce((sum, channel) => 
-                sum + calculateTotalBudgetFromFlights(channel.flights || []), 0);
+              // Include fees from "Other" type channels in the total budget
+              const totalBudget = channels.reduce((sum, channel) => {
+                const category = channel.channelCategory || getChannelCategory(channel.channelName);
+                const flightTotal = calculateTotalBudgetFromFlights(channel.flights || []);
+                return sum + flightTotal + (category === 'other' ? (channel.fees || 0) : 0);
+              }, 0);
 
               return (
                 <tr className="bg-gray-50 font-semibold">
@@ -2888,7 +3425,7 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                   {/* Monthly totals in date columns */}
                   {monthGroups.map((group, groupIdx) => {
                     const monthTotal = calculateWeekGroupTotal(group.weeks);
-                    
+
                     return (
                       <td
                         key={`total-${groupIdx}`}
@@ -2904,41 +3441,32 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                 </tr>
               );
             })()}
-            
-            {/* Grand Total Row */}
+
+            {/* Total Media Plan Row — always visible in sticky columns */}
             {channels.length > 0 && (() => {
-              // Calculate grand total
-              const monthlyTotals: { [monthKey: string]: number } = {};
-              
-              channels.forEach((channel) => {
-                channel.flights.forEach((flight) => {
-                  const flightStart = flight.startWeek instanceof Date ? flight.startWeek : new Date(flight.startWeek);
-                  const flightEnd = flight.endWeek instanceof Date ? flight.endWeek : new Date(flight.endWeek);
-                  Object.entries(flight.monthlySpend).forEach(([monthKey, amount]) => {
-                    const [yr, mo] = monthKey.split('-').map(Number);
-                    const monthStart = new Date(yr, mo - 1, 1);
-                    const monthEnd = new Date(yr, mo, 0);
-                    if (monthEnd >= flightStart && monthStart <= flightEnd) {
-                      monthlyTotals[monthKey] = (monthlyTotals[monthKey] || 0) + amount;
-                    }
-                  });
-                });
-              });
-              
-              const grandTotal = Object.values(monthlyTotals).reduce((sum, amount) => sum + amount, 0);
-              const totalBudget = channels.reduce((sum, channel) => sum + (channel.totalBudget || 0), 0);
-              
+              const totalMediaSpend = channels.reduce((sum, channel) =>
+                sum + calculateTotalBudgetFromFlights(channel.flights || []), 0);
+              const totalFees = channels.reduce((sum, channel) => {
+                const category = channel.channelCategory || getChannelCategory(channel.channelName);
+                return sum + (category === 'other' ? (channel.fees || 0) : 0);
+              }, 0);
+              const grandTotal = totalMediaSpend + totalFees;
+
               return (
-                <tr className="bg-gray-100 font-bold">
-                  <td
-                    colSpan={3 + customColumns.length + weeks.length}
-                    className="border border-gray-300 px-3 py-2 text-right font-[family-name:var(--font-inter)] bg-gray-100"
-                  >
-                    <div className="flex justify-end items-center gap-6">
-                      <span>Total Budget: {formatCurrency(totalBudget)}</span>
-                      <span>Grand Total (All Monthly Spend): {formatCurrency(grandTotal)}</span>
-                    </div>
+                <tr className="bg-gray-800 font-bold">
+                  <td className="border border-gray-700 px-3 py-2 sticky left-0 mr-[-1px] z-20 bg-gray-800 text-white w-[200px] min-w-[200px] border-r-2 border-gray-600 shadow-[2px_0_4px_rgba(0,0,0,0.2)] text-xs uppercase tracking-wide">
+                    TOTAL MEDIA PLAN
                   </td>
+                  <td className="border border-gray-700 px-3 py-2 sticky left-[200px] mr-[-1px] z-20 bg-gray-800 text-white/60 w-[150px] min-w-[150px] border-r-2 border-gray-600 shadow-[2px_0_4px_rgba(0,0,0,0.2)] text-xs">
+                    {totalFees > 0 && `incl. ${formatCurrency(totalFees)} fees`}
+                  </td>
+                  <td className="border-l-2 border-l-gray-600 border border-gray-700 px-3 py-2 text-right font-[family-name:var(--font-inter)] sticky left-[350px] mr-[-1px] z-30 bg-gray-800 text-white w-[120px] min-w-[120px] border-r-2 border-gray-600 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.3)] text-base">
+                    {formatCurrency(grandTotal)}
+                  </td>
+                  {customColumns.map((col) => (
+                    <td key={col.id} className="border border-gray-700 px-2 py-2 bg-gray-800 w-[120px] min-w-[120px]" />
+                  ))}
+                  <td colSpan={weeks.length} className="border border-gray-700 bg-gray-800" />
                 </tr>
               );
             })()}
@@ -3260,6 +3788,459 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                 ) : (
                   'Extract Plan →'
                 )}
+              </Button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Combined upload modal (Excel + screenshot) */}
+      {isCombinedModalOpen && createPortal(
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 999999,
+            background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: 24, fontFamily: "'DM Sans', system-ui, sans-serif",
+          }}
+          onClick={closeCombinedModal}
+        >
+          <div
+            style={{
+              background: '#FDFCF8', borderRadius: 16, maxWidth: 580, width: '100%',
+              overflow: 'hidden', display: 'flex', flexDirection: 'column',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div style={{ padding: '20px 24px 16px', borderBottom: '0.5px solid #E8E4DC', display: 'flex', alignItems: 'center', gap: 10 }}>
+              <Layers style={{ color: '#7C3AED', width: 20, height: 20, flexShrink: 0 }} />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 15, fontWeight: 600, color: '#1C1917' }}>Best Accuracy Upload</div>
+                <div style={{ fontSize: 12, color: '#8A8578', marginTop: 1 }}>
+                  Excel gives precise numbers · Screenshot gives visual layout · AI reconciles both
+                </div>
+              </div>
+              <button onClick={closeCombinedModal} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#8A8578', padding: 4 }}>
+                <X style={{ width: 18, height: 18 }} />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+              {/* Two drop zones */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+
+                {/* Excel drop zone */}
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: '#6B6860', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    Excel File (.xlsx)
+                  </div>
+                  <div
+                    onClick={() => combinedXlsxInputRef.current?.click()}
+                    style={{
+                      border: `2px dashed ${combinedXlsxFile ? '#7C3AED' : '#D8C9F0'}`,
+                      borderRadius: 10, padding: '20px 12px', cursor: 'pointer',
+                      background: combinedXlsxFile ? '#F5F0FF' : '#FDFCF8',
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
+                      transition: 'all 0.15s', minHeight: 120, justifyContent: 'center',
+                    }}
+                  >
+                    <FileSpreadsheet style={{ width: 28, height: 28, color: combinedXlsxFile ? '#7C3AED' : '#B5AADC' }} />
+                    {combinedXlsxFile ? (
+                      <div style={{ textAlign: 'center' }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: '#5B21B6', wordBreak: 'break-all' }}>{combinedXlsxFile.name}</div>
+                        <button
+                          onClick={e => { e.stopPropagation(); setCombinedXlsxFile(null); }}
+                          style={{ marginTop: 4, fontSize: 11, color: '#8A8578', background: 'none', border: 'none', cursor: 'pointer' }}
+                        >Remove</button>
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 12, color: '#8A8578', textAlign: 'center' }}>
+                        Click to upload<br /><span style={{ fontSize: 11 }}>Media plan .xlsx</span>
+                      </div>
+                    )}
+                  </div>
+                  <input
+                    ref={combinedXlsxInputRef}
+                    type="file"
+                    accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    style={{ display: 'none' }}
+                    onChange={e => { const f = e.target.files?.[0]; if (f) setCombinedXlsxFile(f); e.target.value = ''; }}
+                  />
+                </div>
+
+                {/* Screenshot drop zone */}
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: '#6B6860', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    Screenshot (PNG/JPG)
+                  </div>
+                  <div
+                    onClick={() => combinedScreenshotInputRef.current?.click()}
+                    style={{
+                      border: `2px dashed ${combinedScreenshotFile ? '#059669' : '#A7F3D0'}`,
+                      borderRadius: 10, padding: '20px 12px', cursor: 'pointer',
+                      background: combinedScreenshotFile ? '#F0FDF4' : '#FDFCF8',
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
+                      transition: 'all 0.15s', minHeight: 120, justifyContent: 'center',
+                      overflow: 'hidden', position: 'relative',
+                    }}
+                  >
+                    {combinedScreenshotPreview ? (
+                      <>
+                        <img src={combinedScreenshotPreview} alt="Preview" style={{ width: '100%', height: 90, objectFit: 'cover', borderRadius: 6 }} />
+                        <button
+                          onClick={e => { e.stopPropagation(); setCombinedScreenshotFile(null); setCombinedScreenshotPreview(null); }}
+                          style={{ fontSize: 11, color: '#8A8578', background: 'none', border: 'none', cursor: 'pointer' }}
+                        >Remove</button>
+                      </>
+                    ) : (
+                      <>
+                        <ImageIcon style={{ width: 28, height: 28, color: '#6EE7B7' }} />
+                        <div style={{ fontSize: 12, color: '#8A8578', textAlign: 'center' }}>
+                          Click to upload<br /><span style={{ fontSize: 11 }}>Plan screenshot</span>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  <input
+                    ref={combinedScreenshotInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    style={{ display: 'none' }}
+                    onChange={e => {
+                      const f = e.target.files?.[0]; if (!f) return;
+                      setCombinedScreenshotFile(f);
+                      const reader = new FileReader();
+                      reader.onload = ev => { if (ev.target?.result) setCombinedScreenshotPreview(ev.target.result as string); };
+                      reader.readAsDataURL(f);
+                      e.target.value = '';
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Status hint */}
+              <div style={{
+                background: combinedXlsxFile && combinedScreenshotFile ? '#F5F0FF' : '#F9F8F5',
+                border: `0.5px solid ${combinedXlsxFile && combinedScreenshotFile ? '#D8C9F0' : '#E8E4DC'}`,
+                borderRadius: 8, padding: '8px 12px', fontSize: 12,
+                color: combinedXlsxFile && combinedScreenshotFile ? '#5B21B6' : '#8A8578',
+              }}>
+                {combinedXlsxFile && combinedScreenshotFile
+                  ? '✦ Both files ready — AI will reconcile Excel numbers with visual flight layout for maximum accuracy'
+                  : combinedXlsxFile
+                    ? 'Add a screenshot to unlock reconciliation. Excel-only will be used if you proceed without one.'
+                    : combinedScreenshotFile
+                      ? 'Add an Excel file to unlock reconciliation. Screenshot-only will be used if you proceed without one.'
+                      : 'Upload both files for best results. Either file alone also works.'}
+              </div>
+
+              {combinedError && (
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, color: '#DC2626', fontSize: 12 }}>
+                  <AlertCircle style={{ width: 14, height: 14, flexShrink: 0, marginTop: 1 }} />
+                  <span>{combinedError}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div style={{ padding: '12px 24px 20px', display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <Button variant="outline" onClick={closeCombinedModal} disabled={isCombinedParsing}>Cancel</Button>
+              <Button
+                onClick={handleCombinedParse}
+                disabled={(!combinedXlsxFile && !combinedScreenshotFile) || isCombinedParsing}
+                style={{ background: '#7C3AED', color: '#fff', border: 'none' }}
+              >
+                {isCombinedParsing ? (
+                  <><Loader2 style={{ width: 14, height: 14, marginRight: 6, display: 'inline', animation: 'spin 1s linear infinite' }} />Analysing…</>
+                ) : (
+                  <><Layers style={{ width: 14, height: 14, marginRight: 6, display: 'inline' }} />Analyse Plan</>
+                )}
+              </Button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Paste-to-parse modal */}
+      {isPasteModalOpen && createPortal(
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 999999,
+            background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: 24, fontFamily: "'DM Sans', system-ui, sans-serif",
+          }}
+          onClick={() => { if (!isParsingPaste) closePasteModal(); }}
+        >
+          <div
+            style={{
+              background: '#FDFCF8', borderRadius: 16, maxWidth: 640, width: '100%',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.25)', overflow: 'hidden',
+              display: 'flex', flexDirection: 'column',
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div style={{ padding: '20px 24px 16px', borderBottom: '0.5px solid #E8E4DC', display: 'flex', alignItems: 'center', gap: 10 }}>
+              <ClipboardPaste style={{ color: '#7C3AED', width: 20, height: 20, flexShrink: 0 }} />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 15, fontWeight: 600, color: '#1C1917' }}>Paste Media Plan Data</div>
+                <div style={{ fontSize: 12, color: '#8A8578', marginTop: 1 }}>
+                  AI extracts channels, flight dates, and monthly budgets
+                </div>
+              </div>
+              <button
+                onClick={closePasteModal}
+                disabled={isParsingPaste}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#8A8578', padding: 4 }}
+              >
+                <X style={{ width: 18, height: 18 }} />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div style={{ padding: '16px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+
+              {/* Instructions */}
+              <div style={{
+                background: '#F0EBF8', border: '0.5px solid #D8C9F0', borderRadius: 8,
+                padding: '10px 14px', fontSize: 12, color: '#4C1D95', lineHeight: 1.6,
+              }}>
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>For best results:</div>
+                <ol style={{ margin: 0, paddingLeft: 16 }}>
+                  <li>In your spreadsheet, select from the <strong>top-left cell</strong> (including month/date headers) down through all channel rows</li>
+                  <li>Copy (<kbd style={{ background: '#E9D5FF', padding: '0 4px', borderRadius: 3, fontSize: 11 }}>⌘C</kbd>) and paste below</li>
+                  <li>Set the campaign period — this fixes flight dates even if headers are missing</li>
+                </ol>
+              </div>
+
+              {/* Campaign period */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end' }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: '#6B6860', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      Campaign Start
+                    </div>
+                    <input
+                      type="date"
+                      value={pasteStartDate}
+                      onChange={e => setPasteStartDate(e.target.value)}
+                      disabled={isParsingPaste}
+                      style={{
+                        width: '100%', padding: '7px 10px', borderRadius: 6,
+                        border: `1px solid ${pasteStartDate ? '#7C3AED' : '#E8E4DC'}`, fontSize: 13, color: '#1C1917',
+                        background: '#fff', outline: 'none', boxSizing: 'border-box',
+                      }}
+                    />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: '#6B6860', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      Campaign End
+                    </div>
+                    <input
+                      type="date"
+                      value={pasteEndDate}
+                      onChange={e => setPasteEndDate(e.target.value)}
+                      disabled={isParsingPaste}
+                      style={{
+                        width: '100%', padding: '7px 10px', borderRadius: 6,
+                        border: `1px solid ${pasteEndDate ? '#7C3AED' : '#E8E4DC'}`, fontSize: 13, color: '#1C1917',
+                        background: '#fff', outline: 'none', boxSizing: 'border-box',
+                      }}
+                    />
+                  </div>
+                  {(pasteStartDate || pasteEndDate) && (
+                    <button
+                      onClick={() => { setPasteStartDate(''); setPasteEndDate(''); }}
+                      disabled={isParsingPaste}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#8A8578', fontSize: 11, paddingBottom: 8, whiteSpace: 'nowrap' }}
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+
+                {/* W/C quick-select chips — only shown when no structured data detected */}
+                <div style={{ display: tsvPreview ? 'none' : undefined }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: '#8A8578', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                    Quick select W/C
+                    {!pasteStartDate && <span style={{ fontWeight: 400, color: '#A9A39A', marginLeft: 6 }}>— tap to set start</span>}
+                    {pasteStartDate && !pasteEndDate && <span style={{ fontWeight: 400, color: '#A9A39A', marginLeft: 6 }}>— tap to set end</span>}
+                    {pasteStartDate && pasteEndDate && <span style={{ fontWeight: 400, color: '#A9A39A', marginLeft: 6 }}>— tap to reset</span>}
+                  </div>
+                  <div style={{
+                    display: 'flex', gap: 4, overflowX: 'auto', paddingBottom: 4,
+                    scrollbarWidth: 'thin', scrollbarColor: '#D8C9F0 transparent',
+                  }}>
+                    {weeks.map((week) => {
+                      const d = week.weekStart;
+                      const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                      const day = d.getDate();
+                      const mon = d.toLocaleDateString('en-GB', { month: 'short' });
+                      const label = `${day} ${mon}`;
+                      const isStart = pasteStartDate === iso;
+                      const isEnd = pasteEndDate === iso;
+                      const isBetween = pasteStartDate && pasteEndDate && iso > pasteStartDate && iso < pasteEndDate;
+                      return (
+                        <button
+                          key={iso}
+                          disabled={isParsingPaste}
+                          onClick={() => {
+                            if (!pasteStartDate) {
+                              setPasteStartDate(iso);
+                            } else if (!pasteEndDate) {
+                              if (iso >= pasteStartDate) {
+                                setPasteEndDate(iso);
+                              } else {
+                                setPasteStartDate(iso);
+                              }
+                            } else {
+                              setPasteStartDate(iso);
+                              setPasteEndDate('');
+                            }
+                          }}
+                          style={{
+                            flexShrink: 0,
+                            padding: '3px 7px',
+                            borderRadius: 4,
+                            fontSize: 11,
+                            fontWeight: isStart || isEnd ? 700 : 400,
+                            cursor: 'pointer',
+                            whiteSpace: 'nowrap',
+                            border: isStart || isEnd ? '1.5px solid #7C3AED' : isBetween ? '1px solid #C4B5FD' : '1px solid #E8E4DC',
+                            background: isStart || isEnd ? '#7C3AED' : isBetween ? '#EDE9FE' : '#fff',
+                            color: isStart || isEnd ? '#fff' : isBetween ? '#5B21B6' : '#6B6860',
+                            transition: 'all 0.1s',
+                          }}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* Textarea */}
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: '#6B6860', textTransform: 'uppercase', letterSpacing: '0.05em', flex: 1 }}>
+                    Paste spreadsheet data or describe the plan
+                  </div>
+                  <button
+                    onClick={() => csvFileInputRef.current?.click()}
+                    disabled={isParsingPaste || isNormalizingChannels}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: '#7C3AED', fontWeight: 500, padding: '0 0 0 8px', whiteSpace: 'nowrap' }}
+                    title="Upload a CSV file instead of pasting"
+                  >
+                    Upload CSV
+                  </button>
+                  <input
+                    ref={csvFileInputRef}
+                    type="file"
+                    accept=".csv,.tsv,.txt"
+                    style={{ display: 'none' }}
+                    onChange={e => {
+                      const f = e.target.files?.[0];
+                      if (!f) return;
+                      const reader = new FileReader();
+                      reader.onload = ev => { if (ev.target?.result) setPasteText(ev.target.result as string); };
+                      reader.readAsText(f);
+                      e.target.value = '';
+                    }}
+                  />
+                </div>
+                <textarea
+                  autoFocus
+                  value={pasteText}
+                  onChange={e => setPasteText(e.target.value)}
+                  disabled={isParsingPaste || isNormalizingChannels}
+                  placeholder={`Paste copied Excel/Sheets cells here — include the W/C header row\n\nOr upload a CSV file using the link above\n\nOr describe in plain text:\n"Google Ads $260,000 always-on Jan–Dec\nMeta Ads $120,000 Feb–Dec"`}
+                  style={{
+                    width: '100%', minHeight: tsvPreview ? 100 : 160, padding: 12,
+                    border: `1px solid ${tsvPreview ? '#A7F3D0' : '#E8E4DC'}`, borderRadius: 8,
+                    fontSize: 12, fontFamily: 'monospace', lineHeight: 1.5,
+                    resize: 'vertical', outline: 'none', color: '#1C1917',
+                    background: tsvPreview ? '#F0FDF4' : '#F9F8F5', boxSizing: 'border-box',
+                    transition: 'border-color 0.2s, background 0.2s',
+                  }}
+                />
+              </div>
+
+              {/* TSV/CSV structured preview */}
+              {tsvPreview && (
+                <div style={{ background: '#ECFDF5', border: '0.5px solid #A7F3D0', borderRadius: 8, padding: '10px 14px' }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: '#065F46', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <CheckCircle style={{ width: 13, height: 13, flexShrink: 0 }} />
+                    Spreadsheet detected — {tsvPreview.rows.length} channel{tsvPreview.rows.length !== 1 ? 's' : ''},&nbsp;
+                    {tsvPreview.type === 'weekly' ? `${tsvPreview.columns.length} W/C columns` : `${tsvPreview.columns.length} months`}
+                    {tsvPreview.rows.some(r => r.channelName === 'Other') ? (
+                      <span style={{ marginLeft: 'auto', fontWeight: 400, fontSize: 11, color: '#065F46' }}>AI will refine channels ✦</span>
+                    ) : (
+                      <span style={{ marginLeft: 'auto', fontWeight: 400, fontSize: 11, color: '#047857' }}>Channels matched ✓</span>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {tsvPreview.rows.map((row, i) => {
+                      const keys = Object.keys(row.spend).sort();
+                      const first = keys[0];
+                      let last = keys[keys.length - 1];
+                      // Extend last date to cover merged-cell slaves (same logic as tsvToMediaPlanChannels)
+                      if (tsvPreview.type === 'weekly' && keys.length >= 2) {
+                        const allWCDates = tsvPreview.columns.filter(c => !!c.iso).map(c => c.iso!).sort();
+                        const lastWC = allWCDates[allWCDates.length - 1];
+                        if (lastWC) {
+                          const daysDiff = (new Date(lastWC + 'T00:00:00').getTime() - new Date(last + 'T00:00:00').getTime()) / 86_400_000;
+                          if (daysDiff >= 0 && daysDiff <= 56) last = lastWC;
+                        }
+                      }
+                      const fmtWC = (iso: string) => { const d = new Date(iso + 'T00:00:00'); return `${d.getDate()} ${d.toLocaleDateString('en-GB', { month: 'short' })}`; };
+                      const fmtMonth = (mk: string) => { const [y, m] = mk.split('-').map(Number); return new Date(y, m - 1, 1).toLocaleDateString('en-GB', { month: 'short' }); };
+                      const range = tsvPreview.type === 'weekly'
+                        ? (first === last ? `W/C ${fmtWC(first)}` : `${fmtWC(first)} – ${fmtWC(last)}`)
+                        : (first === last ? fmtMonth(first) : `${fmtMonth(first)} – ${fmtMonth(last)}`);
+                      return (
+                        <div key={i} style={{ fontSize: 11, color: '#065F46', display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: getFlightHexColor(row.channelName), flexShrink: 0 }} />
+                          <span style={{ flex: 1, fontWeight: 500 }}>{row.channelName !== 'Other' ? row.channelName : row.rawName}</span>
+                          <span style={{ fontWeight: 600 }}>${row.total.toLocaleString()}</span>
+                          <span style={{ color: '#047857', minWidth: 90, textAlign: 'right' }}>{range}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {pasteError && (
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, color: '#DC2626', fontSize: 12 }}>
+                  <AlertCircle style={{ width: 14, height: 14, flexShrink: 0, marginTop: 1 }} />
+                  <span>{pasteError}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div style={{ padding: '12px 24px 20px', display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <Button variant="outline" onClick={closePasteModal} disabled={isParsingPaste || isNormalizingChannels}>
+                Cancel
+              </Button>
+              <Button
+                onClick={handlePasteParse}
+                disabled={!pasteText.trim() || isParsingPaste || isNormalizingChannels}
+                style={{ background: tsvPreview ? '#059669' : '#7C3AED', color: '#fff', border: 'none' }}
+              >
+                {isNormalizingChannels ? (
+                  <><Loader2 style={{ width: 14, height: 14, marginRight: 6, display: 'inline', animation: 'spin 1s linear infinite' }} />Refining channels…</>
+                ) : isParsingPaste ? (
+                  <><Loader2 style={{ width: 14, height: 14, marginRight: 6, display: 'inline', animation: 'spin 1s linear infinite' }} />Extracting…</>
+                ) : tsvPreview ? 'Apply Plan' : 'Extract with AI'}
               </Button>
             </div>
           </div>

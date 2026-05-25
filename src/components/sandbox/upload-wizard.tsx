@@ -128,7 +128,7 @@ export function UploadWizard({ onPlanLoaded }: Props) {
       <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50 p-8">
         <div className="w-full max-w-lg">
           <div className="text-center mb-8">
-            <h1 className="text-2xl font-bold text-gray-900">Media Plan Sandbox</h1>
+            <h1 className="text-2xl font-bold text-gray-900">Media Plan</h1>
             <p className="text-gray-500 mt-1 text-sm">Upload an existing Excel plan or start from scratch</p>
           </div>
 
@@ -251,7 +251,6 @@ export function UploadWizard({ onPlanLoaded }: Props) {
   if (step === "review" && parsedPlan) {
     const total = totalBudget(parsedPlan.rows);
     const channelSet = new Set(parsedPlan.rows.map(r => r.channel || r.funnel).filter(Boolean));
-    const flightCount = parsedPlan.rows.reduce((s, r) => s + r.flights.length, 0);
 
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50 p-8">
@@ -263,11 +262,10 @@ export function UploadWizard({ onPlanLoaded }: Props) {
           </div>
 
           {/* Summary cards */}
-          <div className="grid grid-cols-4 gap-3 mb-6">
+          <div className="grid grid-cols-3 gap-3 mb-6">
             {[
               { label: "Channels", value: channelSet.size },
               { label: "Rows", value: parsedPlan.rows.length },
-              { label: "Flights", value: flightCount },
               { label: "Total budget", value: total > 0 ? formatBudget(total) : "—" },
             ].map(({ label, value }) => (
               <div key={label} className="bg-white rounded-xl border border-gray-200 p-4 text-center">
@@ -280,10 +278,10 @@ export function UploadWizard({ onPlanLoaded }: Props) {
           {/* Row preview */}
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-6">
             <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-2 border-b border-gray-100 bg-gray-50">
-              Detected rows (first 8)
+              Detected rows
             </div>
-            <div className="divide-y divide-gray-100">
-              {parsedPlan.rows.slice(0, 8).map(row => (
+            <div className="divide-y divide-gray-100 max-h-72 overflow-y-auto">
+              {parsedPlan.rows.map(row => (
                 <div key={row.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
                   {row.funnel && (
                     <span className="text-xs bg-gray-100 text-gray-600 rounded px-1.5 py-0.5 font-medium">
@@ -306,11 +304,6 @@ export function UploadWizard({ onPlanLoaded }: Props) {
                   )}
                 </div>
               ))}
-              {parsedPlan.rows.length > 8 && (
-                <div className="px-4 py-2 text-xs text-gray-400">
-                  + {parsedPlan.rows.length - 8} more rows
-                </div>
-              )}
             </div>
           </div>
 

@@ -17,9 +17,32 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
-import { Plus, Facebook, Search, Linkedin, Music, Instagram, Radio, Edit2, Trash2, Check, X } from 'lucide-react';
+import { Plus, Facebook, Search, Linkedin, Music, Instagram, Radio, Edit2, Trash2, Check, X, Upload, FileText, BookOpen } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { MetricsBenchmarksPanel } from '@/components/library/metrics-benchmarks-panel';
+
+const PLAYBOOK_CATEGORIES: { value: string; label: string }[] = [
+  { value: 'process', label: 'Process' },
+  { value: 'sop', label: 'SOP' },
+  { value: 'strategy', label: 'Strategy' },
+  { value: 'brand_guidelines', label: 'Brand Guidelines' },
+  { value: 'onboarding', label: 'Onboarding' },
+  { value: 'reporting', label: 'Reporting' },
+  { value: 'billing', label: 'Billing' },
+  { value: 'compliance', label: 'Compliance' },
+  { value: 'other', label: 'Other' },
+];
+
+interface LibraryDocument {
+  id: string;
+  file_name: string;
+  file_url: string;
+  doc_category: string;
+  is_text_doc: boolean;
+  uploaded_at: string;
+  uploader_name: string;
+  text_content: string | null;
+}
 
 interface ActionPoint {
   id: string;
@@ -100,7 +123,20 @@ export default function LibraryPage() {
   const [editingSpecText, setEditingSpecText] = useState('');
   const [addingSpecChannelId, setAddingSpecChannelId] = useState<string | null>(null);
   const [newSpecText, setNewSpecText] = useState('');
-  const [activeTab, setActiveTab] = useState<'channels' | 'benchmarks'>('channels');
+  const [activeTab, setActiveTab] = useState<'channels' | 'benchmarks' | 'playbooks'>('channels');
+
+  // Playbooks state
+  const [playbookDocs, setPlaybookDocs] = useState<LibraryDocument[]>([]);
+  const [playbooksLoading, setPlaybooksLoading] = useState(false);
+  const [isPlaybookDialogOpen, setIsPlaybookDialogOpen] = useState(false);
+  const [playbookUploadMode, setPlaybookUploadMode] = useState<'file' | 'text'>('file');
+  const [playbookFile, setPlaybookFile] = useState<File | null>(null);
+  const [playbookCategory, setPlaybookCategory] = useState('other');
+  const [playbookTextName, setPlaybookTextName] = useState('');
+  const [playbookTextContent, setPlaybookTextContent] = useState('');
+  const [playbookUploading, setPlaybookUploading] = useState(false);
+  const playbookDropRef = useRef<HTMLDivElement>(null);
+  const [playbookDragOver, setPlaybookDragOver] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearchResults, setShowSearchResults] = useState(false);
   const [highlightedEntryId, setHighlightedEntryId] = useState<string | null>(null);
@@ -221,6 +257,77 @@ export default function LibraryPage() {
       setLoading(false);
     }
   };
+
+  const loadPlaybooks = async () => {
+    setPlaybooksLoading(true);
+    try {
+      const res = await fetch('/api/library/documents');
+      if (res.ok) {
+        const { documents } = await res.json();
+        setPlaybookDocs(documents || []);
+      }
+    } catch (err) {
+      console.error('Failed to load playbooks:', err);
+    } finally {
+      setPlaybooksLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'playbooks' && playbookDocs.length === 0 && !playbooksLoading) {
+      loadPlaybooks();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
+  const handlePlaybookUpload = async () => {
+    setPlaybookUploading(true);
+    try {
+      if (playbookUploadMode === 'text') {
+        if (!playbookTextName.trim() || !playbookTextContent.trim()) return;
+        const res = await fetch('/api/library/documents', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            file_name: playbookTextName.trim(),
+            doc_category: playbookCategory,
+            text_content: playbookTextContent.trim(),
+          }),
+        });
+        if (!res.ok) throw new Error((await res.json()).error ?? 'Upload failed');
+      } else {
+        if (!playbookFile) return;
+        const form = new FormData();
+        form.append('file', playbookFile);
+        form.append('doc_category', playbookCategory);
+        const res = await fetch('/api/library/documents', { method: 'POST', body: form });
+        if (!res.ok) throw new Error((await res.json()).error ?? 'Upload failed');
+      }
+      setIsPlaybookDialogOpen(false);
+      setPlaybookFile(null);
+      setPlaybookTextName('');
+      setPlaybookTextContent('');
+      setPlaybookCategory('other');
+      loadPlaybooks();
+    } catch (err: any) {
+      alert(err.message ?? 'Upload failed');
+    } finally {
+      setPlaybookUploading(false);
+    }
+  };
+
+  const handleDeletePlaybook = async (id: string, name: string) => {
+    if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
+    const res = await fetch(`/api/library/documents/${id}`, { method: 'DELETE' });
+    if (res.ok) {
+      setPlaybookDocs(prev => prev.filter(d => d.id !== id));
+    } else {
+      alert('Failed to delete document');
+    }
+  };
+
+  const categoryLabel = (cat: string) =>
+    PLAYBOOK_CATEGORIES.find(c => c.value === cat)?.label ?? cat;
 
   const handleAddChannel = async () => {
     if (!newChannelTitle.trim()) {
@@ -833,6 +940,12 @@ export default function LibraryPage() {
             <h1 className="text-3xl font-bold" style={{ color: '#1C1917', ...serifFont }}>Library</h1>
             <p className="mt-1" style={{ color: '#8A8578' }}>Manage media channel information and action points</p>
           </div>
+        {activeTab === 'playbooks' && (
+          <Button onClick={() => setIsPlaybookDialogOpen(true)}>
+            <Upload className="h-4 w-4 mr-2" />
+            Upload Playbook
+          </Button>
+        )}
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
           {activeTab === 'channels' ? (
             <DialogTrigger asChild>
@@ -1021,9 +1134,242 @@ export default function LibraryPage() {
         >
           Metrics & Benchmarks
         </Button>
+        <Button
+          size="sm"
+          variant={activeTab === 'playbooks' ? 'default' : 'ghost'}
+          onClick={() => setActiveTab('playbooks')}
+          className="h-8 text-sm px-4"
+        >
+          Company Playbook
+        </Button>
       </div>
 
       {activeTab === 'benchmarks' && <MetricsBenchmarksPanel />}
+
+      {activeTab === 'playbooks' && (
+        <div>
+          {playbooksLoading ? (
+            <div style={{ textAlign: 'center', color: '#8A8578', padding: '48px 0', fontSize: 15 }}>Loading...</div>
+          ) : playbookDocs.length === 0 ? (
+            <div
+              style={{
+                background: '#FDFCF8', border: '2px dashed rgba(196,168,130,0.4)', borderRadius: 18,
+                padding: '48px 32px', textAlign: 'center',
+              }}
+            >
+              <BookOpen style={{ width: 40, height: 40, margin: '0 auto 12px', color: '#C4A882' }} />
+              <p style={{ color: '#8A8578', marginBottom: 16, fontSize: 15 }}>No playbooks uploaded yet</p>
+              <Button onClick={() => setIsPlaybookDialogOpen(true)}>
+                <Upload className="h-4 w-4 mr-2" />
+                Upload your first playbook
+              </Button>
+            </div>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {playbookDocs.map(doc => (
+                <div
+                  key={doc.id}
+                  style={{
+                    background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18,
+                    boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)',
+                    padding: '20px 20px 16px',
+                    display: 'flex', flexDirection: 'column', gap: 10,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                    <div style={{
+                      flexShrink: 0, width: 36, height: 36, borderRadius: 10,
+                      background: 'rgba(196,168,130,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}>
+                      <FileText style={{ width: 18, height: 18, color: '#C4A882' }} />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, fontSize: 14, color: '#1C1917', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {doc.file_name}
+                      </div>
+                      <div style={{ fontSize: 12, color: '#8A8578', marginTop: 2 }}>
+                        {categoryLabel(doc.doc_category)}
+                        {' · '}
+                        {doc.is_text_doc ? 'Text' : 'File'}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleDeletePlaybook(doc.id, doc.file_name)}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#C4BEB6', padding: 4, display: 'flex', borderRadius: 6 }}
+                      title="Delete"
+                    >
+                      <Trash2 style={{ width: 15, height: 15 }} />
+                    </button>
+                  </div>
+
+                  {doc.text_content && (
+                    <div style={{
+                      background: '#F5F3EF', borderRadius: 10, padding: '10px 12px',
+                      fontSize: 12, color: '#6B6460', lineHeight: 1.6,
+                      maxHeight: 80, overflow: 'hidden',
+                      display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical',
+                    }}>
+                      {doc.text_content}
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 2 }}>
+                    <span style={{ fontSize: 11, color: '#A09890' }}>
+                      {new Date(doc.uploaded_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}
+                      {' · '}
+                      {doc.uploader_name}
+                    </span>
+                    {!doc.is_text_doc && doc.file_url && (
+                      <a
+                        href={doc.file_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ fontSize: 11, color: '#C4A882', textDecoration: 'none', fontWeight: 500 }}
+                      >
+                        Download
+                      </a>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Upload Playbook Dialog */}
+      <Dialog open={isPlaybookDialogOpen} onOpenChange={(open) => { setIsPlaybookDialogOpen(open); if (!open) { setPlaybookFile(null); setPlaybookTextName(''); setPlaybookTextContent(''); setPlaybookCategory('other'); } }}>
+        <DialogContent style={{ maxWidth: 500 }}>
+          <DialogHeader>
+            <DialogTitle>Upload Playbook</DialogTitle>
+            <DialogDescription>
+              Add a process doc, SOP, or blueprint for your agency. The AI will reference it in chat.
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* Mode toggle */}
+          <div style={{ display: 'flex', gap: 4, background: '#EEECE8', padding: 4, borderRadius: 10, marginBottom: 4 }}>
+            <button
+              onClick={() => setPlaybookUploadMode('file')}
+              style={{
+                flex: 1, padding: '6px 0', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 500,
+                background: playbookUploadMode === 'file' ? '#FDFCF8' : 'transparent',
+                color: playbookUploadMode === 'file' ? '#1C1917' : '#8A8578',
+                boxShadow: playbookUploadMode === 'file' ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
+              }}
+            >
+              Upload File
+            </button>
+            <button
+              onClick={() => setPlaybookUploadMode('text')}
+              style={{
+                flex: 1, padding: '6px 0', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 500,
+                background: playbookUploadMode === 'text' ? '#FDFCF8' : 'transparent',
+                color: playbookUploadMode === 'text' ? '#1C1917' : '#8A8578',
+                boxShadow: playbookUploadMode === 'text' ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
+              }}
+            >
+              Paste Text
+            </button>
+          </div>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Category</Label>
+              <Select value={playbookCategory} onValueChange={setPlaybookCategory}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PLAYBOOK_CATEGORIES.map(c => (
+                    <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {playbookUploadMode === 'file' ? (
+              <div
+                ref={playbookDropRef}
+                onDragOver={(e) => { e.preventDefault(); setPlaybookDragOver(true); }}
+                onDragLeave={() => setPlaybookDragOver(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setPlaybookDragOver(false);
+                  const f = e.dataTransfer.files[0];
+                  if (f) setPlaybookFile(f);
+                }}
+                onClick={() => {
+                  const input = document.createElement('input');
+                  input.type = 'file';
+                  input.accept = '.pdf,.docx,.txt,.md,.csv';
+                  input.onchange = (e) => {
+                    const f = (e.target as HTMLInputElement).files?.[0];
+                    if (f) setPlaybookFile(f);
+                  };
+                  input.click();
+                }}
+                style={{
+                  border: `2px dashed ${playbookDragOver ? '#C4A882' : 'rgba(196,168,130,0.4)'}`,
+                  borderRadius: 12, padding: '28px 20px', textAlign: 'center', cursor: 'pointer',
+                  background: playbookDragOver ? 'rgba(196,168,130,0.07)' : '#FDFCF8',
+                  transition: 'all 0.15s',
+                }}
+              >
+                {playbookFile ? (
+                  <div>
+                    <FileText style={{ width: 28, height: 28, margin: '0 auto 8px', color: '#C4A882' }} />
+                    <p style={{ fontSize: 13, color: '#1C1917', fontWeight: 500 }}>{playbookFile.name}</p>
+                    <p style={{ fontSize: 11, color: '#A09890', marginTop: 2 }}>
+                      {(playbookFile.size / 1024).toFixed(0)} KB · Click to change
+                    </p>
+                  </div>
+                ) : (
+                  <div>
+                    <Upload style={{ width: 28, height: 28, margin: '0 auto 8px', color: '#C4A882' }} />
+                    <p style={{ fontSize: 13, color: '#8A8578' }}>Drop a file here or click to browse</p>
+                    <p style={{ fontSize: 11, color: '#A09890', marginTop: 4 }}>PDF, DOCX, TXT, MD, CSV · Max 50 MB</p>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <>
+                <div className="space-y-2">
+                  <Label>Document Name</Label>
+                  <Input
+                    placeholder="e.g. Google Ads Onboarding Process"
+                    value={playbookTextName}
+                    onChange={(e) => setPlaybookTextName(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Content</Label>
+                  <Textarea
+                    placeholder="Paste your process doc, SOP, or notes here…"
+                    value={playbookTextContent}
+                    onChange={(e) => setPlaybookTextContent(e.target.value)}
+                    rows={8}
+                    style={{ resize: 'vertical' }}
+                  />
+                </div>
+              </>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsPlaybookDialogOpen(false)}>Cancel</Button>
+            <Button
+              onClick={handlePlaybookUpload}
+              disabled={
+                playbookUploading ||
+                (playbookUploadMode === 'file' ? !playbookFile : !playbookTextName.trim() || !playbookTextContent.trim())
+              }
+            >
+              {playbookUploading ? 'Uploading…' : 'Save Playbook'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {activeTab === 'channels' ? (libraryEntries.length === 0 ? (
         <Card style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)' }}>

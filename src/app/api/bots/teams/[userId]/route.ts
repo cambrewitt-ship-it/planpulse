@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { waitUntil } from '@vercel/functions';
 import { createHmac } from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 import Anthropic from '@anthropic-ai/sdk';
 import { BOT_TOOL_DEFINITIONS } from '@/lib/agent-tools';
+import { sendTeamsAlert } from '@/lib/teams';
 
 export const maxDuration = 60;
 
@@ -16,10 +18,15 @@ Rules:
 - Max 5 items per list — summarise the rest as "...and N more".
 - For write actions (create/complete), confirm what you did with a ✅.
 - If asked something outside your tools, say so briefly.
-- Never mention "tokens", "Claude", or internal system details.`;
+- Never mention "tokens", "Claude", or internal system details.
+- Do not use **bold** markdown — write plain text or use ALL CAPS for emphasis instead.`;
 
 function stripHtml(html: string): string {
   return html.replace(/<[^>]+>/g, '').trim();
+}
+
+function stripMarkdownBold(text: string): string {
+  return text.replace(/\*\*(.+?)\*\*/g, '$1');
 }
 
 function validateTeamsHmac(body: string, authHeader: string | null, secret: string): boolean {
@@ -29,6 +36,17 @@ function validateTeamsHmac(body: string, authHeader: string | null, secret: stri
     .update(Buffer.from(body, 'utf8'))
     .digest('base64');
   return provided === expected;
+}
+
+function teamsResponse(text: string): NextResponse {
+  return NextResponse.json({ type: 'message', text });
+}
+
+function makeSupabase() {
+  const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '');
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  if (!supabaseUrl || !serviceKey) throw new Error('Supabase env vars missing');
+  return createClient(supabaseUrl, serviceKey);
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -89,12 +107,10 @@ async function runBotTools(toolName: string, toolInput: Record<string, unknown>,
     const clientIds = clients.map((c: any) => c.id);
     const clientMap = new Map(clients.map((c: any) => [c.id, c.name]));
 
-    // Get all action points
     const { data: allAps } = await supabase
       .from('action_points')
       .select('id, text, channel_type, category, due_date, days_before_live_due, frequency');
 
-    // Get completions for these clients
     const { data: completions } = await supabase
       .from('client_action_point_completions')
       .select('client_id, action_point_id, completed')
@@ -297,66 +313,202 @@ async function runBotTools(toolName: string, toolInput: Record<string, unknown>,
     return { success: true, message: `✅ Created "${text}" for ${channel_type}`, id: (data as any)?.id };
   }
 
+  if (toolName === 'generate_report') {
+    const { client_name, start_date, end_date } = toolInput as {
+      client_name: string; start_date: string; end_date: string;
+    };
+
+    const { data: clients } = await (supabase as any)
+      .from('clients')
+      .select('id, name')
+      .eq('user_id', userId)
+      .ilike('name', `%${client_name}%`);
+
+    if (!clients?.length) return { error: `No client found matching "${client_name}"` };
+    if (clients.length > 1) return { error: 'Multiple clients matched — be more specific.', matches: clients.map((c: any) => c.name) };
+
+    const client = clients[0];
+
+    const [healthRes, metricsRes, actionRes, completionsRes] = await Promise.all([
+      supabase.from('client_health_status')
+        .select('status, total_overdue_tasks, budget_health_percentage')
+        .eq('client_id', client.id).maybeSingle(),
+      supabase.from('ad_performance_metrics')
+        .select('platform, spend')
+        .eq('client_id', client.id)
+        .gte('date', start_date).lte('date', end_date)
+        .not('campaign_id', 'like', 'manual-override-%'),
+      supabase.from('action_points').select('id, text, channel_type, due_date'),
+      supabase.from('client_action_point_completions')
+        .select('action_point_id').eq('client_id', client.id).eq('completed', true),
+    ]);
+
+    const health = healthRes.data;
+    const metrics = metricsRes.data ?? [];
+    const completedIds = new Set((completionsRes.data ?? []).map((c: any) => c.action_point_id));
+    const today = new Date().toISOString().split('T')[0];
+    const overdueCount = (actionRes.data ?? []).filter((ap: any) =>
+      !completedIds.has(ap.id) && ap.due_date && ap.due_date < today
+    ).length;
+
+    const totalSpend = metrics.reduce((s: number, m: any) => s + Number(m.spend || 0), 0);
+    const platformLabels: Record<string, string> = {
+      'meta-ads': 'Meta Ads', 'google-ads': 'Google Ads',
+      'linkedin-ads': 'LinkedIn Ads', 'tiktok-ads': 'TikTok Ads',
+    };
+    const byPlatform = new Map<string, number>();
+    for (const m of metrics) {
+      byPlatform.set(m.platform, (byPlatform.get(m.platform) ?? 0) + Number(m.spend || 0));
+    }
+    const channelLines = Array.from(byPlatform.entries())
+      .filter(([, s]) => s > 0)
+      .map(([p, s]) => `${platformLabels[p] ?? p}: $${s.toLocaleString('en-US', { maximumFractionDigits: 0 })}`);
+
+    const statusIcon = health?.status === 'red' ? 'Red' : health?.status === 'amber' ? 'Amber' : 'Green';
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? '';
+
+    return {
+      client: client.name,
+      date_range: `${start_date} to ${end_date}`,
+      health: statusIcon,
+      budget_health_pct: health?.budget_health_percentage ?? null,
+      total_spend: Math.round(totalSpend * 100) / 100,
+      channels: channelLines,
+      overdue_action_points: overdueCount,
+      note: appUrl ? `Full PDF available in the dashboard: ${appUrl}/clients/${client.id}/dashboard` : 'Full PDF available in the PlanPulse dashboard.',
+    };
+  }
+
+  if (toolName === 'generate_invoice') {
+    const { client_name, start_date, end_date, spend_type = 'actual' } = toolInput as {
+      client_name: string;
+      start_date: string;
+      end_date: string;
+      spend_type?: 'actual' | 'planned';
+    };
+
+    const { data: clients } = await (supabase as any)
+      .from('clients')
+      .select('id, name')
+      .eq('user_id', userId)
+      .ilike('name', `%${client_name}%`);
+
+    if (!clients?.length) return { error: `No client found matching "${client_name}"` };
+    if (clients.length > 1) return { error: 'Multiple clients matched — be more specific.', matches: clients.map((c: any) => c.name) };
+
+    const client = clients[0];
+
+    const { data: mediaPlan } = await supabase
+      .from('client_media_plan_builder')
+      .select('channels, commission')
+      .eq('client_id', client.id)
+      .maybeSingle();
+
+    const commission = mediaPlan?.commission ?? 0;
+
+    const channels: Array<{ name: string; net: number; gross: number }> = [];
+
+    if (spend_type === 'planned') {
+      const rawChannels: any[] = mediaPlan?.channels ?? [];
+      const [startY, startM, startD] = start_date.split('-').map(Number);
+      const [endY, endM, endD] = end_date.split('-').map(Number);
+
+      for (const ch of rawChannels) {
+        let total = 0;
+        let year = startY; let month = startM;
+        while (year < endY || (year === endY && month <= endM)) {
+          const daysInMonth = new Date(year, month, 0).getDate();
+          const mStart = (year === startY && month === startM) ? startD : 1;
+          const mEnd = (year === endY && month === endM) ? endD : daysInMonth;
+          const fraction = (mEnd - mStart + 1) / daysInMonth;
+          const key = `${year}-${String(month).padStart(2, '0')}`;
+          const keyAlt = `${year}-${month}`;
+          for (const f of ch.flights ?? []) {
+            if (f.monthlySpend) {
+              total += Number(f.monthlySpend[key] ?? f.monthlySpend[keyAlt] ?? 0) * fraction;
+            }
+          }
+          month++; if (month > 12) { month = 1; year++; }
+        }
+        if (total > 0) {
+          const gross = commission > 0 && commission < 100 ? total / (1 - commission / 100) : total;
+          channels.push({ name: ch.channelName || 'Unknown', net: Math.round(total * 100) / 100, gross: Math.round(gross * 100) / 100 });
+        }
+      }
+    } else {
+      const { data: metrics } = await supabase
+        .from('ad_performance_metrics')
+        .select('platform, spend')
+        .eq('client_id', client.id)
+        .gte('date', start_date)
+        .lte('date', end_date)
+        .not('campaign_id', 'like', 'manual-override-%');
+
+      const byPlatform = new Map<string, number>();
+      for (const m of metrics ?? []) {
+        byPlatform.set(m.platform, (byPlatform.get(m.platform) ?? 0) + Number(m.spend || 0));
+      }
+
+      const platformLabels: Record<string, string> = {
+        'meta-ads': 'Meta Ads', 'google-ads': 'Google Ads',
+        'linkedin-ads': 'LinkedIn Ads', 'tiktok-ads': 'TikTok Ads',
+      };
+
+      for (const [platform, net] of byPlatform) {
+        if (net > 0) {
+          const gross = commission > 0 && commission < 100 ? net / (1 - commission / 100) : net;
+          channels.push({
+            name: platformLabels[platform] ?? platform,
+            net: Math.round(net * 100) / 100,
+            gross: Math.round(gross * 100) / 100,
+          });
+        }
+      }
+    }
+
+    if (!channels.length) {
+      return { error: `No ${spend_type} spend data found for ${client.name} between ${start_date} and ${end_date}` };
+    }
+
+    const subtotal = channels.reduce((s, c) => s + c.net, 0);
+    const totalGross = channels.reduce((s, c) => s + c.gross, 0);
+    const commissionAmount = totalGross - subtotal;
+
+    const fmt = (n: number) => `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+    const lines = [
+      `Invoice — ${client.name} (${start_date} to ${end_date})`,
+      '',
+      ...channels.map(c => `• ${c.name}: ${fmt(c.net)}`),
+      '──────────────────',
+      `Subtotal: ${fmt(subtotal)}`,
+      ...(commission > 0 ? [`Commission (${commission}%): ${fmt(commissionAmount)}`, `Total: ${fmt(totalGross)}`] : [`Total: ${fmt(subtotal)}`]),
+      '',
+      `Generated: ${new Date().toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}`,
+    ];
+
+    return {
+      formatted: lines.join('\n'),
+      client_name: client.name,
+      date_range: { start: start_date, end: end_date },
+      channels,
+      subtotal,
+      commission_pct: commission,
+      commission_amount: Math.round(commissionAmount * 100) / 100,
+      total: Math.round(totalGross * 100) / 100,
+    };
+  }
+
   return { error: `Unknown tool: ${toolName}` };
 }
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: Promise<{ userId: string }> }
-) {
-  const { userId } = await params;
-  const rawBody = await request.text();
-
-  const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '');
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
-  if (!supabaseUrl || !serviceKey) {
-    return NextResponse.json({ type: 'message', text: 'Configuration error.' }, { status: 500 });
-  }
-
-  const supabase = createClient(supabaseUrl, serviceKey);
-
-  // user_integrations is a new table — cast to any until types are regenerated
-  const { data: integration } = await (supabase as any)
-    .from('user_integrations')
-    .select('teams_bot_hmac_secret')
-    .eq('user_id', userId)
-    .maybeSingle();
-
-  if (!integration?.teams_bot_hmac_secret) {
-    return NextResponse.json({ type: 'message', text: 'Bot not configured for this workspace.' }, { status: 403 });
-  }
-
-  // Validate HMAC signature from Teams
-  const authHeader = request.headers.get('authorization');
-  if (!validateTeamsHmac(rawBody, authHeader, integration.teams_bot_hmac_secret)) {
-    return NextResponse.json({ type: 'message', text: 'Invalid request signature.' }, { status: 401 });
-  }
-
-  let body: any;
-  try {
-    body = JSON.parse(rawBody);
-  } catch {
-    return NextResponse.json({ type: 'message', text: 'Could not parse request.' }, { status: 400 });
-  }
-
-  // Strip @mention and HTML tags from the message
-  const rawText = body?.text ?? body?.attachments?.[0]?.content ?? '';
-  const query = stripHtml(rawText);
-
-  if (!query) {
-    return NextResponse.json({
-      type: 'message',
-      text: 'Hi! @mention me with a question like "which clients are underpacing?" or "what\'s overdue today?"',
-    });
-  }
-
+async function runClaudeAsync(query: string, userId: string, webhookUrl: string): Promise<void> {
+  const supabase = makeSupabase();
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
   try {
     let messages: Anthropic.MessageParam[] = [{ role: 'user', content: query }];
 
-    // Tool-use loop (max 5 rounds to stay within Teams' 5s window isn't guaranteed,
-    // but haiku is fast enough for 1-2 tool calls)
     for (let round = 0; round < 5; round++) {
       const response = await anthropic.messages.create({
         model: 'claude-haiku-4-5-20251001',
@@ -370,7 +522,9 @@ export async function POST(
 
       if (response.stop_reason !== 'tool_use') {
         const textBlock = response.content.find((b): b is Anthropic.TextBlock => b.type === 'text');
-        return NextResponse.json({ type: 'message', text: textBlock?.text ?? 'Done.' });
+        const text = stripMarkdownBold(textBlock?.text ?? 'Done.');
+        await sendTeamsAlert({ title: '', text, webhookUrl });
+        return;
       }
 
       const toolResults: Anthropic.ToolResultBlockParam[] = [];
@@ -382,9 +536,92 @@ export async function POST(
       messages.push({ role: 'user', content: toolResults });
     }
 
-    return NextResponse.json({ type: 'message', text: 'Request processed.' });
+    await sendTeamsAlert({ title: '', text: 'Request processed.', webhookUrl });
   } catch (err: any) {
-    console.error('[teams-bot] error:', err);
-    return NextResponse.json({ type: 'message', text: 'Something went wrong. Try again shortly.' });
+    console.error('[teams-bot] async error:', err);
+    await sendTeamsAlert({ title: '', text: 'Something went wrong — please try again.', webhookUrl });
   }
+}
+
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ userId: string }> }
+) {
+  const { userId } = await params;
+  const rawBody = await request.text();
+
+  let supabase: any;
+  try {
+    supabase = makeSupabase();
+  } catch {
+    return teamsResponse('Configuration error.');
+  }
+
+  const { data: integration } = await (supabase as any)
+    .from('user_integrations')
+    .select('teams_bot_hmac_secret, teams_webhook_url')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (!integration?.teams_bot_hmac_secret) {
+    return teamsResponse('Bot not configured for this workspace.');
+  }
+
+  const authHeader = request.headers.get('authorization');
+  if (!validateTeamsHmac(rawBody, authHeader, integration.teams_bot_hmac_secret)) {
+    return NextResponse.json({ type: 'message', text: 'Invalid request signature.' }, { status: 401 });
+  }
+
+  let body: any;
+  try {
+    body = JSON.parse(rawBody);
+  } catch {
+    return teamsResponse('Could not parse request.');
+  }
+
+  const rawText = body?.text ?? body?.attachments?.[0]?.content ?? '';
+  const query = stripHtml(rawText);
+
+  if (!query) {
+    return teamsResponse('Hi! Ask me anything about your campaigns — e.g. "which clients are underpacing?" or "what\'s overdue today?"');
+  }
+
+  const webhookUrl = integration.teams_webhook_url;
+
+  if (!webhookUrl) {
+    // No webhook URL — try synchronous (may time out on complex queries)
+    const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    try {
+      let messages: Anthropic.MessageParam[] = [{ role: 'user', content: query }];
+      for (let round = 0; round < 3; round++) {
+        const response = await anthropic.messages.create({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 512,
+          system: BOT_SYSTEM_PROMPT,
+          tools: BOT_TOOL_DEFINITIONS,
+          messages,
+        });
+        messages.push({ role: 'assistant', content: response.content });
+        if (response.stop_reason !== 'tool_use') {
+          const textBlock = response.content.find((b): b is Anthropic.TextBlock => b.type === 'text');
+          return teamsResponse(stripMarkdownBold(textBlock?.text ?? 'Done.'));
+        }
+        const toolResults: Anthropic.ToolResultBlockParam[] = [];
+        for (const block of response.content) {
+          if (block.type !== 'tool_use') continue;
+          const result = await runBotTools(block.name, block.input as Record<string, unknown>, userId, supabase);
+          toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify(result) });
+        }
+        messages.push({ role: 'user', content: toolResults });
+      }
+      return teamsResponse('Request processed.');
+    } catch (err: any) {
+      console.error('[teams-bot] sync error:', err);
+      return teamsResponse('Something went wrong. Try again shortly.');
+    }
+  }
+
+  // Async path: ACK immediately, process in background
+  waitUntil(runClaudeAsync(query, userId, webhookUrl));
+  return teamsResponse('⏳ On it...');
 }

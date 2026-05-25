@@ -956,6 +956,8 @@ export interface Database {
             file_name: string;
             file_url: string;
             file_type: string;
+            text_content: string | null;
+            is_text_doc: boolean;
             uploaded_at: string;
             uploaded_by: string | null;
           };
@@ -965,6 +967,8 @@ export interface Database {
             file_name: string;
             file_url: string;
             file_type?: string;
+            text_content?: string | null;
+            is_text_doc?: boolean;
             uploaded_at?: string;
             uploaded_by?: string | null;
           };
@@ -974,6 +978,45 @@ export interface Database {
             file_name?: string;
             file_url?: string;
             file_type?: string;
+            text_content?: string | null;
+            is_text_doc?: boolean;
+            uploaded_at?: string;
+            uploaded_by?: string | null;
+          };
+          Relationships: [];
+        };
+
+        library_documents: {
+          Row: {
+            id: string;
+            user_id: string;
+            file_name: string;
+            file_url: string;
+            doc_category: string;
+            text_content: string | null;
+            is_text_doc: boolean;
+            uploaded_at: string;
+            uploaded_by: string | null;
+          };
+          Insert: {
+            id?: string;
+            user_id: string;
+            file_name: string;
+            file_url?: string;
+            doc_category?: string;
+            text_content?: string | null;
+            is_text_doc?: boolean;
+            uploaded_at?: string;
+            uploaded_by?: string | null;
+          };
+          Update: {
+            id?: string;
+            user_id?: string;
+            file_name?: string;
+            file_url?: string;
+            doc_category?: string;
+            text_content?: string | null;
+            is_text_doc?: boolean;
             uploaded_at?: string;
             uploaded_by?: string | null;
           };

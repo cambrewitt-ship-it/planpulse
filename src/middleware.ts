@@ -9,7 +9,9 @@ const PUBLIC_ROUTES = [
   '/auth/login',
   '/auth/signup',
   '/auth/callback',
-  '/api/nango/webhook', // Webhook endpoint
+  '/api/nango/webhook',
+  '/sandbox',
+  '/api/sandbox/',
 ];
 
 // Define API routes that require authentication

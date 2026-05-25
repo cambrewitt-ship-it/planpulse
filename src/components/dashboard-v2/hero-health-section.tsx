@@ -314,7 +314,7 @@ function MetricCard({ title, value, sub, badge, progress, children }: MetricCard
 // Perf Sparkline — MTD running metric time series for the hero card
 // ---------------------------------------------------------------------------
 
-function PerfSparkline({ clientId, perf, onConnect }: { clientId: string; perf: PerfData | null; onConnect?: () => void }) {
+function PerfSparkline({ clientId, perf, perfLoading, onConnect }: { clientId: string; perf: PerfData | null; perfLoading?: boolean; onConnect?: () => void }) {
   const [series, setSeries] = useState<Array<{ date: string; value: number }>>([]);
   const [loading, setLoading] = useState(false);
 
@@ -364,15 +364,25 @@ function PerfSparkline({ clientId, perf, onConnect }: { clientId: string; perf: 
     </svg>
   );
 
-  if (loading) {
+  if (perfLoading || loading) {
     return (
       <div className="w-full">
+        <style>{`
+          @keyframes heroSpinLoader { to { transform: rotate(360deg); } }
+        `}</style>
         <div className="flex items-center justify-between mb-1">
-          <span className="text-xs text-gray-300 uppercase tracking-wide font-medium">{metric || '—'} · 30 day</span>
+          <span className="text-xs text-gray-300 uppercase tracking-wide font-medium">
+            {metric || 'Performance'} · 30 day
+          </span>
         </div>
-        <div className="relative">
+        <div className="relative rounded overflow-hidden" style={{ background: '#F9FAFB' }}>
           {shellSvg}
-          <div className="absolute inset-0 bg-gray-50/60 animate-pulse rounded" />
+          <div className="absolute inset-0 flex items-center justify-center">
+            <svg width={32} height={32} viewBox="0 0 32 32" style={{ animation: 'heroSpinLoader 0.8s linear infinite', display: 'block' }}>
+              <circle cx={16} cy={16} r={12} fill="none" stroke="#E5E7EB" strokeWidth={3} />
+              <path d="M 16 4 A 12 12 0 0 1 28 16" fill="none" stroke="#6366f1" strokeWidth={3} strokeLinecap="round" />
+            </svg>
+          </div>
         </div>
       </div>
     );
@@ -588,6 +598,7 @@ export default function HeroHealthSection({
   const [showAmMenu, setShowAmMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const [perfData, setPerfData] = useState<PerfData | null>(null);
+  const [perfReady, setPerfReady] = useState(false);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -769,9 +780,9 @@ export default function HeroHealthSection({
         {/* Col 2: CPA/CTR Sparkline + metric widget + speedometer */}
         <div className="min-w-0">
           <div className="relative w-full border border-gray-100 rounded-lg bg-gray-50/80 px-4 py-4">
-            <PerformanceWidget clientId={clientId} onNeedle={setPerfData} floatingGear />
+            <PerformanceWidget clientId={clientId} onNeedle={setPerfData} onFetched={() => setPerfReady(true)} floatingGear />
             <div className="mt-3">
-              <PerfSparkline clientId={clientId} perf={perfData} onConnect={onConnect} />
+              <PerfSparkline clientId={clientId} perf={perfData} perfLoading={!perfReady} onConnect={onConnect} />
             </div>
             <div className="absolute top-4 right-8 pointer-events-none flex flex-col items-center">
               <HealthRing score={healthScore.overallScore} status={healthScore.status} perf={perfData} loading={isLoadingScore} scale={0.6} />

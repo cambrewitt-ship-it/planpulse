@@ -29,22 +29,41 @@ import type { MediaPlanChannel } from '@/components/media-plan-builder/media-pla
 
 export function isMetaAdsChannel(channelName: string): boolean {
   const lower = channelName.toLowerCase();
-  return lower.includes('facebook') || lower.includes('meta');
+  return lower.includes('facebook') || lower.includes('meta') || lower.includes('instagram') ||
+    lower.includes('paid social') || lower.includes('reels');
 }
 
 export function isGoogleAdsChannel(channelName: string): boolean {
-  return channelName.toLowerCase().includes('google');
+  const lower = channelName.toLowerCase();
+  if (lower.includes('organic')) return false;
+  return lower.includes('google') ||
+    lower.includes('search') ||
+    lower.includes('sem') ||
+    lower.includes('ppc') ||
+    lower.includes('performance max') ||
+    lower.includes('pmax') ||
+    lower.includes('youtube') ||
+    lower.includes('shopping');
 }
 
 export function getPlatformForChannel(channelName: string): string {
   const lower = channelName.toLowerCase();
   if (lower.includes('organic')) return 'organic-social';
   if (lower.includes('edm') || lower.includes('email')) return 'edm';
-  if (lower.includes('ooh') || lower.includes('out of home')) return 'ooh';
-  if (lower.includes('meta') || lower.includes('facebook') || lower.includes('instagram')) return 'meta-ads';
-  if (lower.includes('google')) return 'google-ads';
+  if (lower.includes('ooh') || lower.includes('out of home') || lower.includes('billboard') ||
+      lower.includes('outdoor') || lower.includes('transit') || lower.includes('street furniture')) return 'ooh';
+  // Meta: explicit platform names and common paid social aliases
+  if (lower.includes('meta') || lower.includes('facebook') || lower.includes('instagram') ||
+      lower.includes('paid social') || lower.includes('reels')) return 'meta-ads';
+  // Google: explicit name plus all common search/SEM/video aliases
+  if (lower.includes('google') || lower.includes('search') || lower.includes('sem') ||
+      lower.includes('ppc') || lower.includes('performance max') || lower.includes('pmax') ||
+      lower.includes('youtube') || lower.includes('shopping')) return 'google-ads';
   if (lower.includes('linkedin')) return 'linkedin-ads';
-  if (lower.includes('tiktok')) return 'tiktok-ads';
+  if (lower.includes('tiktok') || lower.includes('tik tok')) return 'tiktok-ads';
+  if (lower.includes('snapchat') || lower.includes('snap')) return 'snapchat-ads';
+  if (lower.includes('pinterest')) return 'pinterest-ads';
+  if (lower.includes('twitter') || lower.includes('x ads')) return 'twitter-ads';
   return lower.replace(/\s+/g, '-');
 }
 
@@ -59,13 +78,16 @@ export function getChannelDisplayNameFromPlatform(platform?: string): string {
 }
 
 // Determine channel category from channelName
-export function getChannelCategory(channelName: string): 'paid_digital' | 'organic_social' | 'edm' | 'ooh' | 'display_native' {
+export function getChannelCategory(channelName: string): 'paid_digital' | 'organic_social' | 'edm' | 'ooh' | 'display_native' | 'other' | 'fee' {
   if (!channelName) return 'paid_digital';
   const lower = channelName.toLowerCase();
-  if (lower.includes('(organic)')) return 'organic_social';
-  if (lower.includes('edm') || lower.includes('email')) return 'edm';
-  if (lower.includes('ooh')) return 'ooh';
-  if (lower.includes('display') || lower.includes('native')) return 'display_native';
+  if (lower.includes('fee') || lower.includes('set up fee') || lower.includes('setup fee') ||
+      lower.includes('management fee') || lower.includes('retainer')) return 'fee';
+  if (lower.includes('(organic)') || lower.includes('organic social')) return 'organic_social';
+  if (lower.includes('edm') || lower.includes('email marketing') || lower.includes('e-dm')) return 'edm';
+  if (lower.includes('ooh') || lower.includes('out of home') || lower.includes('billboard') ||
+      lower.includes('outdoor') || lower.includes('transit') || lower.includes('street furniture')) return 'ooh';
+  if (lower.includes('display') || lower.includes('native') || lower.includes('programmatic')) return 'display_native';
   return 'paid_digital';
 }
 

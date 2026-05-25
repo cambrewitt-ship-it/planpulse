@@ -13,12 +13,14 @@ You help the team with:
 - Client campaign performance and spend pacing
 - Channel-level performance health checks (spend vs plan, KPIs, pacing status)
 - Media channel specifications and best practices from the agency library
+- Agency playbooks, SOPs, and process documentation using get_agency_playbooks
 - Guidance on how to use the platform
 
 You can also take actions:
 - Complete action points: Mark tasks as done for specific clients using complete_action_point
 - Create new clients: Add new clients to the platform using create_client
 - Update budgets: Adjust channel budgets in media plans for specific months using update_media_plan_budget
+- Load a full media plan: Set all channels, flights, and budgets for a client from a description or pasted data using set_media_plan_channels
 - View live Meta campaigns: Fetch current campaign data directly from the Meta Ads API using get_live_meta_campaigns
 
 Client health indicators:
@@ -36,7 +38,8 @@ Action points have due dates calculated from channel start dates — SET UP task
 When asked about channel performance, spend, metrics, or pacing — always use get_channel_performance to pull live data.
 
 Multi-step workflow patterns:
-- "Onboard [client]": Use create_client to create them, then explain what to do next (add media plan channels + budgets in the app, connect ad accounts, assign account manager)
+- "Onboard [client]": Use create_client to create them, then ask for their media plan details (channels, budgets, dates). Once provided, call set_media_plan_channels to load the plan immediately. Then explain next steps (connect ad accounts, assign account manager).
+- "Load plan for [client]" / user pastes plan data: Call set_media_plan_channels with the extracted channels. If key details (dates, budgets) are missing, ask for them first.
 - "Health check [client]": Use get_channel_performance + get_action_points, identify issues, offer to complete tasks that are resolved
 - "End of month review": Use get_daily_briefing + get_channel_performance for all clients, synthesise and flag issues
 - "Sort out tasks for [client]": Use get_action_points to list overdue items, then use complete_action_point for any the user confirms are done
@@ -434,6 +437,42 @@ async function toolGetChannelLibrary(request: NextRequest, input: { channel_type
   return { total: (data ?? []).length, entries: (data ?? []).slice(0, 20) };
 }
 
+async function toolGetAgencyPlaybooks(
+  _request: NextRequest,
+  input: { category?: string; search?: string }
+) {
+  const supabase = await createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.user) return { error: 'Unauthorized' };
+
+  let query = supabase
+    .from('library_documents')
+    .select('file_name, doc_category, text_content, is_text_doc, uploaded_at')
+    .eq('user_id', session.user.id)
+    .order('uploaded_at', { ascending: false });
+
+  if (input.category) {
+    query = query.eq('doc_category', input.category);
+  }
+
+  if (input.search) {
+    query = query.ilike('file_name', `%${input.search}%`);
+  }
+
+  const { data, error } = await query;
+  if (error) return { error: 'Failed to fetch playbooks' };
+
+  const docs = (data ?? []).map(d => ({
+    name: d.file_name,
+    category: d.doc_category,
+    type: d.is_text_doc ? 'text' : 'file',
+    uploaded: d.uploaded_at?.split('T')[0],
+    content: d.text_content ?? '(no extracted text available)',
+  }));
+
+  return { total: docs.length, documents: docs };
+}
+
 // ── Write / action tool implementations (Tier 1) ──────────────────────────────
 
 async function toolCompleteActionPoint(
@@ -661,6 +700,196 @@ async function toolCreateActionPoint(
       category: input.category,
     },
     note: 'This action point will now appear for all clients running this channel.',
+  };
+}
+
+// ── Invoice & Report tool implementations ────────────────────────────────────
+
+async function toolGenerateInvoice(
+  request: NextRequest,
+  input: { client_name: string; start_date: string; end_date: string; spend_type?: string }
+) {
+  const supabase = await createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.user) return { error: 'Unauthorized' };
+
+  const { data: clients } = await supabase
+    .from('clients')
+    .select('id, name')
+    .eq('user_id', session.user.id)
+    .ilike('name', `%${input.client_name}%`);
+
+  if (!clients?.length) return { error: `No client found matching "${input.client_name}"` };
+  if (clients.length > 1) return { error: 'Multiple clients matched — be more specific.', matches: clients.map((c: any) => c.name) };
+
+  const client = clients[0];
+  const origin = new URL(request.url).origin;
+  const cookieHeader = request.headers.get('cookie') ?? '';
+
+  const res = await fetch(`${origin}/api/clients/${client.id}/invoice`, {
+    method: 'POST',
+    headers: { cookie: cookieHeader, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      start_date: input.start_date,
+      end_date: input.end_date,
+      spend_type: input.spend_type ?? 'actual',
+    }),
+  });
+
+  if (!res.ok) return { error: `Invoice generation failed: ${res.status}` };
+  return res.json();
+}
+
+async function toolGenerateReport(
+  request: NextRequest,
+  input: { client_name: string; start_date: string; end_date: string; sections?: string[] }
+) {
+  const supabase = await createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.user) return { error: 'Unauthorized' };
+
+  const { data: clients } = await supabase
+    .from('clients')
+    .select('id, name')
+    .eq('user_id', session.user.id)
+    .ilike('name', `%${input.client_name}%`);
+
+  if (!clients?.length) return { error: `No client found matching "${input.client_name}"` };
+  if (clients.length > 1) return { error: 'Multiple clients matched — be more specific.', matches: clients.map((c: any) => c.name) };
+
+  const client = clients[0];
+  const sections = (input.sections ?? ['summary', 'spend', 'channels', 'actions']).join(',');
+  const origin = new URL(request.url).origin;
+  const cookieHeader = request.headers.get('cookie') ?? '';
+
+  const res = await fetch(
+    `${origin}/api/clients/${client.id}/report-data?start_date=${input.start_date}&end_date=${input.end_date}&sections=${sections}`,
+    { headers: { cookie: cookieHeader } }
+  );
+
+  if (!res.ok) return { error: `Report data fetch failed: ${res.status}` };
+  const data = await res.json();
+
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? origin;
+  return {
+    ...data,
+    download_url: `${appUrl}/api/clients/${client.id}/report?start_date=${input.start_date}&end_date=${input.end_date}`,
+  };
+}
+
+// ── Media plan onboarding tool implementation ─────────────────────────────────
+
+function snapToMonday(dateStr: string): string {
+  const d = new Date(dateStr + 'T00:00:00');
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  return d.toISOString();
+}
+
+function snapToEndOfWeek(dateStr: string): string {
+  const d = new Date(dateStr + 'T00:00:00');
+  // Snap to Monday of that week then go forward to Sunday
+  const day = d.getDay();
+  const toMonday = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + toMonday + 6);
+  return d.toISOString();
+}
+
+const CHANNEL_HEX_COLORS: Record<string, string> = {
+  'meta ads': '#3B82F6', 'google ads': '#EF4444', 'display ads': '#06B6D4',
+  'native ads': '#14B8A6', 'linkedin ads': '#6366F1', 'tiktok ads': '#6B7280',
+  'instagram ads': '#EC4899', 'twitter ads': '#0EA5E9', 'youtube ads': '#DC2626',
+  'snapchat ads': '#EAB308', 'reddit ads': '#EA580C',
+  'instagram (organic)': '#F472B6', 'facebook (organic)': '#60A5FA', 'linkedin (organic)': '#22D3EE',
+  'edm / email': '#A855F7', 'ooh': '#F97316', 'radio': '#F59E0B',
+  'linear tv': '#7C3AED', 'svod': '#9333EA', 'bvod': '#D946EF',
+};
+
+function getHex(channelName: string): string {
+  const lower = channelName.toLowerCase();
+  return CHANNEL_HEX_COLORS[lower] ?? (lower.startsWith('ooh') ? '#F97316' : '#6B7280');
+}
+
+async function toolSetMediaPlanChannels(
+  _request: NextRequest,
+  input: {
+    client_name: string;
+    channels: Array<{
+      channelName: string;
+      customChannelName?: string;
+      format?: string;
+      totalBudget: number;
+      flights: Array<{ startDate: string; endDate: string; monthlySpend: Record<string, number> }>;
+    }>;
+  }
+) {
+  const supabase = await createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.user) return { error: 'Unauthorized' };
+
+  const { data: clients } = await supabase
+    .from('clients')
+    .select('id, name')
+    .eq('user_id', session.user.id)
+    .ilike('name', `%${input.client_name}%`);
+
+  if (!clients?.length) return { error: `No client found matching "${input.client_name}"` };
+  if (clients.length > 1) return { error: 'Multiple clients matched — be more specific.', matches: clients.map((c: any) => c.name) };
+
+  const client = clients[0];
+  const grandTotal = input.channels.reduce((s, c) => s + (c.totalBudget || 0), 0);
+
+  const mediaChannels = input.channels.map((ch, idx) => {
+    const hex = getHex(ch.channelName);
+    const pct = grandTotal > 0 ? Math.round((ch.totalBudget / grandTotal) * 100) : 0;
+
+    const flights = (ch.flights || []).map(f => ({
+      id: `flight-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 7)}`,
+      startWeek: snapToMonday(f.startDate),
+      endWeek: snapToEndOfWeek(f.endDate),
+      monthlySpend: f.monthlySpend || {},
+      color: hex,
+    }));
+
+    if (flights.length === 0) {
+      const now = new Date();
+      flights.push({
+        id: `flight-${Date.now()}-${idx}-0`,
+        startWeek: snapToMonday(`${now.getFullYear()}-01-01`),
+        endWeek: snapToEndOfWeek(`${now.getFullYear()}-12-31`),
+        monthlySpend: {},
+        color: hex,
+      });
+    }
+
+    return {
+      id: `channel-${Date.now()}-${idx}`,
+      channelName: ch.channelName,
+      customChannelName: ch.customChannelName || '',
+      format: ch.format || '',
+      totalBudget: ch.totalBudget || 0,
+      percentOfInvestment: pct,
+      flights,
+    };
+  });
+
+  const { error: upsertError } = await supabase
+    .from('client_media_plan_builder')
+    .upsert(
+      { client_id: client.id, channels: mediaChannels, commission: 0 },
+      { onConflict: 'client_id' }
+    );
+
+  if (upsertError) return { error: 'Failed to save media plan', details: upsertError.message };
+
+  return {
+    success: true,
+    message: `Loaded ${mediaChannels.length} channel${mediaChannels.length !== 1 ? 's' : ''} into ${client.name}'s media plan`,
+    client: client.name,
+    channels_added: mediaChannels.map(c => ({ name: c.channelName, budget: c.totalBudget, flights: c.flights.length })),
+    total_budget: grandTotal,
+    note: 'Open the media plan builder to review, adjust flights, and add monthly budget breakdowns.',
   };
 }
 
@@ -973,6 +1202,8 @@ export async function POST(request: NextRequest) {
               result = await toolGetClientStatus(request, input);
             } else if (block.name === 'get_channel_library') {
               result = await toolGetChannelLibrary(request, input);
+            } else if (block.name === 'get_agency_playbooks') {
+              result = await toolGetAgencyPlaybooks(request, input);
             } else if (block.name === 'get_channel_performance') {
               result = await toolGetChannelPerformance(request, input);
             // Write / action tools (Tier 1)
@@ -984,9 +1215,16 @@ export async function POST(request: NextRequest) {
               result = await toolCreateClient(request, input);
             } else if (block.name === 'update_media_plan_budget') {
               result = await toolUpdateMediaPlanBudget(request, input);
+            } else if (block.name === 'set_media_plan_channels') {
+              result = await toolSetMediaPlanChannels(request, input);
             // Client Intelligence Hub (Tier 2)
             } else if (block.name === 'get_client_intelligence') {
               result = await toolGetClientIntelligence(request, input);
+            // Invoice & Reports
+            } else if (block.name === 'generate_invoice') {
+              result = await toolGenerateInvoice(request, input);
+            } else if (block.name === 'generate_report') {
+              result = await toolGenerateReport(request, input);
             // Live ad platform tools (Tier 3)
             } else if (block.name === 'get_live_meta_campaigns') {
               result = await toolGetLiveMetaCampaigns(request, input);
@@ -995,7 +1233,7 @@ export async function POST(request: NextRequest) {
             }
 
             // Emit structured action event so the UI can trigger animations
-            const writableTools = ['complete_action_point', 'create_action_point', 'create_client', 'update_media_plan_budget'];
+            const writableTools = ['complete_action_point', 'create_action_point', 'create_client', 'update_media_plan_budget', 'set_media_plan_channels'];
             if (writableTools.includes(block.name) && result?.success) {
               send({ type: 'action', tool: block.name, data: result });
             }

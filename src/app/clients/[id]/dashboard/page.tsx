@@ -21,7 +21,10 @@
 'use client';
 
 import Link from 'next/link';
-import { MediaPlanGrid, MediaPlanChannel } from '@/components/media-plan-builder/media-plan-grid';
+import { MediaPlanChannel } from '@/components/media-plan-builder/media-plan-grid';
+import { UploadWizard } from '@/components/sandbox/upload-wizard';
+import { PlanGrid } from '@/components/sandbox/plan-grid';
+import type { SandboxPlan } from '@/components/sandbox/types';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { getClients, getMediaPlans, getPlanById, updateClient, updateClientLogoUrl } from '@/lib/db/plans';
@@ -55,6 +58,7 @@ import ClientActionPointsList from '@/components/dashboard-v2/client-action-poin
 import ChannelPerformanceCard from '@/components/dashboard-v2/channel-performance-card';
 import dynamic from 'next/dynamic';
 const InvoiceModal = dynamic(() => import('@/components/dashboard-v2/invoice-modal').then(m => m.InvoiceModal), { ssr: false });
+const ReportBuilderModal = dynamic(() => import('@/components/dashboard-v2/report-builder-modal').then(m => m.ReportBuilderModal), { ssr: false });
 import { GanttCalendar, type GanttClient, type GanttChannel } from '@/components/agency/GanttCalendar';
 import { FullscreenGanttView, type GanttAPMarker } from '@/components/agency/FullscreenGanttView';
 import { ClientIntelTab } from '@/components/dashboard-v2/client-intel-tab';
@@ -216,6 +220,10 @@ export default function DashboardV2() {
   const [organicSocialActuals, setOrganicSocialActuals] = useState<OrganicSocialActual[]>([]);
   const [edmActuals, setEdmActuals] = useState<EdmActual[]>([]);
   const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  // Sandbox-style media plan (per-client, persisted in localStorage)
+  const [clientSandboxPlan, setClientSandboxPlan] = useState<SandboxPlan | null>(null);
+  const [sandboxPlanHydrated, setSandboxPlanHydrated] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [healthWeights, setHealthWeights] = useState<{ pacing: number; actions: number; perf: number }>(() => {
@@ -285,11 +293,11 @@ export default function DashboardV2() {
 
       total += chPoints.reduce((s: number, p: any) => s + (p.spend ?? 0), 0);
     }
-    // Add manual actual spend from non-digital channels
+    // Add manual actual spend from non-digital channels (exclude fee rows)
     const nonDigitalTotal = mediaPlanBuilderChannels
       .filter(ch => {
         const cat = (ch as any).channelCategory || getChannelCategory(ch.channelName);
-        return cat !== 'paid_digital';
+        return cat !== 'paid_digital' && cat !== 'fee';
       })
       .reduce((sum, ch) => sum + ((ch as any).manualActualSpend ?? 0), 0);
 
@@ -366,6 +374,93 @@ export default function DashboardV2() {
   }, [clientId, totalActualSpend]);
 
   // Note: analyticsDateRange defaults to YTD (Jan 1 – today) on each load
+
+  // Load sandbox media plan from localStorage (per-client)
+  useEffect(() => {
+    if (!clientId) return;
+    try {
+      const raw = localStorage.getItem(`planpulse_sandbox_plan_${clientId}`);
+      if (raw) setClientSandboxPlan(JSON.parse(raw));
+    } catch {}
+    setSandboxPlanHydrated(true);
+  }, [clientId]);
+
+  const handleClientPlanChange = (updated: SandboxPlan) => {
+    setClientSandboxPlan(updated);
+    try { localStorage.setItem(`planpulse_sandbox_plan_${clientId}`, JSON.stringify(updated)); } catch {}
+  };
+
+  const handleClientPlanLoaded = (loaded: SandboxPlan) => {
+    handleClientPlanChange(loaded);
+  };
+
+  const handleClientPlanUpload = () => {
+    setClientSandboxPlan(null);
+    try { localStorage.removeItem(`planpulse_sandbox_plan_${clientId}`); } catch {}
+  };
+
+  // One-time sync: when the API has no channels with flights but localStorage has a sandbox
+  // plan with flight data, convert that sandbox plan into MediaPlanChannel format so the
+  // health score and hero section have data to work with.
+  useEffect(() => {
+    if (!sandboxPlanHydrated || isLoadingMediaPlanBuilder) return;
+    if (!clientSandboxPlan?.rows?.length) return;
+
+    const hasFlights = mediaPlanBuilderChannels.some(ch => (ch.flights?.length ?? 0) > 0);
+    if (hasFlights) return;
+
+    const MS_PER_WEEK = 7 * 24 * 60 * 60 * 1000;
+    const channelMap = new Map<string, { subType?: string; flightMap: Map<string, any> }>();
+
+    for (const row of clientSandboxPlan.rows) {
+      const key = row.channel?.trim();
+      if (!key) continue;
+      if (!channelMap.has(key)) channelMap.set(key, { subType: row.detail?.trim() || undefined, flightMap: new Map() });
+      if (row.isMasterRow === false) continue;
+      for (const f of (row.flights ?? [])) {
+        if (f.startWeek && f.endWeek && !channelMap.get(key)!.flightMap.has(f.id)) {
+          channelMap.get(key)!.flightMap.set(f.id, f);
+        }
+      }
+    }
+
+    const converted: MediaPlanChannel[] = Array.from(channelMap.entries()).map(([channelName, { subType, flightMap }]) => {
+      const mediaFlights = Array.from(flightMap.values())
+        .filter((f: any) => f.startWeek && f.endWeek)
+        .map((sbFlight: any) => {
+          const startDate = new Date(sbFlight.startWeek);
+          const endDate = new Date(sbFlight.endWeek);
+          const numWeeks = Math.max(1, Math.round((endDate.getTime() - startDate.getTime()) / MS_PER_WEEK) + 1);
+          const weeklyBudget = sbFlight.budget / numWeeks;
+          const monthlySpend: Record<string, number> = {};
+          let week = new Date(startDate);
+          while (week <= endDate) {
+            const monthKey = `${week.getFullYear()}-${String(week.getMonth() + 1).padStart(2, '0')}`;
+            monthlySpend[monthKey] = (monthlySpend[monthKey] ?? 0) + weeklyBudget;
+            week = new Date(week.getTime() + MS_PER_WEEK);
+          }
+          return { id: `sb-${sbFlight.id}`, startWeek: startDate, endWeek: endDate, monthlySpend, color: sbFlight.color, weeklyBudget };
+        });
+
+      const totalBudget = mediaFlights.reduce((sum: number, f: any) =>
+        sum + Object.values(f.monthlySpend as Record<string, number>).reduce((a, b) => a + b, 0), 0);
+
+      return {
+        id: `sandbox-${channelName.replace(/\s+/g, '-').toLowerCase()}`,
+        channelName,
+        channelSubType: subType,
+        format: '',
+        percentOfInvestment: 0,
+        totalBudget,
+        flights: mediaFlights,
+      };
+    });
+
+    if (converted.length > 0 && converted.some(ch => ch.flights.length > 0)) {
+      setMediaPlanBuilderChannels(converted);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sandboxPlanHydrated, isLoadingMediaPlanBuilder, clientSandboxPlan]);
 
   // Load note files from localStorage
   useEffect(() => {
@@ -506,6 +601,8 @@ export default function DashboardV2() {
       const unpaddedKey = `${year}-${month}`;
 
       mediaPlanBuilderChannels.forEach((channel) => {
+        const cat = (channel as any).channelCategory || getChannelCategory(channel.channelName);
+        if (cat === 'fee') return;
         channel.flights?.forEach((flight) => {
           if (flight.monthlySpend) {
             const spend = flight.monthlySpend[paddedKey] ?? flight.monthlySpend[unpaddedKey] ?? 0;
@@ -1335,10 +1432,13 @@ export default function DashboardV2() {
       return issues;
     };
 
-    return mediaPlanBuilderChannels.map(ch => {
+    return (mediaPlanBuilderChannels as any[]).flatMap((ch: any): any => {
       // Detect channel category
       const category = ch.channelCategory || getChannelCategory(ch.channelName);
-      
+
+      // Skip fee channels entirely — no card should be shown
+      if (category === 'fee') return [];
+
       // Return special card data for non-digital channels
       if (category === 'organic_social') {
         return {
@@ -1375,10 +1475,18 @@ export default function DashboardV2() {
         };
       }
 
-      // Paid digital - existing logic
+      // Only Meta and Google get the full ChannelPerformanceCard with spend pacing graphs.
+      // All other paid digital channels (LinkedIn, TikTok, etc.) use OtherChannelCard.
       const platform = getPlatformForChannel(ch.channelName);
+      if (platform !== 'meta-ads' && platform !== 'google-ads') {
+        return [{
+          type: 'other' as const,
+          channel: ch,
+        }];
+      }
 
-      const chPlatform = getPlatformForChannel(ch.channelName);
+      // Paid digital (Meta / Google) - existing logic
+      const chPlatform = platform;
       const keyword    = ch.channelName.toLowerCase().split(' ')[0];
 
       // ── Chart data: compute first so multi-month totals can be derived ────
@@ -1570,8 +1678,6 @@ export default function DashboardV2() {
         }, 0);
         return sum + channelTotal;
       }, 0);
-
-      if (totalBudget === 0) return;
 
       const now = new Date();
       const allDates = mediaPlanBuilderChannels.flatMap(ch =>
@@ -1892,33 +1998,35 @@ export default function DashboardV2() {
         ) : (
           <>
             {/* ── Hero: health score + quick metrics ── */}
-            {loadingAnalytics ? (
-              <div className="bg-white rounded-xl border border-gray-200 px-7 py-6 animate-pulse">
-                <div className="flex items-start gap-4">
-                  <div className="w-14 h-14 rounded-full bg-gray-200 flex-shrink-0" />
-                  <div className="flex-1 space-y-3">
-                    <div className="h-7 w-48 bg-gray-200 rounded" />
-                    <div className="h-3 w-32 bg-gray-100 rounded" />
-                    <div className="flex items-center gap-6 mt-3">
-                      <div className="flex-1 space-y-2">
-                        <div className="h-3 w-16 bg-gray-100 rounded" />
-                        <div className="h-7 w-28 bg-gray-200 rounded" />
-                        <div className="h-2 w-full bg-gray-100 rounded-full" />
+            {(
+              loadingAnalytics ? (
+                <div className="bg-white rounded-xl border border-gray-200 px-7 py-6 animate-pulse">
+                  <div className="flex items-start gap-4">
+                    <div className="w-14 h-14 rounded-full bg-gray-200 flex-shrink-0" />
+                    <div className="flex-1 space-y-3">
+                      <div className="h-7 w-48 bg-gray-200 rounded" />
+                      <div className="h-3 w-32 bg-gray-100 rounded" />
+                      <div className="flex items-center gap-6 mt-3">
+                        <div className="flex-1 space-y-2">
+                          <div className="h-3 w-16 bg-gray-100 rounded" />
+                          <div className="h-7 w-28 bg-gray-200 rounded" />
+                          <div className="h-2 w-full bg-gray-100 rounded-full" />
+                        </div>
+                        <div className="w-28 h-28 rounded-full bg-gray-100 flex-shrink-0" />
                       </div>
-                      <div className="w-28 h-28 rounded-full bg-gray-100 flex-shrink-0" />
                     </div>
                   </div>
                 </div>
-              </div>
-            ) : heroProps ? (
-              <HeroHealthSection {...heroProps} liveChannels={liveChannels} onChannelClick={handleChannelClick} onConnect={() => setViewMode('admin')} />
-            ) : (
-              /* Edge case: no media plan channels set up yet */
-              <div className="bg-white rounded-xl border border-gray-200 p-8 text-center">
-                <p className="text-gray-500 text-sm">
-                  No media plan data found. Add channels in the Media Plan Builder to see your health score.
-                </p>
-              </div>
+              ) : heroProps ? (
+                <HeroHealthSection {...heroProps} liveChannels={liveChannels} onChannelClick={handleChannelClick} onConnect={() => setViewMode('admin')} />
+              ) : (
+                /* Edge case: no media plan channels set up yet */
+                <div className="bg-white rounded-xl border border-gray-200 p-8 text-center">
+                  <p className="text-gray-500 text-sm">
+                    No media plan data found. Add channels in the Media Plan Builder to see your health score.
+                  </p>
+                </div>
+              )
             )}
 
             {/* ── Global View Mode & Date Controls (under hero) ── */}
@@ -2534,17 +2642,24 @@ export default function DashboardV2() {
             )}
 
             {/* ── Media Plan view ── */}
-            {viewMode === 'media-plan' && (
-              <>
-                <div className="rounded-lg p-6" style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)' }}>
-                <MediaPlanGrid
-                  channels={mediaPlanBuilderChannels}
-                  onChannelsChange={handleChannelsChange}
-                  commission={commission}
-                  onCommissionChange={handleCommissionChange}
-                />
-              </div>
-              </>
+            {viewMode === 'media-plan' && sandboxPlanHydrated && (
+              clientSandboxPlan ? (
+                // PlanGrid: container height drives the grid — outerStyle overrides h-screen
+                // so the inner scroll area reaches exactly the container bottom (totals visible)
+                <div style={{ height: 'calc(100vh - 180px)', borderRadius: 12, border: '1px solid rgba(232,228,220,0.7)', boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', overflow: 'hidden' }}>
+                  <PlanGrid
+                    plan={clientSandboxPlan}
+                    onPlanChange={handleClientPlanChange}
+                    onUpload={handleClientPlanUpload}
+                    outerStyle={{ height: '100%' }}
+                  />
+                </div>
+              ) : (
+                // UploadWizard: no height cap so all steps/buttons are reachable
+                <div style={{ borderRadius: 12, border: '1px solid rgba(232,228,220,0.7)', boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', overflow: 'hidden' }}>
+                  <UploadWizard onPlanLoaded={handleClientPlanLoaded} />
+                </div>
+              )
             )}
 
             {/* ── Admin view ── */}
@@ -2589,6 +2704,28 @@ export default function DashboardV2() {
                       })}
                     </div>
                   )}
+                </div>
+
+                {/* Reports section */}
+                <div style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', padding: '20px 24px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <span style={{ fontSize: 13, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Performance Reports</span>
+                    <button
+                      onClick={() => setIsReportModalOpen(true)}
+                      style={{
+                        height: 30, padding: '0 12px', borderRadius: 12,
+                        border: '0.5px solid #D5D0C5', background: '#FDFCF8',
+                        color: '#1C1917', fontSize: 12, fontWeight: 500,
+                        cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif",
+                        display: 'flex', alignItems: 'center', gap: 5,
+                      }}
+                    >
+                      + Generate Report
+                    </button>
+                  </div>
+                  <p style={{ fontSize: 12, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+                    Generate a branded PDF with spend, channel performance, and action points.
+                  </p>
                 </div>
 
                 {/* Client Logo */}
@@ -2799,6 +2936,16 @@ export default function DashboardV2() {
             setInvoiceHistory(updated);
             try { localStorage.setItem(`invoice-history-${clientId}`, JSON.stringify(updated)); } catch {}
           }}
+        />
+      )}
+
+      {/* Report Builder Modal */}
+      {client && (
+        <ReportBuilderModal
+          isOpen={isReportModalOpen}
+          onClose={() => setIsReportModalOpen(false)}
+          clientId={clientId}
+          clientName={client.name}
         />
       )}
 

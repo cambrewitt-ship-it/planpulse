@@ -409,9 +409,17 @@ interface FeeRowRendererProps {
 }
 
 function FeeRowRenderer({ fee, weekCount, stickyBase, onUpdateName, onUpdateAmount, onDelete }: FeeRowRendererProps) {
-  const [editingField, setEditingField] = useState<'name' | 'amount' | null>(null);
+  const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState(fee.name);
-  const [draftAmount, setDraftAmount] = useState(String(fee.amount || ""));
+  const [draftAmount, setDraftAmount] = useState(fee.amount > 0 ? String(fee.amount) : "");
+
+  // Keep draft in sync if fee changes externally
+  useEffect(() => { setDraftAmount(fee.amount > 0 ? String(fee.amount) : ""); }, [fee.amount]);
+
+  const commitAmount = () => {
+    const parsed = parseFloat(draftAmount.replace(/[^0-9.]/g, ""));
+    onUpdateAmount(isNaN(parsed) ? 0 : Math.max(0, parsed));
+  };
 
   return (
     <tr style={{ height: ROW_H }} className="group">
@@ -419,16 +427,16 @@ function FeeRowRenderer({ fee, weekCount, stickyBase, onUpdateName, onUpdateAmou
         colSpan={4}
         className={`${stickyBase} bg-amber-50/60 border-amber-100`}
         style={{ position: "sticky", left: 0, zIndex: 10 }}
-        onDoubleClick={() => { setDraftName(fee.name); setEditingField('name'); }}
+        onDoubleClick={() => { setDraftName(fee.name); setEditingName(true); }}
       >
-        {editingField === 'name' ? (
+        {editingName ? (
           <input
             autoFocus
             value={draftName}
             onChange={e => setDraftName(e.target.value)}
-            onBlur={() => { onUpdateName(draftName); setEditingField(null); }}
+            onBlur={() => { onUpdateName(draftName); setEditingName(false); }}
             onKeyDown={e => {
-              if (e.key === 'Enter' || e.key === 'Escape') { onUpdateName(draftName); setEditingField(null); }
+              if (e.key === 'Enter' || e.key === 'Escape') { onUpdateName(draftName); setEditingName(false); }
             }}
             className="w-full bg-transparent border-none outline-none text-xs font-medium text-amber-900"
           />
@@ -441,34 +449,29 @@ function FeeRowRenderer({ fee, weekCount, stickyBase, onUpdateName, onUpdateAmou
         )}
       </td>
       <td
-        className={`${stickyBase} text-right align-middle bg-amber-50/60 border-amber-100`}
-        style={{ position: "sticky", left: LEFT_OFFSETS.total, zIndex: 10 }}
-        onDoubleClick={() => { setDraftAmount(String(fee.amount || "")); setEditingField('amount'); }}
+        className="border border-amber-200 px-2 py-1 text-right align-middle bg-amber-50 cursor-text"
+        style={{ position: "sticky", left: LEFT_OFFSETS.total, zIndex: 10, width: COL_WIDTHS.total, minWidth: COL_WIDTHS.total }}
       >
-        {editingField === 'amount' ? (
+        <div className="flex items-center justify-end gap-1">
+          <span className="text-amber-500 text-xs select-none">$</span>
           <input
-            autoFocus
-            type="number"
+            type="text"
+            inputMode="numeric"
             value={draftAmount}
-            onChange={e => setDraftAmount(e.target.value)}
-            onBlur={() => { onUpdateAmount(Math.max(0, parseInt(draftAmount) || 0)); setEditingField(null); }}
-            onKeyDown={e => {
-              if (e.key === 'Enter' || e.key === 'Escape') { onUpdateAmount(Math.max(0, parseInt(draftAmount) || 0)); setEditingField(null); }
-            }}
-            className="w-full bg-transparent border-none outline-none text-xs text-right font-medium"
+            onChange={e => setDraftAmount(e.target.value.replace(/[^0-9.]/g, ""))}
+            onBlur={commitAmount}
+            onKeyDown={e => { if (e.key === 'Enter') commitAmount(); }}
+            placeholder="0"
+            className="w-full bg-transparent border-none outline-none text-sm font-semibold text-amber-900 text-right placeholder:text-amber-300 focus:placeholder:text-amber-200 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
           />
-        ) : (
-          <div className="flex items-center justify-end gap-1">
-            <span className="font-medium text-amber-900">{fee.amount > 0 ? fmt(fee.amount) : <span className="text-gray-300">—</span>}</span>
-            <button
-              onClick={onDelete}
-              className="text-gray-200 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
-              title="Delete fee"
-            >
-              <Trash2 className="w-3 h-3" />
-            </button>
-          </div>
-        )}
+          <button
+            onClick={onDelete}
+            className="text-amber-200 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100 flex-shrink-0"
+            title="Delete fee"
+          >
+            <Trash2 className="w-3 h-3" />
+          </button>
+        </div>
       </td>
       <td
         colSpan={weekCount}
@@ -1087,18 +1090,40 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
               />
             ))}
 
-            <tr className="bg-gray-50 font-semibold" style={{ height: ROW_H }}>
-              <td colSpan={4} className={`${stickyBase} font-bold bg-gray-800 text-white`}
+            {fees.length > 0 && (() => {
+              const feesTotal = fees.reduce((s, f) => s + f.amount, 0);
+              return (
+                <tr style={{ height: ROW_H }}>
+                  <td
+                    colSpan={4}
+                    className={`${stickyBase} bg-amber-100 border-amber-200 font-bold text-amber-900`}
+                    style={{ position: "sticky", left: 0, zIndex: 10 }}
+                  >
+                    TOTAL NON-MEDIA FEES
+                  </td>
+                  <td
+                    className={`${stickyBase} text-right bg-amber-100 border-amber-200 font-bold text-amber-900`}
+                    style={{ position: "sticky", left: LEFT_OFFSETS.total, zIndex: 10 }}
+                  >
+                    {feesTotal > 0 ? fmt(feesTotal) : <span className="text-amber-400">—</span>}
+                  </td>
+                  <td colSpan={weeks.length} className="border border-amber-100 bg-amber-50/20" />
+                </tr>
+              );
+            })()}
+
+            <tr style={{ height: ROW_H + 4 }}>
+              <td colSpan={4} className="border border-gray-700 px-2 py-2 text-xs font-bold bg-gray-800 text-white uppercase tracking-wide"
                 style={{ position: "sticky", left: 0, zIndex: 10 }}>
-                TOTAL
+                {fees.length > 0 ? "TOTAL MEDIA PLAN" : "TOTAL"}
               </td>
-              <td className={`${stickyBase} text-right bg-gray-800 text-white font-bold`}
+              <td className="border border-gray-700 px-2 py-2 text-right bg-gray-800 text-white font-bold text-sm"
                 style={{ position: "sticky", left: LEFT_OFFSETS.total, zIndex: 10 }}>
-                {fmt(grandTotal)}
+                {grandTotal > 0 ? fmt(grandTotal) : "$0"}
               </td>
               {monthGroups.map((mg, i) => (
                 <td key={`${mg.month}-${mg.year}`} colSpan={mg.count}
-                  className="border border-gray-200 text-center text-xs font-semibold text-gray-700 bg-gray-50">
+                  className="border border-gray-700 text-center text-xs font-semibold text-gray-300 bg-gray-800">
                   {monthTotals[i] > 0 ? fmt(monthTotals[i]) : ""}
                 </td>
               ))}

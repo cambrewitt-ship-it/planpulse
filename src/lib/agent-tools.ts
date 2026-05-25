@@ -55,6 +55,25 @@ export const TOOL_DEFINITIONS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'get_agency_playbooks',
+    description: 'Fetch the agency\'s internal playbooks, process docs, SOPs, and blueprint documents. Use this whenever asked about agency processes, how we operate, onboarding procedures, billing processes, reporting templates, or any internal documentation.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        category: {
+          type: 'string',
+          enum: ['process', 'sop', 'strategy', 'brand_guidelines', 'onboarding', 'reporting', 'billing', 'compliance', 'other'],
+          description: 'Filter by document category. Omit to return all playbooks.',
+        },
+        search: {
+          type: 'string',
+          description: 'Optional keyword to filter documents by name.',
+        },
+      },
+      required: [],
+    },
+  },
+  {
     name: 'get_channel_performance',
     description: 'Get channel-level performance and spend health for a client. Returns per-channel: planned budget, actual spend, spend variance %, pacing status, and performance KPIs (impressions, clicks, CTR, conversions, CPC, CPM). Use this whenever asked about channel performance, spend pacing, channel health, or specific channel metrics.',
     input_schema: {
@@ -190,6 +209,98 @@ export const TOOL_DEFINITIONS: Anthropic.Tool[] = [
         },
       },
       required: ['client_name'],
+    },
+  },
+
+  // ── Invoice & Reports ─────────────────────────────────────────────────────────
+  {
+    name: 'generate_invoice',
+    description: 'Generate an invoice for a client for a given date range. Returns spend per channel, commission, and total. Use when asked to create, generate, or prepare an invoice.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        client_name: { type: 'string' },
+        start_date: { type: 'string', description: 'YYYY-MM-DD' },
+        end_date: { type: 'string', description: 'YYYY-MM-DD' },
+        spend_type: { type: 'string', enum: ['actual', 'planned'], description: 'Use actual for real spend, planned for media plan budgets. Default: actual.' },
+      },
+      required: ['client_name', 'start_date', 'end_date'],
+    },
+  },
+  {
+    name: 'generate_report',
+    description: 'Generate a performance report for a client for a given date range. Returns a summary of health, spend, channel performance, and action points. Use when asked to create, generate, or prepare a report.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        client_name: { type: 'string' },
+        start_date: { type: 'string', description: 'YYYY-MM-DD' },
+        end_date: { type: 'string', description: 'YYYY-MM-DD' },
+        sections: {
+          type: 'array',
+          items: { type: 'string', enum: ['summary', 'spend', 'channels', 'ga4', 'actions'] },
+          description: 'Which sections to include. Omit for all sections.',
+        },
+      },
+      required: ['client_name', 'start_date', 'end_date'],
+    },
+  },
+
+  // ── Media plan onboarding (Tier 1 write) ─────────────────────────────────────
+  {
+    name: 'set_media_plan_channels',
+    description: "Set (replace) the full media plan for a client from a natural-language description or pasted data. Use when the user describes their plan verbally or pastes channel/budget/date details into chat. Replaces any existing channels for that client.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        client_name: {
+          type: 'string',
+          description: 'The client name (partial match is fine).',
+        },
+        channels: {
+          type: 'array',
+          description: 'Array of channels extracted from the user\'s description.',
+          items: {
+            type: 'object',
+            properties: {
+              channelName: {
+                type: 'string',
+                description: 'Standard channel name e.g. "Meta Ads", "Google Ads", "LinkedIn Ads", "OOH", "EDM / Email".',
+              },
+              customChannelName: {
+                type: 'string',
+                description: 'Only set if channelName is "Other" — the user\'s original channel name.',
+              },
+              format: {
+                type: 'string',
+                description: 'Ad format or placement detail e.g. "Search + Shopping", "Feed + Stories". Empty string if not specified.',
+              },
+              totalBudget: {
+                type: 'number',
+                description: 'Total budget in dollars across all flights for this channel.',
+              },
+              flights: {
+                type: 'array',
+                description: 'One or more flight periods for this channel.',
+                items: {
+                  type: 'object',
+                  properties: {
+                    startDate: { type: 'string', description: 'YYYY-MM-DD — start of flight.' },
+                    endDate: { type: 'string', description: 'YYYY-MM-DD — end of flight.' },
+                    monthlySpend: {
+                      type: 'object',
+                      description: 'Spend per calendar month in YYYY-MM format e.g. {"2026-01": 10000, "2026-02": 10000}. If unknown, distribute totalBudget evenly.',
+                    },
+                  },
+                  required: ['startDate', 'endDate', 'monthlySpend'],
+                },
+              },
+            },
+            required: ['channelName', 'totalBudget', 'flights'],
+          },
+        },
+      },
+      required: ['client_name', 'channels'],
     },
   },
 

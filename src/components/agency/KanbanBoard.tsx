@@ -455,8 +455,11 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
   // In-progress state (local UI state)
   const [inProgressIds, setInProgressIds] = useState<Set<string>>(new Set());
 
-  // Completing state — optimistic scratch-out before card disappears
+  // Completing state — optimistic scratch-out before card disappears.
+  // Keys are `${id}:${daysUntilDue ?? 'none'}` so health-check occurrences
+  // that share the same ap.id but have different due dates are distinct.
   const [completingIds, setCompletingIds] = useState<Set<string>>(new Set());
+  const ck = (c: KanbanCard) => `${c.id}:${c.daysUntilDue ?? 'none'}`;
 
   // Flash/highlight newly AI-created items
   const [flashingIds, setFlashingIds] = useState<Set<string>>(new Set());
@@ -470,8 +473,9 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
       if (tool === 'complete_action_point') {
         const apId = data.action_point?.id;
         if (apId) {
-          setCompletingIds(prev => new Set(prev).add(apId));
-          // Fire confetti from the bottom-right (near the AI chat button)
+          const match = cardsRef.current.find(c => c.id === apId);
+          const key = match ? `${match.id}:${match.daysUntilDue ?? 'none'}` : apId;
+          setCompletingIds(prev => new Set(prev).add(key));
           fireConfetti(window.innerWidth - 50, window.innerHeight - 50);
         }
         setTimeout(() => onActionPointCompleted?.(), 900);
@@ -562,6 +566,9 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
 
   // Flatten all outstanding action points into kanban cards
   const cards: KanbanCard[] = [];
+  // Keep a ref so the AI event handler (useEffect) can resolve completion keys.
+  // Must be declared before the loop so React hook order is stable.
+  const cardsRef = useRef<KanbanCard[]>([]);
   for (const clientGroup of actionPointClients) {
     for (const channelGroup of clientGroup.channels) {
       for (const ap of channelGroup.actionPoints) {
@@ -605,6 +612,7 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
       }
     }
   }
+  cardsRef.current = cards; // sync ref each render so event handler always has latest cards
 
   function fireConfetti(originX: number, originY: number) {
     try {
@@ -663,10 +671,9 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
 
   async function handleComplete(card: KanbanCard, e?: React.MouseEvent) {
     if (e) fireConfetti(e.clientX, e.clientY);
-    // Immediately show scratch-out
-    setCompletingIds(prev => new Set(prev).add(card.id));
+    const key = ck(card);
+    setCompletingIds(prev => new Set(prev).add(key));
     try {
-      // TODO items have no per-client completion — mark the template directly
       const isGenericTodo = card.tag === 'TODO';
       const res = await fetch('/api/action-points', {
         method: 'PUT',
@@ -679,14 +686,13 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
       });
       if (!res.ok) {
         console.error('Failed to complete action point from Kanban');
-        setCompletingIds(prev => { const next = new Set(prev); next.delete(card.id); return next; });
+        setCompletingIds(prev => { const next = new Set(prev); next.delete(key); return next; });
         return;
       }
-      // Let the animation play for 900ms before refreshing
       setTimeout(() => { onActionPointCompleted?.(); }, 900);
     } catch (err) {
       console.error('Error completing action point from Kanban:', err);
-      setCompletingIds(prev => { const next = new Set(prev); next.delete(card.id); return next; });
+      setCompletingIds(prev => { const next = new Set(prev); next.delete(key); return next; });
     }
   }
 
@@ -1075,19 +1081,38 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                 return (
                   <div key={i} style={{
                     width: DAY_W, flexShrink: 0, textAlign: 'center', padding: '4px 0',
-                    fontSize: 8, fontWeight: isToday ? 700 : 400,
-                    color: isToday ? '#A0442A' : isWeekend ? '#D5D0C5' : '#8A8578',
-                    background: isToday ? 'rgba(160,68,42,0.05)' : 'transparent',
-                    borderLeft: isToday ? '1px solid rgba(160,68,42,0.25)' : '0.5px solid #F0EDE8',
+                    fontSize: isToday ? 7 : 8, fontWeight: isToday ? 700 : 400,
+                    color: isToday ? '#3B82F6' : isWeekend ? '#D5D0C5' : '#8A8578',
+                    background: isToday ? 'rgba(59,130,246,0.08)' : 'transparent',
+                    borderLeft: isToday ? '1.5px solid rgba(59,130,246,0.5)' : '0.5px solid #F0EDE8',
+                    letterSpacing: isToday ? '-0.02em' : undefined,
                   }}>
-                    {isToday ? '▼' : `${d.getDate()}`}
+                    {isToday ? 'Today' : `${d.getDate()}`}
                   </div>
                 );
               })}
             </div>
-            {/* Rows */}
+            {/* Rows — wrapped in a relative container so the today overlay is one continuous element */}
+            <div style={{ position: 'relative', minWidth: totalW }}>
+              {/* Single continuous today column overlay */}
+              <div style={{
+                position: 'absolute',
+                left: (-startDay) * DAY_W,
+                top: 0, bottom: 0, width: DAY_W,
+                background: 'rgba(59,130,246,0.04)',
+                pointerEvents: 'none', zIndex: 0,
+              }} />
+              <div style={{
+                position: 'absolute',
+                left: (-startDay) * DAY_W + DAY_W / 2 - 0.5,
+                top: 0, bottom: 0, width: 1,
+                background: 'rgba(59,130,246,0.35)',
+                pointerEvents: 'none', zIndex: 1,
+              }} />
+
             {withDue.map(card => {
               const isInProgress = inProgressIds.has(card.id);
+              const isCompleting = completingIds.has(ck(card));
               const dotColor = card.urgent ? '#A0442A' : card.status === '1-2' ? '#A0442A' : card.status === '3-4' ? '#B07030' : '#4A6580';
               const dotX = (card.daysUntilDue! - startDay) * DAY_W;
 
@@ -1105,19 +1130,20 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
               }
 
               return (
-                <div key={card.id} style={{ position: 'relative', height: ROW_H, minWidth: totalW, borderBottom: '0.5px solid #F0EDE8', background: isInProgress ? '#FFFBF4' : 'transparent' }}>
+                <div key={card.id} style={{ display: 'grid', gridTemplateRows: isCompleting ? '0fr' : '1fr', transition: 'grid-template-rows 0.45s ease 0.35s', overflow: 'hidden' }}>
+                <div style={{ overflow: 'hidden' }}>
+                <div style={{ position: 'relative', height: ROW_H, minWidth: totalW, borderBottom: '0.5px solid #F0EDE8', background: isInProgress ? '#FFFBF4' : 'transparent' }}>
                   {/* Grid columns */}
-                  <div style={{ position: 'absolute', inset: 0, display: 'flex' }}>
+                  <div style={{ position: 'absolute', inset: 0, display: 'flex', zIndex: 0 }}>
                     {Array.from({ length: dayCount }, (_, i) => {
                       const offset = startDay + i;
                       const d = new Date(todayMs + offset * 86400000);
-                      const isToday = offset === 0;
                       const isWeekend = d.getDay() === 0 || d.getDay() === 6;
                       return (
                         <div key={i} style={{
                           width: DAY_W, height: '100%', flexShrink: 0,
-                          background: isToday ? 'rgba(160,68,42,0.04)' : isWeekend ? 'rgba(0,0,0,0.01)' : 'transparent',
-                          borderLeft: isToday ? '1px solid rgba(160,68,42,0.2)' : '0.5px solid #F5F3EF',
+                          background: isWeekend ? 'rgba(0,0,0,0.01)' : 'transparent',
+                          borderLeft: '0.5px solid #F5F3EF',
                         }} />
                       );
                     })}
@@ -1130,14 +1156,14 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                       <div key={futureDays} style={{
                         position: 'absolute', left: fx + DAY_W / 2 - 3, top: '50%', transform: 'translateY(-50%)',
                         width: 6, height: 6, borderRadius: '50%',
-                        background: dotColor, opacity: 0.25, zIndex: 1,
+                        background: dotColor, opacity: 0.25, zIndex: 2,
                       }} />
                     );
                   })}
                   {/* Item — tick + dot + text, clickable */}
                   <div style={{
                     position: 'absolute', left: dotX, top: '50%', transform: 'translateY(-50%)',
-                    display: 'flex', alignItems: 'center', gap: 4, zIndex: 2,
+                    display: 'flex', alignItems: 'center', gap: 4, zIndex: 3,
                   }}>
                     {/* Tick to complete */}
                     <button
@@ -1146,11 +1172,14 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                       title="Mark complete"
                       style={{
                         width: 13, height: 13, borderRadius: '50%', flexShrink: 0,
-                        border: '1px solid #D5D0C5', background: 'transparent',
+                        border: isCompleting ? '1px solid #4A7C59' : '1px solid #D5D0C5',
+                        background: isCompleting ? '#4A7C59' : 'transparent',
                         cursor: 'pointer', padding: 0,
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                       }}
-                    />
+                    >
+                      {isCompleting && <span style={{ color: '#fff', fontSize: 8, lineHeight: 1, fontWeight: 700 }}>✓</span>}
+                    </button>
                     {/* Dot + text — click opens popup */}
                     <div
                       style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', maxWidth: 190 }}
@@ -1162,37 +1191,48 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                       }} />
                       <div style={{ minWidth: 0 }}>
                         <div style={{ fontSize: 9, color: '#B5B0A5', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{card.clientName}</div>
-                        <div style={{ fontSize: 10, fontWeight: 500, color: '#1C1917', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{card.text}</div>
+                        <div style={{ fontSize: 10, fontWeight: 500, color: isCompleting ? '#B5B0A5' : '#1C1917', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', position: 'relative', transition: 'color 0.2s' }}>
+                          {card.text}
+                          {isCompleting && <span style={{ position: 'absolute', left: 0, top: '50%', height: '1.5px', background: '#6B7280', width: 0, animation: 'strike 0.35s ease forwards' }} />}
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
+                </div>
+                </div>
               );
             })}
+            </div>
             {/* No-date items */}
             {noDue.length > 0 && (
               <div style={{ padding: '6px 8px', borderTop: '0.5px solid #E8E4DC' }}>
                 <div style={{ fontSize: 9, color: '#B5B0A5', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>No due date</div>
                 {noDue.map(card => {
                   const dotColor = '#B5B0A5';
+                  const isCompleting = completingIds.has(ck(card));
                   return (
-                    <div key={card.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 0' }}>
+                    <div key={card.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 0', opacity: isCompleting ? 0.5 : 1, transition: 'opacity 0.3s ease' }}>
                       <button
                         type="button"
                         onClick={e => { e.stopPropagation(); void handleComplete(card, e); }}
                         title="Mark complete"
                         style={{
                           width: 13, height: 13, borderRadius: '50%', flexShrink: 0,
-                          border: '1px solid #D5D0C5', background: 'transparent',
+                          border: isCompleting ? '1px solid #4A7C59' : '1px solid #D5D0C5',
+                          background: isCompleting ? '#4A7C59' : 'transparent',
                           cursor: 'pointer', padding: 0,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
                         }}
-                      />
+                      >
+                        {isCompleting && <span style={{ color: '#fff', fontSize: 8, lineHeight: 1, fontWeight: 700 }}>✓</span>}
+                      </button>
                       <div
                         style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}
                         onClick={e => setGanttPopup({ card, x: e.clientX, y: e.clientY })}
                       >
                         <div style={{ width: 8, height: 8, borderRadius: '50%', background: dotColor, flexShrink: 0 }} />
-                        <span style={{ fontSize: 10, color: '#8A8578' }}>{card.clientName} — {card.text}</span>
+                        <span style={{ fontSize: 10, color: isCompleting ? '#B5B0A5' : '#8A8578', textDecoration: isCompleting ? 'line-through' : 'none' }}>{card.clientName} — {card.text}</span>
                       </div>
                     </div>
                   );
@@ -1210,7 +1250,7 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
       <div style={{ display: 'flex', flexDirection: 'column' }}>
         {allCardsSorted.map((card) => {
           const isInProgress = inProgressIds.has(card.id);
-          const isCompleting = completingIds.has(card.id);
+          const isCompleting = completingIds.has(ck(card));
           const isFlashing = flashingIds.has(card.id);
           const colColor = card.status === '1-2' ? '#A0442A' : card.status === '3-4' ? '#B07030' : '#4A6580';
           const clientCol = clientColor(card.clientId);
@@ -1332,7 +1372,7 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
               <div style={{ overflowY: 'auto', maxHeight: 340, display: 'flex', flexDirection: 'column', paddingBottom: overdueCards.length > 3 ? 10 : 2 }}>
                 {overdueCards.map((card) => {
                   const isInProgress = inProgressIds.has(card.id);
-                  const isCompleting = completingIds.has(card.id);
+                  const isCompleting = completingIds.has(ck(card));
                   const isFlashing = flashingIds.has(card.id);
                   const clientCol = clientColor(card.clientId);
                   return (
@@ -1420,7 +1460,7 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
               }}>
               {colCards.map((card) => {
                 const isInProgress = inProgressIds.has(card.id);
-                const isCompleting = completingIds.has(card.id);
+                const isCompleting = completingIds.has(ck(card));
                 const isFlashing = flashingIds.has(card.id);
                 const clientCol = clientColor(card.clientId);
                 return (
