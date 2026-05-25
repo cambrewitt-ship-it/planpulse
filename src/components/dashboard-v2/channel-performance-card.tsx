@@ -60,6 +60,7 @@ export interface ChannelCardProps {
     }>;
     isMultiMonth?: boolean;
     campaigns?: Array<{ id: string; name: string }>;
+    metaCampaignIds?: string[];
     rawSpendPoints?: any[];
   };
   selectedMonth?: Date;
@@ -587,7 +588,12 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
     if (typeof window === 'undefined' || !clientId) return new Set();
     try {
       const saved = localStorage.getItem(`channel-campaigns-${clientId}-${channel.id ?? channel.name}`);
-      return saved ? new Set(JSON.parse(saved) as string[]) : new Set();
+      if (saved) return new Set(JSON.parse(saved) as string[]);
+      // No saved selection — if no onboarding campaigns were configured, default to "Not set up yet"
+      if (!channel.metaCampaignIds?.length && (channel.campaigns?.length ?? 0) > 0) {
+        return new Set([NONE_SENTINEL]);
+      }
+      return new Set();
     } catch { return new Set(); }
   });
 
@@ -602,6 +608,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCampaignIds]);
   const [campaignDropdownOpen, setCampaignDropdownOpen] = useState(false);
+  const [campaignSearch, setCampaignSearch] = useState('');
   const campaignDropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -609,6 +616,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
     function handleClick(e: MouseEvent) {
       if (campaignDropdownRef.current && !campaignDropdownRef.current.contains(e.target as Node)) {
         setCampaignDropdownOpen(false);
+        setCampaignSearch('');
       }
     }
     document.addEventListener('mousedown', handleClick);
@@ -1001,47 +1009,71 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                         )}
                       </button>
                       {campaignDropdownOpen && (
-                        <div className="absolute top-full left-0 mt-1 z-30 bg-white border border-gray-200 rounded-lg shadow-lg py-1 min-w-[220px] max-w-[300px] max-h-64 overflow-y-auto">
-                          {/* All Campaigns */}
-                          <button
-                            onClick={() => { setSelectedCampaignIds(new Set()); if (clientId) { try { localStorage.removeItem(`channel-campaigns-${clientId}-${channel.id ?? channel.name}`); } catch {} } }}
-                            className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors border-b border-gray-100 ${!isNoneSelected && selectedCampaignIds.size === 0 ? 'font-semibold text-blue-600 bg-blue-50' : 'text-gray-600 hover:bg-gray-50'}`}
-                          >
-                            <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0 ${!isNoneSelected && selectedCampaignIds.size === 0 ? 'bg-blue-600 border-blue-600' : 'border-gray-300'}`}>
-                              {!isNoneSelected && selectedCampaignIds.size === 0 && <span className="text-white text-[8px] leading-none">✓</span>}
-                            </span>
-                            All Campaigns
-                          </button>
-                          {/* No Campaigns / Not set up yet */}
-                          <button
-                            onClick={() => {
-                              const next = new Set([NONE_SENTINEL]);
-                              setSelectedCampaignIds(next);
-                              if (clientId) { try { localStorage.setItem(`channel-campaigns-${clientId}-${channel.id ?? channel.name}`, JSON.stringify([...next])); } catch {} }
-                              setCampaignDropdownOpen(false);
-                            }}
-                            className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors border-b border-gray-100 ${isNoneSelected ? 'font-semibold text-amber-600 bg-amber-50' : 'text-gray-600 hover:bg-gray-50'}`}
-                          >
-                            <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0 ${isNoneSelected ? 'bg-amber-500 border-amber-500' : 'border-gray-300'}`}>
-                              {isNoneSelected && <span className="text-white text-[8px] leading-none">✓</span>}
-                            </span>
-                            Not set up yet
-                          </button>
-                          {channel.campaigns.map(c => {
-                            const checked = selectedCampaignIds.has(c.id);
-                            return (
+                        <div className="absolute top-full left-0 mt-1 z-30 bg-white border border-gray-200 rounded-lg shadow-lg min-w-[240px] max-w-[320px]">
+                          {/* Search */}
+                          <div className="px-2 pt-2 pb-1 border-b border-gray-100">
+                            <input
+                              autoFocus
+                              type="text"
+                              placeholder="Search campaigns…"
+                              value={campaignSearch}
+                              onChange={e => setCampaignSearch(e.target.value)}
+                              onClick={e => e.stopPropagation()}
+                              className="w-full text-xs px-2 py-1.5 border border-gray-200 rounded-md outline-none focus:border-blue-400 placeholder-gray-400"
+                            />
+                          </div>
+                          <div className="max-h-56 overflow-y-auto py-1">
+                            {/* All Campaigns — hidden when searching */}
+                            {!campaignSearch && (
                               <button
-                                key={c.id}
-                                onClick={() => toggleCampaign(c.id)}
-                                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors hover:bg-gray-50 text-gray-700"
+                                onClick={() => { setSelectedCampaignIds(new Set()); if (clientId) { try { localStorage.removeItem(`channel-campaigns-${clientId}-${channel.id ?? channel.name}`); } catch {} } }}
+                                className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors border-b border-gray-100 ${!isNoneSelected && selectedCampaignIds.size === 0 ? 'font-semibold text-blue-600 bg-blue-50' : 'text-gray-600 hover:bg-gray-50'}`}
                               >
-                                <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0 ${checked ? 'bg-blue-600 border-blue-600' : 'border-gray-300'}`}>
-                                  {checked && <span className="text-white text-[8px] leading-none">✓</span>}
+                                <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0 ${!isNoneSelected && selectedCampaignIds.size === 0 ? 'bg-blue-600 border-blue-600' : 'border-gray-300'}`}>
+                                  {!isNoneSelected && selectedCampaignIds.size === 0 && <span className="text-white text-[8px] leading-none">✓</span>}
                                 </span>
-                                <span className="truncate text-left">{c.name}</span>
+                                All Campaigns
                               </button>
-                            );
-                          })}
+                            )}
+                            {/* Not set up yet — hidden when searching */}
+                            {!campaignSearch && (
+                              <button
+                                onClick={() => {
+                                  const next = new Set([NONE_SENTINEL]);
+                                  setSelectedCampaignIds(next);
+                                  if (clientId) { try { localStorage.setItem(`channel-campaigns-${clientId}-${channel.id ?? channel.name}`, JSON.stringify([...next])); } catch {} }
+                                  setCampaignDropdownOpen(false);
+                                  setCampaignSearch('');
+                                }}
+                                className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors border-b border-gray-100 ${isNoneSelected ? 'font-semibold text-amber-600 bg-amber-50' : 'text-gray-600 hover:bg-gray-50'}`}
+                              >
+                                <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0 ${isNoneSelected ? 'bg-amber-500 border-amber-500' : 'border-gray-300'}`}>
+                                  {isNoneSelected && <span className="text-white text-[8px] leading-none">✓</span>}
+                                </span>
+                                Not set up yet
+                              </button>
+                            )}
+                            {channel.campaigns
+                              .filter(c => !campaignSearch || c.name.toLowerCase().includes(campaignSearch.toLowerCase()))
+                              .map(c => {
+                                const checked = selectedCampaignIds.has(c.id);
+                                return (
+                                  <button
+                                    key={c.id}
+                                    onClick={() => toggleCampaign(c.id)}
+                                    className="w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors hover:bg-gray-50 text-gray-700"
+                                  >
+                                    <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0 ${checked ? 'bg-blue-600 border-blue-600' : 'border-gray-300'}`}>
+                                      {checked && <span className="text-white text-[8px] leading-none">✓</span>}
+                                    </span>
+                                    <span className="truncate text-left">{c.name}</span>
+                                  </button>
+                                );
+                              })}
+                            {campaignSearch && channel.campaigns.filter(c => c.name.toLowerCase().includes(campaignSearch.toLowerCase())).length === 0 && (
+                              <p className="px-3 py-2 text-xs text-gray-400">No campaigns match</p>
+                            )}
+                          </div>
                         </div>
                       )}
                     </div>

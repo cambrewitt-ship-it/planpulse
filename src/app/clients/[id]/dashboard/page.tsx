@@ -1513,6 +1513,17 @@ export default function DashboardV2() {
         isMultiMonth,
         campaigns: (() => {
           const seen = new Map<string, string>();
+          // Seed with campaigns saved during onboarding so they always appear,
+          // even before spend data has been synced for the first time.
+          const savedIds: string[] = (ch as any).metaCampaignIds ?? [];
+          const savedNames: string[] = (ch as any).metaCampaignNames ?? [];
+          savedIds.forEach((id: string, i: number) => {
+            if (id) seen.set(id, savedNames[i] ?? id);
+          });
+          if (!savedIds.length && (ch as any).metaCampaignId) {
+            seen.set((ch as any).metaCampaignId, (ch as any).metaCampaignName ?? (ch as any).metaCampaignId);
+          }
+          // Merge in any additional campaigns found in actual spend data.
           chMetricPoints.forEach((p: any) => {
             if (p.campaignId && p.campaignName && !seen.has(p.campaignId)) {
               seen.set(p.campaignId, p.campaignName);
@@ -1520,6 +1531,7 @@ export default function DashboardV2() {
           });
           return Array.from(seen.entries()).map(([id, name]) => ({ id, name }));
         })(),
+        metaCampaignIds: (ch as any).metaCampaignIds ?? [],
         rawSpendPoints: chMetricPoints,
       };
     }).sort((a, b) => channelSortOrder(a) - channelSortOrder(b));
