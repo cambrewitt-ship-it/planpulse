@@ -80,22 +80,37 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Look up user's connection for Meta Ads
-    // If clientId is provided, filter by it; otherwise find any active connection
-    let query = supabase
-      .from('ad_platform_connections')
-      .select('connection_id, platform, connection_status')
-      .eq('user_id', user.id)
-      .eq('platform', 'meta-ads')
-      .eq('connection_status', 'active');
-    
-    if (clientId) {
-      query = query.eq('client_id', clientId);
-    }
-    
-    const { data: connection, error: dbError } = await query.single();
+    // Look up user's connection for Meta Ads.
+    // First try client-specific, then fall back to any active connection (same
+    // pattern as the channel-account route so accounts saved at user level work).
+    let connection: { connection_id: string; platform: string; connection_status: string } | null = null;
 
-    if (dbError || !connection) {
+    if (clientId) {
+      const { data: clientConnection } = await supabase
+        .from('ad_platform_connections')
+        .select('connection_id, platform, connection_status')
+        .eq('user_id', user.id)
+        .eq('platform', 'meta-ads')
+        .eq('connection_status', 'active')
+        .eq('client_id', clientId)
+        .maybeSingle();
+      connection = clientConnection;
+    }
+
+    if (!connection) {
+      // Fall back to any active Meta Ads connection for this user
+      const { data: anyConnection } = await supabase
+        .from('ad_platform_connections')
+        .select('connection_id, platform, connection_status')
+        .eq('user_id', user.id)
+        .eq('platform', 'meta-ads')
+        .eq('connection_status', 'active')
+        .limit(1)
+        .maybeSingle();
+      connection = anyConnection;
+    }
+
+    if (!connection) {
       return Response.json(
         { error: 'Meta Ads not connected. Please connect your account first.' },
         { status: 404 }
@@ -121,56 +136,41 @@ export async function POST(request: NextRequest) {
     console.log('Connection ID:', connection.connection_id);
 
     try {
-      // Step 1: Get Meta Ads accounts from database, restricted to accounts
-      // that have stored performance data for this client. This prevents
-      // cross-client data leakage when multiple clients share the same user.
+      // Step 1: Get Meta Ads accounts.
+      // Try client-specific first; fall back to user-level accounts so accounts
+      // saved without a client_id (or for a different client) still work here.
       let metaAdsAccounts: any[] = [];
       {
-        const { data: allAccounts, error: accountsError } = await supabase
-          .from('meta_ads_accounts')
-          .select('*')
-          .eq('user_id', user.id)
-          .eq('is_active', true);
-
-        if (accountsError || !allAccounts || allAccounts.length === 0) {
-          return Response.json({
-            success: false,
-            error: 'No Meta Ads accounts configured'
-          }, { status: 404 });
-        }
-
-        // If a clientId was provided, only include accounts that have
-        // ad_performance_metrics rows for that client.
         if (clientId) {
-          const { data: clientMetrics } = await supabase
-            .from('ad_performance_metrics')
-            .select('account_id')
+          const { data: clientAccounts } = await supabase
+            .from('meta_ads_accounts')
+            .select('*')
+            .eq('user_id', user.id)
             .eq('client_id', clientId)
-            .eq('platform', 'meta-ads')
-            .limit(500);
-
-          const clientAccountIds = new Set(
-            (clientMetrics || []).map((r: any) => String(r.account_id).replace(/^act_/, ''))
-          );
-
-          if (clientAccountIds.size > 0) {
-            metaAdsAccounts = allAccounts.filter((acc: any) =>
-              clientAccountIds.has(String(acc.account_id).replace(/^act_/, ''))
-            );
-          } else {
-            // No stored metrics for this client yet — use all active accounts
-            // on first fetch so data can be seeded into ad_performance_metrics.
-            metaAdsAccounts = allAccounts;
+            .eq('is_active', true);
+          if (clientAccounts && clientAccounts.length > 0) {
+            metaAdsAccounts = clientAccounts;
           }
-        } else {
-          metaAdsAccounts = allAccounts;
         }
 
         if (metaAdsAccounts.length === 0) {
-          return Response.json({
-            success: false,
-            error: 'No Meta Ads accounts configured for this client'
-          }, { status: 404 });
+          // Fall back to any active account for this user (user-level or other clients)
+          const { data: anyAccounts, error: accountsError } = await supabase
+            .from('meta_ads_accounts')
+            .select('*')
+            .eq('user_id', user.id)
+            .eq('is_active', true);
+
+          if (accountsError || !anyAccounts || anyAccounts.length === 0) {
+            return Response.json({
+              success: false,
+              error: clientId
+                ? 'No Meta Ads accounts configured for this client. Please add an account in Platform Connections.'
+                : 'No Meta Ads accounts configured',
+            }, { status: 404 });
+          }
+
+          metaAdsAccounts = anyAccounts;
         }
       }
 

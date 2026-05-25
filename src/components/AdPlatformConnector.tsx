@@ -464,7 +464,7 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
   const fetchMetaAdsAccounts = async () => {
     setIsLoadingMetaAccounts(true);
     try {
-      const response = await fetch('/api/ads/meta/get-accounts');
+      const response = await fetch(`/api/ads/meta/get-accounts?clientId=${clientId}`);
       if (response.ok) {
         const data = await response.json();
         setMetaAdsAccounts(data.accounts || []);
@@ -1135,8 +1135,8 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
                             <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
                           </div>
                         ) : metaAdsAccounts.length === 0 ? (
-                          <div className="text-center py-6 bg-gray-50 rounded-lg border-2 border-dashed border-gray-200">
-                            <p className="text-sm text-gray-500">No accounts added yet</p>
+                          <div className="text-center py-6 bg-red-50 rounded-lg border-2 border-dashed border-red-200">
+                            <p className="text-sm font-medium text-red-600">No Saved Account — Configure Now</p>
                           </div>
                         ) : (
                           <div className="space-y-2">

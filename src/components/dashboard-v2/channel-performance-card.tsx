@@ -643,22 +643,11 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
     const campaigns = channel.campaigns;
     if (!campaigns || campaigns.length === 0) return null;
     if (isNoneSelected) return 'NOT SET UP YET';
-    if (selectedCampaignIds.size === 0 || selectedCampaignIds.size === campaigns.length) return 'ALL CAMPAIGNS';
-    const selected = campaigns.filter(c => selectedCampaignIds.has(c.id));
+    const allSelected = selectedCampaignIds.size === 0 || selectedCampaignIds.size === campaigns.length;
+    const selected = allSelected ? campaigns : campaigns.filter(c => selectedCampaignIds.has(c.id));
+    if (selected.length === 0) return 'ALL CAMPAIGNS';
     if (selected.length === 1) return selected[0].name.toUpperCase();
-    return selected.map(c => c.name.toUpperCase()).join(' + ');
-  })();
-
-  // For 3+ selected campaigns, split into two display lines at the midpoint
-  const campaignLines = (() => {
-    if (!campaignSubtitle || isNoneSelected || selectedCampaignIds.size < 3) return null;
-    const campaigns = channel.campaigns ?? [];
-    const selected = campaigns.filter(c => selectedCampaignIds.has(c.id));
-    if (selected.length < 3) return null;
-    const mid = Math.ceil(selected.length / 2);
-    const line1 = selected.slice(0, mid).map(c => c.name.toUpperCase()).join(' + ');
-    const line2 = '+ ' + selected.slice(mid).map(c => c.name.toUpperCase()).join(' + ');
-    return [line1, line2];
+    return `${selected[0].name.toUpperCase()} + ${selected.length - 1} MORE`;
   })();
 
   const convEventStorageKey = `conv-event-${clientId ?? ''}-${channel.id ?? channel.name}`;
@@ -999,14 +988,11 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                           <h3 className="text-sm font-bold" style={{ color: '#1C1917', fontFamily: "'Inter', system-ui, sans-serif" }}>
                             {channel.name.toUpperCase()}
                             {campaignSubtitle && (
-                              <span className="text-gray-500"> — {campaignLines ? campaignLines[0] : campaignSubtitle}</span>
+                              <span className="text-gray-500"> — {campaignSubtitle}</span>
                             )}
                           </h3>
                           <ChevronDown className="w-3 h-3 flex-shrink-0 text-gray-400" />
                         </div>
-                        {campaignLines?.[1] && (
-                          <div className="text-sm font-bold text-gray-500 leading-snug">{campaignLines[1]}</div>
-                        )}
                       </button>
                       {campaignDropdownOpen && (
                         <div className="absolute top-full left-0 mt-1 z-30 bg-white border border-gray-200 rounded-lg shadow-lg min-w-[240px] max-w-[320px]">

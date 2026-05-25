@@ -49,6 +49,7 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
   const [selectedMonths, setSelectedMonths] = useState<Record<string, Date>>({});
   const [selectedCampaigns, setSelectedCampaigns] = useState<Record<string, string>>({}); // channelId -> campaignId ('all' means all campaigns)
   const [channelActualSpend, setChannelActualSpend] = useState<Record<string, number>>({}); // channelId -> actualSpend
+  const [fetchedCampaigns, setFetchedCampaigns] = useState<Record<string, { id: string; name: string }[]>>({}); // channelType -> campaigns from API
 
   // Handle actual spend change from a channel card
   const handleActualSpendChange = (channelId: string, actualSpend: number) => {
@@ -465,6 +466,25 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
     }
   };
 
+  // Fetch the full campaign list for a Meta Ads channel type from the API
+  const fetchCampaignsList = async (channelType: string) => {
+    if (!clientId) return;
+    try {
+      const params = new URLSearchParams({ clientId });
+      const response = await fetch(`/api/ads/meta/campaigns?${params}`);
+      if (!response.ok) return;
+      const { campaigns } = await response.json();
+      if (campaigns && Array.isArray(campaigns)) {
+        setFetchedCampaigns(prev => ({
+          ...prev,
+          [channelType]: campaigns.map((c: any) => ({ id: c.id, name: c.name })),
+        }));
+      }
+    } catch (error) {
+      console.error(`Error fetching campaigns for ${channelType}:`, error);
+    }
+  };
+
   // Auto-fetch spend data and action points for channels on mount
   useEffect(() => {
     console.log('MediaChannels useEffect: Running with', {
@@ -476,6 +496,7 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
     });
     
     // Prioritize mediaPlanBuilderChannels over activePlan.channels
+    const fetchedCampaignTypes = new Set<string>();
     if (mediaPlanBuilderChannels && mediaPlanBuilderChannels.length > 0) {
       console.log('MediaChannels: Processing mediaPlanBuilderChannels');
       mediaPlanBuilderChannels.forEach((channel) => {
@@ -488,6 +509,10 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
         fetchActionPoints(channelType);
         if (clientId) {
           fetchConnectedAccount(channelType);
+          if (isMetaAdsChannel(channel.channelName) && !fetchedCampaignTypes.has(channelType)) {
+            fetchedCampaignTypes.add(channelType);
+            fetchCampaignsList(channelType);
+          }
         } else {
           console.log('MediaChannels: Skipping fetchConnectedAccount - no clientId');
         }
@@ -502,6 +527,10 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
         fetchActionPoints(channelType);
         if (clientId) {
           fetchConnectedAccount(channelType);
+          if (isMetaAdsChannel(channel.channel) && !fetchedCampaignTypes.has(channelType)) {
+            fetchedCampaignTypes.add(channelType);
+            fetchCampaignsList(channelType);
+          }
         }
       });
     }
@@ -855,17 +884,33 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
       // Get selected campaign for this channel (default to 'all')
       const selectedCampaignId = selectedCampaigns[channel.id] || 'all';
       
-      // Extract unique campaigns from live spend data for this channel
-      const channelLiveSpendData = liveSpendData[channel.id] || [];
-      const campaignsMap = new Map<string, { id: string; name: string }>();
-      channelLiveSpendData.forEach((item) => {
-        const campaignId = item.campaignId || '';
-        const campaignName = item.campaignName || '';
-        if (campaignId && campaignName && !campaignsMap.has(campaignId)) {
-          campaignsMap.set(campaignId, { id: campaignId, name: campaignName });
-        }
-      });
-      const campaigns = Array.from(campaignsMap.values());
+      // Use campaigns fetched directly from the Meta API (all campaigns, not just those with spend).
+      // Fall back to extracting from live spend data if the API fetch hasn't completed yet.
+      const apiCampaigns = fetchedCampaigns[channelType];
+      let campaigns: { id: string; name: string }[];
+      if (apiCampaigns && apiCampaigns.length > 0) {
+        campaigns = apiCampaigns;
+      } else {
+        const channelLiveSpendData = liveSpendData[channel.id] || [];
+        const campaignsMap = new Map<string, { id: string; name: string }>();
+        channelLiveSpendData.forEach((item) => {
+          if (accountId && hasConnectedAccount) {
+            let matches = false;
+            if (item.accountId) {
+              matches = String(item.accountId).replace(/^act_/, '') === String(accountId).replace(/^act_/, '');
+            } else if (item.customerId) {
+              matches = String(item.customerId).replace(/-/g, '') === String(accountId).replace(/-/g, '');
+            }
+            if (!matches) return;
+          }
+          const campaignId = item.campaignId || '';
+          const campaignName = item.campaignName || '';
+          if (campaignId && campaignName && !campaignsMap.has(campaignId)) {
+            campaignsMap.set(campaignId, { id: campaignId, name: campaignName });
+          }
+        });
+        campaigns = Array.from(campaignsMap.values());
+      }
       
       // Check if this is a MediaPlanBuilder channel (has _monthlySpendTotals or we have original channels)
       const isMediaPlanBuilderChannel = !!(channel as any)._monthlySpendTotals || (originalMediaPlanChannels && originalMediaPlanChannels.some(c => c.id === channel.id));
@@ -901,9 +946,10 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
           // Also try padded format
           const paddedMonthKey = `${year}-${String(month).padStart(2, '0')}`; // e.g., "2024-12" or "2024-01"
           
-          // Find all channels with the same channel name (same media channel type)
-          const channelsWithSameName = originalMediaPlanChannels.filter(c => 
-            getChannelDisplayName(c.channelName, c.format || '') === channelType
+          // Find all channels with the same channel name AND campaign (detail/format)
+          const channelsWithSameName = originalMediaPlanChannels.filter(c =>
+            getChannelDisplayName(c.channelName, c.format || '') === channelType &&
+            (c.format || '') === (channel.detail || '')
           );
           
           // Debug logging
@@ -973,9 +1019,10 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
         // If not found from original channels, try stored totals
         // Sum across all channels with the same channel type
         if (!foundInOriginalChannels && (monthlySpendTotal === undefined || monthlySpendTotal === 0)) {
-          // Find all channels with the same channel name and sum their stored totals
-          const channelsWithSameName = channels.filter(c => 
-            getChannelDisplayName(c.channel, c.detail) === channelType
+          // Find all channels with the same channel name AND campaign (detail)
+          const channelsWithSameName = channels.filter(c =>
+            getChannelDisplayName(c.channel, c.detail) === channelType &&
+            (c.detail || '') === (channel.detail || '')
           );
           
           monthlySpendTotal = 0;
@@ -1002,9 +1049,10 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
           const selectedMonthStart = startOfMonth(selectedMonth);
           const selectedMonthEnd = endOfMonth(selectedMonth);
           
-          // Find all channels with the same channel name and sum their weekly plans
-          const channelsWithSameName = channels.filter(c => 
-            getChannelDisplayName(c.channel, c.detail) === channelType
+          // Find all channels with the same channel name AND campaign (detail)
+          const channelsWithSameName = channels.filter(c =>
+            getChannelDisplayName(c.channel, c.detail) === channelType &&
+            (c.detail || '') === (channel.detail || '')
           );
           
           // Collect weekly plans from all channels with the same name
@@ -1138,7 +1186,8 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
         connectedAccountId: accountId,
         selectedMonth: selectedMonth,
         campaigns: campaigns,
-        selectedCampaignId: selectedCampaignId
+        selectedCampaignId: selectedCampaignId,
+        campaignName: channel.detail || undefined,
       };
     });
   };
@@ -1151,10 +1200,11 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
     
     channels.forEach((channel) => {
       const channelName = channel.name;
-      if (!grouped.has(channelName)) {
-        grouped.set(channelName, []);
+      const groupKey = channelName + (channel.campaignName ? ':' + channel.campaignName : '');
+      if (!grouped.has(groupKey)) {
+        grouped.set(groupKey, []);
       }
-      grouped.get(channelName)!.push(channel);
+      grouped.get(groupKey)!.push(channel);
     });
     
     // Aggregate data for each group
@@ -1273,8 +1323,9 @@ export default function MediaChannels({ activePlan, clientId, mediaPlanBuilderCh
 
       return {
         ...firstChannel,
-        id: `grouped-${channelName}`, // Use a grouped ID
+        id: `grouped-${channelName}${firstChannel.campaignName ? '-' + firstChannel.campaignName : ''}`,
         monthBudget: totalMonthBudget,
+        campaignName: firstChannel.campaignName,
         totalMonthlySpend: totalMonthlySpend, // Preserve total monthly spend
         spendData: aggregatedSpendData,
         liveSpendData: allLiveSpendData,

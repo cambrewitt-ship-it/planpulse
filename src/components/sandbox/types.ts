@@ -20,6 +20,7 @@ export interface PlanRow {
   detail: string;
   audience: string;
   flights: Flight[];
+  customFields?: Record<string, string>;
   flightGroupId?: string; // rows sharing a vertically-merged flight block
   isMasterRow?: boolean;  // true = renders the flight cell with rowspan; false = skips it
 }
@@ -30,6 +31,11 @@ export interface FeeRow {
   amount: number;
 }
 
+export interface CustomColumn {
+  id: string;
+  name: string;
+}
+
 export interface SandboxPlan {
   id: string;
   title: string;
@@ -37,6 +43,7 @@ export interface SandboxPlan {
   weeks: Week[];
   rows: PlanRow[];
   fees?: FeeRow[];
+  customColumns?: CustomColumn[];
   updatedAt: string;
 }
 

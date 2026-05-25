@@ -317,6 +317,8 @@ function MetricCard({ title, value, sub, badge, progress, children }: MetricCard
 function PerfSparkline({ clientId, perf, perfLoading, onConnect }: { clientId: string; perf: PerfData | null; perfLoading?: boolean; onConnect?: () => void }) {
   const [series, setSeries] = useState<Array<{ date: string; value: number }>>([]);
   const [loading, setLoading] = useState(false);
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
 
   useEffect(() => {
     if (!perf?.metric) return;
@@ -372,7 +374,7 @@ function PerfSparkline({ clientId, perf, perfLoading, onConnect }: { clientId: s
         `}</style>
         <div className="flex items-center justify-between mb-1">
           <span className="text-xs text-gray-300 uppercase tracking-wide font-medium">
-            {metric || 'Performance'} · 30 day
+            {metric || 'Performance'} · {/cpa|cpl/i.test(metric) ? 'MTD' : '30 day'}
           </span>
         </div>
         <div className="relative rounded overflow-hidden" style={{ background: '#F9FAFB' }}>
@@ -392,20 +394,26 @@ function PerfSparkline({ clientId, perf, perfLoading, onConnect }: { clientId: s
   const noData = !perf?.hasData || cleanSeries.length < 1;
 
   if (noData) {
+    // Distinguish: goal exists but no actuals (platform issue) vs no goal at all
+    const hasGoal = !!(perf?.metric);
     return (
       <div className="w-full">
         <div className="flex items-center justify-between mb-1">
-          <span className="text-xs text-gray-300 uppercase tracking-wide font-medium">Performance · 30 day</span>
+          <span className="text-xs text-gray-300 uppercase tracking-wide font-medium">
+            {metric || 'Performance'} · {/cpa|cpl/i.test(metric) ? 'MTD' : '30 day'}
+          </span>
         </div>
         <div className="relative">
           {shellSvg}
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
-            <span className="text-[11px] font-bold tracking-widest text-gray-400 uppercase">No Data</span>
+            <span className="text-[11px] font-bold tracking-widest text-gray-400 uppercase">
+              {hasGoal ? 'No conversions data' : 'No Data'}
+            </span>
             <button
               onClick={() => onConnect ? onConnect() : (window.location.href = '/settings/connections')}
               className="text-[10px] font-semibold px-3 py-1 rounded-full bg-gray-800 text-white hover:bg-gray-600 transition-colors cursor-pointer"
             >
-              Connect
+              {hasGoal ? 'Configure event' : 'Connect'}
             </button>
           </div>
         </div>
@@ -424,15 +432,14 @@ function PerfSparkline({ clientId, perf, perfLoading, onConnect }: { clientId: s
   // Falls back to a data-padded range when no target.
   let chartMin: number, chartMax: number;
   if (target !== null) {
-    const maxDev = Math.max(Math.abs(dataMin - target), Math.abs(dataMax - target));
-    const pad = Math.max(maxDev * 1.25, Math.abs(target) * 0.1, 1);
-    chartMin = target - pad;
-    chartMax = target + pad;
+    chartMax = target * 1.5;
+    chartMin = target * 0.5;
   } else {
     const r = (dataMax - dataMin) || Math.abs(dataMax) * 0.1 || 1;
     chartMin = dataMin - r * 0.15;
     chartMax = dataMax + r * 0.15;
   }
+  if (/cpa|cpc|cpm|cpl/.test(mk) && chartMin < 0) chartMin = 0;
   const span = chartMax - chartMin || 1;
 
   const toX = (i: number) =>
@@ -455,8 +462,7 @@ function PerfSparkline({ clientId, perf, perfLoading, onConnect }: { clientId: s
     'Z',
   ].join(' ');
 
-  // Target is always at the vertical midpoint of the chart.
-  const targetY = target !== null ? PT + ph / 2 : null;
+  const targetY = target !== null ? toY(target) : null;
 
   function fmtY(v: number): string {
     if (/ctr/.test(mk)) return `${v.toFixed(1)}%`;
@@ -480,17 +486,30 @@ function PerfSparkline({ clientId, perf, perfLoading, onConnect }: { clientId: s
   const gradId = `sg_${clientId}`;
   const clipId = `sc_${clientId}`;
 
+  const handleMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const rect = svg.getBoundingClientRect();
+    const svgX = ((e.clientX - rect.left) / rect.width) * W;
+    let nearest = 0, minDist = Infinity;
+    pts.forEach((p, i) => {
+      const d = Math.abs(p.x - svgX);
+      if (d < minDist) { minDist = d; nearest = i; }
+    });
+    setHoverIdx(nearest);
+  };
+
   return (
     <div className="w-full">
       <div className="flex items-center justify-between mb-1">
-        <span className="text-xs text-gray-400 uppercase tracking-wide font-medium">{metric} · 30 day</span>
+        <span className="text-xs text-gray-400 uppercase tracking-wide font-medium">{metric} · {/cpa|cpl/i.test(metric) ? 'MTD' : '30 day'}</span>
         {perf.trend24h && (
           <span className={`text-xs font-semibold ${perf.trend24h.improving ? 'text-emerald-600' : 'text-red-600'}`}>
             {perf.trend24h.pctChange < 0 ? '↓' : '↑'}{Math.abs(perf.trend24h.pctChange).toFixed(1)}% 24h
           </span>
         )}
       </div>
-      <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
+      <svg ref={svgRef} width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible', cursor: 'crosshair' }} onMouseMove={handleMouseMove} onMouseLeave={() => setHoverIdx(null)}>
         <defs>
           <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%"   stopColor={lineColor} stopOpacity={0.2} />
@@ -564,6 +583,28 @@ function PerfSparkline({ clientId, perf, perfLoading, onConnect }: { clientId: s
 
         {/* Latest value dot */}
         <circle cx={pts[pts.length - 1].x} cy={pts[pts.length - 1].y} r={3} fill={lineColor} />
+
+        {/* Hover crosshair + tooltip */}
+        {hoverIdx !== null && (() => {
+          const hp = pts[hoverIdx];
+          const hs = cleanSeries[hoverIdx];
+          const hv = values[hoverIdx];
+          const d = new Date(`${hs.date}T12:00:00`);
+          const dateLabel = isNaN(d.getTime()) ? hs.date : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+          const valLabel = fmtY(hv);
+          const tipW = 54, tipH = 30, tipPad = 6;
+          const tipX = hp.x + tipPad + tipW > PL + pw ? hp.x - tipW - tipPad : hp.x + tipPad;
+          const tipY = Math.max(PT, Math.min(hp.y - tipH / 2, bottom - tipH));
+          return (
+            <g>
+              <line x1={hp.x} y1={PT} x2={hp.x} y2={bottom} stroke="#9CA3AF" strokeWidth={0.75} strokeDasharray="3 2" />
+              <circle cx={hp.x} cy={hp.y} r={3.5} fill="white" stroke={lineColor} strokeWidth={1.5} />
+              <rect x={tipX} y={tipY} width={tipW} height={tipH} rx={3} fill="#1C1917" opacity={0.88} />
+              <text x={tipX + tipW / 2} y={tipY + 12} textAnchor="middle" fontSize={9.5} fontWeight="700" fill="white" fontFamily="system-ui, sans-serif">{valLabel}</text>
+              <text x={tipX + tipW / 2} y={tipY + 23} textAnchor="middle" fontSize={7.5} fill="#9CA3AF" fontFamily="system-ui, sans-serif">{dateLabel}</text>
+            </g>
+          );
+        })()}
       </svg>
     </div>
   );
@@ -788,7 +829,7 @@ export default function HeroHealthSection({
               <HealthRing score={healthScore.overallScore} status={healthScore.status} perf={perfData} loading={isLoadingScore} scale={0.6} />
               {perfData?.hasData && (
                 <p className="text-[10px] font-bold text-center leading-tight mt-0.5" style={{ color: perfData.color }}>
-                  {perfData.metric}
+                  {perfData.metric.toUpperCase()}
                 </p>
               )}
             </div>

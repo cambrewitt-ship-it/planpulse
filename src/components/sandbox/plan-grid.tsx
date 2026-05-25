@@ -2,24 +2,29 @@
 
 import React, { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { Plus, Trash2, Upload, Download, X, Check, Edit2 } from "lucide-react";
-import type { SandboxPlan, PlanRow, Flight, Week, FeeRow } from "./types";
+import type { SandboxPlan, PlanRow, Flight, Week, FeeRow, CustomColumn } from "./types";
 import { FLIGHT_COLORS } from "./types";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const COL_WIDTHS = { funnel: 100, channel: 140, detail: 140, audience: 160, total: 110 };
+const COL_WIDTHS = { del: 32, funnel: 100, channel: 140, detail: 140, audience: 160, total: 110 };
+const CUSTOM_COL_W = 140;
 const WEEK_W = 72;
+const WEEK_W_MIN = 28;
+const WEEK_W_MAX = 120;
+const WEEK_W_STEP = 8;
 const ROW_H = 38;
 const HEADER_H = 32;
 const LEFT_COLS_WIDTH =
-  COL_WIDTHS.funnel + COL_WIDTHS.channel + COL_WIDTHS.detail + COL_WIDTHS.audience + COL_WIDTHS.total;
+  COL_WIDTHS.del + COL_WIDTHS.funnel + COL_WIDTHS.channel + COL_WIDTHS.detail + COL_WIDTHS.audience + COL_WIDTHS.total;
 
 const LEFT_OFFSETS = {
-  funnel: 0,
-  channel: COL_WIDTHS.funnel,
-  detail: COL_WIDTHS.funnel + COL_WIDTHS.channel,
-  audience: COL_WIDTHS.funnel + COL_WIDTHS.channel + COL_WIDTHS.detail,
-  total: COL_WIDTHS.funnel + COL_WIDTHS.channel + COL_WIDTHS.detail + COL_WIDTHS.audience,
+  del: 0,
+  funnel: COL_WIDTHS.del,
+  channel: COL_WIDTHS.del + COL_WIDTHS.funnel,
+  detail: COL_WIDTHS.del + COL_WIDTHS.funnel + COL_WIDTHS.channel,
+  audience: COL_WIDTHS.del + COL_WIDTHS.funnel + COL_WIDTHS.channel + COL_WIDTHS.detail,
+  total: COL_WIDTHS.del + COL_WIDTHS.funnel + COL_WIDTHS.channel + COL_WIDTHS.detail + COL_WIDTHS.audience,
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -159,11 +164,12 @@ function FlightPopover({ flight, onSave, onDelete, onClose, anchorRef }: FlightP
       <label className="text-xs text-gray-500 block mb-1">Budget</label>
       <input
         autoFocus
-        type="number"
+        type="text"
+        inputMode="numeric"
         value={budget}
-        onChange={e => setBudget(e.target.value)}
+        onChange={e => setBudget(e.target.value.replace(/[^0-9.]/g, ""))}
         onKeyDown={e => {
-          if (e.key === "Enter") onSave(Math.max(0, parseInt(budget) || 0), color);
+          if (e.key === "Enter") onSave(Math.max(0, parseFloat(budget) || 0), color);
           if (e.key === "Escape") onClose();
         }}
         className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-blue-400"
@@ -180,7 +186,7 @@ function FlightPopover({ flight, onSave, onDelete, onClose, anchorRef }: FlightP
       </div>
       <div className="flex gap-2">
         <button
-          onClick={() => onSave(Math.max(0, parseInt(budget) || 0), color)}
+          onClick={() => onSave(Math.max(0, parseFloat(budget) || 0), color)}
           className="flex-1 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 flex items-center justify-center gap-1"
         >
           <Check className="w-3 h-3" /> Save
@@ -386,6 +392,44 @@ function ResizeHandle({ side, onMouseDown }: ResizeHandleProps) {
   );
 }
 
+// ── Add column modal ──────────────────────────────────────────────────────────
+
+function AddColumnModal({ onAdd, onClose }: { onAdd: (name: string) => void; onClose: () => void }) {
+  const [name, setName] = useState("");
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
+      <div className="bg-white rounded-2xl shadow-2xl p-6 w-80">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-semibold text-gray-900">Add column</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="w-4 h-4" /></button>
+        </div>
+        <input
+          autoFocus
+          value={name}
+          onChange={e => setName(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === "Enter" && name.trim()) { onAdd(name.trim()); onClose(); }
+            if (e.key === "Escape") onClose();
+          }}
+          placeholder="e.g. Creative format"
+          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 mb-4"
+        />
+        <div className="flex gap-2">
+          <button
+            onClick={() => { if (name.trim()) { onAdd(name.trim()); onClose(); } }}
+            className="flex-1 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700"
+          >
+            Add column
+          </button>
+          <button onClick={onClose} className="py-2.5 px-4 border border-gray-200 text-gray-600 rounded-xl text-sm hover:bg-gray-50">
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Fee row renderer ──────────────────────────────────────────────────────────
 
 const FEE_SUGGESTIONS = [
@@ -403,12 +447,14 @@ interface FeeRowRendererProps {
   fee: FeeRow;
   weekCount: number;
   stickyBase: string;
+  totalOffset: number;
+  leftColSpan: number;
   onUpdateName: (name: string) => void;
   onUpdateAmount: (amount: number) => void;
   onDelete: () => void;
 }
 
-function FeeRowRenderer({ fee, weekCount, stickyBase, onUpdateName, onUpdateAmount, onDelete }: FeeRowRendererProps) {
+function FeeRowRenderer({ fee, weekCount, stickyBase, totalOffset, leftColSpan, onUpdateName, onUpdateAmount, onDelete }: FeeRowRendererProps) {
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState(fee.name);
   const [draftAmount, setDraftAmount] = useState(fee.amount > 0 ? String(fee.amount) : "");
@@ -424,7 +470,7 @@ function FeeRowRenderer({ fee, weekCount, stickyBase, onUpdateName, onUpdateAmou
   return (
     <tr style={{ height: ROW_H }} className="group">
       <td
-        colSpan={4}
+        colSpan={leftColSpan}
         className={`${stickyBase} bg-amber-50/60 border-amber-100`}
         style={{ position: "sticky", left: 0, zIndex: 10 }}
         onDoubleClick={() => { setDraftName(fee.name); setEditingName(true); }}
@@ -450,7 +496,7 @@ function FeeRowRenderer({ fee, weekCount, stickyBase, onUpdateName, onUpdateAmou
       </td>
       <td
         className="border border-amber-200 px-2 py-1 text-right align-middle bg-amber-50 cursor-text"
-        style={{ position: "sticky", left: LEFT_OFFSETS.total, zIndex: 10, width: COL_WIDTHS.total, minWidth: COL_WIDTHS.total }}
+        style={{ position: "sticky", left: totalOffset, zIndex: 10, width: COL_WIDTHS.total, minWidth: COL_WIDTHS.total }}
       >
         <div className="flex items-center justify-end gap-1">
           <span className="text-amber-500 text-xs select-none">$</span>
@@ -557,8 +603,15 @@ interface Props {
 
 export function PlanGrid({ plan, onPlanChange, onUpload, outerStyle }: Props) {
   const [rows, setRows] = useState<PlanRow[]>(plan.rows);
-  const [weeks, setWeeks] = useState<Week[]>(plan.weeks);
+  const [weeks, setWeeks] = useState<Week[]>(() => {
+    if (plan.weeks.length >= 52) return plan.weeks;
+    const year = plan.weeks[0]?.year ?? new Date().getFullYear();
+    return generateWeeksForYear(year, 52);
+  });
   const [fees, setFees] = useState<FeeRow[]>(plan.fees ?? []);
+  const [customColumns, setCustomColumns] = useState<CustomColumn[]>(plan.customColumns ?? []);
+  const [weekWidth, setWeekWidth] = useState(WEEK_W);
+  const [showAddColumn, setShowAddColumn] = useState(false);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [resizeState, setResizeState] = useState<ResizeState | null>(null);
   const [editingFlight, setEditingFlight] = useState<EditingFlight | null>(null);
@@ -574,14 +627,17 @@ export function PlanGrid({ plan, onPlanChange, onUpload, outerStyle }: Props) {
   const isDragging = dragState !== null;
   const isResizing = resizeState !== null;
 
+  const dynamicTotalLeft = LEFT_OFFSETS.audience + COL_WIDTHS.audience + customColumns.length * CUSTOM_COL_W;
+  const leftColSpan = 5 + customColumns.length; // DEL + FUNNEL + CHANNEL + DETAIL + AUDIENCE + custom cols
+
   const planYear = weeks[0]?.year ?? new Date().getFullYear();
   const yearOptions = Array.from({ length: 7 }, (_, i) => new Date().getFullYear() - 2 + i);
 
-  // Sync rows + weeks + fees to parent
+  // Sync rows + weeks + fees + customColumns to parent
   useEffect(() => {
-    onPlanChange({ ...plan, rows, weeks, fees, updatedAt: new Date().toISOString() });
+    onPlanChange({ ...plan, rows, weeks, fees, customColumns, updatedAt: new Date().toISOString() });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, weeks, fees]);
+  }, [rows, weeks, fees, customColumns]);
 
   const rowSpans = useMemo(() => computeRowSpans(rows), [rows]);
   const monthGroups = useMemo(() => groupWeeksByMonth(weeks), [weeks]);
@@ -677,6 +733,28 @@ export function PlanGrid({ plan, onPlanChange, onUpload, outerStyle }: Props) {
     setFees(prev => prev.filter(f => f.id !== feeId));
   }, []);
 
+  // ── Custom column helpers ─────────────────────────────────────────────────
+
+  const addCustomColumn = useCallback((name: string) => {
+    const col: CustomColumn = { id: uid(), name };
+    setCustomColumns(prev => [...prev, col]);
+  }, []);
+
+  const deleteCustomColumn = useCallback((colId: string) => {
+    setCustomColumns(prev => prev.filter(c => c.id !== colId));
+  }, []);
+
+  const updateCustomField = useCallback((rowId: string, colId: string, value: string) => {
+    setRows(prev => prev.map(r => r.id !== rowId ? r : {
+      ...r,
+      customFields: { ...(r.customFields ?? {}), [colId]: value },
+    }));
+  }, []);
+
+  const renameCustomColumn = useCallback((colId: string, name: string) => {
+    setCustomColumns(prev => prev.map(c => c.id === colId ? { ...c, name } : c));
+  }, []);
+
   // ── Drag-to-create ────────────────────────────────────────────────────────
 
   const startDrag = useCallback((rowId: string, weekIdx: number) => {
@@ -715,12 +793,12 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
       if (!scrollRef.current) return;
       const rect = scrollRef.current.getBoundingClientRect();
       const weekX = e.clientX - rect.left - LEFT_COLS_WIDTH + scrollRef.current.scrollLeft;
-      const idx = Math.max(0, Math.min(weeks.length - 1, Math.floor(weekX / WEEK_W)));
+      const idx = Math.max(0, Math.min(weeks.length - 1, Math.floor(weekX / weekWidth)));
       setDragState(prev => prev ? { ...prev, endIdx: idx } : null);
     };
     window.addEventListener('mousemove', handleMove);
     return () => window.removeEventListener('mousemove', handleMove);
-  }, [isDragging, weeks.length]);
+  }, [isDragging, weeks.length, weekWidth]);
 
   useEffect(() => {
     if (!isResizing || !resizeState) return;
@@ -731,7 +809,7 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
       const rect = scrollRef.current.getBoundingClientRect();
       const scrollLeft = scrollRef.current.scrollLeft;
       const weekX = e.clientX - rect.left - LEFT_COLS_WIDTH + scrollLeft;
-      const weekIdx = Math.max(0, Math.min(weeks.length - 1, Math.floor(weekX / WEEK_W)));
+      const weekIdx = Math.max(0, Math.min(weeks.length - 1, Math.floor(weekX / weekWidth)));
 
       setRows(prev => prev.map(row => {
         if (row.id !== resizeState.rowId) return row;
@@ -763,7 +841,7 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
       window.removeEventListener('mousemove', handleMove);
       window.removeEventListener('mouseup', handleUp);
     };
-  }, [isResizing, resizeState, weeks]);
+  }, [isResizing, resizeState, weeks, weekWidth]);
 
   // ── Week cell renderer ────────────────────────────────────────────────────
 
@@ -791,7 +869,7 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
                 if (!scrollRef.current) return;
                 const rect = scrollRef.current.getBoundingClientRect();
                 const weekX = e.clientX - rect.left - LEFT_COLS_WIDTH + scrollRef.current.scrollLeft;
-                const weekIdx = Math.max(0, Math.min(weeks.length - 1, Math.floor(weekX / WEEK_W)));
+                const weekIdx = Math.max(0, Math.min(weeks.length - 1, Math.floor(weekX / weekWidth)));
                 startDrag(row.id, weekIdx);
               }}
             />
@@ -846,7 +924,7 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
               outline: isBeingResized ? `2px solid white` : undefined,
               outlineOffset: '-2px',
             }}
-            className="group/flight border border-white/30 text-center text-xs font-semibold text-white cursor-pointer select-none"
+            className="group/flight border border-white/30 text-center text-xs font-semibold text-white cursor-pointer"
             onClick={e => {
               if (resizeMoved.current) return;
               e.stopPropagation();
@@ -881,7 +959,11 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
             />
 
             {isEditing && (
-              <div style={{ position: "absolute", top: 0, left: 0 }}>
+              <div
+                style={{ position: "absolute", top: 0, left: 0 }}
+                onMouseDown={e => e.stopPropagation()}
+                onClick={e => e.stopPropagation()}
+              >
                 <FlightPopover
                   flight={flight}
                   anchorRef={flightAnchorRef}
@@ -909,7 +991,7 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
             if (!scrollRef.current) return;
             const rect = scrollRef.current.getBoundingClientRect();
             const weekX = e.clientX - rect.left - LEFT_COLS_WIDTH + scrollRef.current.scrollLeft;
-            const weekIdx = Math.max(0, Math.min(weeks.length - 1, Math.floor(weekX / WEEK_W)));
+            const weekIdx = Math.max(0, Math.min(weeks.length - 1, Math.floor(weekX / weekWidth)));
             startDrag(row.id, weekIdx);
           }}
         />
@@ -947,6 +1029,27 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
           </select>
         </div>
 
+        {/* Zoom */}
+        <div className="flex items-center gap-0.5 border border-gray-200 rounded-lg overflow-hidden">
+          <button
+            onClick={() => setWeekWidth(w => Math.max(WEEK_W_MIN, w - WEEK_W_STEP))}
+            disabled={weekWidth <= WEEK_W_MIN}
+            className="px-2.5 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 disabled:text-gray-300 disabled:cursor-not-allowed transition-colors"
+            title="Zoom out"
+          >
+            −
+          </button>
+          <span className="text-xs text-gray-400 select-none px-1">{Math.round((weekWidth / WEEK_W) * 100)}%</span>
+          <button
+            onClick={() => setWeekWidth(w => Math.min(WEEK_W_MAX, w + WEEK_W_STEP))}
+            disabled={weekWidth >= WEEK_W_MAX}
+            className="px-2.5 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 disabled:text-gray-300 disabled:cursor-not-allowed transition-colors"
+            title="Zoom in"
+          >
+            +
+          </button>
+        </div>
+
         {/* Color picker */}
         <div className="flex items-center gap-1.5">
           <span className="text-xs text-gray-500">Draw colour:</span>
@@ -979,45 +1082,80 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
       <div ref={scrollRef} className="flex-1 overflow-auto bg-white">
         <table
           className="border-collapse"
-          style={{ tableLayout: "fixed", minWidth: `${LEFT_COLS_WIDTH + weeks.length * WEEK_W}px` }}
+          style={{ tableLayout: "fixed", minWidth: `${LEFT_COLS_WIDTH + weeks.length * weekWidth}px` }}
         >
           <colgroup>
+            <col style={{ width: COL_WIDTHS.del }} />
             <col style={{ width: COL_WIDTHS.funnel }} />
             <col style={{ width: COL_WIDTHS.channel }} />
             <col style={{ width: COL_WIDTHS.detail }} />
             <col style={{ width: COL_WIDTHS.audience }} />
+            {customColumns.map(c => <col key={c.id} style={{ width: CUSTOM_COL_W }} />)}
             <col style={{ width: COL_WIDTHS.total }} />
-            {weeks.map(w => <col key={w.weekStart} style={{ width: WEEK_W }} />)}
+            {weeks.map(w => <col key={w.weekStart} style={{ width: weekWidth }} />)}
           </colgroup>
 
           <thead>
             <tr style={{ height: HEADER_H }}>
-              <th colSpan={5} className={stickyHeader}
-                style={{ position: "sticky", left: 0, zIndex: 30, textAlign: "left" }} />
+              <th colSpan={6 + customColumns.length} className={stickyHeader}
+                style={{ position: "sticky", left: 0, top: 0, zIndex: 30, textAlign: "left" }} />
               {monthGroups.map(mg => (
                 <th key={`${mg.month}-${mg.year}`} colSpan={mg.count}
-                  className="border border-gray-300 bg-gray-700 text-white text-xs font-bold uppercase tracking-wider text-center">
+                  className="border border-gray-300 bg-gray-700 text-white text-xs font-bold uppercase tracking-wider text-center"
+                  style={{ position: "sticky", top: 0, zIndex: 2 }}>
                   {mg.month} {mg.year !== planYear ? mg.year : ""}
                 </th>
               ))}
             </tr>
 
             <tr style={{ height: HEADER_H }}>
+              <th className={stickyHeader}
+                style={{ position: "sticky", left: LEFT_OFFSETS.del, top: HEADER_H, zIndex: 20 }} />
               {(["FUNNEL", "CHANNEL", "DETAIL", "AUDIENCE"] as const).map((label, i) => {
                 const offsets = [LEFT_OFFSETS.funnel, LEFT_OFFSETS.channel, LEFT_OFFSETS.detail, LEFT_OFFSETS.audience];
                 return (
                   <th key={label} className={stickyHeader}
-                    style={{ position: "sticky", left: offsets[i], zIndex: 20, textAlign: "left" }}>
+                    style={{ position: "sticky", left: offsets[i], top: HEADER_H, zIndex: 20, textAlign: "left" }}>
                     {label}
                   </th>
                 );
               })}
+              {customColumns.map((col, ci) => {
+                const colLeft = LEFT_OFFSETS.audience + COL_WIDTHS.audience + ci * CUSTOM_COL_W;
+                return (
+                  <th key={col.id}
+                    className={`${stickyHeader} group/colhdr`}
+                    style={{ position: "sticky", left: colLeft, top: HEADER_H, zIndex: 20, width: CUSTOM_COL_W }}>
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="truncate">{col.name}</span>
+                      <button
+                        onClick={() => deleteCustomColumn(col.id)}
+                        className="opacity-0 group-hover/colhdr:opacity-100 text-gray-400 hover:text-red-400 transition-all flex-shrink-0"
+                        title="Remove column"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </th>
+                );
+              })}
               <th className={stickyHeader}
-                style={{ position: "sticky", left: LEFT_OFFSETS.total, zIndex: 20, textAlign: "right" }}>
-                TOTAL
+                style={{ position: "sticky", left: dynamicTotalLeft, top: HEADER_H, zIndex: 20 }}>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setShowAddColumn(true)}
+                    className="text-gray-400 hover:text-white transition-colors flex-shrink-0"
+                    title="Add column"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                  </button>
+                  <span className="flex-1 text-right">TOTAL</span>
+                </div>
               </th>
               {weeks.map(w => (
-                <th key={w.weekStart} className="border border-gray-300 bg-gray-800 text-white text-xs font-medium text-center whitespace-nowrap">
+                <th key={w.weekStart}
+                  className="border border-gray-300 bg-gray-800 text-white text-xs font-medium text-center whitespace-nowrap"
+                  style={{ position: "sticky", top: HEADER_H, zIndex: 2 }}>
                   {w.label}
                 </th>
               ))}
@@ -1029,7 +1167,19 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
               const span = rowSpans[rowIdx];
               const rowTotal = totalForRow(row);
               return (
-                <tr key={row.id} style={{ height: ROW_H }}>
+                <tr key={row.id} style={{ height: ROW_H }} className="group">
+                  <td
+                    className={`${stickyBase} text-center align-middle`}
+                    style={{ position: "sticky", left: LEFT_OFFSETS.del, zIndex: 10 }}
+                  >
+                    <button
+                      onClick={() => deleteRow(row.id)}
+                      className="text-gray-300 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+                      title="Delete row"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </td>
                   {span.showFunnel && (
                     <EditableCell value={row.funnel} rowSpan={span.funnelSpan} bold
                       onChange={val => {
@@ -1064,15 +1214,27 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
                     className={`${stickyBase} text-left align-middle`}
                     style={{ position: "sticky", left: LEFT_OFFSETS.audience, zIndex: 10 }}
                   />
-                  <td className={`${stickyBase} text-right align-middle font-medium`}
-                    style={{ position: "sticky", left: LEFT_OFFSETS.total, zIndex: 10 }}>
-                    {rowTotal > 0 ? fmt(rowTotal) : ""}
-                    <button onClick={() => deleteRow(row.id)}
-                      className="ml-1 text-gray-200 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
-                      title="Delete row">
-                      <Trash2 className="w-3 h-3 inline" />
-                    </button>
-                  </td>
+                  {customColumns.map((col, ci) => {
+                    const colLeft = LEFT_OFFSETS.audience + COL_WIDTHS.audience + ci * CUSTOM_COL_W;
+                    return (
+                      <EditableCell
+                        key={col.id}
+                        value={row.customFields?.[col.id] ?? ""}
+                        onChange={val => updateCustomField(row.id, col.id, val)}
+                        className={`${stickyBase} text-left align-middle`}
+                        style={{ position: "sticky", left: colLeft, zIndex: 10 }}
+                      />
+                    );
+                  })}
+                  {(!row.flightGroupId || row.isMasterRow) && (
+                    <td
+                      className={`${stickyBase} text-right align-middle font-medium`}
+                      style={{ position: "sticky", left: dynamicTotalLeft, zIndex: 10 }}
+                      rowSpan={row.isMasterRow ? (flightGroups.get(row.flightGroupId!)?.length ?? 1) : 1}
+                    >
+                      {rowTotal > 0 ? fmt(rowTotal) : ""}
+                    </td>
+                  )}
                   {renderWeekCells(row, rowIdx)}
                 </tr>
               );
@@ -1084,6 +1246,8 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
                 fee={fee}
                 weekCount={weeks.length}
                 stickyBase={stickyBase}
+                totalOffset={dynamicTotalLeft}
+                leftColSpan={leftColSpan}
                 onUpdateName={name => updateFee(fee.id, { name })}
                 onUpdateAmount={amount => updateFee(fee.id, { amount })}
                 onDelete={() => deleteFee(fee.id)}
@@ -1095,7 +1259,7 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
               return (
                 <tr style={{ height: ROW_H }}>
                   <td
-                    colSpan={4}
+                    colSpan={leftColSpan}
                     className={`${stickyBase} bg-amber-100 border-amber-200 font-bold text-amber-900`}
                     style={{ position: "sticky", left: 0, zIndex: 10 }}
                   >
@@ -1103,7 +1267,7 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
                   </td>
                   <td
                     className={`${stickyBase} text-right bg-amber-100 border-amber-200 font-bold text-amber-900`}
-                    style={{ position: "sticky", left: LEFT_OFFSETS.total, zIndex: 10 }}
+                    style={{ position: "sticky", left: dynamicTotalLeft, zIndex: 10 }}
                   >
                     {feesTotal > 0 ? fmt(feesTotal) : <span className="text-amber-400">—</span>}
                   </td>
@@ -1112,13 +1276,34 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
               );
             })()}
 
+            {/* Add channel row */}
+            <tr style={{ height: 34 }}>
+              <td
+                colSpan={leftColSpan}
+                className="border border-dashed border-blue-100 bg-white"
+                style={{ position: "sticky", left: 0, zIndex: 10 }}
+              >
+                <button
+                  onClick={() => setShowAddRow(true)}
+                  className="flex items-center gap-1.5 px-2 text-xs text-gray-300 hover:text-blue-500 font-medium transition-colors w-full py-1"
+                >
+                  <Plus className="w-3 h-3" /> Add channel
+                </button>
+              </td>
+              <td
+                className="border border-dashed border-blue-100 bg-white"
+                style={{ position: "sticky", left: dynamicTotalLeft, zIndex: 10, width: COL_WIDTHS.total, minWidth: COL_WIDTHS.total }}
+              />
+              <td colSpan={weeks.length} className="border border-dashed border-blue-100 bg-white" />
+            </tr>
+
             <tr style={{ height: ROW_H + 4 }}>
-              <td colSpan={4} className="border border-gray-700 px-2 py-2 text-xs font-bold bg-gray-800 text-white uppercase tracking-wide"
+              <td colSpan={leftColSpan} className="border border-gray-700 px-2 py-2 text-xs font-bold bg-gray-800 text-white uppercase tracking-wide"
                 style={{ position: "sticky", left: 0, zIndex: 10 }}>
                 {fees.length > 0 ? "TOTAL MEDIA PLAN" : "TOTAL"}
               </td>
               <td className="border border-gray-700 px-2 py-2 text-right bg-gray-800 text-white font-bold text-sm"
-                style={{ position: "sticky", left: LEFT_OFFSETS.total, zIndex: 10 }}>
+                style={{ position: "sticky", left: dynamicTotalLeft, zIndex: 10 }}>
                 {grandTotal > 0 ? fmt(grandTotal) : "$0"}
               </td>
               {monthGroups.map((mg, i) => (
@@ -1155,6 +1340,13 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
             setRows(prev => [...prev, { id: uid(), funnel, channel, detail, audience, flights: [] }]);
           }}
           onClose={() => setShowAddRow(false)}
+        />
+      )}
+
+      {showAddColumn && (
+        <AddColumnModal
+          onAdd={name => addCustomColumn(name)}
+          onClose={() => setShowAddColumn(false)}
         />
       )}
     </div>

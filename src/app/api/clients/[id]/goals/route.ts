@@ -106,6 +106,10 @@ export async function GET(_req: NextRequest, { params }: Params) {
       ? ([...new Set(channels.map(ch => ch.platform).filter(Boolean))] as string[])
       : (['meta-ads', 'google-ads'] as string[]);
 
+  // Tracks the auto-detected Meta action type when the user hasn't configured one explicitly.
+  // Determined in step 4b, applied to the series build so the sparkline reflects the same event.
+  let autoMetaActionType: string | null = null;
+
   let actuals: Record<string, {
     spend: number; impressions: number; clicks: number; conversions: number;
     cpc_sum: number; cpc_count: number; cpm_sum: number; cpm_count: number;
@@ -165,6 +169,40 @@ export async function GET(_req: NextRequest, { params }: Params) {
         }
       }
       actuals['meta-ads'].conversions = metaConvs;
+    }
+
+    // 4b. Auto-detect Meta conversion event when none is configured.
+    // Meta stores conversions: null — all event data lives in meta_actions JSONB.
+    // Without this, CPA is always null for Meta even when campaigns are running.
+    if (!metaActionType && actuals['meta-ads'] && actuals['meta-ads'].conversions === 0) {
+      let autoActQuery = supabase
+        .from('ad_performance_metrics')
+        .select('meta_actions')
+        .eq('client_id', clientId)
+        .eq('platform', 'meta-ads')
+        .gte('date', monthStart)
+        .lte('date', today)
+        .not('meta_actions', 'is', null);
+      if (filterCampaignIds.length > 0) autoActQuery = autoActQuery.in('campaign_id', filterCampaignIds);
+      const { data: autoActRows } = await autoActQuery;
+
+      // Tally each offsite/app conversion action type — pick the one with the highest count.
+      // Using a single winner avoids double-counting across related event types.
+      const evtTotals = new Map<string, number>();
+      for (const row of autoActRows ?? []) {
+        for (const act of ((row.meta_actions as any[]) ?? [])) {
+          if (/^offsite_conversion|^mobile_app_install/.test(act.action_type)) {
+            evtTotals.set(act.action_type, (evtTotals.get(act.action_type) ?? 0) + (parseInt(act.value, 10) || 0));
+          }
+        }
+      }
+      let bestCount = 0;
+      for (const [type, count] of evtTotals) {
+        if (count > bestCount) { bestCount = count; autoMetaActionType = type; }
+      }
+      if (autoMetaActionType && bestCount > 0) {
+        actuals['meta-ads'].conversions = bestCount;
+      }
     }
 
     // Derive final metrics per platform
@@ -272,9 +310,10 @@ export async function GET(_req: NextRequest, { params }: Params) {
       cur.spend += Number(row.spend || 0);
       cur.impressions += Number(row.impressions || 0);
       cur.clicks += Number(row.clicks || 0);
-      if (metaActionType && row.meta_actions) {
+      const effectiveActionType = metaActionType || autoMetaActionType;
+      if (effectiveActionType && row.meta_actions) {
         for (const act of (row.meta_actions as any[]) ?? []) {
-          if (act.action_type === metaActionType) cur.conversions += parseInt(act.value, 10) || 0;
+          if (act.action_type === effectiveActionType) cur.conversions += parseInt(act.value, 10) || 0;
         }
       } else {
         cur.conversions += Number(row.conversions || 0);
@@ -331,14 +370,16 @@ export async function GET(_req: NextRequest, { params }: Params) {
   const ga4Events = Object.keys(ga4Totals).sort();
 
   // 9. Available Meta conversion action types from meta_actions JSONB
+  // Look back 90 days so early-month or sparse accounts still surface their events
+  const ninetyDaysAgo = format(subDays(new Date(), 90), 'yyyy-MM-dd');
   const { data: metaEvtRows } = await supabase
     .from('ad_performance_metrics')
     .select('meta_actions')
     .eq('client_id', clientId)
     .eq('platform', 'meta-ads')
-    .gte('date', monthStart)
+    .gte('date', ninetyDaysAgo)
     .not('meta_actions', 'is', null)
-    .limit(300);
+    .limit(500);
 
   const metaEvtMap = new Map<string, number>();
   for (const row of metaEvtRows ?? []) {

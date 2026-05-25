@@ -192,7 +192,6 @@ export default function CreateClientPage() {
   // ── Step 3: Performance Goal ──
   const [goalMetric, setGoalMetric] = useState('');
   const [goalTarget, setGoalTarget] = useState('');
-  const [goalChannel, setGoalChannel] = useState('');
   const [goalSaving, setGoalSaving] = useState(false);
 
   // ── Step 4: Client Intel Hub ──
@@ -408,7 +407,7 @@ export default function CreateClientPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          channel: goalChannel.trim() || 'Overall',
+          channel: 'overarching',
           metric: goalMetric,
           target_value: parseFloat(goalTarget),
           is_primary: true,
@@ -900,18 +899,6 @@ export default function CreateClientPage() {
                   value={goalTarget}
                   onChange={(e) => setGoalTarget(e.target.value)}
                   placeholder="e.g. 25.00"
-                />
-              </div>
-
-              <div className="grid gap-2">
-                <Label htmlFor="goal-channel">
-                  Channel <span className="text-gray-400 font-normal text-xs">(optional — defaults to Overall)</span>
-                </Label>
-                <Input
-                  id="goal-channel"
-                  value={goalChannel}
-                  onChange={(e) => setGoalChannel(e.target.value)}
-                  placeholder="e.g. Meta Ads, Google Ads, Overall…"
                 />
               </div>
 

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { subDays, format } from 'date-fns';
+import { subDays, format, startOfMonth } from 'date-fns';
 
 type Params = { params: Promise<{ id: string }> | { id: string } };
 
@@ -37,8 +37,14 @@ export async function GET(req: NextRequest, { params }: Params) {
   const metaActionType = url.searchParams.get('metaActionType') ?? null;
 
   const today = new Date();
-  const windowStart = format(subDays(today, 29), 'yyyy-MM-dd');
   const todayStr = format(today, 'yyyy-MM-dd');
+  const mk = metric.toLowerCase();
+  const isCumulative = /cpa|cpl/.test(mk);
+  // Cumulative metrics (CPA/CPL) use month-to-date so the series end matches the headline number.
+  // Other metrics use a 30-day rolling window.
+  const windowStart = isCumulative
+    ? format(startOfMonth(today), 'yyyy-MM-dd')
+    : format(subDays(today, 29), 'yyyy-MM-dd');
   const activePlatforms = filterPlatforms.length > 0 ? filterPlatforms : ['meta-ads', 'google-ads'];
 
   let query = supabase
@@ -74,10 +80,8 @@ export async function GET(req: NextRequest, { params }: Params) {
     byDate.set(row.date, cur);
   }
 
-  // Build month-to-date running cumulative per day for CPA/CPL (so values match the widget).
+  // Build running cumulative per day for CPA/CPL (so values match the widget).
   // For other metrics (CTR, CPC, CPM, etc.), use per-day values.
-  const mk = metric.toLowerCase();
-  const isCumulative = /cpa|cpl/.test(mk);
 
   let cumSpend = 0, cumImpressions = 0, cumClicks = 0, cumConversions = 0;
   const seriesMap = new Map<string, number>();
@@ -97,11 +101,10 @@ export async function GET(req: NextRequest, { params }: Params) {
     }
   }
 
-  // Collect the last 30 calendar days that have computed values
+  // Emit all days in the window that have a computed value
   const series: Array<{ date: string; value: number }> = [];
-  for (let i = 29; i >= 0; i--) {
-    const d = format(subDays(today, i), 'yyyy-MM-dd');
-    if (seriesMap.has(d)) series.push({ date: d, value: seriesMap.get(d)! });
+  for (const date of [...seriesMap.keys()].sort()) {
+    series.push({ date, value: seriesMap.get(date)! });
   }
 
   return NextResponse.json({ series, metric });

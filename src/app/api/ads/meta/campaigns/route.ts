@@ -21,27 +21,38 @@ export async function GET(request: NextRequest) {
     const user = session.user;
     const clientId = request.nextUrl.searchParams.get('clientId');
 
-    // Find the connection for this specific client (or first active if no clientId)
-    let connectionQuery = supabase
-      .from('ad_platform_connections')
-      .select('connection_id, client_id')
-      .eq('user_id', user.id)
-      .eq('platform', 'meta-ads')
-      .eq('connection_status', 'active');
+    // Find the connection — try client-specific first, fall back to any active connection.
+    let connection: { connection_id: string; client_id: string | null } | null = null;
 
     if (clientId) {
-      connectionQuery = connectionQuery.eq('client_id', clientId);
+      const { data: clientConns } = await supabase
+        .from('ad_platform_connections')
+        .select('connection_id, client_id')
+        .eq('user_id', user.id)
+        .eq('platform', 'meta-ads')
+        .eq('connection_status', 'active')
+        .eq('client_id', clientId)
+        .limit(1);
+      connection = clientConns?.[0] ?? null;
     }
 
-    const { data: connections } = await connectionQuery.limit(1);
-    const connection = connections?.[0] ?? null;
+    if (!connection) {
+      const { data: anyConns } = await supabase
+        .from('ad_platform_connections')
+        .select('connection_id, client_id')
+        .eq('user_id', user.id)
+        .eq('platform', 'meta-ads')
+        .eq('connection_status', 'active')
+        .limit(1);
+      connection = anyConns?.[0] ?? null;
+    }
 
     if (!connection) {
       return NextResponse.json({ error: 'Meta Ads not connected' }, { status: 404 });
     }
 
     const nangoPlatformKey = toNangoPlatform('meta-ads');
-    const endUserId = `${user.id}:${connection.client_id}`;
+    const endUserId = connection.client_id ? `${user.id}:${connection.client_id}` : user.id;
 
     const candidateIds = [connection.connection_id, endUserId, user.id].filter(
       (id, i, arr) => id && arr.indexOf(id) === i
@@ -80,51 +91,26 @@ export async function GET(request: NextRequest) {
     }
 
     // Determine which ad accounts to query.
-    // When a clientId is provided, prefer accounts that have stored performance
-    // data for that client. For brand-new clients (no metrics yet), fall back to
-    // discovering accounts live from the Meta API using this client's token —
-    // which naturally scopes to accounts accessible by that connection.
+    // Try client-specific first; fall back to user-level accounts.
     let savedAccounts: Array<{ account_id: string; account_name: string | null }> = [];
 
     if (clientId) {
-      const { data: clientMetrics } = await supabase
-        .from('ad_performance_metrics')
+      const { data: clientAccounts } = await supabase
+        .from('meta_ads_accounts')
         .select('account_id, account_name')
+        .eq('user_id', user.id)
         .eq('client_id', clientId)
-        .eq('platform', 'meta-ads')
-        .limit(500);
-
-      const seen = new Map<string, string | null>();
-      (clientMetrics || []).forEach((r: any) => {
-        const id = String(r.account_id).replace(/^act_/, '');
-        if (!seen.has(id)) seen.set(id, r.account_name ?? null);
-      });
-
-      if (seen.size > 0) {
-        savedAccounts = Array.from(seen.entries()).map(([account_id, account_name]) => ({
-          account_id,
-          account_name,
-        }));
-      }
+        .eq('is_active', true);
+      savedAccounts = clientAccounts ?? [];
     }
 
-    // If we still have no accounts, query meta_ads_accounts.
-    // After the migration, filter by client_id when provided so accounts are
-    // fully isolated per client. Also include legacy rows (client_id IS NULL)
-    // so existing data continues to work before any re-save.
     if (savedAccounts.length === 0) {
-      let accountQuery = supabase
+      const { data: anyAccounts } = await supabase
         .from('meta_ads_accounts')
         .select('account_id, account_name')
         .eq('user_id', user.id)
         .eq('is_active', true);
-
-      if (clientId) {
-        accountQuery = accountQuery.or(`client_id.eq.${clientId},client_id.is.null`);
-      }
-
-      const { data: allAccounts } = await accountQuery;
-      savedAccounts = allAccounts ?? [];
+      savedAccounts = anyAccounts ?? [];
     }
 
     if (savedAccounts.length === 0) {

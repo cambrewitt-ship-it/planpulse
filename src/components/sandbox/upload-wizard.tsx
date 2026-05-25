@@ -88,7 +88,7 @@ export function UploadWizard({ onPlanLoaded }: Props) {
 
       const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
       const monthsFull = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
-      const weeks = Array.from({ length: 13 }, (_, i) => {
+      const weeks = Array.from({ length: 52 }, (_, i) => {
         const d = new Date(firstMonday);
         d.setDate(firstMonday.getDate() + i * 7);
         const thu = new Date(d.getTime() + 3 * 86400000); // Thursday determines the month

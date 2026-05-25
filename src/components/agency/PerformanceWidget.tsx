@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
+import { format, startOfMonth } from 'date-fns';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -50,6 +51,29 @@ const PLATFORM_OPTIONS = [
   { id: '' as const, label: 'All' },
   { id: 'meta-ads' as const, label: 'Meta' },
   { id: 'google-ads' as const, label: 'Google' },
+];
+
+// Default Meta pixel / app action types — shown even before data is synced
+const META_DEFAULT_EVENTS: Array<{ name: string; count: number }> = [
+  { name: 'offsite_conversion.fb_pixel_purchase', count: 0 },
+  { name: 'offsite_conversion.fb_pixel_lead', count: 0 },
+  { name: 'offsite_conversion.fb_pixel_complete_registration', count: 0 },
+  { name: 'offsite_conversion.fb_pixel_add_to_cart', count: 0 },
+  { name: 'offsite_conversion.fb_pixel_initiate_checkout', count: 0 },
+  { name: 'offsite_conversion.fb_pixel_view_content', count: 0 },
+  { name: 'offsite_conversion.fb_pixel_contact', count: 0 },
+  { name: 'offsite_conversion.fb_pixel_schedule', count: 0 },
+  { name: 'mobile_app_install', count: 0 },
+  { name: 'app_custom_event.fb_mobile_purchase', count: 0 },
+  { name: 'app_custom_event.fb_mobile_add_to_cart', count: 0 },
+  { name: 'link_click', count: 0 },
+];
+
+// Default GA4 event names — shown even before data is synced
+const GA4_DEFAULT_EVENTS: string[] = [
+  'purchase', 'generate_lead', 'begin_checkout', 'add_to_cart',
+  'view_item', 'sign_up', 'form_submit', 'page_view',
+  'app_install', 'first_open',
 ];
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -159,17 +183,26 @@ function ConfigModal({ clientId, initialConfig, goals, campaigns, ga4Events, met
   const [editConfig, setEditConfig] = useState<WidgetConfig>({ ...initialConfig });
   const [saving, setSaving] = useState(false);
 
+  // Merge fetched events with defaults — fetched events come first (have real counts), defaults fill gaps
+  const mergedMetaEvents: Array<{ name: string; count: number }> = [
+    ...metaEvents,
+    ...META_DEFAULT_EVENTS.filter(d => !metaEvents.some(e => e.name === d.name)),
+  ];
+  const mergedGa4Events: string[] = [
+    ...ga4Events,
+    ...GA4_DEFAULT_EVENTS.filter(d => !ga4Events.includes(d)),
+  ];
+
   const filteredCampaigns = editConfig.platform
     ? campaigns.filter(c => c.platform === editConfig.platform)
     : campaigns;
 
   // Show Meta event picker when platform is meta or all-platforms with ad source
   const showMetaEvents = editConfig.metricSource === 'ad'
-    && (editConfig.platform === 'meta-ads' || editConfig.platform === '')
-    && metaEvents.length > 0;
+    && (editConfig.platform === 'meta-ads' || editConfig.platform === '');
 
   // Show GA4 event picker when GA4 source selected
-  const showGa4Events = editConfig.metricSource === 'ga4' && ga4Events.length > 0;
+  const showGa4Events = editConfig.metricSource === 'ga4';
 
   // Needs configuration nudge
   const needsConversionEvent =
@@ -286,26 +319,20 @@ function ConfigModal({ clientId, initialConfig, goals, campaigns, ga4Events, met
         </div>
 
         {/* ── GA4 Conversion Event ── */}
-        {editConfig.metricSource === 'ga4' && (
+        {showGa4Events && (
           <div style={{ marginBottom: 20 }}>
             <span style={sectionLabel}>GA4 Conversion Event</span>
-            {ga4Events.length > 0 ? (
-              <>
-                <select
-                  value={editConfig.ga4EventName}
-                  onChange={e => setEditConfig(c => ({ ...c, ga4EventName: e.target.value }))}
-                  style={selectStyle}
-                >
-                  <option value="">— select event —</option>
-                  {ga4Events.map(ev => <option key={ev} value={ev}>{ev}</option>)}
-                </select>
-                <p style={{ fontSize: 10, color: '#B5B0A5', marginTop: 4 }}>
-                  This event count becomes the denominator for CPA / CPL calculation
-                </p>
-              </>
-            ) : (
-              <p style={{ fontSize: 12, color: '#B5B0A5' }}>No GA4 events found for this client this month. Sync GA4 data first.</p>
-            )}
+            <select
+              value={editConfig.ga4EventName}
+              onChange={e => setEditConfig(c => ({ ...c, ga4EventName: e.target.value }))}
+              style={selectStyle}
+            >
+              <option value="">— select event —</option>
+              {mergedGa4Events.map(ev => <option key={ev} value={ev}>{ev}</option>)}
+            </select>
+            <p style={{ fontSize: 10, color: '#B5B0A5', marginTop: 4 }}>
+              This event count becomes the denominator for CPA / CPL calculation
+            </p>
           </div>
         )}
 
@@ -332,10 +359,10 @@ function ConfigModal({ clientId, initialConfig, goals, campaigns, ga4Events, met
               onChange={e => setEditConfig(c => ({ ...c, metaActionType: e.target.value }))}
               style={selectStyle}
             >
-              <option value="">— use platform conversions —</option>
-              {metaEvents.map(ev => (
+              <option value="">— use platform total conversions —</option>
+              {mergedMetaEvents.map(ev => (
                 <option key={ev.name} value={ev.name}>
-                  {metaActionLabel(ev.name)} ({ev.count.toLocaleString()})
+                  {metaActionLabel(ev.name)}{ev.count > 0 ? ` (${ev.count.toLocaleString()})` : ''}
                 </option>
               ))}
             </select>
@@ -497,11 +524,13 @@ export function PerformanceWidget({
       : null;
 
     // Daily sparkline series — oldest first
-    // CPA/CPL use cumulative spend÷conversions so sparse-conversion days don't drop out
+    // CPA/CPL: accumulate MTD only so the sparkline end matches the headline number
     let dailySeries: number[];
     if (/cpa|cpl/.test(mk)) {
+      const monthStartStr = format(startOfMonth(new Date()), 'yyyy-MM-dd');
+      const mtdRows = last30DaysSeries.filter(row => row.date >= monthStartStr);
       let cumSpend = 0, cumConv = 0;
-      dailySeries = last30DaysSeries.reduce<number[]>((acc, row) => {
+      dailySeries = mtdRows.reduce<number[]>((acc, row) => {
         cumSpend += row.spend;
         cumConv += row.conversions;
         if (cumConv > 0) acc.push(cumSpend / cumConv);
@@ -573,20 +602,38 @@ export function PerformanceWidget({
     <>
       {/* Gear button */}
       {!hideControls && (
-        <div style={floatingGear ? { position: 'absolute', bottom: 10, left: 10 } : { display: 'flex', justifyContent: 'flex-end' }}>
+        floatingGear ? (
           <button
             onClick={e => { e.stopPropagation(); setShowModal(true); }}
             title="Configure performance metric"
             style={{
-              display: 'flex', alignItems: 'center',
+              position: 'absolute', bottom: 6, left: 6,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
               background: 'none', border: 'none',
-              cursor: 'pointer', padding: 4,
+              cursor: 'pointer', padding: '8px',
               color: needsSetup ? '#B07030' : '#6B7280',
+              borderRadius: 6, lineHeight: 0,
             }}
           >
-            <GearIcon size={floatingGear ? 18 : 12} />
+            <GearIcon size={20} />
           </button>
-        </div>
+        ) : (
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <button
+              onClick={e => { e.stopPropagation(); setShowModal(true); }}
+              title="Configure performance metric"
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: 'none', border: 'none',
+                cursor: 'pointer', padding: '8px',
+                color: needsSetup ? '#B07030' : '#6B7280',
+                borderRadius: 6, lineHeight: 0,
+              }}
+            >
+              <GearIcon size={14} />
+            </button>
+          </div>
+        )
       )}
 
       {/* Config modal via portal */}

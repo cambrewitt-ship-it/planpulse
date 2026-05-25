@@ -399,15 +399,17 @@ export default function DashboardV2() {
     try { localStorage.removeItem(`planpulse_sandbox_plan_${clientId}`); } catch {}
   };
 
-  // One-time sync: when the API has no channels with flights but localStorage has a sandbox
-  // plan with flight data, convert that sandbox plan into MediaPlanChannel format so the
-  // health score and hero section have data to work with.
+  // Sync sandbox plan → MediaPlanChannel whenever the sandbox plan changes.
+  // Only skip if channels with flights came from the API (non-sandbox IDs),
+  // so we don't clobber real ad-platform data.
   useEffect(() => {
     if (!sandboxPlanHydrated || isLoadingMediaPlanBuilder) return;
     if (!clientSandboxPlan?.rows?.length) return;
 
-    const hasFlights = mediaPlanBuilderChannels.some(ch => (ch.flights?.length ?? 0) > 0);
-    if (hasFlights) return;
+    const hasApiFlights = mediaPlanBuilderChannels.some(
+      ch => (ch.flights?.length ?? 0) > 0 && !String(ch.id ?? '').startsWith('sandbox-')
+    );
+    if (hasApiFlights) return;
 
     const MS_PER_WEEK = 7 * 24 * 60 * 60 * 1000;
     const channelMap = new Map<string, { subType?: string; flightMap: Map<string, any> }>();

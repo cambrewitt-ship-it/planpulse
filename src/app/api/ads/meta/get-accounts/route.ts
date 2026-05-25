@@ -17,12 +17,19 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Query meta_ads_accounts for user's accounts
-    const { data: accounts, error: queryError } = await supabase
+    const clientId = request.nextUrl.searchParams.get('clientId');
+
+    // Query meta_ads_accounts for user's accounts, optionally scoped to a client
+    let query = supabase
       .from('meta_ads_accounts')
       .select('id, account_id, account_name, is_active, created_at')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false });
+      .eq('user_id', user.id);
+
+    if (clientId) {
+      query = query.eq('client_id', clientId);
+    }
+
+    const { data: accounts, error: queryError } = await query.order('created_at', { ascending: false });
 
     if (queryError) {
       console.error('Query error:', queryError);

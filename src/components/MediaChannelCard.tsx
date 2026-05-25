@@ -74,6 +74,7 @@ interface MediaChannelCardProps {
     campaigns?: Campaign[];
     selectedCampaignId?: string;
     onCampaignChange?: (campaignId: string) => void;
+    campaignName?: string;
   };
   onToggleAction?: (channelId: string, actionId: string) => void;
   onActualSpendChange?: (channelId: string, actualSpend: number) => void;
@@ -905,6 +906,9 @@ export default function MediaChannelCard({ channel, onToggleAction, onActualSpen
                   <h3 className="text-lg font-semibold text-[#0f172a]">
                     {channel.name}
                   </h3>
+                  {channel.campaignName && (
+                    <span className="text-sm font-medium text-[#64748b]">{channel.campaignName}</span>
+                  )}
                   <Button
                     size="sm"
                     variant="outline"
@@ -1259,21 +1263,31 @@ export default function MediaChannelCard({ channel, onToggleAction, onActualSpen
                   </div>
                   <div className="flex items-center gap-2">
                     {/* Campaign Filter */}
-                    {channel.campaigns && channel.campaigns.length > 0 && (
-                      <Select value={selectedCampaignId} onValueChange={handleCampaignChange}>
-                        <SelectTrigger className="h-7 text-xs w-[180px]">
-                          <SelectValue placeholder="All Campaigns" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">All Campaigns</SelectItem>
-                          {channel.campaigns.map((campaign) => (
-                            <SelectItem key={campaign.id} value={campaign.id}>
-                              {campaign.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    )}
+                    {channel.campaigns && channel.campaigns.length > 0 && (() => {
+                      const campaigns = channel.campaigns!;
+                      const platform = (channel.channelType || channel.name)
+                        .replace(/ Ads$/i, '').toUpperCase();
+                      const triggerLabel = selectedCampaignId !== 'all'
+                        ? `${platform} — ${campaigns.find(c => c.id === selectedCampaignId)?.name || 'Campaign'}`
+                        : campaigns.length > 1
+                          ? `${platform} — ${campaigns[0].name} + ${campaigns.length - 1} more`
+                          : `${platform} — ${campaigns[0].name}`;
+                      return (
+                        <Select value={selectedCampaignId} onValueChange={handleCampaignChange}>
+                          <SelectTrigger className="h-7 text-xs w-auto max-w-[280px]">
+                            <SelectValue>{triggerLabel}</SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All Campaigns</SelectItem>
+                            {campaigns.map((campaign) => (
+                              <SelectItem key={campaign.id} value={campaign.id}>
+                                {campaign.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      );
+                    })()}
                   </div>
                 </div>
               }

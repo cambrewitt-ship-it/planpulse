@@ -51,7 +51,59 @@ export async function DELETE(
     );
   }
 
-  // Delete the client (DB cascade handles ad_platform_connections and other related rows)
+  // Explicitly delete all related rows before the client to avoid FK constraint failures
+  const relatedTables = [
+    "client_campaign_goals",
+    "client_documents",
+    "client_notes",
+    "client_brief_versions",
+    "client_briefs",
+    "client_channel_presets",
+    "channel_benchmarks",
+    "metric_presets",
+    "client_media_plan_builder",
+    "client_action_point_completions",
+    "client_health_status",
+    "organic_social_actuals",
+    "edm_actuals",
+    "ad_performance_metrics",
+    "google_analytics_metrics",
+    "meta_ads_accounts",
+    "media_plan_funnels",
+    "client_tasks",
+    "ad_platform_connections",
+  ] as const;
+
+  for (const table of relatedTables) {
+    const { error } = await (supabase as any)
+      .from(table)
+      .delete()
+      .eq("client_id", clientId);
+    if (error) {
+      console.warn(`Failed to delete rows from ${table} for client ${clientId}:`, error.message);
+    }
+  }
+
+  // channels → weekly_plans have their own cascade, delete channels after other tables
+  const { data: planRows } = await supabase
+    .from("media_plans")
+    .select("id")
+    .eq("client_id", clientId);
+
+  if (planRows && planRows.length > 0) {
+    const planIds = planRows.map((p) => p.id);
+    const { data: channelRows } = await supabase
+      .from("channels")
+      .select("id")
+      .in("plan_id", planIds);
+    if (channelRows && channelRows.length > 0) {
+      const channelIds = channelRows.map((c) => c.id);
+      await supabase.from("weekly_plans").delete().in("channel_id", channelIds);
+      await supabase.from("channels").delete().in("plan_id", planIds);
+    }
+    await supabase.from("media_plans").delete().eq("client_id", clientId);
+  }
+
   const { error: deleteError } = await supabase
     .from("clients")
     .delete()
