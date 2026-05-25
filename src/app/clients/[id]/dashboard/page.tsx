@@ -1841,7 +1841,7 @@ export default function DashboardV2() {
           const ids: string[] = (ch as any)?.metaCampaignIds?.length
             ? (ch as any).metaCampaignIds
             : (ch as any)?.metaCampaignId ? [(ch as any).metaCampaignId] : [];
-          initial[key] = ids;
+          initial[key] = ids.length > 0 ? ids : ['__none__'];
         }
       } catch { initial[key] = []; }
     });

@@ -589,11 +589,11 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
     try {
       const saved = localStorage.getItem(`channel-campaigns-${clientId}-${channel.id ?? channel.name}`);
       if (saved) return new Set(JSON.parse(saved) as string[]);
-      // No saved selection — if no onboarding campaigns were configured, default to "Not set up yet"
-      if (!channel.metaCampaignIds?.length && (channel.campaigns?.length ?? 0) > 0) {
-        return new Set([NONE_SENTINEL]);
+      // No saved selection — pre-select onboarding campaigns if configured, otherwise "Not set up yet"
+      if (channel.metaCampaignIds?.length) {
+        return new Set(channel.metaCampaignIds);
       }
-      return new Set();
+      return new Set([NONE_SENTINEL]);
     } catch { return new Set(); }
   });
 
