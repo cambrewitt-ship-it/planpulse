@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { subDays, format, startOfMonth } from 'date-fns';
+import { subDays, format, startOfMonth, eachDayOfInterval, parseISO } from 'date-fns';
 
 type Params = { params: Promise<{ id: string }> | { id: string } };
 
@@ -38,15 +38,47 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   const today = new Date();
   const todayStr = format(today, 'yyyy-MM-dd');
+  const yesterdayStr = format(subDays(today, 1), 'yyyy-MM-dd');
   const mk = metric.toLowerCase();
   const isCumulative = /cpa|cpl/.test(mk);
-  // Cumulative metrics (CPA/CPL) use month-to-date so the series end matches the headline number.
-  // Other metrics use a 30-day rolling window.
   const windowStart = isCumulative
     ? format(startOfMonth(today), 'yyyy-MM-dd')
     : format(subDays(today, 29), 'yyyy-MM-dd');
   const activePlatforms = filterPlatforms.length > 0 ? filterPlatforms : ['meta-ads', 'google-ads'];
 
+  // Stable snapshot keys — sort so order doesn't matter
+  const platformsKey    = [...activePlatforms].sort().join(',');
+  const campaignIdsKey  = [...filterCampaignIds].sort().join(',');
+  const actionTypeKey   = metaActionType ?? '';
+
+  // ── Step 1: Load existing snapshots for all completed days in the window ──
+  const { data: existingSnapshots } = await supabase
+    .from('client_perf_snapshots')
+    .select('date, value')
+    .eq('client_id', clientId)
+    .eq('metric', metric)
+    .eq('platforms_key', platformsKey)
+    .eq('campaign_ids_key', campaignIdsKey)
+    .eq('meta_action_type', actionTypeKey)
+    .gte('date', windowStart)
+    .lte('date', yesterdayStr)
+    .order('date', { ascending: true });
+
+  const snapshotMap = new Map<string, number>(
+    (existingSnapshots ?? []).map(s => [s.date as string, Number(s.value)]),
+  );
+
+  // Past dates in the window (window start → yesterday, inclusive)
+  const windowStartDate = parseISO(windowStart);
+  const pastDates: string[] = windowStart < todayStr
+    ? eachDayOfInterval({ start: windowStartDate, end: parseISO(yesterdayStr) })
+        .map(d => format(d, 'yyyy-MM-dd'))
+    : [];
+
+  const missingDates = pastDates.filter(d => !snapshotMap.has(d));
+
+  // ── Step 2: Fetch raw DB rows for the full window ──────────────────────────
+  // Always needed for today's live value; also required to backfill missing snapshots.
   let query = supabase
     .from('ad_performance_metrics')
     .select('date, spend, impressions, clicks, conversions, meta_actions')
@@ -63,16 +95,35 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   const { data: rows } = await query;
 
-  // Group rows by date, applying metaActionType override for conversions
+  // Auto-detect the best Meta conversion action type when none is explicitly configured.
+  // Meta rarely populates the top-level `conversions` column — all event data is in
+  // `meta_actions`. Without this, CPA for Meta always shows no data.
+  let effectiveMetaActionType = metaActionType;
+  if (!effectiveMetaActionType && activePlatforms.includes('meta-ads')) {
+    const evtTotals = new Map<string, number>();
+    for (const row of rows ?? []) {
+      for (const act of ((row.meta_actions as any[]) ?? [])) {
+        if (/^offsite_conversion|^mobile_app_install/.test(act.action_type)) {
+          evtTotals.set(act.action_type, (evtTotals.get(act.action_type) ?? 0) + (parseInt(act.value, 10) || 0));
+        }
+      }
+    }
+    let bestCount = 0;
+    for (const [type, count] of evtTotals) {
+      if (count > bestCount) { bestCount = count; effectiveMetaActionType = type; }
+    }
+  }
+
+  // Group raw rows by date
   const byDate = new Map<string, { spend: number; impressions: number; clicks: number; conversions: number }>();
   for (const row of rows ?? []) {
     const cur = byDate.get(row.date) ?? { spend: 0, impressions: 0, clicks: 0, conversions: 0 };
-    cur.spend += Number(row.spend || 0);
+    cur.spend       += Number(row.spend       || 0);
     cur.impressions += Number(row.impressions || 0);
-    cur.clicks += Number(row.clicks || 0);
-    if (metaActionType && row.meta_actions) {
+    cur.clicks      += Number(row.clicks      || 0);
+    if (effectiveMetaActionType && row.meta_actions) {
       for (const act of (row.meta_actions as any[]) ?? []) {
-        if (act.action_type === metaActionType) cur.conversions += parseInt(act.value, 10) || 0;
+        if (act.action_type === effectiveMetaActionType) cur.conversions += parseInt(act.value, 10) || 0;
       }
     } else {
       cur.conversions += Number(row.conversions || 0);
@@ -80,31 +131,67 @@ export async function GET(req: NextRequest, { params }: Params) {
     byDate.set(row.date, cur);
   }
 
-  // Build running cumulative per day for CPA/CPL (so values match the widget).
-  // For other metrics (CTR, CPC, CPM, etc.), use per-day values.
-
+  // ── Step 3: Calculate metric values for all raw dates ─────────────────────
   let cumSpend = 0, cumImpressions = 0, cumClicks = 0, cumConversions = 0;
-  const seriesMap = new Map<string, number>();
+  const calculatedMap = new Map<string, number>();
 
   for (const date of [...byDate.keys()].sort()) {
     const d = byDate.get(date)!;
     if (isCumulative) {
-      cumSpend += d.spend;
+      cumSpend       += d.spend;
       cumImpressions += d.impressions;
-      cumClicks += d.clicks;
+      cumClicks      += d.clicks;
       cumConversions += d.conversions;
       const val = computeMetric(cumSpend, cumImpressions, cumClicks, cumConversions, metric);
-      if (val !== null) seriesMap.set(date, val);
+      if (val !== null) calculatedMap.set(date, val);
     } else {
       const val = computeMetric(d.spend, d.impressions, d.clicks, d.conversions, metric);
-      if (val !== null) seriesMap.set(date, val);
+      if (val !== null) calculatedMap.set(date, val);
     }
   }
 
-  // Emit all days in the window that have a computed value
+  // ── Step 4: Persist snapshots for missing past dates (write-once) ─────────
+  // ignoreDuplicates: true ensures we never overwrite a previously written snapshot.
+  if (missingDates.length > 0) {
+    const toSave = missingDates
+      .filter(date => calculatedMap.has(date))
+      .map(date => ({
+        client_id:        clientId,
+        date,
+        metric,
+        value:            calculatedMap.get(date)!,
+        platforms_key:    platformsKey,
+        campaign_ids_key: campaignIdsKey,
+        meta_action_type: actionTypeKey,
+      }));
+
+    if (toSave.length > 0) {
+      await supabase
+        .from('client_perf_snapshots')
+        .upsert(toSave, {
+          onConflict: 'client_id,date,metric,platforms_key,campaign_ids_key,meta_action_type',
+          ignoreDuplicates: true,
+        });
+    }
+  }
+
+  // ── Step 5: Build the final series ────────────────────────────────────────
+  // Past days  → snapshot value (immutable, like a stock close price)
+  // Today      → live calculated value (changes throughout the day)
+  const allDates = new Set([...snapshotMap.keys(), ...calculatedMap.keys()]);
   const series: Array<{ date: string; value: number }> = [];
-  for (const date of [...seriesMap.keys()].sort()) {
-    series.push({ date, value: seriesMap.get(date)! });
+
+  for (const date of [...allDates].sort()) {
+    let value: number | undefined;
+    if (date < todayStr) {
+      // Prefer stored snapshot; fall back to freshly calculated (= will be stored next call)
+      value = snapshotMap.get(date) ?? calculatedMap.get(date);
+    } else {
+      value = calculatedMap.get(date);
+    }
+    if (value != null && isFinite(value)) {
+      series.push({ date, value });
+    }
   }
 
   return NextResponse.json({ series, metric });

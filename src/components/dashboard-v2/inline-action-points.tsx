@@ -74,6 +74,7 @@ interface InlineActionPointsProps {
   channelType: string;
   clientId: string;
   channelStartDate?: Date | null;
+  channelFlights?: { startWeek: Date | string; endWeek: Date | string }[];
   maxVisible?: number;
   onToggleComplete?: (id: string, completed: boolean) => void;
   showBorder?: boolean;
@@ -130,6 +131,7 @@ export default function InlineActionPoints({
   channelType,
   clientId,
   channelStartDate,
+  channelFlights,
   maxVisible = 3,
   onToggleComplete,
   showBorder = true,
@@ -470,30 +472,46 @@ export default function InlineActionPoints({
     );
   }
 
+  // Compute flight awareness from channelFlights if provided
+  const todayMs = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); })();
+  const isInActiveFlight = (channelFlights ?? []).some(f => {
+    const start = new Date(f.startWeek).setHours(0, 0, 0, 0);
+    const end = new Date(f.endWeek).setHours(23, 59, 59, 999);
+    return todayMs >= start && todayMs <= end;
+  });
+  const effectiveChannelStartDate = (() => {
+    if (!channelFlights?.length) return channelStartDate ?? null;
+    const upcoming = channelFlights
+      .filter(f => new Date(f.startWeek).getTime() > todayMs)
+      .sort((a, b) => new Date(a.startWeek).getTime() - new Date(b.startWeek).getTime());
+    return upcoming.length > 0 ? new Date(upcoming[0].startWeek) : null;
+  })();
+
   // Separate action points by category
   const setupItems = actionPoints.filter(ap => ap.category === 'SET UP');
   const ongoingItems = actionPoints.filter(ap => ap.category === 'HEALTH CHECK' || ap.category === 'ONGOING');
 
   // Separate incomplete and completed items
-  const setupIncomplete = setupItems.filter(ap => !ap.completed);
+  // Suppress incomplete SET UP items while the channel has an active flight
+  const setupIncomplete = setupItems.filter(ap => !ap.completed && !isInActiveFlight);
   const setupCompleted = setupItems.filter(ap => ap.completed);
   const ongoingIncomplete = ongoingItems.filter(ap => !ap.completed);
   const ongoingCompleted = ongoingItems.filter(ap => ap.completed);
 
   // Show incomplete items (up to maxVisible, or all if showAll is true)
-  const visibleSetupIncomplete = showAllSetup 
-    ? setupIncomplete 
+  const visibleSetupIncomplete = showAllSetup
+    ? setupIncomplete
     : setupIncomplete.slice(0, maxVisible);
-  const visibleOngoingIncomplete = showAllOngoing 
-    ? ongoingIncomplete 
+  const visibleOngoingIncomplete = showAllOngoing
+    ? ongoingIncomplete
     : ongoingIncomplete.slice(0, maxVisible);
 
   const hasMoreSetup = setupIncomplete.length > maxVisible;
   const hasMoreOngoing = ongoingIncomplete.length > maxVisible;
 
   const calculateDueDate = (daysBeforeLive: number | null | undefined): Date | null => {
-    if (!channelStartDate || !daysBeforeLive || daysBeforeLive < 0) return null;
-    return addDays(channelStartDate, -daysBeforeLive);
+    if (!effectiveChannelStartDate || !daysBeforeLive || daysBeforeLive < 0) return null;
+    return addDays(effectiveChannelStartDate, -daysBeforeLive);
   };
 
   const formatDueDate = (dueDate: Date | null): string | null => {

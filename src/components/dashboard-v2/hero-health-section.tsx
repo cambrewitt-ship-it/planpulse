@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import type { HealthScoreResult } from '@/lib/utils/health-score';
 import { PerformanceWidget, type PerfData } from '@/components/agency/PerformanceWidget';
-import { Mail, Share2, Monitor, LayoutTemplate } from 'lucide-react';
+import { Mail, Share2, Monitor, LayoutTemplate, Upload } from 'lucide-react';
 
 interface AccountManager {
   id: string;
@@ -20,6 +20,7 @@ export interface LiveChannel {
   name: string;
   type: string;
   platform?: string;
+  hasSpend?: boolean;
 }
 
 export interface HeroHealthSectionProps {
@@ -60,6 +61,8 @@ export interface HeroHealthSectionProps {
   isSavingAccountManager?: boolean;
   accountManagers?: AccountManager[];
   onConnect?: () => void;
+  onLogoUpload?: (file: File) => void;
+  isUploadingLogo?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -396,12 +399,25 @@ function PerfSparkline({ clientId, perf, perfLoading, onConnect }: { clientId: s
   if (noData) {
     // Distinguish: goal exists but no actuals (platform issue) vs no goal at all
     const hasGoal = !!(perf?.metric);
+    const targetVal = perf?.targetValue;
+    const targetDisplay = targetVal != null && isFinite(targetVal) && perf?.metric
+      ? (() => {
+          const mk = (perf.metric ?? '').toLowerCase();
+          if (/ctr/.test(mk)) return `${targetVal.toFixed(1)}%`;
+          if (/roas/.test(mk)) return `${targetVal.toFixed(1)}x`;
+          if (/cpa|cpc|cpm|cpl/.test(mk)) return targetVal >= 100 ? `$${Math.round(targetVal)}` : `$${targetVal.toFixed(2)}`;
+          return targetVal >= 1000 ? `${(targetVal / 1000).toFixed(1)}k` : String(Math.round(targetVal));
+        })()
+      : null;
     return (
       <div className="w-full">
         <div className="flex items-center justify-between mb-1">
           <span className="text-xs text-gray-300 uppercase tracking-wide font-medium">
             {metric || 'Performance'} · {/cpa|cpl/i.test(metric) ? 'MTD' : '30 day'}
           </span>
+          {targetDisplay && (
+            <span className="text-xs text-gray-400">Target: {targetDisplay}</span>
+          )}
         </div>
         <div className="relative">
           {shellSvg}
@@ -410,7 +426,7 @@ function PerfSparkline({ clientId, perf, perfLoading, onConnect }: { clientId: s
               {hasGoal ? 'No conversions data' : 'No Data'}
             </span>
             <button
-              onClick={() => onConnect ? onConnect() : (window.location.href = '/settings/connections')}
+              onClick={() => onConnect?.()}
               className="text-[10px] font-semibold px-3 py-1 rounded-full bg-gray-800 text-white hover:bg-gray-600 transition-colors cursor-pointer"
             >
               {hasGoal ? 'Configure event' : 'Connect'}
@@ -503,11 +519,6 @@ function PerfSparkline({ clientId, perf, perfLoading, onConnect }: { clientId: s
     <div className="w-full">
       <div className="flex items-center justify-between mb-1">
         <span className="text-xs text-gray-400 uppercase tracking-wide font-medium">{metric} · {/cpa|cpl/i.test(metric) ? 'MTD' : '30 day'}</span>
-        {perf.trend24h && (
-          <span className={`text-xs font-semibold ${perf.trend24h.improving ? 'text-emerald-600' : 'text-red-600'}`}>
-            {perf.trend24h.pctChange < 0 ? '↓' : '↑'}{Math.abs(perf.trend24h.pctChange).toFixed(1)}% 24h
-          </span>
-        )}
       </div>
       <svg ref={svgRef} width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible', cursor: 'crosshair' }} onMouseMove={handleMouseMove} onMouseLeave={() => setHoverIdx(null)}>
         <defs>
@@ -635,11 +646,15 @@ export default function HeroHealthSection({
   isSavingAccountManager = false,
   accountManagers = [],
   onConnect,
+  onLogoUpload,
+  isUploadingLogo = false,
 }: HeroHealthSectionProps) {
   const [showAmMenu, setShowAmMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const logoInputRef = useRef<HTMLInputElement>(null);
   const [perfData, setPerfData] = useState<PerfData | null>(null);
   const [perfReady, setPerfReady] = useState(false);
+  const [showPerfConfig, setShowPerfConfig] = useState(false);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -695,6 +710,35 @@ export default function HeroHealthSection({
                 alt={`${client.name} logo`}
                 className="w-14 h-14 rounded-full object-cover flex-shrink-0 border border-gray-200"
               />
+            ) : onLogoUpload ? (
+              <>
+                <button
+                  onClick={() => logoInputRef.current?.click()}
+                  disabled={isUploadingLogo}
+                  title="Upload client logo"
+                  className="w-14 h-14 rounded-full bg-gray-100 flex-shrink-0 flex flex-col items-center justify-center border border-dashed border-gray-300 hover:border-indigo-400 hover:bg-indigo-50 transition-all group cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isUploadingLogo ? (
+                    <svg className="animate-spin w-5 h-5 text-indigo-400" viewBox="0 0 24 24" fill="none">
+                      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity="0.3" />
+                      <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                    </svg>
+                  ) : (
+                    <Upload size={16} className="text-gray-400 group-hover:text-indigo-500 transition-colors" />
+                  )}
+                </button>
+                <input
+                  ref={logoInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={e => {
+                    const file = e.target.files?.[0];
+                    if (file) onLogoUpload(file);
+                    e.target.value = '';
+                  }}
+                />
+              </>
             ) : (
               <div className="w-14 h-14 rounded-full bg-gray-100 flex-shrink-0 flex items-center justify-center border border-gray-200">
                 <span className="text-xl font-bold text-gray-400 select-none">
@@ -821,17 +865,38 @@ export default function HeroHealthSection({
         {/* Col 2: CPA/CTR Sparkline + metric widget + speedometer */}
         <div className="min-w-0">
           <div className="relative w-full border border-gray-100 rounded-lg bg-gray-50/80 px-4 py-4">
-            <PerformanceWidget clientId={clientId} onNeedle={setPerfData} onFetched={() => setPerfReady(true)} floatingGear />
+            <PerformanceWidget clientId={clientId} onNeedle={setPerfData} onFetched={() => setPerfReady(true)} floatingGear modalOpen={showPerfConfig} onModalOpenChange={setShowPerfConfig} />
             <div className="mt-3">
-              <PerfSparkline clientId={clientId} perf={perfData} perfLoading={!perfReady} onConnect={onConnect} />
+              <PerfSparkline clientId={clientId} perf={perfData} perfLoading={!perfReady} onConnect={() => setShowPerfConfig(true)} />
             </div>
-            <div className="absolute top-4 right-8 pointer-events-none flex flex-col items-center">
-              <HealthRing score={healthScore.overallScore} status={healthScore.status} perf={perfData} loading={isLoadingScore} scale={0.6} />
-              {perfData?.hasData && (
-                <p className="text-[10px] font-bold text-center leading-tight mt-0.5" style={{ color: perfData.color }}>
-                  {perfData.metric.toUpperCase()}
-                </p>
-              )}
+            <div className="absolute top-4 right-4 pointer-events-none flex flex-row items-center gap-2">
+              {/* 24h change badge — shown to the left of the speedometer */}
+              {perfData?.hasData && perfData?.trend24h && (() => {
+                const { pctChange, improving } = perfData.trend24h;
+                const color = improving ? '#4A7C59' : '#A0442A';
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
+                    <span style={{ fontSize: 18, lineHeight: 1, fontWeight: 800, color }}>
+                      {pctChange < 0 ? '↓' : '↑'}
+                    </span>
+                    <span style={{ fontSize: 11, fontWeight: 700, lineHeight: 1.1, color }}>
+                      {Math.abs(pctChange).toFixed(1)}%
+                    </span>
+                    <span style={{ fontSize: 9, color: '#9ca3af', fontWeight: 500, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                      24h
+                    </span>
+                  </div>
+                );
+              })()}
+              {/* Speedometer */}
+              <div className="flex flex-col items-center">
+                <HealthRing score={healthScore.overallScore} status={healthScore.status} perf={perfData} loading={isLoadingScore} scale={0.6} />
+                {perfData?.hasData && (
+                  <p className="text-[10px] font-bold text-center leading-tight mt-0.5" style={{ color: perfData.color }}>
+                    {perfData.metric.toUpperCase()}
+                  </p>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -852,7 +917,12 @@ export default function HeroHealthSection({
                       <span className="flex-shrink-0">
                         <ChannelIcon type={ch.type} platform={ch.platform} />
                       </span>
-                      {ch.name}
+                      <span className="flex-1 text-left truncate">{ch.name}</span>
+                      <span
+                        className="flex-shrink-0 w-2 h-2 rounded-full"
+                        style={{ backgroundColor: ch.hasSpend ? '#10b981' : '#ef4444' }}
+                        title={ch.hasSpend ? 'Spend registered' : 'No spend registered'}
+                      />
                     </button>
                   ))}
                 </div>

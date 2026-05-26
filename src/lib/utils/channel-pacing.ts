@@ -83,7 +83,7 @@ export function getChannelCategory(channelName: string): 'paid_digital' | 'organ
   const lower = channelName.toLowerCase();
   if (lower.includes('fee') || lower.includes('set up fee') || lower.includes('setup fee') ||
       lower.includes('management fee') || lower.includes('retainer')) return 'fee';
-  if (lower.includes('(organic)') || lower.includes('organic social')) return 'organic_social';
+  if (lower.includes('organic')) return 'organic_social';
   if (lower.includes('edm') || lower.includes('email marketing') || lower.includes('e-dm')) return 'edm';
   if (lower.includes('ooh') || lower.includes('out of home') || lower.includes('billboard') ||
       lower.includes('outdoor') || lower.includes('transit') || lower.includes('street furniture')) return 'ooh';

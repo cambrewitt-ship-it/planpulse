@@ -56,6 +56,7 @@ import HeroHealthSection from '@/components/dashboard-v2/hero-health-section';
 import { NotesChecklist } from '@/components/agency/NotesChecklist';
 import ClientActionPointsList from '@/components/dashboard-v2/client-action-points-list';
 import ChannelPerformanceCard from '@/components/dashboard-v2/channel-performance-card';
+import { ChannelManageMenu } from '@/components/dashboard-v2/channel-manage-menu';
 import dynamic from 'next/dynamic';
 const InvoiceModal = dynamic(() => import('@/components/dashboard-v2/invoice-modal').then(m => m.InvoiceModal), { ssr: false });
 const ReportBuilderModal = dynamic(() => import('@/components/dashboard-v2/report-builder-modal').then(m => m.ReportBuilderModal), { ssr: false });
@@ -142,6 +143,7 @@ export default function DashboardV2() {
   const [loadingPlan, setLoadingPlan] = useState(false);
   const [mediaPlanBuilderChannels, setMediaPlanBuilderChannels] = useState<MediaPlanChannel[]>([]);
   const [commission, setCommission] = useState<number>(0);
+  const [planView, setPlanView] = useState<'gross' | 'net'>('gross');
   const [isLoadingMediaPlanBuilder, setIsLoadingMediaPlanBuilder] = useState(true);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isInitialLoadRef = useRef(true);
@@ -181,7 +183,49 @@ export default function DashboardV2() {
   const [availableChannels, setAvailableChannels] = useState<Array<{ id: string; name: string }>>([]);
   const [selectedCampaignIds, setSelectedCampaignIds] = useState<Set<string>>(new Set());
   const [availableCampaigns, setAvailableCampaigns] = useState<Array<{ id: string; name: string; channelId: string }>>([]);;
-  const [viewMode, setViewMode] = useState<'overview' | 'funnels' | 'media-plan' | 'admin' | 'client-intel'>('overview');
+  const [viewMode, setViewMode] = useState<'overview' | 'funnels' | 'media-plan' | 'client-hub'>('overview');
+  const [adminNeedsConfig, setAdminNeedsConfig] = useState(false);
+
+  // Eagerly check if any connected platform is missing saved accounts
+  useEffect(() => {
+    if (!clientId) return;
+    const check = async () => {
+      try {
+        const statusRes = await fetch(`/api/connections/status?clientId=${clientId}`);
+        if (!statusRes.ok) return;
+        const { connections } = await statusRes.json();
+        if (!Array.isArray(connections)) return;
+
+        const active = new Set(
+          connections
+            .filter((c: { platform: string; status: string }) => c.status === 'active')
+            .map((c: { platform: string }) => c.platform === 'meta-ads' ? 'facebook' : c.platform)
+        );
+
+        const checks = await Promise.all([
+          active.has('google-ads')
+            ? fetch('/api/ads/google-ads/get-accounts').then(r => r.ok ? r.json() : { accounts: [] })
+            : Promise.resolve({ accounts: ['placeholder'] }),
+          active.has('facebook')
+            ? fetch(`/api/ads/meta/get-accounts?clientId=${clientId}`).then(r => r.ok ? r.json() : { accounts: [] })
+            : Promise.resolve({ accounts: ['placeholder'] }),
+          active.has('google-analytics')
+            ? fetch('/api/ads/google-analytics/get-accounts').then(r => r.ok ? r.json() : { accounts: [] })
+            : Promise.resolve({ accounts: ['placeholder'] }),
+        ]);
+
+        const needed =
+          (active.has('google-ads') && (checks[0].accounts ?? []).length === 0) ||
+          (active.has('facebook') && (checks[1].accounts ?? []).length === 0) ||
+          (active.has('google-analytics') && (checks[2].accounts ?? []).length === 0);
+
+        setAdminNeedsConfig(needed);
+      } catch {
+        // silently ignore — badge is non-critical
+      }
+    };
+    check();
+  }, [clientId]);
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
   const [logoUploadError, setLogoUploadError] = useState<string | null>(null);
   const logoInputRef = useRef<HTMLInputElement>(null);
@@ -226,6 +270,7 @@ export default function DashboardV2() {
   const [sandboxPlanHydrated, setSandboxPlanHydrated] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [allMetaCampaigns, setAllMetaCampaigns] = useState<Array<{ id: string; name: string }>>([]);
   const [healthWeights, setHealthWeights] = useState<{ pacing: number; actions: number; perf: number }>(() => {
     if (typeof window === 'undefined') return { pacing: 44, actions: 28, perf: 28 };
     try {
@@ -412,12 +457,14 @@ export default function DashboardV2() {
     if (hasApiFlights) return;
 
     const MS_PER_WEEK = 7 * 24 * 60 * 60 * 1000;
-    const channelMap = new Map<string, { subType?: string; flightMap: Map<string, any> }>();
+    const channelMap = new Map<string, { subType?: string; isOrganic: boolean; flightMap: Map<string, any> }>();
 
     for (const row of clientSandboxPlan.rows) {
       const key = row.channel?.trim();
       if (!key) continue;
-      if (!channelMap.has(key)) channelMap.set(key, { subType: row.detail?.trim() || undefined, flightMap: new Map() });
+      if (!channelMap.has(key)) channelMap.set(key, { subType: row.detail?.trim() || undefined, isOrganic: false, flightMap: new Map() });
+      // Propagate isOrganic — any row for this channel being organic makes the whole channel organic
+      if (row.isOrganic) channelMap.get(key)!.isOrganic = true;
       if (row.isMasterRow === false) continue;
       for (const f of (row.flights ?? [])) {
         if (f.startWeek && f.endWeek && !channelMap.get(key)!.flightMap.has(f.id)) {
@@ -426,7 +473,7 @@ export default function DashboardV2() {
       }
     }
 
-    const converted: MediaPlanChannel[] = Array.from(channelMap.entries()).map(([channelName, { subType, flightMap }]) => {
+    const converted: MediaPlanChannel[] = Array.from(channelMap.entries()).map(([channelName, { subType, isOrganic, flightMap }]) => {
       const mediaFlights = Array.from(flightMap.values())
         .filter((f: any) => f.startWeek && f.endWeek)
         .map((sbFlight: any) => {
@@ -455,6 +502,7 @@ export default function DashboardV2() {
         percentOfInvestment: 0,
         totalBudget,
         flights: mediaFlights,
+        ...(isOrganic ? { channelCategory: 'organic_social' } : {}),
       };
     });
 
@@ -579,6 +627,20 @@ export default function DashboardV2() {
     fetchMonthSpend();
     return () => { cancelled = true; };
   }, [clientId, analyticsDateRange.startDate, analyticsDateRange.endDate]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fetch all Meta campaigns (not limited to spend data) so the campaign
+  // filter dropdown in each channel card shows the full account campaign list.
+  useEffect(() => {
+    if (!clientId) return;
+    fetch(`/api/ads/meta/campaigns?clientId=${clientId}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.campaigns) {
+          setAllMetaCampaigns(data.campaigns.map((c: any) => ({ id: c.id, name: c.name })));
+        }
+      })
+      .catch(() => {});
+  }, [clientId]);
 
   // Calculate planned budget prorated to the selected date range
   const plannedBudget = useMemo(() => {
@@ -1503,19 +1565,22 @@ export default function DashboardV2() {
       let currentSpend: number;
       let plannedSpend: number;
 
+      let grossPlannedSpend: number;
+
       if (isMultiMonth && chartData.length > 0) {
         const lastPoint       = chartData[chartData.length - 1];
         const lastActualPoint = [...chartData].reverse().find(p => p.actualSpend !== null && typeof p.actualSpend === 'number');
         currentSpend = lastActualPoint?.actualSpend ?? 0;
         plannedSpend = lastPoint.plannedSpend;
+        grossPlannedSpend = commission > 0 ? plannedSpend * 100 / (100 - commission) : plannedSpend;
       } else {
-        plannedSpend = ch.flights.reduce((sum, f) => {
-          const paddedKey   = format(selectedMonth, 'yyyy-MM');
-          const unpaddedKey = `${selectedMonth.getFullYear()}-${selectedMonth.getMonth() + 1}`;
-          const raw         = f.monthlySpend[paddedKey] ?? f.monthlySpend[unpaddedKey] ?? 0;
-          const afterComm   = commission > 0 ? raw * ((100 - commission) / 100) : raw;
-          return sum + afterComm;
+        const paddedKey   = format(selectedMonth, 'yyyy-MM');
+        const unpaddedKey = `${selectedMonth.getFullYear()}-${selectedMonth.getMonth() + 1}`;
+        grossPlannedSpend = ch.flights.reduce((sum, f) => {
+          const raw = f.monthlySpend[paddedKey] ?? f.monthlySpend[unpaddedKey] ?? 0;
+          return sum + raw;
         }, 0);
+        plannedSpend = commission > 0 ? grossPlannedSpend * ((100 - commission) / 100) : grossPlannedSpend;
 
         const monthStartStr = format(startOfMonth(selectedMonth), 'yyyy-MM-dd');
         const monthEndStr   = format(endOfMonth(selectedMonth),   'yyyy-MM-dd');
@@ -1594,6 +1659,7 @@ export default function DashboardV2() {
         status:           determineStatus(currentSpend, plannedSpend),
         currentSpend,
         plannedSpend,
+        grossPlannedSpend: commission > 0 ? grossPlannedSpend : undefined,
         pacingPercentage: pacingPct,
         metrics: {
           impressions: totalImpressions,
@@ -1639,22 +1705,28 @@ export default function DashboardV2() {
               seen.set(p.campaignId, p.campaignName);
             }
           });
+          // Merge in ALL campaigns from the account (matches what onboarding shows).
+          if (chPlatform === 'meta-ads') {
+            allMetaCampaigns.forEach(c => {
+              if (!seen.has(c.id)) seen.set(c.id, c.name);
+            });
+          }
           return Array.from(seen.entries()).map(([id, name]) => ({ id, name }));
         })(),
         metaCampaignIds: (ch as any).metaCampaignIds ?? [],
         rawSpendPoints: chMetricPoints,
       };
     }).sort((a, b) => channelSortOrder(a) - channelSortOrder(b));
-  }, [mediaPlanBuilderChannels, channelMonthSpendData, spendApiErrors, selectedMonth, commission, analyticsDateRange.startDate, analyticsDateRange.endDate]);
+  }, [mediaPlanBuilderChannels, channelMonthSpendData, spendApiErrors, selectedMonth, commission, analyticsDateRange.startDate, analyticsDateRange.endDate, allMetaCampaigns]);
 
   const liveChannels = useMemo(() =>
     channelCards.map((ch: any, idx: number) => {
-      if (ch.type === 'organic_social') return { id: `channel-card-organic-${ch.channel.id}`, name: ch.channel.channelName ?? 'Organic Social', type: ch.type };
-      if (ch.type === 'edm') return { id: `channel-card-edm-${ch.channel.id}`, name: ch.channel.channelName ?? 'EDM', type: ch.type };
-      if (ch.type === 'ooh') return { id: `channel-card-ooh-${ch.channel.id}`, name: ch.channel.channelName ?? 'OOH', type: ch.type };
-      if (ch.type === 'display_native') return { id: `channel-card-display-native-${ch.channel.id}`, name: ch.channel.channelName ?? 'Display & Native', type: ch.type };
-      if (ch.type === 'other') return { id: `channel-card-other-${ch.channel.id}`, name: ch.channel.channelName ?? 'Other', type: ch.type };
-      return { id: `channel-card-paid-${idx}-${ch.name}`, name: ch.name, type: ch.type, platform: ch.platform };
+      if (ch.type === 'organic_social') return { id: `channel-card-organic-${ch.channel.id}`, name: ch.channel.channelName ?? 'Organic Social', type: ch.type, hasSpend: false };
+      if (ch.type === 'edm') return { id: `channel-card-edm-${ch.channel.id}`, name: ch.channel.channelName ?? 'EDM', type: ch.type, hasSpend: false };
+      if (ch.type === 'ooh') return { id: `channel-card-ooh-${ch.channel.id}`, name: ch.channel.channelName ?? 'OOH', type: ch.type, hasSpend: false };
+      if (ch.type === 'display_native') return { id: `channel-card-display-native-${ch.channel.id}`, name: ch.channel.channelName ?? 'Display & Native', type: ch.type, hasSpend: false };
+      if (ch.type === 'other') return { id: `channel-card-other-${ch.channel.id}`, name: ch.channel.channelName ?? 'Other', type: ch.type, hasSpend: (ch.currentSpend ?? 0) > 0 };
+      return { id: `channel-card-paid-${idx}-${ch.name}`, name: ch.name, type: ch.type, platform: ch.platform, hasSpend: (ch.currentSpend ?? 0) > 0 };
     })
   , [channelCards]);
 
@@ -1749,9 +1821,57 @@ export default function DashboardV2() {
   };
 
   // Enrich action points with effective due dates (SET UP points use campaign_start - days_before_live_due)
+  // SET UP points are suppressed when the matched channel has an active flight, and re-anchored
+  // to the next upcoming flight's start date when in a gap between flights.
   const enrichedActionPoints = useMemo(() => {
-    return allActionPoints.map((ap: any) => {
-      if (ap.due_date) return ap;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayMs = today.getTime();
+
+    const channelHasActiveFlight = (flights: { startWeek: Date | string; endWeek: Date | string }[]): boolean =>
+      flights.some(f => {
+        const start = new Date(f.startWeek).setHours(0, 0, 0, 0);
+        const end = new Date(f.endWeek).setHours(23, 59, 59, 999);
+        return todayMs >= start && todayMs <= end;
+      });
+
+    const nextUpcomingFlightStart = (flights: { startWeek: Date | string; endWeek: Date | string }[]): Date | null => {
+      const upcoming = flights
+        .filter(f => new Date(f.startWeek).getTime() > todayMs)
+        .sort((a, b) => new Date(a.startWeek).getTime() - new Date(b.startWeek).getTime());
+      return upcoming.length > 0 ? new Date(upcoming[0].startWeek) : null;
+    };
+
+    return allActionPoints.flatMap((ap: any) => {
+      if (ap.category === 'SET UP') {
+        // Find matching channel with flight data from the media plan
+        const matchedMpCh = mediaPlanBuilderChannels.find(ch =>
+          ch.channelName.toLowerCase().trim() === (ap.channel_type ?? '').toLowerCase().trim() ||
+          ch.channelName.toLowerCase().includes((ap.channel_type ?? '').toLowerCase()) ||
+          (ap.channel_type ?? '').toLowerCase().includes(ch.channelName.toLowerCase())
+        );
+        const flights = matchedMpCh?.flights ?? [];
+
+        if (flights.length > 0) {
+          // Suppress while a flight is actively running
+          if (channelHasActiveFlight(flights)) return [];
+
+          // Find the next upcoming flight to anchor the due date
+          const nextStart = nextUpcomingFlightStart(flights);
+          if (!nextStart) return []; // No upcoming flights — nothing to set up for
+
+          if (ap.days_before_live_due != null) {
+            const d = new Date(nextStart);
+            d.setDate(d.getDate() - (ap.days_before_live_due as number));
+            return [{ ...ap, due_date: d.toISOString().slice(0, 10) }];
+          }
+          // Has a hardcoded due_date with an upcoming flight — keep as-is
+          return [ap];
+        }
+      }
+
+      // Non-SET UP, or SET UP with no flight data: existing enrichment logic
+      if (ap.due_date) return [ap];
       if (ap.category === 'SET UP' && ap.days_before_live_due != null) {
         const matchedChannel = ganttChannels.find(
           ch => ch.label.toLowerCase().trim() === (ap.channel_type ?? '').toLowerCase().trim() ||
@@ -1764,12 +1884,12 @@ export default function DashboardV2() {
         if (refDate) {
           const d = new Date(refDate);
           d.setDate(d.getDate() - (ap.days_before_live_due as number));
-          return { ...ap, due_date: d.toISOString().slice(0, 10) };
+          return [{ ...ap, due_date: d.toISOString().slice(0, 10) }];
         }
       }
-      return ap;
+      return [ap];
     });
-  }, [allActionPoints, ganttChannels, campaignDates]);
+  }, [allActionPoints, ganttChannels, campaignDates, mediaPlanBuilderChannels]);
 
   const actionItemsForSection = useMemo(() => {
     return allActionPoints.map((item: any) => ({
@@ -1860,6 +1980,10 @@ export default function DashboardV2() {
     setMediaPlanBuilderChannels(prev =>
       prev.map(ch => ch.id === channelId ? { ...ch, ...updates } : ch)
     );
+  };
+
+  const handleDeleteChannel = (channelId: string) => {
+    setMediaPlanBuilderChannels(prev => prev.filter(ch => ch.id !== channelId));
   };
 
   const handleCommissionChange = (value: number) => {
@@ -2020,7 +2144,7 @@ export default function DashboardV2() {
                   </div>
                 </div>
               ) : heroProps ? (
-                <HeroHealthSection {...heroProps} liveChannels={liveChannels} onChannelClick={handleChannelClick} onConnect={() => setViewMode('admin')} />
+                <HeroHealthSection {...heroProps} liveChannels={liveChannels} onChannelClick={handleChannelClick} onConnect={() => setViewMode('client-hub')} onLogoUpload={handleLogoUpload} isUploadingLogo={isUploadingLogo} />
               ) : (
                 /* Edge case: no media plan channels set up yet */
                 <div className="bg-white rounded-xl border border-gray-200 p-8 text-center">
@@ -2067,24 +2191,21 @@ export default function DashboardV2() {
                     Media Plan
                   </button>
                   <button
-                    onClick={() => setViewMode('admin')}
-                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                      viewMode === 'admin'
+                    onClick={() => setViewMode('client-hub')}
+                    className={`relative flex items-center gap-1.5 px-4 py-2 rounded-lg font-medium transition-colors ${
+                      viewMode === 'client-hub'
                         ? 'bg-blue-600 text-white'
                         : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                     }`}
                   >
-                    Admin
-                  </button>
-                  <button
-                    onClick={() => setViewMode('client-intel')}
-                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                      viewMode === 'client-intel'
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
-                    Client Intel
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.46 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3.12A2.5 2.5 0 0 1 9.5 2Z"/>
+                      <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.46 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3.12A2.5 2.5 0 0 0 14.5 2Z"/>
+                    </svg>
+                    Client Hub
+                    {adminNeedsConfig && (
+                      <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-orange-500 text-white text-[9px] font-bold leading-none">!</span>
+                    )}
                   </button>
                   <div style={{ width: '0.5px', height: 20, background: '#E8E4DC', margin: '0 4px' }} />
                   <button
@@ -2399,9 +2520,57 @@ export default function DashboardV2() {
                   </div>
                 ) : channelCards.length > 0 ? (
                   <div className="bg-white rounded-xl border border-gray-200 p-6">
-                    <h3 className="text-base font-bold mb-4" style={{ color: '#1C1917', fontFamily: "'Inter', system-ui, sans-serif" }}>Channel Performance</h3>
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-base font-bold" style={{ color: '#1C1917', fontFamily: "'Inter', system-ui, sans-serif" }}>Channel Performance</h3>
+                      <div className="flex items-center gap-3">
+                        {commission > 0 && (
+                          <div className="flex items-center rounded-full border border-gray-200 overflow-hidden text-xs">
+                            <button
+                              onClick={() => setPlanView('gross')}
+                              className={`px-3 py-1 transition-colors ${planView === 'gross' ? 'bg-gray-900 text-white' : 'bg-white text-gray-500 hover:text-gray-700'}`}
+                            >
+                              Gross
+                            </button>
+                            <button
+                              onClick={() => setPlanView('net')}
+                              className={`px-3 py-1 transition-colors ${planView === 'net' ? 'bg-gray-900 text-white' : 'bg-white text-gray-500 hover:text-gray-700'}`}
+                            >
+                              Net
+                            </button>
+                          </div>
+                        )}
+                        <label className="text-xs text-gray-500 font-medium whitespace-nowrap">Commission</label>
+                        <div className="relative flex items-center">
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="0.5"
+                            value={commission || ''}
+                            onChange={e => handleCommissionChange(e.target.value === '' ? 0 : parseFloat(e.target.value))}
+                            placeholder="0"
+                            className="w-16 text-right text-xs border border-gray-200 rounded-md px-2 py-1 pr-5 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                            style={{ fontFamily: "'Inter', system-ui, sans-serif" }}
+                          />
+                          <span className="absolute right-2 text-xs text-gray-400 pointer-events-none">%</span>
+                        </div>
+                      </div>
+                    </div>
                     <div className="space-y-4">
                       {channelCards.map((ch, idx) => {
+                        // Helper: find the raw MediaPlanChannel for the manage menu
+                        const rawChannel = ch.type === 'paid_digital'
+                          ? mediaPlanBuilderChannels.find((mbCh: any) => String(mbCh.id ?? mbCh.channelName) === ch.id)
+                          : (ch as any).channel as MediaPlanChannel | undefined;
+
+                        const manageMenu = rawChannel ? (
+                          <ChannelManageMenu
+                            channel={rawChannel}
+                            onUpdate={handleUpdateChannel}
+                            onDelete={handleDeleteChannel}
+                          />
+                        ) : null;
+
                         if (ch.type === 'organic_social') {
                           return (
                             <div key={`organic-${ch.channel.id}`} id={`channel-card-organic-${ch.channel.id}`}>
@@ -2412,6 +2581,7 @@ export default function DashboardV2() {
                                 actuals={organicSocialActuals}
                                 onRefresh={loadNonDigitalActuals}
                                 onUpdateChannel={handleUpdateChannel}
+                                headerActions={manageMenu}
                               />
                             </div>
                           );
@@ -2425,6 +2595,7 @@ export default function DashboardV2() {
                                 clientId={clientId}
                                 actuals={edmActuals}
                                 onUpdateChannel={handleUpdateChannel}
+                                headerActions={manageMenu}
                               />
                             </div>
                           );
@@ -2437,6 +2608,7 @@ export default function DashboardV2() {
                                 channel={ch.channel}
                                 clientId={clientId}
                                 onUpdateChannel={handleUpdateChannel}
+                                headerActions={manageMenu}
                               />
                             </div>
                           );
@@ -2449,6 +2621,7 @@ export default function DashboardV2() {
                                 channel={ch.channel}
                                 clientId={clientId}
                                 onUpdateChannel={handleUpdateChannel}
+                                headerActions={manageMenu}
                               />
                             </div>
                           );
@@ -2469,6 +2642,7 @@ export default function DashboardV2() {
                                 channelStartDate={earliestStart}
                                 refetchTrigger={actionPointsRefetchTrigger}
                                 onUpdateChannel={handleUpdateChannel}
+                                headerActions={manageMenu}
                               />
                             </div>
                           );
@@ -2492,7 +2666,9 @@ export default function DashboardV2() {
                               onAdjust={() => handleAdjustChannel(ch.platform)}
                               onViewReport={() => handleViewReport(ch.platform)}
                               clientId={clientId}
+                              planView={planView}
                               channelStartDate={earliestStartDate}
+                              channelFlights={channelData?.flights ?? []}
                               refetchTrigger={actionPointsRefetchTrigger}
                               benchmarks={allBenchmarks}
                               presets={allPresets}
@@ -2504,6 +2680,7 @@ export default function DashboardV2() {
                                   : [...prev, updated];
                               })}
                               onCampaignSelectionChange={handleCampaignSelectionChange}
+                              headerActions={manageMenu}
                             />
                           </div>
                         );
@@ -2664,8 +2841,8 @@ export default function DashboardV2() {
               )
             )}
 
-            {/* ── Admin view ── */}
-            {viewMode === 'admin' && (
+            {/* ── Client Hub view (Admin + Client Intel) ── */}
+            {viewMode === 'client-hub' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                 {/* Invoices section */}
                 <div style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', padding: '20px 24px' }}>
@@ -2781,84 +2958,23 @@ export default function DashboardV2() {
 
                 {/* Ad Platform Connections */}
                 <div className="rounded-lg p-6" style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)' }}>
-                  <AdPlatformConnector clientId={clientId} />
+                  <AdPlatformConnector clientId={clientId} onConfigNeeded={setAdminNeedsConfig} />
                 </div>
 
-                {/* Health Score Configuration */}
-                {healthScore && (
-                  <div style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', padding: '20px 24px' }}>
-                    <div style={{ marginBottom: 16 }}>
-                      <span style={{ fontSize: 13, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Health Score</span>
-                      <span style={{ fontSize: 11, color: '#B5B0A5', marginLeft: 8, fontFamily: "'DM Sans', system-ui, sans-serif" }}>Adjust component weightings — will be normalised to 100%</span>
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                      {([
-                        { key: 'pacing' as const, label: 'Budget Pacing', score: healthScore.breakdown.budgetPacing.score, details: healthScore.breakdown.budgetPacing.details },
-                        { key: 'actions' as const, label: 'Action Completion', score: healthScore.breakdown.actionCompletion.score, details: healthScore.breakdown.actionCompletion.details },
-                        { key: 'perf' as const, label: 'Performance', score: healthScore.breakdown.performance.score, details: healthScore.breakdown.performance.details },
-                      ]).map(({ key, label, score, details }) => {
-                        const s = score >= 80 ? '#4A7C59' : score >= 60 ? '#B07030' : '#A0442A';
-                        const bg = score >= 80 ? '#EAF0EB' : score >= 60 ? '#F5EDE0' : '#F5EDE9';
-                        return (
-                          <div key={key} style={{ padding: '12px 14px', borderRadius: 10, border: '0.5px solid #E8E4DC', background: '#FAFAF8' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                              <span style={{ flex: 1, fontSize: 13, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}>{label}</span>
-                              <span style={{ fontSize: 13, fontWeight: 700, color: s, background: bg, padding: '2px 8px', borderRadius: 8 }}>{score}</span>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                <span style={{ fontSize: 11, color: '#8A8578', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Weight</span>
-                                <input
-                                  type="number"
-                                  min={0}
-                                  max={100}
-                                  value={healthWeights[key]}
-                                  onChange={(e) => {
-                                    const v = Math.max(0, Math.min(100, Number(e.target.value) || 0));
-                                    const updated = { ...healthWeights, [key]: v };
-                                    setHealthWeights(updated);
-                                    try { localStorage.setItem(`health-weights-${clientId}`, JSON.stringify(updated)); } catch {}
-                                  }}
-                                  style={{
-                                    width: 52, height: 28, borderRadius: 10, border: '0.5px solid #D5D0C5',
-                                    background: '#FDFCF8', textAlign: 'center', fontSize: 13, color: '#1C1917',
-                                    fontFamily: "'DM Sans', system-ui, sans-serif", outline: 'none',
-                                  }}
-                                />
-                                <span style={{ fontSize: 11, color: '#8A8578', fontFamily: "'DM Sans', system-ui, sans-serif" }}>%</span>
-                              </div>
-                            </div>
-                            <p style={{ fontSize: 11, color: '#8A8578', marginTop: 5, fontFamily: "'DM Sans', system-ui, sans-serif" }}>{details}</p>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    {/* Composite score preview */}
-                    <div style={{ marginTop: 12, paddingTop: 12, borderTop: '0.5px solid #E8E4DC', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <span style={{ fontSize: 13, color: '#8A8578', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
-                        Composite Score
-                        {(healthWeights.pacing + healthWeights.actions + healthWeights.perf) !== 100 && (
-                          <span style={{ marginLeft: 8, fontSize: 11, color: '#B07030' }}>
-                            (weights sum to {healthWeights.pacing + healthWeights.actions + healthWeights.perf}%, will be normalised)
-                          </span>
-                        )}
-                      </span>
-                      <span style={{ fontSize: 17, fontWeight: 700, color: '#1C1917', fontFamily: "'Inter', system-ui, sans-serif" }}>
-                        {adjustedHealthScore?.overallScore ?? healthScore.overallScore}
-                      </span>
-                    </div>
-                  </div>
-                )}
+                <ClientIntelTab clientId={clientId} />
 
-                {/* Delete Client */}
-                <div style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', padding: '20px 24px' }}>
+                {/* Danger Zone */}
+                <div style={{ background: '#FDF7F5', border: '1px solid rgba(160,68,42,0.2)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', padding: '20px 24px' }}>
                   <div style={{ marginBottom: 12 }}>
-                    <span style={{ fontSize: 13, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Danger Zone</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: '#A0442A', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Danger Zone</span>
                   </div>
-                  {deleteConfirm ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                      <p style={{ fontSize: 13, color: '#A0442A', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
-                        Are you sure? This will permanently delete <strong>{client?.name}</strong> and all associated data. This cannot be undone.
-                      </p>
-                      <div style={{ display: 'flex', gap: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', borderRadius: 10, border: '0.5px solid rgba(160,68,42,0.15)', background: '#FDFCF8' }}>
+                    <div>
+                      <p style={{ fontSize: 13, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif", margin: 0 }}>Delete this client</p>
+                      <p style={{ fontSize: 12, color: '#8A8578', fontFamily: "'DM Sans', system-ui, sans-serif", margin: '2px 0 0' }}>Permanently remove this client and all associated data. This cannot be undone.</p>
+                    </div>
+                    {deleteConfirm ? (
+                      <div style={{ display: 'flex', gap: 8, flexShrink: 0, marginLeft: 16 }}>
                         <button
                           onClick={async () => {
                             setDeleting(true);
@@ -2882,7 +2998,7 @@ export default function DashboardV2() {
                             opacity: deleting ? 0.6 : 1,
                           }}
                         >
-                          {deleting ? 'Deleting…' : 'Yes, delete client'}
+                          {deleting ? 'Deleting…' : 'Yes, delete'}
                         </button>
                         <button
                           onClick={() => setDeleteConfirm(false)}
@@ -2897,28 +3013,22 @@ export default function DashboardV2() {
                           Cancel
                         </button>
                       </div>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => setDeleteConfirm(true)}
-                      style={{
-                        height: 30, padding: '0 12px', borderRadius: 12,
-                        border: '0.5px solid #F5C5B8', background: '#FDF2EF',
-                        color: '#A0442A', fontSize: 12, fontWeight: 500,
-                        cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif",
-                      }}
-                    >
-                      Delete Client
-                    </button>
-                  )}
+                    ) : (
+                      <button
+                        onClick={() => setDeleteConfirm(true)}
+                        style={{
+                          height: 30, padding: '0 12px', borderRadius: 12, flexShrink: 0, marginLeft: 16,
+                          border: '0.5px solid #F5C5B8', background: '#FDF2EF',
+                          color: '#A0442A', fontSize: 12, fontWeight: 500,
+                          cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif",
+                        }}
+                      >
+                        Delete Client
+                      </button>
+                    )}
+                  </div>
                 </div>
-
               </div>
-            )}
-
-            {/* ── Client Intel view ── */}
-            {viewMode === 'client-intel' && (
-              <ClientIntelTab clientId={clientId} />
             )}
 
           </>

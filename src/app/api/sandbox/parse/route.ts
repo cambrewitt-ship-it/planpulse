@@ -197,6 +197,7 @@ export async function POST(request: NextRequest) {
 
   const yearParam = formData.get('year');
   const userYear = yearParam ? parseInt(String(yearParam), 10) : null;
+  const sheetName = formData.get('sheetName') as string | null;
 
   // Load workbook
   const bytes = await file.arrayBuffer();
@@ -207,13 +208,18 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Could not read the Excel file.' }, { status: 400 });
   }
 
-  // Pick most-data sheet
+  // Use the user-selected sheet, or fall back to the most-data sheet
   let ws = workbook.worksheets[0];
-  let bestScore = 0;
-  for (const sheet of workbook.worksheets.slice(0, 3)) {
-    let score = 0;
-    sheet.eachRow({ includeEmpty: false }, row => { score += row.actualCellCount; });
-    if (score > bestScore) { bestScore = score; ws = sheet; }
+  if (sheetName) {
+    const named = workbook.getWorksheet(sheetName);
+    if (named) ws = named;
+  } else {
+    let bestScore = 0;
+    for (const sheet of workbook.worksheets.slice(0, 3)) {
+      let score = 0;
+      sheet.eachRow({ includeEmpty: false }, row => { score += row.actualCellCount; });
+      if (score > bestScore) { bestScore = score; ws = sheet; }
+    }
   }
 
   // Build merged range index

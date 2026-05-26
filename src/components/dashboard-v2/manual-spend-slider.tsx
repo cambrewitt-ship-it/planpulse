@@ -14,7 +14,8 @@ function fmt(v: number): string {
 }
 
 export default function ManualSpendSlider({ planned, actual, onChange, accentColor = '#4A6580' }: ManualSpendSliderProps) {
-  const max = planned > 0 ? Math.max(planned * 1.25, actual * 1.1) : Math.max(actual * 1.1, 100);
+  // When no planned budget is set, use a sensible default so the slider can still be dragged.
+  const max = planned > 0 ? Math.max(planned * 1.25, actual * 1.1) : Math.max(actual * 1.5, 5000);
   const [editing, setEditing] = useState(false);
   const [inputVal, setInputVal] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -129,7 +130,7 @@ export default function ManualSpendSlider({ planned, actual, onChange, accentCol
             type="range"
             min={0}
             max={max}
-            step={500}
+            step={tickInterval}
             value={actual}
             onChange={e => onChange(parseFloat(e.target.value))}
             style={{

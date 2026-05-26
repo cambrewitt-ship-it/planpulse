@@ -11,6 +11,7 @@ interface OOHCardProps {
   channel: MediaPlanChannel;
   clientId: string;
   onUpdateChannel?: (channelId: string, updates: Partial<MediaPlanChannel>) => void;
+  headerActions?: React.ReactNode;
 }
 
 function formatCurrency(amount: number): string {
@@ -30,7 +31,7 @@ const OOH_MILESTONES: { key: string; label: string }[] = [
   { key: 'photo_proof',         label: 'Photo proof received' },
 ];
 
-export default function OOHCard({ channel, clientId, onUpdateChannel }: OOHCardProps) {
+export default function OOHCard({ channel, clientId, onUpdateChannel, headerActions }: OOHCardProps) {
   const plannedSpend = channel.flights?.reduce((sum, f) =>
     sum + Object.values(f.monthlySpend).reduce((a, b) => a + b, 0), 0) || channel.totalUpfrontSpend || 0;
   const [manualActualSpend, setManualActualSpend] = useState(channel.manualActualSpend ?? 0);
@@ -93,23 +94,26 @@ export default function OOHCard({ channel, clientId, onUpdateChannel }: OOHCardP
               <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-orange-100 text-orange-600">
                 <MapPin className="w-5 h-5" />
               </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h3 className="text-sm font-semibold text-gray-900 truncate">Out of Home</h3>
-                  {/* Clickable booking confirmation toggle */}
-                  <button
-                    onClick={handleToggleConfirmed}
-                    title="Click to toggle booking confirmation"
-                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium cursor-pointer transition-all border ${
-                      isConfirmed
-                        ? 'bg-emerald-100 text-emerald-700 border-emerald-200 hover:bg-emerald-200'
-                        : 'bg-red-100 text-red-700 border-red-200 hover:bg-red-200'
-                    }`}
-                  >
-                    <span className={`w-1.5 h-1.5 rounded-full ${isConfirmed ? 'bg-emerald-500' : 'bg-red-500'}`} />
-                    {isConfirmed ? 'Booking Confirmed' : 'Not Yet Confirmed'}
-                  </button>
+              <div className="flex-1 min-w-0 flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-sm font-semibold text-gray-900 truncate">Out of Home</h3>
+                    {/* Clickable booking confirmation toggle */}
+                    <button
+                      onClick={handleToggleConfirmed}
+                      title="Click to toggle booking confirmation"
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium cursor-pointer transition-all border ${
+                        isConfirmed
+                          ? 'bg-emerald-100 text-emerald-700 border-emerald-200 hover:bg-emerald-200'
+                          : 'bg-red-100 text-red-700 border-red-200 hover:bg-red-200'
+                      }`}
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full ${isConfirmed ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                      {isConfirmed ? 'Booking Confirmed' : 'Not Yet Confirmed'}
+                    </button>
+                  </div>
                 </div>
+                {headerActions && <div className="-mt-0.5 flex-shrink-0">{headerActions}</div>}
               </div>
             </div>
 

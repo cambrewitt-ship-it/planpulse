@@ -23,6 +23,7 @@ export interface PlanRow {
   customFields?: Record<string, string>;
   flightGroupId?: string; // rows sharing a vertically-merged flight block
   isMasterRow?: boolean;  // true = renders the flight cell with rowspan; false = skips it
+  isOrganic?: boolean;    // true = organic (unpaid) social channel
 }
 
 export interface FeeRow {

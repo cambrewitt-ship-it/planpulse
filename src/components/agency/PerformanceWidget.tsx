@@ -118,8 +118,15 @@ function loadConfig(clientId: string): WidgetConfig {
     const raw = localStorage.getItem(`perf_widget_${clientId}`);
     if (raw) {
       const parsed = JSON.parse(raw);
-      // Backfill new fields for existing saved configs
       return { ...defaultConfig(), ...parsed };
+    }
+    // First-time setup: inherit the conversion event already selected in a channel card
+    // so the Performance Goal and channel cards start in sync.
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith(`conv-event-${clientId}-`)) {
+        const val = localStorage.getItem(key);
+        if (val) return { ...defaultConfig(), metaActionType: val };
+      }
     }
   } catch {}
   return defaultConfig();
@@ -133,13 +140,36 @@ function persistConfig(clientId: string, config: WidgetConfig) {
   try { localStorage.setItem(`perf_widget_${clientId}`, JSON.stringify(config)); } catch {}
 }
 
-// Friendly label for a Meta action type key
+// Friendly label for a Meta action type key — matches channel card labels
+const META_ACTION_LABELS: Record<string, string> = {
+  'lead':                                              'Leads',
+  'offsite_conversion.fb_pixel_purchase':              'Purchases',
+  'offsite_conversion.fb_pixel_add_to_cart':           'Add to Cart',
+  'offsite_conversion.fb_pixel_initiate_checkout':     'Checkout Started',
+  'offsite_conversion.fb_pixel_complete_registration': 'Registrations',
+  'offsite_conversion.fb_pixel_lead':                  'Pixel Leads',
+  'offsite_conversion.fb_pixel_view_content':          'Content Views',
+  'offsite_conversion.fb_pixel_search':                'Searches',
+  'offsite_conversion.fb_pixel_contact':               'Contact',
+  'offsite_conversion.fb_pixel_schedule':              'Schedule',
+  'link_click':                                        'Link Clicks',
+  'landing_page_view':                                 'Landing Page Views',
+  'post_engagement':                                   'Post Engagement',
+  'page_engagement':                                   'Page Engagement',
+  'video_view':                                        'Video Views',
+  'omni_purchase':                                     'Omni Purchases',
+  'omni_add_to_cart':                                  'Omni Add to Cart',
+  'mobile_app_install':                                'App Installs',
+  'app_custom_event.fb_mobile_purchase':               'In-App Purchases',
+  'app_custom_event.fb_mobile_add_to_cart':            'In-App Add to Cart',
+};
+
 function metaActionLabel(key: string): string {
-  return key
-    .replace('offsite_conversion.fb_pixel_', '')
-    .replace('offsite_conversion.', '')
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, c => c.toUpperCase());
+  return META_ACTION_LABELS[key] ??
+    key.replace('offsite_conversion.fb_pixel_', '')
+       .replace('offsite_conversion.', '')
+       .replace(/_/g, ' ')
+       .replace(/\b\w/g, c => c.toUpperCase());
 }
 
 // ── Settings gear icon ────────────────────────────────────────────────────────
@@ -197,9 +227,10 @@ function ConfigModal({ clientId, initialConfig, goals, campaigns, ga4Events, met
     ? campaigns.filter(c => c.platform === editConfig.platform)
     : campaigns;
 
-  // Show Meta event picker when platform is meta or all-platforms with ad source
-  const showMetaEvents = editConfig.metricSource === 'ad'
-    && (editConfig.platform === 'meta-ads' || editConfig.platform === '');
+  // Show Meta event picker whenever metric source is 'ad' — Meta events are
+  // relevant for all-platforms and meta-only selections. Hiding it for Google
+  // doesn't help since users may have mixed accounts.
+  const showMetaEvents = editConfig.metricSource === 'ad' && editConfig.platform !== 'google-ads';
 
   // Show GA4 event picker when GA4 source selected
   const showGa4Events = editConfig.metricSource === 'ga4';
@@ -207,7 +238,7 @@ function ConfigModal({ clientId, initialConfig, goals, campaigns, ga4Events, met
   // Needs configuration nudge
   const needsConversionEvent =
     (editConfig.metricSource === 'ga4' && !editConfig.ga4EventName && ga4Events.length > 0) ||
-    (editConfig.metricSource === 'ad' && editConfig.platform === 'meta-ads' && !editConfig.metaActionType && metaEvents.length > 0);
+    (showMetaEvents && !editConfig.metaActionType && mergedMetaEvents.length > 0);
 
   async function handleSave() {
     setSaving(true);
@@ -350,16 +381,16 @@ function ConfigModal({ clientId, initialConfig, goals, campaigns, ga4Events, met
           </div>
         </div>
 
-        {/* ── Meta Conversion Action ── */}
+        {/* ── Conversion Event (Meta) ── */}
         {showMetaEvents && (
           <div style={{ marginBottom: 20 }}>
-            <span style={sectionLabel}>Meta Conversion Action</span>
+            <span style={sectionLabel}>Conversion Event</span>
             <select
               value={editConfig.metaActionType}
               onChange={e => setEditConfig(c => ({ ...c, metaActionType: e.target.value }))}
               style={selectStyle}
             >
-              <option value="">— use platform total conversions —</option>
+              <option value="">— auto-detect best event —</option>
               {mergedMetaEvents.map(ev => (
                 <option key={ev.name} value={ev.name}>
                   {metaActionLabel(ev.name)}{ev.count > 0 ? ` (${ev.count.toLocaleString()})` : ''}
@@ -367,7 +398,7 @@ function ConfigModal({ clientId, initialConfig, goals, campaigns, ga4Events, met
               ))}
             </select>
             <p style={{ fontSize: 10, color: '#B5B0A5', marginTop: 4 }}>
-              Select a Meta pixel event to use as the conversion count for CPA
+              Same events shown on the channel performance cards. Used as the conversion count for CPA/CPL.
             </p>
           </div>
         )}
@@ -427,6 +458,8 @@ export function PerformanceWidget({
   hideControls = false,
   hideDisplay = false,
   floatingGear = false,
+  modalOpen,
+  onModalOpenChange,
 }: {
   clientId: string;
   onNeedle?: (data: PerfData | null) => void;
@@ -435,6 +468,9 @@ export function PerformanceWidget({
   hideControls?: boolean;
   hideDisplay?: boolean;
   floatingGear?: boolean;
+  /** When provided, the modal is controlled externally. */
+  modalOpen?: boolean;
+  onModalOpenChange?: (open: boolean) => void;
 }) {
   const [config, setConfig] = useState<WidgetConfig>(() => loadConfig(clientId));
   const [goals, setGoals] = useState<Goal[]>([]);
@@ -449,8 +485,15 @@ export function PerformanceWidget({
   const [ga4Events, setGa4Events] = useState<string[]>([]);
   const [metaEvents, setMetaEvents] = useState<Array<{ name: string; count: number }>>([]);
   const [perfData, setPerfData] = useState<PerfData | null>(null);
-  const [showModal, setShowModal] = useState(false);
+  const [internalShowModal, setInternalShowModal] = useState(false);
   const [mounted, setMounted] = useState(false);
+
+  const isControlled = modalOpen !== undefined;
+  const showModal = isControlled ? (modalOpen ?? false) : internalShowModal;
+  const setShowModal = (open: boolean) => {
+    if (!isControlled) setInternalShowModal(open);
+    onModalOpenChange?.(open);
+  };
 
   const onNeedleRef = useRef(onNeedle);
   onNeedleRef.current = onNeedle;

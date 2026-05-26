@@ -34,6 +34,7 @@ export interface ChannelCardProps {
     status: 'healthy' | 'attention' | 'excellent';
     currentSpend: number;
     plannedSpend: number;
+    grossPlannedSpend?: number;
     pacingPercentage: number;
     metrics: {
       impressions: number;
@@ -70,12 +71,15 @@ export interface ChannelCardProps {
   onViewReport?: () => void;
   clientId?: string;
   channelStartDate?: Date | null;
+  channelFlights?: { startWeek: Date | string; endWeek: Date | string }[];
   refetchTrigger?: number;
   benchmarks?: ChannelBenchmark[];
   presets?: MetricPreset[];
   clientChannelPresets?: ClientChannelPreset[];
   onPresetSaved?: (updated: ClientChannelPreset) => void;
   onCampaignSelectionChange?: (channelKey: string, ids: string[]) => void;
+  planView?: 'gross' | 'net';
+  headerActions?: React.ReactNode;
 }
 
 // ---------------------------------------------------------------------------
@@ -273,22 +277,19 @@ function StatusBadge({ status }: { status: ChannelCardProps['channel']['status']
 // ---------------------------------------------------------------------------
 
 function PacingBar({
-  pacingPercentage,
   currentSpend,
   plannedSpend,
+  plannedLabel,
   status,
 }: {
-  pacingPercentage: number;
   currentSpend: number;
   plannedSpend: number;
+  plannedLabel?: string;
   status: ChannelCardProps['channel']['status'];
 }) {
-  // Calculate fill percentage based on actual spend vs planned spend
   const spendRatio = plannedSpend > 0 ? (currentSpend / plannedSpend) * 100 : 0;
-  const fillPct  = Math.min(100, spendRatio);
-  const barColor = spendRatio > 100 ? '#ef4444' : STATUS_CONFIG[status].bar;
-  // Use spendRatio (derived from displayed values) for the label so it stays
-  // consistent with the bar and the spend figures shown below it.
+  const fillPct    = Math.min(100, spendRatio);
+  const barColor   = spendRatio > 100 ? '#ef4444' : STATUS_CONFIG[status].bar;
   const displayPct = Math.round(spendRatio);
 
   return (
@@ -300,12 +301,10 @@ function PacingBar({
         </span>
       </div>
       <div className="relative h-2 w-full rounded-full bg-gray-100 overflow-visible">
-        {/* Fill */}
         <div
           className="absolute inset-y-0 left-0 rounded-full transition-all duration-500"
           style={{ width: `${fillPct}%`, backgroundColor: barColor }}
         />
-        {/* Target pin at 100% */}
         <div
           className="absolute top-1/2 -translate-y-1/2 w-0.5 h-4 rounded-full bg-gray-400"
           style={{ left: 'calc(100% - 1px)' }}
@@ -314,7 +313,7 @@ function PacingBar({
       </div>
       <div className="flex justify-between text-xs text-gray-400">
         <span>{fmt(currentSpend, 'currency', 0)} spent</span>
-        <span>{fmt(plannedSpend, 'currency', 0)} planned</span>
+        <span>{fmt(plannedSpend, 'currency', 0)}{plannedLabel ? ` ${plannedLabel}` : ' planned'}</span>
       </div>
     </div>
   );
@@ -567,7 +566,6 @@ function actionTypeLabel(type: string): string {
 
 // Helper to normalize channel name to channel_type format
 function normalizeChannelType(channelName: string): string {
-  // Convert to title case: "META ADS" -> "Meta Ads"
   return channelName
     .toLowerCase()
     .split(' ')
@@ -575,7 +573,21 @@ function normalizeChannelType(channelName: string): string {
     .join(' ');
 }
 
-export default function ChannelPerformanceCard({ channel, selectedMonth, dateRange, onAdjust, onViewReport, clientId, channelStartDate, refetchTrigger, benchmarks, presets, clientChannelPresets, onPresetSaved, onCampaignSelectionChange }: ChannelCardProps) {
+// Map channel platform + name to the canonical channel_type stored in action_points.
+// Uses platform first (already resolved by getPlatformForChannel) so uploaded plans
+// with variant names like "-Search", "Paid Search", "SEM" all resolve correctly.
+function inferActionPointChannelType(platform: string, channelName: string): string {
+  if (platform === 'meta-ads') return 'Meta Ads';
+  if (platform === 'google-ads') return 'Google Ads';
+  if (platform === 'linkedin-ads') return 'LinkedIn Ads';
+  if (platform === 'tiktok-ads') return 'TikTok Ads';
+  if (platform === 'snapchat-ads') return 'Snapchat Ads';
+  if (platform === 'pinterest-ads') return 'Pinterest Ads';
+  if (platform === 'instagram-ads') return 'Instagram Ads';
+  return normalizeChannelType(channelName);
+}
+
+export default function ChannelPerformanceCard({ channel, selectedMonth, dateRange, onAdjust, onViewReport, clientId, channelStartDate, channelFlights, refetchTrigger, benchmarks, presets, clientChannelPresets, onPresetSaved, onCampaignSelectionChange, planView, headerActions }: ChannelCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [chartType, setChartType] = useState<'spend' | 'metrics'>('spend');
   const [selectedMetrics, setSelectedMetrics] = useState<Set<MetricKey>>(new Set(['impressions']));
@@ -1075,24 +1087,45 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                 </p>
               </div>
 
-              {/* Spend summary */}
-              <div className="row-start-1 col-start-3 text-right flex-shrink-0">
-                <p className="text-sm font-bold text-gray-900">
-                  {fmt(filteredMetrics.spend ?? channel.currentSpend, 'currency', 0)}
-                </p>
-                <p className="text-xs text-gray-400">
-                  of {fmt(channel.plannedSpend, 'currency', 0)}
-                </p>
+              {/* Spend summary + manage menu */}
+              <div className="row-start-1 col-start-3 flex items-start gap-1 flex-shrink-0">
+                <div className="text-right">
+                  {(() => {
+                    const hasCommission = channel.grossPlannedSpend !== undefined && channel.grossPlannedSpend !== channel.plannedSpend;
+                    const displayPlanned = hasCommission && planView === 'gross' ? channel.grossPlannedSpend! : channel.plannedSpend;
+                    const label = hasCommission ? (planView === 'gross' ? ' gross' : ' net') : '';
+                    return (
+                      <>
+                        <p className="text-sm font-bold text-gray-900">
+                          {fmt(filteredMetrics.spend ?? channel.currentSpend, 'currency', 0)}
+                        </p>
+                        <p className="text-xs text-gray-400">
+                          of {fmt(displayPlanned, 'currency', 0)}{label}
+                        </p>
+                      </>
+                    );
+                  })()}
+                </div>
+                {headerActions && (
+                  <div className="-mt-0.5">{headerActions}</div>
+                )}
               </div>
 
               {/* Pacing bar spans from under logo to under spend */}
               <div className="row-start-2 col-start-1 col-end-4">
-                <PacingBar
-                  pacingPercentage={channel.pacingPercentage}
-                  currentSpend={filteredMetrics.spend ?? channel.currentSpend}
-                  plannedSpend={channel.plannedSpend}
-                  status={channel.status}
-                />
+                {(() => {
+                  const hasCommission = channel.grossPlannedSpend !== undefined && channel.grossPlannedSpend !== channel.plannedSpend;
+                  const displayPlanned = hasCommission && planView === 'gross' ? channel.grossPlannedSpend! : channel.plannedSpend;
+                  const plannedLabel = hasCommission ? (planView === 'gross' ? 'gross' : 'net') : undefined;
+                  return (
+                    <PacingBar
+                      currentSpend={filteredMetrics.spend ?? channel.currentSpend}
+                      plannedSpend={displayPlanned}
+                      plannedLabel={plannedLabel}
+                      status={channel.status}
+                    />
+                  );
+                })()}
               </div>
             </div>
           </div>
@@ -1514,9 +1547,10 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
             <div className="relative flex-1 min-h-0">
               <div className={`h-full px-4 pb-6 ${isExpanded ? 'overflow-y-auto' : 'overflow-hidden'}`}>
                 <InlineActionPoints
-                  channelType={normalizeChannelType(channel.name)}
+                  channelType={inferActionPointChannelType(channel.platform, channel.name)}
                   clientId={clientId}
                   channelStartDate={channelStartDate}
+                  channelFlights={channelFlights}
                   maxVisible={3}
                   showBorder={false}
                   showTitle={false}

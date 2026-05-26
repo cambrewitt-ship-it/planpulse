@@ -94,23 +94,26 @@ export async function GET(request: NextRequest) {
     // Try client-specific first; fall back to user-level accounts.
     let savedAccounts: Array<{ account_id: string; account_name: string | null }> = [];
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const db = supabase as any;
+
     if (clientId) {
-      const { data: clientAccounts } = await supabase
+      const { data: clientAccounts } = await db
         .from('meta_ads_accounts')
         .select('account_id, account_name')
         .eq('user_id', user.id)
         .eq('client_id', clientId)
         .eq('is_active', true);
-      savedAccounts = clientAccounts ?? [];
+      savedAccounts = (clientAccounts as Array<{ account_id: string; account_name: string | null }> | null) ?? [];
     }
 
     if (savedAccounts.length === 0) {
-      const { data: anyAccounts } = await supabase
+      const { data: anyAccounts } = await db
         .from('meta_ads_accounts')
         .select('account_id, account_name')
         .eq('user_id', user.id)
         .eq('is_active', true);
-      savedAccounts = anyAccounts ?? [];
+      savedAccounts = (anyAccounts as Array<{ account_id: string; account_name: string | null }> | null) ?? [];
     }
 
     if (savedAccounts.length === 0) {

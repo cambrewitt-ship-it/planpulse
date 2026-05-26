@@ -19,6 +19,7 @@ interface OrganicSocialCardProps {
   actuals: OrganicSocialActual[];
   onRefresh?: () => void; // Callback to reload actuals after fetching
   onUpdateChannel?: (channelId: string, updates: Partial<MediaPlanChannel>) => void;
+  headerActions?: React.ReactNode;
 }
 
 function getChannelIcon(channelName: string) {
@@ -42,7 +43,7 @@ function getStatusBadge(postsPublished: number | null, postsPerWeek: number) {
   return { color: 'bg-red-100', text: 'text-red-700', label: '🔴 Off Track', emoji: '🔴' };
 }
 
-export default function OrganicSocialCard({ channel, clientId, weekCommencing, actuals, onRefresh, onUpdateChannel }: OrganicSocialCardProps) {
+export default function OrganicSocialCard({ channel, clientId, weekCommencing, actuals, onRefresh, onUpdateChannel, headerActions }: OrganicSocialCardProps) {
   const postsPerWeek = channel.postsPerWeek || 0;
   const plannedSpend = channel.flights?.reduce((sum, f) =>
     sum + Object.values(f.monthlySpend).reduce((a, b) => a + b, 0), 0) || 0;
@@ -341,7 +342,8 @@ export default function OrganicSocialCard({ channel, clientId, weekCommencing, a
                 {getChannelIcon(channel.channelName)}
               </div>
 
-              <div className="flex-1 min-w-0">
+              <div className="flex-1 min-w-0 flex items-start justify-between gap-2">
+                <div className="min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <h3 className="text-sm font-semibold text-gray-900 truncate">
                     {channel.channelName}
@@ -355,6 +357,8 @@ export default function OrganicSocialCard({ channel, clientId, weekCommencing, a
                 <p className="text-xs text-gray-400 mt-0.5">
                   Target: {postsPerWeek} posts/week
                 </p>
+                </div>
+                {headerActions && <div className="-mt-0.5 flex-shrink-0">{headerActions}</div>}
               </div>
             </div>
 

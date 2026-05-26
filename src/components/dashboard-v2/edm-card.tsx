@@ -16,6 +16,7 @@ interface EdmCardProps {
   clientId: string;
   actuals: EdmActual[];
   onUpdateChannel?: (channelId: string, updates: Partial<MediaPlanChannel>) => void;
+  headerActions?: React.ReactNode;
 }
 
 function getFrequencyLabel(sendFrequency: string | undefined): string {
@@ -81,7 +82,7 @@ function calculateOnTrackStatus(sendFrequency: string | undefined, actuals: EdmA
   return { status: 'not-set', message: 'Frequency not recognized' };
 }
 
-export default function EdmCard({ channel, clientId, actuals, onUpdateChannel }: EdmCardProps) {
+export default function EdmCard({ channel, clientId, actuals, onUpdateChannel, headerActions }: EdmCardProps) {
   const plannedSpend = channel.flights?.reduce((sum, f) =>
     sum + Object.values(f.monthlySpend).reduce((a, b) => a + b, 0), 0) || 0;
   const [manualActualSpend, setManualActualSpend] = useState(channel.manualActualSpend ?? 0);
@@ -154,14 +155,17 @@ export default function EdmCard({ channel, clientId, actuals, onUpdateChannel }:
             <Mail className="w-5 h-5" />
           </div>
 
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="text-sm font-semibold text-gray-900 truncate">EDM / Email</h3>
-              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${statusColor}`}>
-                {trackStatus.status === 'on-track' ? '🟢' : trackStatus.status === 'behind' ? '🟡' : '⚪'} {trackStatus.message}
-              </span>
+          <div className="flex-1 min-w-0 flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-sm font-semibold text-gray-900 truncate">EDM / Email</h3>
+                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${statusColor}`}>
+                  {trackStatus.status === 'on-track' ? '🟢' : trackStatus.status === 'behind' ? '🟡' : '⚪'} {trackStatus.message}
+                </span>
+              </div>
+              <p className="text-xs text-gray-400 mt-0.5">Frequency: {frequencyLabel}</p>
             </div>
-            <p className="text-xs text-gray-400 mt-0.5">Frequency: {frequencyLabel}</p>
+            {headerActions && <div className="-mt-0.5 flex-shrink-0">{headerActions}</div>}
           </div>
         </div>
 

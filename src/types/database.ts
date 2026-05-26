@@ -1054,6 +1054,42 @@ export interface Database {
           Relationships: [];
         };
 
+        client_perf_snapshots: {
+          Row: {
+            id: string;
+            client_id: string;
+            date: string;
+            metric: string;
+            value: number;
+            platforms_key: string;
+            campaign_ids_key: string;
+            meta_action_type: string;
+            snapped_at: string;
+          };
+          Insert: {
+            id?: string;
+            client_id: string;
+            date: string;
+            metric: string;
+            value: number;
+            platforms_key?: string;
+            campaign_ids_key?: string;
+            meta_action_type?: string;
+            snapped_at?: string;
+          };
+          Update: {
+            id?: string;
+            client_id?: string;
+            date?: string;
+            metric?: string;
+            value?: number;
+            platforms_key?: string;
+            campaign_ids_key?: string;
+            meta_action_type?: string;
+            snapped_at?: string;
+          };
+          Relationships: [];
+        };
         client_campaign_goals: {
           Row: {
             id: string;

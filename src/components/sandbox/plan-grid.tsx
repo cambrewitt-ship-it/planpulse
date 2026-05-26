@@ -172,7 +172,7 @@ function FlightPopover({ flight, onSave, onDelete, onClose, anchorRef }: FlightP
           if (e.key === "Enter") onSave(Math.max(0, parseFloat(budget) || 0), color);
           if (e.key === "Escape") onClose();
         }}
-        className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-blue-400"
+        className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm text-gray-900 mb-3 focus:outline-none focus:ring-2 focus:ring-blue-400"
         placeholder="0"
       />
       <label className="text-xs text-gray-500 block mb-2">Colour</label>
@@ -912,13 +912,17 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
         const isEditing = editingFlight?.rowId === row.id && editingFlight?.flightId === flight.id;
         const isBeingResized = resizeState?.rowId === row.id && resizeState?.flightId === flight.id;
 
+        const flightBg = row.isOrganic
+          ? `repeating-linear-gradient(-45deg, ${flight.color}, ${flight.color} 5px, rgba(255,255,255,0.45) 5px, rgba(255,255,255,0.45) 10px)`
+          : flight.color;
+
         cells.push(
           <td
             key={week.weekStart}
             colSpan={span}
             rowSpan={flightRowSpan}
             style={{
-              background: flight.color,
+              background: flightBg,
               position: "relative",
               verticalAlign: "middle",
               outline: isBeingResized ? `2px solid white` : undefined,
@@ -1201,7 +1205,12 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
                         });
                       }}
                       className={`${stickyBase} text-center align-middle`}
-                      style={{ position: "sticky", left: LEFT_OFFSETS.channel, zIndex: 10 }}
+                      style={{
+                        position: "sticky",
+                        left: LEFT_OFFSETS.channel,
+                        zIndex: 10,
+                        ...(row.isOrganic ? { background: 'repeating-linear-gradient(-45deg, #f5f3ff, #f5f3ff 8px, #ede9fe 8px, #ede9fe 16px)' } : {}),
+                      }}
                     />
                   )}
                   <EditableCell value={row.detail}

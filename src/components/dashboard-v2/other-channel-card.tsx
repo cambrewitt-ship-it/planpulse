@@ -20,6 +20,7 @@ interface OtherChannelCardProps {
   channelStartDate?: Date | null;
   refetchTrigger?: number;
   onUpdateChannel?: (channelId: string, updates: Partial<MediaPlanChannel>) => void;
+  headerActions?: React.ReactNode;
 }
 
 const LOCAL_KEY = (clientId: string, name: string) =>
@@ -63,6 +64,7 @@ export default function OtherChannelCard({
   channelStartDate,
   refetchTrigger,
   onUpdateChannel,
+  headerActions,
 }: OtherChannelCardProps) {
   const displayName = channel.customChannelName || channel.channelName;
   const plannedSpend = channel.flights?.reduce((sum, f) =>
@@ -253,9 +255,12 @@ export default function OtherChannelCard({
               <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-gray-100 text-gray-500">
                 {getChannelLogo(channel.channelName, 'w-5 h-5')}
               </div>
-              <div className="flex-1 min-w-0">
-                <h3 className="text-sm font-semibold text-gray-900 truncate">{displayName}</h3>
-                {channel.format && <p className="text-xs text-gray-400 mt-0.5">{channel.format}</p>}
+              <div className="flex-1 min-w-0 flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <h3 className="text-sm font-semibold text-gray-900 truncate">{displayName}</h3>
+                  {channel.format && <p className="text-xs text-gray-400 mt-0.5">{channel.format}</p>}
+                </div>
+                {headerActions && <div className="-mt-0.5 flex-shrink-0">{headerActions}</div>}
               </div>
             </div>
 
@@ -417,6 +422,7 @@ export default function OtherChannelCard({
               channelType={channel.channelName}
               clientId={clientId}
               channelStartDate={channelStartDate}
+              channelFlights={channel.flights ?? []}
               maxVisible={4}
               sideBySide={true}
               refetchTrigger={refetchTrigger}

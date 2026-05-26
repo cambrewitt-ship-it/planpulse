@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Nango from '@nangohq/frontend';
 import { Card } from './ui/card';
 import { Button } from './ui/button';
@@ -120,9 +120,10 @@ const platforms: Platform[] = [
 
 interface AdPlatformConnectorProps {
   clientId: string;
+  onConfigNeeded?: (needed: boolean) => void;
 }
 
-export default function AdPlatformConnector({ clientId }: AdPlatformConnectorProps) {
+export default function AdPlatformConnector({ clientId, onConfigNeeded }: AdPlatformConnectorProps) {
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>({
     'google-ads': false,
     'facebook': false,
@@ -160,6 +161,8 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
   const [isDiscoveringGoogleAnalyticsAccounts, setIsDiscoveringGoogleAnalyticsAccounts] = useState(false);
   const [isSavingGoogleAnalyticsAccounts, setIsSavingGoogleAnalyticsAccounts] = useState(false);
   const [googleAnalyticsAccountMessage, setGoogleAnalyticsAccountMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const modalFocusRef = useRef<HTMLDivElement>(null);
 
   // Fetch connection status on mount
   useEffect(() => {
@@ -224,6 +227,7 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
           if (event.type === 'close') {
             console.log('User closed the modal');
             setLoadingStates((prev) => ({ ...prev, [platformId]: false }));
+            setTimeout(() => modalFocusRef.current?.focus(), 0);
           } else if (event.type === 'error') {
             console.error('Nango connection error:', event);
             setLoadingStates((prev) => ({ ...prev, [platformId]: false }));
@@ -251,6 +255,7 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
                 await fetchConnectionStatus();
                 // Open the platform modal so the user can manage accounts immediately
                 setOpenModal(platformId);
+                setTimeout(() => modalFocusRef.current?.focus(), 0);
               }
             } catch (syncError) {
               console.error('Sync error:', syncError);
@@ -445,6 +450,16 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
       fetchGoogleAnalyticsAccounts();
     }
   }, [connectionStatus['google-analytics']]);
+
+  // Notify parent when any connected platform is missing saved accounts
+  useEffect(() => {
+    if (!onConfigNeeded) return;
+    const needed =
+      (connectionStatus['google-ads'] && googleAdsAccounts.length === 0) ||
+      (connectionStatus['facebook'] && metaAdsAccounts.length === 0) ||
+      (connectionStatus['google-analytics'] && googleAnalyticsAccounts.length === 0);
+    onConfigNeeded(!!needed);
+  }, [connectionStatus, googleAdsAccounts, metaAdsAccounts, googleAnalyticsAccounts]);
 
   // Fetch accounts when modal opens for connected platforms
   useEffect(() => {
@@ -733,6 +748,14 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
     }
   };
 
+  const platformHasNoSavedAccounts = (platformId: string) => {
+    if (!connectionStatus[platformId as keyof ConnectionStatus]) return false;
+    if (platformId === 'google-ads') return googleAdsAccounts.length === 0;
+    if (platformId === 'facebook') return metaAdsAccounts.length === 0;
+    if (platformId === 'google-analytics') return googleAnalyticsAccounts.length === 0;
+    return false;
+  };
+
   if (isInitialLoading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -799,18 +822,22 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
           const isConnected = connectionStatus[platform.id];
           const isLoading = loadingStates[platform.id];
 
+          const noSavedAccounts = platformHasNoSavedAccounts(platform.id);
+
           return (
             <button
               key={platform.id}
               onClick={() => !platform.comingSoon && setOpenModal(platform.id)}
               disabled={platform.comingSoon || isLoading}
               className={`
-                w-full h-24
+                w-full h-28
                 flex flex-col items-center justify-center
                 bg-white border-2 rounded-lg
                 transition-all duration-200
-                ${isConnected 
-                  ? 'border-green-500 hover:border-green-600 hover:shadow-md' 
+                ${isConnected && !noSavedAccounts
+                  ? 'border-green-500 hover:border-green-600 hover:shadow-md'
+                  : isConnected && noSavedAccounts
+                  ? 'border-amber-400 hover:border-amber-500 hover:shadow-md'
                   : 'border-gray-200 hover:border-gray-300 hover:shadow-md'
                 }
                 ${platform.comingSoon ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
@@ -820,7 +847,12 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
             >
               <PlatformLogo platformId={platform.id} />
               {isConnected && (
-                <div className="absolute top-2 right-2 w-3 h-3 bg-green-500 rounded-full border-2 border-white" />
+                <div className={`absolute top-2 right-2 w-3 h-3 ${noSavedAccounts ? 'bg-amber-400' : 'bg-green-500'} rounded-full border-2 border-white`} />
+              )}
+              {isConnected && noSavedAccounts && (
+                <span className="absolute bottom-2 text-[9px] font-semibold text-amber-600 text-center leading-tight px-1">
+                  No Saved Account<br />Configure Now
+                </span>
               )}
               {platform.comingSoon && (
                 <span className="absolute bottom-2 text-xs text-gray-500">Coming Soon</span>
@@ -834,6 +866,8 @@ export default function AdPlatformConnector({ clientId }: AdPlatformConnectorPro
       {openModal && (
         <Dialog open={!!openModal} onOpenChange={(open) => !open && setOpenModal(null)}>
           <DialogContent className="max-w-2xl font-[family-name:var(--font-inter)] relative">
+            {/* Focusable anchor so focus can be restored here after Nango OAuth popup closes */}
+            <div ref={modalFocusRef} tabIndex={-1} className="outline-none" />
             {openModal === 'facebook' && isDiscoveringMetaAccounts && (
               <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-white/90 rounded-lg">
                 <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mb-4"></div>

@@ -76,6 +76,14 @@ interface MetaCampaign {
   accountName: string | null;
 }
 
+interface LinkableRow {
+  id: string;
+  channelName: string;
+  detail: string;
+  channelId: string;
+  platform: 'meta' | 'google';
+}
+
 interface IntelDocument {
   id: string;
   file_name: string;
@@ -245,6 +253,7 @@ export default function CreateClientPage() {
   const [campaignsSaving, setCampaignsSaving] = useState(false);
   const [openCampaignDropdown, setOpenCampaignDropdown] = useState<string | null>(null);
   const [campaignSearchMap, setCampaignSearchMap] = useState<Record<string, string>>({});
+  const [showGadsModal, setShowGadsModal] = useState(false);
 
   // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -274,6 +283,34 @@ export default function CreateClientPage() {
     const name = ((ch.customChannelName || ch.channelName) ?? '').toLowerCase();
     return ['meta', 'facebook', 'instagram', 'google', 'youtube', 'search', 'display', 'shopping', 'pmax', 'performance max'].some((kw) => name.includes(kw));
   });
+
+  const META_KWS = ['meta', 'facebook', 'instagram'];
+  const GOOGLE_KWS = ['google', 'youtube', 'search', 'display', 'shopping', 'pmax', 'performance max'];
+  const LINKABLE_KWS = [...META_KWS, ...GOOGLE_KWS];
+  const detectRowPlatform = (name: string): 'meta' | 'google' =>
+    META_KWS.some((kw) => name.toLowerCase().includes(kw)) ? 'meta' : 'google';
+  const linkableRows: LinkableRow[] = (() => {
+    if (sandboxPlan) {
+      const seen = new Set<string>();
+      const rows: LinkableRow[] = [];
+      for (const row of sandboxPlan.rows) {
+        const channelName = (row.channel ?? '').trim();
+        if (!channelName) continue;
+        if (!LINKABLE_KWS.some((kw) => channelName.toLowerCase().includes(kw))) continue;
+        const detail = (row.detail ?? '').trim();
+        const rowId = `${channelName}::${detail}`;
+        if (seen.has(rowId)) continue;
+        seen.add(rowId);
+        const matchingChannel = channels.find((ch) => (ch.channelName ?? '').trim() === channelName);
+        rows.push({ id: rowId, channelName, detail, channelId: matchingChannel?.id ?? channelName, platform: detectRowPlatform(channelName) });
+      }
+      return rows;
+    }
+    return linkableChannels.map((ch) => {
+      const name = (ch.customChannelName || ch.channelName) ?? '';
+      return { id: ch.id, channelName: name, detail: ch.channelSubType ?? '', channelId: ch.id, platform: detectRowPlatform(name) };
+    });
+  })();
 
   // ── Step 1 handlers ───────────────────────────────────────────────────────────
 
@@ -478,7 +515,7 @@ export default function CreateClientPage() {
     setIsCheckingConnections(false);
   };
 
-  const handleConnectPlatform = async (platformId: PlatformId) => {
+  const handleConnectPlatform = async (platformId: PlatformId, onConnected?: () => void) => {
     if (!clientId) return;
     setConnectingPlatform(platformId);
     try {
@@ -496,6 +533,7 @@ export default function CreateClientPage() {
               });
               if (res.ok) {
                 setConnectionStatus((prev) => ({ ...prev, [platformId]: true }));
+                onConnected?.();
               }
             } catch {}
             setConnectingPlatform(null);
@@ -566,7 +604,7 @@ export default function CreateClientPage() {
       const res = await fetch('/api/ads/meta/save-accounts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accounts }),
+        body: JSON.stringify({ accounts, clientId }),
       });
       if (res.ok) setMetaSaved(true);
       else {
@@ -721,8 +759,14 @@ export default function CreateClientPage() {
     if (!clientId) return;
     setCampaignsSaving(true);
     try {
+      const channelCampaignsAgg: Record<string, string[]> = {};
+      for (const row of linkableRows) {
+        const ids = channelCampaignMap[row.id] ?? [];
+        if (!channelCampaignsAgg[row.channelId]) channelCampaignsAgg[row.channelId] = [];
+        channelCampaignsAgg[row.channelId].push(...ids);
+      }
       const updatedChannels = channels.map((ch) => {
-        const campaignIds = (channelCampaignMap[ch.id] ?? []).filter(Boolean);
+        const campaignIds = (channelCampaignsAgg[ch.id] ?? []).filter(Boolean);
         if (campaignIds.length > 0) {
           const campaigns = metaCampaigns.filter((c) => campaignIds.includes(c.id));
           return {
@@ -1264,7 +1308,8 @@ export default function CreateClientPage() {
             {/* Continue button */}
             <Button
               onClick={() => connectionStatus.facebook ? setStep(6) : setStep(7)}
-              className="w-full"
+              disabled={connectionStatus.facebook ? !metaSaved : false}
+              className={`w-full ${connectionStatus.facebook && !metaSaved ? 'bg-white text-gray-400 border border-gray-200 hover:bg-white' : ''}`}
             >
               {connectionStatus.facebook ? (
                 <>Continue to Link Campaigns<ArrowRight className="h-4 w-4 ml-2" /></>
@@ -1290,46 +1335,61 @@ export default function CreateClientPage() {
                     <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
                     <p className="text-sm text-gray-500">Loading campaigns from Meta&hellip;</p>
                   </div>
-                ) : linkableChannels.length === 0 ? (
+                ) : linkableRows.length === 0 ? (
                   <div className="py-10 text-center space-y-2">
                     <p className="text-sm text-gray-500">No Meta or Google channels found in your media plan.</p>
                     <p className="text-xs text-gray-400">You can link campaigns from the client dashboard after setting up your media plan.</p>
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {metaCampaigns.length === 0 && (
-                      <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-sm">
-                        No campaigns found in your saved Meta accounts. You can link campaigns later from the client dashboard.
-                      </div>
-                    )}
-                    {linkableChannels.map((channel) => {
-                      const selectedIds = channelCampaignMap[channel.id] ?? [];
+                    {linkableRows.map((row) => {
+                      const selectedIds = channelCampaignMap[row.id] ?? [];
+                      const platformLogoId: PlatformId = row.platform === 'meta' ? 'facebook' : 'google-ads';
+                      const platformConnected = row.platform === 'meta' ? connectionStatus.facebook : connectionStatus['google-ads'];
+                      const rowCampaigns = row.platform === 'meta' ? metaCampaigns : [];
                       const [dropOpen, setDropOpen] = [
-                        openCampaignDropdown === channel.id,
-                        (v: boolean) => setOpenCampaignDropdown(v ? channel.id : null),
+                        openCampaignDropdown === row.id,
+                        (v: boolean) => setOpenCampaignDropdown(v ? row.id : null),
                       ];
                       const [search, setSearch] = [
-                        campaignSearchMap[channel.id] ?? '',
-                        (v: string) => setCampaignSearchMap(prev => ({ ...prev, [channel.id]: v })),
+                        campaignSearchMap[row.id] ?? '',
+                        (v: string) => setCampaignSearchMap(prev => ({ ...prev, [row.id]: v })),
                       ];
-                      const filtered = metaCampaigns.filter((c) =>
+                      const filtered = rowCampaigns.filter((c) =>
                         c.name.toLowerCase().includes(search.toLowerCase())
                       );
                       const triggerLabel = selectedIds.length === 0
                         ? 'Select campaigns…'
                         : selectedIds.length === 1
-                          ? (metaCampaigns.find(c => c.id === selectedIds[0])?.name ?? 'Select campaigns…')
+                          ? (rowCampaigns.find(c => c.id === selectedIds[0])?.name ?? 'Select campaigns…')
                           : `${selectedIds.length} campaigns selected`;
                       return (
-                      <div key={channel.id} className="flex items-center gap-4 p-3 rounded-xl border border-gray-200 bg-white">
+                      <div key={row.id} className="flex items-center gap-4 p-3 rounded-xl border border-gray-200 bg-white">
+                        <div className="flex-shrink-0">
+                          <PlatformLogo id={platformLogoId} size={22} />
+                        </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-gray-900 truncate">
-                            {channel.customChannelName || channel.channelName}
-                          </p>
-                          {channel.channelSubType && (
-                            <p className="text-xs text-gray-400">{channel.channelSubType}</p>
+                          <p className="text-sm font-medium text-gray-900 truncate">{row.channelName}</p>
+                          {row.detail && (
+                            <p className="text-xs text-gray-400 truncate">{row.detail}</p>
                           )}
                         </div>
+                        {!platformConnected ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleConnectPlatform(platformLogoId, row.platform === 'google' ? () => {
+                              setShowGadsModal(true);
+                              fetchGadsAccounts();
+                            } : undefined)}
+                            disabled={!!connectingPlatform}
+                            className="text-xs flex-shrink-0"
+                          >
+                            {connectingPlatform === platformLogoId
+                              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              : 'Connect'}
+                          </Button>
+                        ) : (
                         <div className="w-56 flex-shrink-0 relative" data-campaign-dropdown>
                           <button
                             type="button"
@@ -1363,14 +1423,14 @@ export default function CreateClientPage() {
                                         type="button"
                                         onMouseDown={(e) => e.preventDefault()}
                                         onClick={() => {
-                                          const chId = channel.id;
+                                          const rowId = row.id;
                                           const cId = c.id;
                                           setChannelCampaignMap(prev => {
-                                            const cur = prev[chId] ?? [];
+                                            const cur = prev[rowId] ?? [];
                                             const isSelected = cur.includes(cId);
                                             return {
                                               ...prev,
-                                              [chId]: isSelected ? cur.filter(id => id !== cId) : [...cur, cId],
+                                              [rowId]: isSelected ? cur.filter(id => id !== cId) : [...cur, cId],
                                             };
                                           });
                                         }}
@@ -1390,7 +1450,7 @@ export default function CreateClientPage() {
                                   <button
                                     type="button"
                                     onMouseDown={(e) => e.preventDefault()}
-                                    onClick={() => setChannelCampaignMap(prev => ({ ...prev, [channel.id]: [] }))}
+                                    onClick={() => setChannelCampaignMap(prev => ({ ...prev, [row.id]: [] }))}
                                     className="text-xs text-gray-400 hover:text-gray-600"
                                   >
                                     Clear selection
@@ -1400,6 +1460,7 @@ export default function CreateClientPage() {
                             </div>
                           )}
                         </div>
+                        )}
                       </div>
                       );
                     })}
@@ -1414,6 +1475,80 @@ export default function CreateClientPage() {
         )}
 
       </div>
+
+      {/* ── Google Ads account modal (triggered after OAuth connect in Step 6) ── */}
+      {showGadsModal && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+        <div className="w-full max-w-md mx-4 rounded-2xl shadow-2xl p-6 space-y-5" style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)' }}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <PlatformLogo id="google-ads" size={24} />
+              <div>
+                <h3 className="text-base font-semibold text-gray-900">Connect Google Ads Account</h3>
+                <p className="text-xs text-gray-400">Add your Customer ID to link campaigns</p>
+              </div>
+            </div>
+            <button onClick={() => setShowGadsModal(false)} className="text-gray-400 hover:text-gray-600 transition-colors">
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+
+          {gadsMsg && (
+            <p className={`text-sm rounded-lg p-2.5 border ${gadsMsg.type === 'success' ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-200 text-red-800'}`}>
+              {gadsMsg.text}
+            </p>
+          )}
+
+          <div className="space-y-2">
+            <div className="flex gap-2">
+              <Input
+                placeholder="Customer ID (123-456-7890)"
+                value={gadsCustomerId}
+                onChange={(e) => setGadsCustomerId(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && addGadsAccount()}
+                className="text-sm font-mono"
+              />
+              <Input
+                placeholder="Name (optional)"
+                value={gadsAccountName}
+                onChange={(e) => setGadsAccountName(e.target.value)}
+                className="text-sm"
+              />
+              <Button size="sm" onClick={addGadsAccount} disabled={gadsSaving || !gadsCustomerId.trim()}>
+                {gadsSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+              </Button>
+            </div>
+            <p className="text-xs text-gray-400">Find your 10-digit Customer ID in the top-right corner of Google Ads</p>
+          </div>
+
+          {gadsLoading ? (
+            <div className="flex justify-center py-4"><Loader2 className="h-5 w-5 animate-spin text-gray-400" /></div>
+          ) : gadsSaved.length > 0 ? (
+            <div className="space-y-2 max-h-48 overflow-y-auto">
+              {gadsSaved.map((acc) => (
+                <div key={acc.id} className="flex items-center justify-between p-2.5 rounded-lg border border-gray-200 bg-white">
+                  <div>
+                    <p className="text-sm font-mono font-medium text-gray-900">{acc.displayCustomerId}</p>
+                    {acc.accountName && <p className="text-xs text-gray-400">{acc.accountName}</p>}
+                  </div>
+                  <button onClick={() => removeGadsAccount(acc.id)} className="text-gray-400 hover:text-red-500 transition-colors">
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-center text-gray-400 py-2">No accounts added yet</p>
+          )}
+
+          <Button onClick={() => setShowGadsModal(false)} disabled={gadsSaved.length === 0} className="w-full">
+            {gadsSaved.length > 0
+              ? <><Check className="h-4 w-4 mr-2" />Done</>
+              : 'Add an account to continue'}
+          </Button>
+        </div>
+      </div>
+    )}
     </div>
   );
 }
