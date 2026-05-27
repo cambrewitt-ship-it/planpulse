@@ -753,11 +753,6 @@ export default function HeroHealthSection({
               <p className="text-base text-gray-500 line-clamp-1">{client.notes}</p>
             )}
             <div className="flex items-center gap-2 mt-2 flex-wrap">
-              <span className="text-sm text-gray-400">
-                {completionPercentage >= 100
-                  ? 'Campaign completed'
-                  : `${formatPct(completionPercentage, 0)} completed`}
-              </span>
               {onAccountManagerChange && (
                 <div className="relative" ref={menuRef}>
                   <button
