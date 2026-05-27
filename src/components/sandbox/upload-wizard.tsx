@@ -4,18 +4,28 @@ import React, { useCallback, useState } from "react";
 import { FileSpreadsheet, CheckCircle, AlertCircle, Loader2, ArrowRight } from "lucide-react";
 import type { SandboxPlan, PlanRow } from "./types";
 
-type Step = "drop" | "sheet" | "year" | "parsing" | "organic-check" | "review" | "error";
+type Step = "drop" | "sheet" | "year" | "parsing" | "review" | "error";
 
-// Channels that could plausibly be organic (unpaid) social media
-const ORGANIC_SUSPECT_TERMS = ['facebook', 'instagram', 'linkedin', 'twitter', 'tiktok', 'tik tok', 'pinterest', 'snapchat', 'x.com'];
-const PAID_DISQUALIFIERS    = ['ads', 'paid', 'sem', 'ppc', 'search', 'shopping', 'performance max', 'pmax', 'google', 'youtube', 'display', 'programmatic', 'retargeting'];
+// Social platforms commonly used for both paid and organic; linkedin omitted (almost always paid)
+const SOCIAL_SUSPECT_TERMS = ['facebook', 'fb', 'instagram', 'ig', 'twitter', 'tiktok', 'tik tok', 'pinterest', 'snapchat', 'x.com'];
+const PAID_DISQUALIFIERS   = ['ads', 'paid', 'sem', 'ppc', 'search', 'shopping', 'performance max', 'pmax', 'google', 'youtube', 'display', 'programmatic', 'retargeting'];
 
+// Channels we can confidently label organic without asking the user
+function isDefinitelyOrganic(name: string): boolean {
+  if (!name) return false;
+  const lower = name.toLowerCase();
+  if (lower.includes('organic')) return true;
+  // Two or more social platforms in one cell → clearly an organic posting row (e.g. "FB & IG")
+  return SOCIAL_SUSPECT_TERMS.filter(t => lower.includes(t)).length >= 2;
+}
+
+// Channels that might be organic — show to user for confirmation
 function isPotentiallyOrganic(name: string): boolean {
   if (!name) return false;
   const lower = name.toLowerCase();
-  if (lower.includes('organic')) return false; // already explicitly labelled
+  if (isDefinitelyOrganic(name)) return false; // handled separately, no need to ask
   if (PAID_DISQUALIFIERS.some(t => lower.includes(t))) return false;
-  return ORGANIC_SUSPECT_TERMS.some(t => lower.includes(t));
+  return SOCIAL_SUSPECT_TERMS.some(t => lower.includes(t));
 }
 
 const CURRENT_YEAR = new Date().getFullYear();
@@ -193,7 +203,9 @@ export function UploadWizard({ onPlanLoaded }: Props) {
   const [selectedYear, setSelectedYear] = useState<number>(CURRENT_YEAR);
   const [availableSheets, setAvailableSheets] = useState<string[]>([]);
   const [selectedSheet, setSelectedSheet] = useState<string>("");
-  // organic-check step: maps unique channel names to whether user says they're organic
+  // channels that might be organic — shown as inline prompts on the review screen
+  const [suspectChannels, setSuspectChannels] = useState<string[]>([]);
+  // user answers: true = organic, false = paid; undefined = not yet answered
   const [organicOverrides, setOrganicOverrides] = useState<Record<string, boolean>>({});
 
   const parseFile = useCallback(async (file: File, year: number, sheetName: string) => {
@@ -223,20 +235,24 @@ export function UploadWizard({ onPlanLoaded }: Props) {
       }
 
       const plan: SandboxPlan = json.plan;
-      setParsedPlan(plan);
-
-      // Detect potentially organic channels and ask user before review
       const uniqueChannels = [...new Set(plan.rows.map((r: any) => (r.channel || '').trim()).filter(Boolean))];
+
+      // Auto-mark channels that are unambiguously organic (no user confirmation needed)
+      const definiteOrganicSet = new Set(uniqueChannels.filter(isDefinitelyOrganic));
+      const planWithDefiniteOrganics: SandboxPlan = definiteOrganicSet.size > 0 ? {
+        ...plan,
+        rows: plan.rows.map((r: any) => ({
+          ...r,
+          isOrganic: definiteOrganicSet.has((r.channel || '').trim()) ? true : r.isOrganic,
+        })),
+      } : plan;
+      setParsedPlan(planWithDefiniteOrganics);
+
+      // Store ambiguous channels — inline prompts will appear on the review screen
       const suspects = uniqueChannels.filter(isPotentiallyOrganic);
-      if (suspects.length > 0) {
-        // Default all suspects to true (organic)
-        const initial: Record<string, boolean> = {};
-        suspects.forEach(ch => { initial[ch] = true; });
-        setOrganicOverrides(initial);
-        setStep("organic-check");
-      } else {
-        setStep("review");
-      }
+      setSuspectChannels(suspects);
+      setOrganicOverrides({});
+      setStep("review");
     } catch {
       setErrorMsg("Network error. Please try again.");
       setStep("error");
@@ -539,95 +555,6 @@ export function UploadWizard({ onPlanLoaded }: Props) {
     );
   }
 
-  // ── Organic check ──────────────────────────────────────────────────────────
-  if (step === "organic-check" && parsedPlan) {
-    const suspects = Object.keys(organicOverrides);
-
-    const applyOrganicAndContinue = () => {
-      const updated: SandboxPlan = {
-        ...parsedPlan,
-        rows: parsedPlan.rows.map(r => ({
-          ...r,
-          isOrganic: organicOverrides[r.channel?.trim()] === true ? true : r.isOrganic,
-        })),
-      };
-      setParsedPlan(updated);
-      setStep("review");
-    };
-
-    return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50 p-8">
-        <div className="w-full max-w-sm">
-          <div className="text-center mb-8">
-            <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-purple-100 flex items-center justify-center">
-              <svg className="w-6 h-6 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
-              </svg>
-            </div>
-            <h1 className="text-2xl font-bold text-gray-900">Organic channels?</h1>
-            <p className="text-gray-500 mt-1 text-sm">
-              We spotted channels that could be organic (unpaid) social media. Confirm which apply.
-            </p>
-          </div>
-
-          <div className="bg-white rounded-xl border border-gray-200 p-2 mb-6 flex flex-col gap-1">
-            {suspects.map(ch => {
-              const isOrganic = organicOverrides[ch] ?? true;
-              return (
-                <button
-                  key={ch}
-                  onClick={() => setOrganicOverrides(prev => ({ ...prev, [ch]: !prev[ch] }))}
-                  className={`flex items-center gap-3 w-full text-left px-4 py-3 rounded-lg text-sm font-medium transition-colors ${
-                    isOrganic
-                      ? "bg-purple-50 text-purple-800 border border-purple-200"
-                      : "text-gray-600 hover:bg-gray-50 border border-transparent"
-                  }`}
-                >
-                  {/* Diagonal stripe swatch */}
-                  <div
-                    className="w-6 h-6 rounded flex-shrink-0 border border-white/30"
-                    style={{
-                      background: isOrganic
-                        ? 'repeating-linear-gradient(-45deg, #9333ea, #9333ea 4px, rgba(255,255,255,0.6) 4px, rgba(255,255,255,0.6) 8px)'
-                        : '#e5e7eb',
-                    }}
-                  />
-                  <span className="flex-1 truncate">{ch}</span>
-                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                    isOrganic
-                      ? "bg-purple-100 text-purple-700"
-                      : "bg-gray-100 text-gray-500"
-                  }`}>
-                    {isOrganic ? "Organic" : "Paid"}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-
-          <p className="text-xs text-gray-400 text-center mb-4">
-            Tap to toggle — Organic channels map to the Organic card in the dashboard
-          </p>
-
-          <button
-            onClick={applyOrganicAndContinue}
-            className="w-full py-3 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
-          >
-            Continue
-            <ArrowRight className="w-4 h-4" />
-          </button>
-
-          <button
-            onClick={() => setStep("review")}
-            className="w-full mt-3 py-2.5 text-sm text-gray-500 hover:text-gray-700 transition-colors"
-          >
-            Skip
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   // ── Review ─────────────────────────────────────────────────────────────────
   if (step === "review" && parsedPlan) {
     const total = totalBudget(parsedPlan.rows);
@@ -661,47 +588,93 @@ export function UploadWizard({ onPlanLoaded }: Props) {
             <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-2 border-b border-gray-100 bg-gray-50">
               Detected rows
             </div>
-            <div className="divide-y divide-gray-100 max-h-72 overflow-y-auto">
-              {parsedPlan.rows.map(row => (
-                <div key={row.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
-                  {row.funnel && (
-                    <span className="text-xs bg-gray-100 text-gray-600 rounded px-1.5 py-0.5 font-medium">
-                      {row.funnel}
-                    </span>
-                  )}
-                  <span className="font-medium text-gray-800 min-w-0 truncate">
-                    {row.channel || "—"}
-                  </span>
-                  {row.isOrganic && (
-                    <span className="text-xs bg-purple-100 text-purple-700 rounded px-1.5 py-0.5 font-medium flex-shrink-0">
-                      Organic
-                    </span>
-                  )}
-                  {row.detail && (
-                    <span className="text-gray-400 truncate">{row.detail}</span>
-                  )}
-                  <span className="ml-auto text-gray-500 flex-shrink-0">
-                    {row.flights.length} flight{row.flights.length !== 1 ? "s" : ""}
-                  </span>
-                  {row.flights.length > 0 && (
-                    <span className="text-gray-700 font-medium flex-shrink-0">
-                      {formatBudget(row.flights.reduce((s, f) => s + f.budget, 0))}
-                    </span>
-                  )}
-                </div>
-              ))}
+            <div className="divide-y divide-gray-100 max-h-96 overflow-y-auto">
+              {(() => {
+                const promptedChannels = new Set<string>();
+                return parsedPlan.rows.map(row => {
+                  const ch = (row.channel || '').trim();
+                  const isSuspect = suspectChannels.includes(ch);
+                  const answered = organicOverrides[ch] !== undefined;
+                  const showPrompt = isSuspect && !answered && !promptedChannels.has(ch);
+                  if (showPrompt) promptedChannels.add(ch);
+                  const effectiveIsOrganic = organicOverrides[ch] !== undefined ? organicOverrides[ch] : row.isOrganic;
+
+                  return (
+                    <React.Fragment key={row.id}>
+                      <div className="flex items-center gap-3 px-4 py-2.5 text-sm">
+                        {row.funnel && (
+                          <span className="text-xs bg-gray-100 text-gray-600 rounded px-1.5 py-0.5 font-medium">
+                            {row.funnel}
+                          </span>
+                        )}
+                        <span className="font-medium text-gray-800 min-w-0 truncate">
+                          {row.channel || "—"}
+                        </span>
+                        {effectiveIsOrganic && (
+                          <span className="text-xs bg-purple-100 text-purple-700 rounded px-1.5 py-0.5 font-medium flex-shrink-0">
+                            Organic
+                          </span>
+                        )}
+                        {row.detail && (
+                          <span className="text-gray-400 truncate">{row.detail}</span>
+                        )}
+                        <span className="ml-auto text-gray-500 flex-shrink-0">
+                          {row.flights.length} flight{row.flights.length !== 1 ? "s" : ""}
+                        </span>
+                        {row.flights.length > 0 && (
+                          <span className="text-gray-700 font-medium flex-shrink-0">
+                            {formatBudget(row.flights.reduce((s, f) => s + f.budget, 0))}
+                          </span>
+                        )}
+                      </div>
+                      {showPrompt && (
+                        <div className="flex items-center gap-3 px-4 py-2.5 bg-amber-50 border-l-2 border-amber-400">
+                          <svg className="w-4 h-4 text-amber-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                          <span className="text-xs text-amber-800 font-medium flex-1">
+                            Potential organic channel detected — is <span className="font-semibold">{ch}</span> an unpaid posting row?
+                          </span>
+                          <button
+                            onClick={() => setOrganicOverrides(prev => ({ ...prev, [ch]: true }))}
+                            className="text-xs px-3 py-1 rounded-lg bg-purple-600 text-white font-medium hover:bg-purple-700 transition-colors flex-shrink-0"
+                          >
+                            Yes, organic
+                          </button>
+                          <button
+                            onClick={() => setOrganicOverrides(prev => ({ ...prev, [ch]: false }))}
+                            className="text-xs px-3 py-1 rounded-lg bg-white text-gray-600 font-medium border border-gray-200 hover:bg-gray-50 transition-colors flex-shrink-0"
+                          >
+                            No, it&apos;s paid
+                          </button>
+                        </div>
+                      )}
+                    </React.Fragment>
+                  );
+                });
+              })()}
             </div>
           </div>
 
           <div className="flex gap-3">
             <button
-              onClick={() => { setParsedPlan(null); setStep("drop"); }}
+              onClick={() => { setParsedPlan(null); setSuspectChannels([]); setOrganicOverrides({}); setStep("drop"); }}
               className="flex-1 py-3 border border-gray-300 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
             >
               Upload different file
             </button>
             <button
-              onClick={() => onPlanLoaded(parsedPlan)}
+              onClick={() => {
+                const finalPlan: SandboxPlan = {
+                  ...parsedPlan,
+                  rows: parsedPlan.rows.map(r => {
+                    const ch = (r.channel || '').trim();
+                    const override = organicOverrides[ch];
+                    return { ...r, isOrganic: override !== undefined ? override : r.isOrganic };
+                  }),
+                };
+                onPlanLoaded(finalPlan);
+              }}
               className="flex-1 py-3 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
             >
               Load into builder

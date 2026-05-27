@@ -275,16 +275,16 @@ export async function fetchSpendData(
       }),
     });
 
+    const googleData = await googleResponse.json().catch(() => ({}));
     if (googleResponse.ok) {
-      const googleData = await googleResponse.json();
       if (googleData.success && googleData.data) {
         googleData.data.forEach((item: any) => {
           // Normalize date format to YYYY-MM-DD
           const dateStr = item.date || item.dateStart || '';
-          const normalizedDate = dateStr.includes('T') 
-            ? dateStr.split('T')[0] 
+          const normalizedDate = dateStr.includes('T')
+            ? dateStr.split('T')[0]
             : dateStr;
-          
+
           spendData.push({
             date: normalizedDate,
             spend: item.spend || 0,
@@ -299,7 +299,14 @@ export async function fetchSpendData(
             campaignName: item.campaignName || '',
           });
         });
+        if (googleData.errors?.length) {
+          googleData.errors.forEach((err: any) => {
+            errors.push(`Google Ads (${err.accountName || err.customerId}): ${err.error}`);
+          });
+        }
       }
+    } else {
+      errors.push(`Google Ads: ${googleData.error || `Request failed with status code ${googleResponse.status}`}`);
     }
   } catch (error: any) {
     errors.push(`Google Ads: ${error.message}`);

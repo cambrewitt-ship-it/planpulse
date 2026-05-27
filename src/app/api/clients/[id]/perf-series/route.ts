@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { subDays, format, startOfMonth, eachDayOfInterval, parseISO } from 'date-fns';
+import { subDays, format, eachDayOfInterval, parseISO } from 'date-fns';
 
 type Params = { params: Promise<{ id: string }> | { id: string } };
 
@@ -39,28 +39,31 @@ export async function GET(req: NextRequest, { params }: Params) {
   const today = new Date();
   const todayStr = format(today, 'yyyy-MM-dd');
   const yesterdayStr = format(subDays(today, 1), 'yyyy-MM-dd');
-  const mk = metric.toLowerCase();
-  const isCumulative = /cpa|cpl/.test(mk);
-  const windowStart = isCumulative
-    ? format(startOfMonth(today), 'yyyy-MM-dd')
-    : format(subDays(today, 29), 'yyyy-MM-dd');
   const activePlatforms = filterPlatforms.length > 0 ? filterPlatforms : ['meta-ads', 'google-ads'];
 
-  // Stable snapshot keys — sort so order doesn't matter
-  const platformsKey    = [...activePlatforms].sort().join(',');
-  const campaignIdsKey  = [...filterCampaignIds].sort().join(',');
-  const actionTypeKey   = metaActionType ?? '';
+  // Chart shows 30 days. Each point is a 7-day rolling aggregate, so we need
+  // 6 extra days of raw data behind the oldest chart point (35 days total).
+  const chartWindowStart = format(subDays(today, 29), 'yyyy-MM-dd');
+  const rawWindowStart   = format(subDays(today, 35), 'yyyy-MM-dd');
 
-  // ── Step 1: Load existing snapshots for all completed days in the window ──
+  // Stable snapshot keys
+  const platformsKey   = [...activePlatforms].sort().join(',');
+  const campaignIdsKey = [...filterCampaignIds].sort().join(',');
+  const actionTypeKey  = metaActionType ?? '';
+
+  // '_r7' distinguishes 7-day rolling snapshots from old cumulative/daily ones
+  const snapshotMetric = metric + '_r7';
+
+  // ── Step 1: Load existing rolling snapshots for past chart days ───────────
   const { data: existingSnapshots } = await supabase
     .from('client_perf_snapshots')
     .select('date, value')
     .eq('client_id', clientId)
-    .eq('metric', metric)
+    .eq('metric', snapshotMetric)
     .eq('platforms_key', platformsKey)
     .eq('campaign_ids_key', campaignIdsKey)
     .eq('meta_action_type', actionTypeKey)
-    .gte('date', windowStart)
+    .gte('date', chartWindowStart)
     .lte('date', yesterdayStr)
     .order('date', { ascending: true });
 
@@ -68,23 +71,19 @@ export async function GET(req: NextRequest, { params }: Params) {
     (existingSnapshots ?? []).map(s => [s.date as string, Number(s.value)]),
   );
 
-  // Past dates in the window (window start → yesterday, inclusive)
-  const windowStartDate = parseISO(windowStart);
-  const pastDates: string[] = windowStart < todayStr
-    ? eachDayOfInterval({ start: windowStartDate, end: parseISO(yesterdayStr) })
-        .map(d => format(d, 'yyyy-MM-dd'))
-    : [];
+  // Past chart dates that have no snapshot yet
+  const chartDates = eachDayOfInterval({ start: parseISO(chartWindowStart), end: parseISO(todayStr) })
+    .map(d => format(d, 'yyyy-MM-dd'));
+  const pastChartDates = chartDates.filter(d => d < todayStr);
+  const missingDates = pastChartDates.filter(d => !snapshotMap.has(d));
 
-  const missingDates = pastDates.filter(d => !snapshotMap.has(d));
-
-  // ── Step 2: Fetch raw DB rows for the full window ──────────────────────────
-  // Always needed for today's live value; also required to backfill missing snapshots.
+  // ── Step 2: Fetch raw data for the full 36-day window ─────────────────────
   let query = supabase
     .from('ad_performance_metrics')
     .select('date, spend, impressions, clicks, conversions, meta_actions')
     .eq('client_id', clientId)
     .in('platform', activePlatforms as ('google-ads' | 'meta-ads')[])
-    .gte('date', windowStart)
+    .gte('date', rawWindowStart)
     .lte('date', todayStr)
     .not('campaign_id', 'like', 'manual-override-%')
     .order('date', { ascending: true });
@@ -95,9 +94,7 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   const { data: rows } = await query;
 
-  // Auto-detect the best Meta conversion action type when none is explicitly configured.
-  // Meta rarely populates the top-level `conversions` column — all event data is in
-  // `meta_actions`. Without this, CPA for Meta always shows no data.
+  // Auto-detect best Meta conversion action type when none is configured
   let effectiveMetaActionType = metaActionType;
   if (!effectiveMetaActionType && activePlatforms.includes('meta-ads')) {
     const evtTotals = new Map<string, number>();
@@ -114,7 +111,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     }
   }
 
-  // Group raw rows by date
+  // Group raw rows by date across the full 36-day window
   const byDate = new Map<string, { spend: number; impressions: number; clicks: number; conversions: number }>();
   for (const row of rows ?? []) {
     const cur = byDate.get(row.date) ?? { spend: 0, impressions: 0, clicks: 0, conversions: 0 };
@@ -131,34 +128,36 @@ export async function GET(req: NextRequest, { params }: Params) {
     byDate.set(row.date, cur);
   }
 
-  // ── Step 3: Calculate metric values for all raw dates ─────────────────────
-  let cumSpend = 0, cumImpressions = 0, cumClicks = 0, cumConversions = 0;
+  // ── Step 3: Compute 7-day rolling metric for each chart day ───────────────
+  // For each chart date D, aggregate raw spend/impressions/clicks/conversions
+  // across D and the 6 preceding days, then derive the metric from the totals.
+  // This smooths noise while still showing real directional trends.
   const calculatedMap = new Map<string, number>();
 
-  for (const date of [...byDate.keys()].sort()) {
-    const d = byDate.get(date)!;
-    if (isCumulative) {
-      cumSpend       += d.spend;
-      cumImpressions += d.impressions;
-      cumClicks      += d.clicks;
-      cumConversions += d.conversions;
-      const val = computeMetric(cumSpend, cumImpressions, cumClicks, cumConversions, metric);
-      if (val !== null) calculatedMap.set(date, val);
-    } else {
-      const val = computeMetric(d.spend, d.impressions, d.clicks, d.conversions, metric);
-      if (val !== null) calculatedMap.set(date, val);
+  for (const chartDate of chartDates) {
+    const base = parseISO(chartDate);
+    let rollSpend = 0, rollImp = 0, rollClicks = 0, rollConv = 0;
+    for (let d = 0; d < 7; d++) {
+      const row = byDate.get(format(subDays(base, d), 'yyyy-MM-dd'));
+      if (row) {
+        rollSpend  += row.spend;
+        rollImp    += row.impressions;
+        rollClicks += row.clicks;
+        rollConv   += row.conversions;
+      }
     }
+    const val = computeMetric(rollSpend, rollImp, rollClicks, rollConv, metric);
+    if (val !== null) calculatedMap.set(chartDate, val);
   }
 
-  // ── Step 4: Persist snapshots for missing past dates (write-once) ─────────
-  // ignoreDuplicates: true ensures we never overwrite a previously written snapshot.
+  // ── Step 4: Lock in snapshots for past chart days (write-once) ────────────
   if (missingDates.length > 0) {
     const toSave = missingDates
       .filter(date => calculatedMap.has(date))
       .map(date => ({
         client_id:        clientId,
         date,
-        metric,
+        metric:           snapshotMetric,
         value:            calculatedMap.get(date)!,
         platforms_key:    platformsKey,
         campaign_ids_key: campaignIdsKey,
@@ -175,16 +174,14 @@ export async function GET(req: NextRequest, { params }: Params) {
     }
   }
 
-  // ── Step 5: Build the final series ────────────────────────────────────────
-  // Past days  → snapshot value (immutable, like a stock close price)
-  // Today      → live calculated value (changes throughout the day)
-  const allDates = new Set([...snapshotMap.keys(), ...calculatedMap.keys()]);
+  // ── Step 5: Build the final 30-point series ───────────────────────────────
+  // Past days → locked snapshot (immutable once all 7 source days have closed)
+  // Today     → live rolling value (updates during the day)
   const series: Array<{ date: string; value: number }> = [];
 
-  for (const date of [...allDates].sort()) {
+  for (const date of chartDates) {
     let value: number | undefined;
     if (date < todayStr) {
-      // Prefer stored snapshot; fall back to freshly calculated (= will be stored next call)
       value = snapshotMap.get(date) ?? calculatedMap.get(date);
     } else {
       value = calculatedMap.get(date);

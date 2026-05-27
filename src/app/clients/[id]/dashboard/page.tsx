@@ -271,6 +271,7 @@ export default function DashboardV2() {
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [allMetaCampaigns, setAllMetaCampaigns] = useState<Array<{ id: string; name: string }>>([]);
+  const [allGoogleAdsCampaigns, setAllGoogleAdsCampaigns] = useState<Array<{ id: string; name: string }>>([]);
   const [healthWeights, setHealthWeights] = useState<{ pacing: number; actions: number; perf: number }>(() => {
     if (typeof window === 'undefined') return { pacing: 44, actions: 28, perf: 28 };
     try {
@@ -637,6 +638,20 @@ export default function DashboardV2() {
       .then(data => {
         if (data?.campaigns) {
           setAllMetaCampaigns(data.campaigns.map((c: any) => ({ id: c.id, name: c.name })));
+        }
+      })
+      .catch(() => {});
+  }, [clientId]);
+
+  // Fetch all Google Ads campaigns from saved metrics so the campaign dropdown
+  // appears on Google Ads cards regardless of the current analytics date range.
+  useEffect(() => {
+    if (!clientId) return;
+    fetch(`/api/ads/google-ads/campaigns?clientId=${clientId}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.campaigns) {
+          setAllGoogleAdsCampaigns(data.campaigns.map((c: any) => ({ id: c.id, name: c.name })));
         }
       })
       .catch(() => {});
@@ -1676,9 +1691,12 @@ export default function DashboardV2() {
             const platformErrors = spendApiErrors
               .filter(e => e.startsWith(platformPrefix))
               .map(e => {
-                // Strip the account prefix, keep the core message
-                const match = e.match(/\): (.+)$/);
-                return match ? match[1] : e;
+                // "Platform (AccountName): message" → "message"
+                const parenMatch = e.match(/\): (.+)$/);
+                if (parenMatch) return parenMatch[1];
+                // "Platform: message" → "message"
+                const colonIdx = e.indexOf(': ');
+                return colonIdx !== -1 ? e.slice(colonIdx + 2) : e;
               });
             if (platformErrors.length > 0) base.push(...platformErrors);
           }
@@ -1711,13 +1729,18 @@ export default function DashboardV2() {
               if (!seen.has(c.id)) seen.set(c.id, c.name);
             });
           }
+          if (chPlatform === 'google-ads') {
+            allGoogleAdsCampaigns.forEach(c => {
+              if (!seen.has(c.id)) seen.set(c.id, c.name);
+            });
+          }
           return Array.from(seen.entries()).map(([id, name]) => ({ id, name }));
         })(),
         metaCampaignIds: (ch as any).metaCampaignIds ?? [],
         rawSpendPoints: chMetricPoints,
       };
     }).sort((a, b) => channelSortOrder(a) - channelSortOrder(b));
-  }, [mediaPlanBuilderChannels, channelMonthSpendData, spendApiErrors, selectedMonth, commission, analyticsDateRange.startDate, analyticsDateRange.endDate, allMetaCampaigns]);
+  }, [mediaPlanBuilderChannels, channelMonthSpendData, spendApiErrors, selectedMonth, commission, analyticsDateRange.startDate, analyticsDateRange.endDate, allMetaCampaigns, allGoogleAdsCampaigns]);
 
   const liveChannels = useMemo(() =>
     channelCards.map((ch: any, idx: number) => {
@@ -1983,7 +2006,11 @@ export default function DashboardV2() {
   };
 
   const handleDeleteChannel = (channelId: string) => {
-    setMediaPlanBuilderChannels(prev => prev.filter(ch => ch.id !== channelId));
+    const filtered = mediaPlanBuilderChannels.filter(ch => ch.id !== channelId);
+    setMediaPlanBuilderChannels(filtered);
+    // Save immediately — don't rely on the debounced auto-save, which the user
+    // can race by refreshing the page before the 1-second timeout fires.
+    saveMediaPlanBuilderData(filtered, commission);
   };
 
   const handleCommissionChange = (value: number) => {

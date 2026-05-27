@@ -222,62 +222,7 @@ export async function POST(request: NextRequest) {
 
         console.log('✓ Got OAuth token from Nango');
 
-        // Get MCC ID from environment (optional - only needed if using MCC account)
-        const mccId = process.env.GOOGLE_ADS_MCC_ID;
-        const cleanMccId = mccId ? mccId.replace(/-/g, '') : null;
-        if (cleanMccId) {
-          console.log(`Using MCC ID: ${mccId} (clean: ${cleanMccId})`);
-        } else {
-          console.log('No MCC ID configured - using direct customer access');
-        }
-
-        // Step 3: Get MCC client accounts (more reliable than listAccessibleCustomers for MCC setups)
-        console.log('Step 3: Verifying accessible customers via MCC...');
-        let mccClientIds: string[] = [];
-
-        if (cleanMccId) {
-          try {
-            // Query the MCC to get all linked client accounts
-            const mccQuery = `
-              SELECT
-                customer_client.id,
-                customer_client.descriptive_name,
-                customer_client.manager
-              FROM customer_client
-              WHERE customer_client.level <= 1
-            `;
-
-            const mccSearchUrl = `https://googleads.googleapis.com/v21/customers/${cleanMccId}/googleAds:search`;
-            const mccResponse = await fetch(mccSearchUrl, {
-              method: 'POST',
-              headers: {
-                'Authorization': `Bearer ${accessToken}`,
-                'developer-token': process.env.GOOGLE_ADS_DEVELOPER_TOKEN || '',
-                'Content-Type': 'application/json',
-                'login-customer-id': cleanMccId,
-              },
-              body: JSON.stringify({ query: mccQuery })
-            });
-
-            if (mccResponse.ok) {
-              const mccData = await mccResponse.json();
-              mccClientIds = (mccData.results || [])
-                .filter((result: any) => !result.customerClient?.manager) // Exclude manager accounts
-                .map((result: any) => result.customerClient?.id?.toString())
-                .filter(Boolean);
-              console.log(`✓ Found ${mccClientIds.length} client accounts under MCC: ${mccClientIds.join(', ')}`);
-            } else {
-              const errorText = await mccResponse.text();
-              console.warn(`⚠ Could not query MCC for client accounts (status ${mccResponse.status}): ${errorText.substring(0, 200)}`);
-            }
-          } catch (mccError) {
-            console.warn(`⚠ Error querying MCC for client accounts:`, mccError);
-          }
-        } else {
-          console.log('No MCC configured - will attempt direct access to accounts');
-        }
-
-        // Step 4: For each customer ID, call Google Ads API directly
+        // Step 3: For each customer ID, call Google Ads API directly
         const allSpendData: GoogleAdMetrics[] = [];
         const errors: Array<{ customerId: string; accountName: string; error: string }> = [];
 
@@ -286,18 +231,7 @@ export async function POST(request: NextRequest) {
           // Strip dashes from customer ID for API call
           const cleanCustomerId = customerId.replace(/-/g, '');
 
-          // Check if customer is in MCC client list (if MCC is configured)
-          if (cleanMccId && mccClientIds.length > 0 && !mccClientIds.includes(cleanCustomerId)) {
-            console.warn(`⚠ Customer ID ${customerId} (${cleanCustomerId}) is not in the MCC client accounts list`);
-            errors.push({
-              customerId: customerId,
-              accountName: account.account_name,
-              error: `Customer ID ${customerId} is not linked to MCC ${mccId}. Please verify the customer is properly linked in Google Ads.`
-            });
-            continue;
-          }
-          
-            const query = `
+          const query = `
             SELECT
               campaign.id,
               campaign.name,
@@ -330,18 +264,12 @@ export async function POST(request: NextRequest) {
             const apiUrl = `https://googleads.googleapis.com/v21/customers/${cleanCustomerId}/googleAds:search`;
             console.log(`  API URL: ${apiUrl}`);
 
-            // Build headers - only include login-customer-id if MCC is configured
             const requestHeaders: Record<string, string> = {
               'Authorization': `Bearer ${accessToken}`,
               'developer-token': process.env.GOOGLE_ADS_DEVELOPER_TOKEN || '',
               'Content-Type': 'application/json',
+              'login-customer-id': cleanCustomerId,
             };
-
-            // Only add login-customer-id if MCC is configured
-            if (cleanMccId) {
-              requestHeaders['login-customer-id'] = cleanMccId;
-              console.log(`  Using MCC login-customer-id: ${cleanMccId}`);
-            }
 
             const response = await fetch(
               apiUrl,
@@ -383,20 +311,13 @@ export async function POST(request: NextRequest) {
                 console.error(`  🔴 404 Error Details:`, {
                   customerId,
                   cleanCustomerId,
-                  mccId,
                   errorMessage,
-                  possibleCauses: [
-                    'Customer ID is not linked to your MCC account (2246810345)',
-                    'Customer ID does not exist',
-                    'Access token does not have permission to access this customer',
-                    'Customer ID format might be incorrect'
-                  ]
                 });
-                
+
                 errors.push({
                   customerId: customerId,
                   accountName: account.account_name,
-                  error: `404 - Customer ID ${customerId} not found or not accessible. Please verify: (1) This customer is linked to your MCC account ${mccId}, (2) The customer ID is correct, (3) Your Google Ads account has access to this customer.`
+                  error: `404 - Customer ID ${customerId} not found or not accessible. Please verify the customer ID is correct and your Google Ads account has access to it.`
                 });
               } else if (response.status === 400) {
                 // Extract detailed error information for 400 errors

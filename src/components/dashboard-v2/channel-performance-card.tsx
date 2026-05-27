@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { AlertTriangle, ChevronDown, ExternalLink, FileText } from 'lucide-react';
 import InlineActionPoints from './inline-action-points';
 import type { ChannelBenchmark, MetricPreset, ClientChannelPreset } from '@/types/database';
@@ -652,9 +652,9 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
   };
 
   const campaignSubtitle = (() => {
+    if (isNoneSelected) return 'NOT SET UP YET';
     const campaigns = channel.campaigns;
     if (!campaigns || campaigns.length === 0) return null;
-    if (isNoneSelected) return 'NOT SET UP YET';
     const allSelected = selectedCampaignIds.size === 0 || selectedCampaignIds.size === campaigns.length;
     const selected = allSelected ? campaigns : campaigns.filter(c => selectedCampaignIds.has(c.id));
     if (selected.length === 0) return 'ALL CAMPAIGNS';
@@ -688,12 +688,44 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
     }
   };
 
+  // Names of selected campaigns — used as a fallback when stored campaign IDs don't
+  // match the campaign_id values returned by the Meta Insights API (e.g. due to ID
+  // format differences between the onboarding flow and the API).
+  const selectedCampaignNames = useMemo(() => {
+    if (isNoneSelected || selectedCampaignIds.size === 0) return null;
+    const names = new Set<string>();
+    (channel.campaigns ?? []).forEach(c => {
+      if (selectedCampaignIds.has(c.id)) names.add(c.name);
+    });
+    return names;
+  }, [isNoneSelected, selectedCampaignIds, channel.campaigns]);
+
+  // Returns true if a rawSpendPoint belongs to one of the selected campaigns.
+  // Checks by campaign ID first; falls back to campaign name when IDs diverge.
+  const matchesSelection = useCallback((p: any): boolean => {
+    if (selectedCampaignIds.has(p.campaignId)) return true;
+    if (selectedCampaignNames && p.campaignName) return selectedCampaignNames.has(p.campaignName);
+    return false;
+  }, [selectedCampaignIds, selectedCampaignNames]);
+
+  // Returns true if every selected campaign has at least one rawSpendPoint.
+  // Checks by ID first; falls back to name for campaigns whose IDs don't match.
+  const allSelectedRepresented = useCallback((pts: any[]): boolean => {
+    const repIds  = new Set(pts.map((p: any) => p.campaignId).filter(Boolean));
+    const repNames = new Set(pts.map((p: any) => p.campaignName).filter(Boolean));
+    return [...selectedCampaignIds].every(id => {
+      if (repIds.has(id)) return true;
+      const campaign = (channel.campaigns ?? []).find(c => c.id === id);
+      return campaign ? repNames.has(campaign.name) : false;
+    });
+  }, [selectedCampaignIds, channel.campaigns]);
+
   // Derive unique action types from raw spend points
   const availableActionTypes = useMemo(() => {
     if (isNoneSelected) return [];
     const pts = selectedCampaignIds.size === 0
       ? (channel.rawSpendPoints ?? [])
-      : (channel.rawSpendPoints ?? []).filter((p: any) => selectedCampaignIds.has(p.campaignId));
+      : (channel.rawSpendPoints ?? []).filter(matchesSelection);
     const seen = new Set<string>();
     pts.forEach((p: any) => {
       (p.actions ?? []).forEach((a: any) => {
@@ -701,7 +733,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
       });
     });
     return Array.from(seen).sort();
-  }, [selectedCampaignIds, channel.rawSpendPoints]);
+  }, [selectedCampaignIds, channel.rawSpendPoints, matchesSelection]);
 
   // Auto-select first action type only when no persisted value exists
   useEffect(() => {
@@ -722,11 +754,49 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
 
   const filteredMetrics = useMemo(() => {
     if (isNoneSelected) return { impressions: 0, clicks: 0, spend: 0, ctr: 0, cpc: 0, conversions: 0, conv_events: 0 };
-    const pts = selectedCampaignIds.size === 0
-      ? (channel.rawSpendPoints ?? [])
-      : (channel.rawSpendPoints ?? []).filter((p: any) => selectedCampaignIds.has(p.campaignId));
 
-    if (!pts.length) return { ...channel.metrics, spend: channel.currentSpend, conv_events: 0 };
+    if (selectedCampaignIds.size === 0) {
+      const allPts = channel.rawSpendPoints ?? [];
+      if (!allPts.length) return { ...channel.metrics, spend: channel.currentSpend, conv_events: 0 };
+      const impressions = allPts.reduce((s: number, p: any) => s + (p.impressions ?? 0), 0);
+      const clicks = allPts.reduce((s: number, p: any) => s + (p.clicks ?? 0), 0);
+      const spend = allPts.reduce((s: number, p: any) => s + (p.spend ?? 0), 0);
+      const conversions = allPts.reduce((s: number, p: any) => s + (p.conversions ?? 0), 0);
+      const conv_events = selectedActionType ? sumActionType(allPts, selectedActionType) : 0;
+      return { impressions, clicks, spend, ctr: impressions > 0 ? clicks / impressions : 0, cpc: clicks > 0 ? spend / clicks : 0, conversions, conv_events };
+    }
+
+    const pts = (channel.rawSpendPoints ?? []).filter(matchesSelection);
+
+    // If any selected campaign can't be identified in rawSpendPoints (ID+name mismatch),
+    // estimate spend by subtraction: total − spend of identifiable non-selected campaigns.
+    if (!pts.length || !allSelectedRepresented(pts)) {
+      const allPts = channel.rawSpendPoints ?? [];
+      if (!allPts.length) return { ...channel.metrics, spend: channel.currentSpend, conv_events: 0 };
+
+      const totalRawSpend = allPts.reduce((s: number, p: any) => s + (p.spend ?? 0), 0);
+      const notSelectedSpend = allPts.reduce((s: number, p: any) => {
+        if (!p.campaignId && !p.campaignName) return s; // unidentifiable — skip
+        if (matchesSelection(p)) return s; // belongs to a selected campaign — skip
+        return s + (p.spend ?? 0);
+      }, 0);
+      const estimatedSpend = Math.max(0, totalRawSpend - notSelectedSpend);
+
+      const impressions = pts.reduce((s: number, p: any) => s + (p.impressions ?? 0), 0);
+      const clicks = pts.reduce((s: number, p: any) => s + (p.clicks ?? 0), 0);
+      const conversions = pts.reduce((s: number, p: any) => s + (p.conversions ?? 0), 0);
+      const conv_events = selectedActionType ? sumActionType(pts, selectedActionType) : 0;
+
+      return {
+        impressions,
+        clicks,
+        spend: estimatedSpend,
+        ctr: impressions > 0 ? clicks / impressions : 0,
+        cpc: clicks > 0 ? estimatedSpend / clicks : 0,
+        conversions,
+        conv_events,
+      };
+    }
 
     const impressions = pts.reduce((s: number, p: any) => s + (p.impressions ?? 0), 0);
     const clicks = pts.reduce((s: number, p: any) => s + (p.clicks ?? 0), 0);
@@ -743,13 +813,17 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
       conversions,
       conv_events,
     };
-  }, [selectedCampaignIds, selectedActionType, channel.rawSpendPoints, channel.metrics]);
+  }, [selectedCampaignIds, selectedActionType, channel.rawSpendPoints, channel.metrics, matchesSelection, allSelectedRepresented]);
 
   const filteredMetricsChartData = useMemo(() => {
     if (isNoneSelected) return [];
     const pts = selectedCampaignIds.size === 0
       ? (channel.rawSpendPoints ?? [])
-      : (channel.rawSpendPoints ?? []).filter((p: any) => selectedCampaignIds.has(p.campaignId));
+      : (channel.rawSpendPoints ?? []).filter(matchesSelection);
+
+    if (pts.length > 0 && selectedCampaignIds.size > 0 && !allSelectedRepresented(pts)) {
+      return channel.metricsChartData;
+    }
 
     if (!pts.length) return channel.metricsChartData;
 
@@ -778,20 +852,44 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
         conversions: vals.conversions,
         conv_events: vals.conv_events,
       }));
-  }, [selectedCampaignIds, selectedActionType, channel.rawSpendPoints, channel.metricsChartData]);
+  }, [selectedCampaignIds, selectedActionType, channel.rawSpendPoints, channel.metricsChartData, matchesSelection, allSelectedRepresented]);
 
   // Filtered spend chart data — rebuilds actualSpend from rawSpendPoints when campaigns are selected
   const filteredSpendChartData = useMemo(() => {
     if (isNoneSelected) return (channel.chartData ?? []).map(p => ({ ...p, actualSpend: null }));
     if (selectedCampaignIds.size === 0) return channel.chartData ?? [];
-    const pts = (channel.rawSpendPoints ?? []).filter((p: any) => selectedCampaignIds.has(p.campaignId));
-    if (!pts.length) return channel.chartData ?? [];
+    const allPts = channel.rawSpendPoints ?? [];
+    const pts = allPts.filter(matchesSelection);
 
-    // Sum daily spend per date from filtered campaigns
+    // Build a per-date map for the subtraction approach when some selected campaigns
+    // can't be matched in rawSpendPoints (ID+name mismatch).
+    const useSubtraction = !pts.length || !allSelectedRepresented(pts);
+
     const spendByDate = new Map<string, number>();
-    pts.forEach((p: any) => {
-      spendByDate.set(p.date, (spendByDate.get(p.date) ?? 0) + (p.spend ?? 0));
-    });
+
+    if (useSubtraction) {
+      // Estimate daily spend = total daily − daily spend of identifiable non-selected campaigns
+      if (!allPts.length) return channel.chartData ?? [];
+      const totalByDate = new Map<string, number>();
+      const notSelectedByDate = new Map<string, number>();
+      allPts.forEach((p: any) => {
+        const d = p.date;
+        totalByDate.set(d, (totalByDate.get(d) ?? 0) + (p.spend ?? 0));
+        if (p.campaignId || p.campaignName) {
+          if (!matchesSelection(p)) {
+            notSelectedByDate.set(d, (notSelectedByDate.get(d) ?? 0) + (p.spend ?? 0));
+          }
+        }
+      });
+      totalByDate.forEach((total, d) => {
+        spendByDate.set(d, Math.max(0, total - (notSelectedByDate.get(d) ?? 0)));
+      });
+    } else {
+      // All selected campaigns are represented — sum directly
+      pts.forEach((p: any) => {
+        spendByDate.set(p.date, (spendByDate.get(p.date) ?? 0) + (p.spend ?? 0));
+      });
+    }
 
     // Determine the range of dates we have actual data for
     const spendDates = [...spendByDate.keys()].sort();
@@ -810,7 +908,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
         actualSpend: point.date <= lastSpendDate ? runningTotal : null,
       };
     });
-  }, [selectedCampaignIds, channel.rawSpendPoints, channel.chartData]);
+  }, [selectedCampaignIds, channel.rawSpendPoints, channel.chartData, matchesSelection, allSelectedRepresented]);
 
   // Benchmark / preset derived values
   const benchmarkChannelName = inferBenchmarkChannelName(channel.platform, channel.name);
@@ -930,8 +1028,10 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
       return -1;
     })();
 
-    if (firstWithActual !== -1 && lastWithActual !== -1 && firstWithActual <= lastWithActual) {
-      firstIdx = firstWithActual;
+    // Only trim the right side — cut off future dates beyond the last actual data point.
+    // Do NOT trim the left: if the selected campaign started mid-period (e.g. Feb in a
+    // YTD view), we still want January on the X-axis so the full analytics range is shown.
+    if (lastWithActual !== -1) {
       lastIdx = lastWithActual;
     }
 
@@ -990,7 +1090,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
               {/* Channel name + status */}
               <div className="row-start-1 col-start-2 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                  {channel.campaigns && channel.campaigns.length > 0 ? (
+                  {(channel.platform === 'google-ads' || channel.platform === 'meta-ads' || (channel.campaigns && channel.campaigns.length > 0)) ? (
                     <div ref={campaignDropdownRef} className="relative min-w-0 flex-shrink-0">
                       <button
                         onClick={() => setCampaignDropdownOpen(v => !v)}
@@ -1024,7 +1124,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                             {/* All Campaigns — hidden when searching */}
                             {!campaignSearch && (
                               <button
-                                onClick={() => { setSelectedCampaignIds(new Set()); if (clientId) { try { localStorage.removeItem(`channel-campaigns-${clientId}-${channel.id ?? channel.name}`); } catch {} } }}
+                                onClick={() => { setSelectedCampaignIds(new Set()); if (clientId) { try { localStorage.setItem(`channel-campaigns-${clientId}-${channel.id ?? channel.name}`, JSON.stringify([])); } catch {} } }}
                                 className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors border-b border-gray-100 ${!isNoneSelected && selectedCampaignIds.size === 0 ? 'font-semibold text-blue-600 bg-blue-50' : 'text-gray-600 hover:bg-gray-50'}`}
                               >
                                 <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0 ${!isNoneSelected && selectedCampaignIds.size === 0 ? 'bg-blue-600 border-blue-600' : 'border-gray-300'}`}>

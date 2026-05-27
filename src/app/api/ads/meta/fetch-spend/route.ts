@@ -177,7 +177,19 @@ export async function POST(request: NextRequest) {
       console.log(`Found ${metaAdsAccounts.length} Meta Ads account(s)`);
 
       // Step 2: Get the OAuth access token from Nango's connection
-      const nangoConnection = await nango.getConnection(toNangoPlatform('meta-ads'), connection.connection_id);
+      let nangoConnection;
+      try {
+        nangoConnection = await nango.getConnection(toNangoPlatform('meta-ads'), connection.connection_id);
+      } catch (nangoError: any) {
+        const httpStatus = nangoError.response?.status || nangoError.status;
+        if (httpStatus === 404) {
+          return Response.json({
+            success: false,
+            error: 'Meta Ads connection not found. Please reconnect your account in Platform Connections.',
+          }, { status: 424 });
+        }
+        throw nangoError;
+      }
       const accessToken = (nangoConnection.credentials as any)?.access_token;
 
       if (!accessToken) {

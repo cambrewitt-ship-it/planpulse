@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { format, startOfMonth } from 'date-fns';
+import { format, subDays } from 'date-fns';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -201,11 +201,13 @@ interface ModalProps {
   campaigns: Campaign[];
   ga4Events: string[];
   metaEvents: Array<{ name: string; count: number }>;
+  hasData: boolean;
+  onConnect?: () => void;
   onSave: (config: WidgetConfig) => void;
   onClose: () => void;
 }
 
-function ConfigModal({ clientId, initialConfig, goals, campaigns, ga4Events, metaEvents, onSave, onClose }: ModalProps) {
+function ConfigModal({ clientId, initialConfig, goals, campaigns, ga4Events, metaEvents, hasData, onConnect, onSave, onClose }: ModalProps) {
   const primaryGoal = goals.find(g => g.is_primary) ?? goals[0] ?? null;
   const [editMetric, setEditMetric] = useState(primaryGoal?.metric ?? 'CPA');
   const [editTarget, setEditTarget] = useState(primaryGoal?.target_value?.toString() ?? '');
@@ -435,6 +437,21 @@ function ConfigModal({ clientId, initialConfig, goals, campaigns, ga4Events, met
           </div>
         )}
 
+        {/* Connect Platforms — shown when no data is available */}
+        {!hasData && onConnect && (
+          <div style={{ marginBottom: 16, padding: '12px 14px', borderRadius: 10, background: 'rgba(249,115,22,0.06)', border: '1px solid rgba(249,115,22,0.25)' }}>
+            <p style={{ fontSize: 12, color: '#7c2d12', marginBottom: 8, fontWeight: 500 }}>
+              No performance data yet. Connect your ad platforms to start tracking.
+            </p>
+            <button
+              onClick={() => { onClose(); onConnect(); }}
+              style={{ padding: '7px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600, border: 'none', background: '#f97316', color: '#fff', cursor: 'pointer', fontFamily: FONT }}
+            >
+              Connect Platforms
+            </button>
+          </div>
+        )}
+
         {/* Actions */}
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
           <button onClick={onClose} style={{ padding: '8px 16px', borderRadius: 8, fontSize: 13, fontWeight: 500, border: '1px solid #E8E4DC', background: '#FDFCF8', color: '#8A8578', cursor: 'pointer', fontFamily: FONT }}>Cancel</button>
@@ -460,6 +477,7 @@ export function PerformanceWidget({
   floatingGear = false,
   modalOpen,
   onModalOpenChange,
+  onConnect,
 }: {
   clientId: string;
   onNeedle?: (data: PerfData | null) => void;
@@ -471,6 +489,7 @@ export function PerformanceWidget({
   /** When provided, the modal is controlled externally. */
   modalOpen?: boolean;
   onModalOpenChange?: (open: boolean) => void;
+  onConnect?: () => void;
 }) {
   const [config, setConfig] = useState<WidgetConfig>(() => loadConfig(clientId));
   const [goals, setGoals] = useState<Goal[]>([]);
@@ -547,43 +566,50 @@ export function PerformanceWidget({
     }
 
     const mk = primaryGoal.metric.toLowerCase();
-    const actuals = config.metricSource === 'ga4' ? ga4Actuals : combinedActuals;
-    const actual = actuals[mk] ?? null;
-
     const lowerBetter = /cpa|cpc|cpm|cpl|cost/.test(mk);
+    const actuals = config.metricSource === 'ga4' ? ga4Actuals : combinedActuals;
 
-    // 7-day trend
+    // 7-day rolling actual + week-over-week trend.
+    // Sum the last 7 and prior 7 calendar days from last30DaysSeries so both the
+    // speedometer and the WoW badge reflect the same window as the rolling chart.
+    let actual: number | null = actuals[mk] ?? null;
+    let trend24h: { pctChange: number; improving: boolean } | null = null;
+
+    if (config.metricSource !== 'ga4') {
+      const dateMap = new Map(last30DaysSeries.map(r => [r.date, r]));
+      let cur7Spend = 0, cur7Imp = 0, cur7Clicks = 0, cur7Conv = 0;
+      let prv7Spend = 0, prv7Imp = 0, prv7Clicks = 0, prv7Conv = 0;
+      for (let d = 0; d < 7; d++) {
+        const curRow = dateMap.get(format(subDays(new Date(), d), 'yyyy-MM-dd'));
+        if (curRow) { cur7Spend += curRow.spend; cur7Imp += curRow.impressions; cur7Clicks += curRow.clicks; cur7Conv += curRow.conversions; }
+        const prvRow = dateMap.get(format(subDays(new Date(), d + 7), 'yyyy-MM-dd'));
+        if (prvRow) { prv7Spend += prvRow.spend; prv7Imp += prvRow.impressions; prv7Clicks += prvRow.clicks; prv7Conv += prvRow.conversions; }
+      }
+      const cur7Val = metricFromDayRow({ spend: cur7Spend, impressions: cur7Imp, clicks: cur7Clicks, conversions: cur7Conv }, primaryGoal.metric);
+      const prv7Val = metricFromDayRow({ spend: prv7Spend, impressions: prv7Imp, clicks: prv7Clicks, conversions: prv7Conv }, primaryGoal.metric);
+      actual = cur7Val;
+      if (cur7Val != null && prv7Val != null && prv7Val !== 0) {
+        trend24h = { pctChange: ((cur7Val - prv7Val) / prv7Val) * 100, improving: lowerBetter ? cur7Val < prv7Val : cur7Val > prv7Val };
+      }
+    } else {
+      const yVal = yesterdayActuals[mk] ?? null;
+      const dbVal = dayBeforeActuals[mk] ?? null;
+      if (yVal != null && dbVal != null && dbVal !== 0) {
+        trend24h = { pctChange: ((yVal - dbVal) / dbVal) * 100, improving: lowerBetter ? yVal < dbVal : yVal > dbVal };
+      }
+    }
+
+    // Kept for API compatibility — separate from the WoW badge above
     const last7Val = last7DaysActuals[mk] ?? null;
     const prev7Val = prev7DaysActuals[mk] ?? null;
     const trend = (last7Val != null && prev7Val != null && prev7Val !== 0)
       ? { pctChange: ((last7Val - prev7Val) / prev7Val) * 100, improving: lowerBetter ? last7Val < prev7Val : last7Val > prev7Val }
       : null;
 
-    // 24h trend: yesterday vs day before yesterday
-    const yVal = yesterdayActuals[mk] ?? null;
-    const dbVal = dayBeforeActuals[mk] ?? null;
-    const trend24h = (yVal != null && dbVal != null && dbVal !== 0)
-      ? { pctChange: ((yVal - dbVal) / dbVal) * 100, improving: lowerBetter ? yVal < dbVal : yVal > dbVal }
-      : null;
-
-    // Daily sparkline series — oldest first
-    // CPA/CPL: accumulate MTD only so the sparkline end matches the headline number
-    let dailySeries: number[];
-    if (/cpa|cpl/.test(mk)) {
-      const monthStartStr = format(startOfMonth(new Date()), 'yyyy-MM-dd');
-      const mtdRows = last30DaysSeries.filter(row => row.date >= monthStartStr);
-      let cumSpend = 0, cumConv = 0;
-      dailySeries = mtdRows.reduce<number[]>((acc, row) => {
-        cumSpend += row.spend;
-        cumConv += row.conversions;
-        if (cumConv > 0) acc.push(cumSpend / cumConv);
-        return acc;
-      }, []);
-    } else {
-      dailySeries = last30DaysSeries
-        .map(row => metricFromDayRow(row, primaryGoal.metric))
-        .filter((v): v is number => v !== null);
-    }
+    // Daily sparkline series — oldest first, one value per day (non-cumulative)
+    const dailySeries: number[] = last30DaysSeries
+      .map(row => metricFromDayRow(row, primaryGoal.metric))
+      .filter((v): v is number => v !== null);
 
     if (actual == null || !primaryGoal.target_value) {
       const noData: PerfData = {
@@ -634,10 +660,7 @@ export function PerformanceWidget({
       ? `Meta${config.metaActionType ? ` · ${metaActionLabel(config.metaActionType)}` : ''}`
       : config.platform === 'google-ads' ? 'Google' : 'All platforms';
 
-  const needsSetup = !perfData?.hasData && (
-    (config.metricSource === 'ga4' && !config.ga4EventName) ||
-    (config.metricSource === 'ad' && config.platform === 'meta-ads' && !config.metaActionType)
-  );
+  const noData = !perfData?.hasData;
 
   if (hideDisplay) return null;
 
@@ -650,15 +673,25 @@ export function PerformanceWidget({
             onClick={e => { e.stopPropagation(); setShowModal(true); }}
             title="Configure performance metric"
             style={{
-              position: 'absolute', bottom: 6, left: 6,
+              position: 'absolute', bottom: 6, left: 6, zIndex: 10,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               background: 'none', border: 'none',
               cursor: 'pointer', padding: '8px',
-              color: needsSetup ? '#B07030' : '#6B7280',
+              color: noData ? '#f97316' : '#6B7280',
               borderRadius: 6, lineHeight: 0,
             }}
           >
-            <GearIcon size={20} />
+            <div style={{ position: 'relative', lineHeight: 0 }}>
+              <GearIcon size={20} />
+              {noData && (
+                <span style={{
+                  position: 'absolute', top: -2, right: -2,
+                  width: 8, height: 8, borderRadius: '50%',
+                  background: '#f97316', border: '1.5px solid white',
+                  display: 'block',
+                }} />
+              )}
+            </div>
           </button>
         ) : (
           <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
@@ -669,11 +702,21 @@ export function PerformanceWidget({
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 background: 'none', border: 'none',
                 cursor: 'pointer', padding: '8px',
-                color: needsSetup ? '#B07030' : '#6B7280',
+                color: noData ? '#f97316' : '#6B7280',
                 borderRadius: 6, lineHeight: 0,
               }}
             >
-              <GearIcon size={14} />
+              <div style={{ position: 'relative', lineHeight: 0 }}>
+                <GearIcon size={14} />
+                {noData && (
+                  <span style={{
+                    position: 'absolute', top: -2, right: -2,
+                    width: 6, height: 6, borderRadius: '50%',
+                    background: '#f97316', border: '1px solid white',
+                    display: 'block',
+                  }} />
+                )}
+              </div>
             </button>
           </div>
         )
@@ -688,6 +731,8 @@ export function PerformanceWidget({
           campaigns={campaigns}
           ga4Events={ga4Events}
           metaEvents={metaEvents}
+          hasData={perfData?.hasData ?? false}
+          onConnect={onConnect}
           onSave={handleSave}
           onClose={() => setShowModal(false)}
         />,

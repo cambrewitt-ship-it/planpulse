@@ -191,24 +191,38 @@ function HealthRing({ score, status, perf, loading, scale = 1 }: {
 
   if (loading) {
     const W = 144, H = 96, sw = 10, r = 62, cx = 72, cy = 70;
+    const spinR = 9;
+    const spinCx = cx, spinCy = cy + 20;
+    const spinCircumference = 2 * Math.PI * spinR;
+    const spinDash = spinCircumference * 0.28;
+    const spinGap = spinCircumference - spinDash;
     return (
       <svg width={W * scale} height={H * scale} viewBox={`0 0 ${W} ${H}`} style={{ fontFamily: "'DM Sans', system-ui, sans-serif", display: 'block' }}>
         <path d={`M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}`} fill="none" stroke="#e5e7eb" strokeWidth={sw} strokeLinecap="round" />
         <line x1={cx} y1={cy} x2={cx - r + sw / 2 + 4} y2={cy} stroke="#d1d5db" strokeWidth={2} strokeLinecap="round" />
         <circle cx={cx} cy={cy} r={4.5} fill="#d1d5db" />
-        <rect x={cx - 14} y={cy + 12} width={28} height={14} rx={3} fill="#e5e7eb" className="animate-pulse" />
-        <rect x={cx - 16} y={cy + 28} width={32} height={8} rx={2} fill="#f3f4f6" className="animate-pulse" />
+        {/* Spinner */}
+        <circle cx={spinCx} cy={spinCy} r={spinR} fill="none" stroke="#e5e7eb" strokeWidth={2.5} />
+        <circle cx={spinCx} cy={spinCy} r={spinR} fill="none" stroke="#f97316" strokeWidth={2.5}
+          strokeDasharray={`${spinDash.toFixed(2)} ${spinGap.toFixed(2)}`} strokeLinecap="round">
+          <animateTransform attributeName="transform" type="rotate"
+            from={`0 ${spinCx} ${spinCy}`} to={`360 ${spinCx} ${spinCy}`}
+            dur="0.8s" repeatCount="indefinite" />
+        </circle>
       </svg>
     );
   }
 
   const usePerf = !!(perf?.hasData);
   const needle = usePerf ? perf!.needle : score / 100;
-  const ringColor = usePerf ? perf!.color : (STATUS_COLORS[status]?.ring ?? '#f59e0b');
-  const centerLabel = usePerf ? perf!.actualLabel : String(Math.round(score));
+  const ringColor = usePerf ? perf!.color : '#d1d5db';
+  const needleColor = usePerf ? '#374151' : '#d1d5db';
+  const centerLabel = usePerf ? perf!.actualLabel : '—';
+  const centerColor = usePerf ? '#1C1917' : '#d1d5db';
   const subLabel = usePerf
     ? perf!.metric.toUpperCase()
     : (status === 'healthy' ? 'Healthy' : status === 'caution' ? 'Caution' : 'At Risk');
+  const subLabelColor = usePerf ? ringColor : '#d1d5db';
 
   const s = Math.min(0.998, Math.max(0.002, needle));
   const rad = Math.PI * (1 - s);
@@ -259,14 +273,14 @@ function HealthRing({ score, status, perf, loading, scale = 1 }: {
         </>
       )}
       {/* Needle */}
-      <line x1={cx} y1={cy} x2={nx} y2={ny} stroke="#374151" strokeWidth={2} strokeLinecap="round" />
-      <circle cx={cx} cy={cy} r={4.5} fill="#374151" />
+      <line x1={cx} y1={cy} x2={nx} y2={ny} stroke={needleColor} strokeWidth={2} strokeLinecap="round" />
+      <circle cx={cx} cy={cy} r={4.5} fill={needleColor} />
       {/* Center value */}
-      <text x={cx} y={cy + 24} textAnchor="middle" fontSize={20} fontWeight="700" fill="#1C1917">{centerLabel}</text>
+      <text x={cx} y={cy + 24} textAnchor="middle" fontSize={20} fontWeight="700" fill={centerColor}>{centerLabel}</text>
       {/* Sub-label */}
       <text
         x={cx} y={cy + 33}
-        textAnchor="middle" fontSize={9} fontWeight="600" fill={ringColor}
+        textAnchor="middle" fontSize={9} fontWeight="600" fill={subLabelColor}
         style={{ textTransform: 'uppercase', letterSpacing: '0.08em' }}
       >{subLabel}</text>
     </svg>
@@ -377,7 +391,7 @@ function PerfSparkline({ clientId, perf, perfLoading, onConnect }: { clientId: s
         `}</style>
         <div className="flex items-center justify-between mb-1">
           <span className="text-xs text-gray-300 uppercase tracking-wide font-medium">
-            {metric || 'Performance'} · {/cpa|cpl/i.test(metric) ? 'MTD' : '30 day'}
+            {metric || 'Performance'} · 7d rolling
           </span>
         </div>
         <div className="relative rounded overflow-hidden" style={{ background: '#F9FAFB' }}>
@@ -397,7 +411,6 @@ function PerfSparkline({ clientId, perf, perfLoading, onConnect }: { clientId: s
   const noData = !perf?.hasData || cleanSeries.length < 1;
 
   if (noData) {
-    // Distinguish: goal exists but no actuals (platform issue) vs no goal at all
     const hasGoal = !!(perf?.metric);
     const targetVal = perf?.targetValue;
     const targetDisplay = targetVal != null && isFinite(targetVal) && perf?.metric
@@ -413,7 +426,7 @@ function PerfSparkline({ clientId, perf, perfLoading, onConnect }: { clientId: s
       <div className="w-full">
         <div className="flex items-center justify-between mb-1">
           <span className="text-xs text-gray-300 uppercase tracking-wide font-medium">
-            {metric || 'Performance'} · {/cpa|cpl/i.test(metric) ? 'MTD' : '30 day'}
+            {metric || 'Performance'} · 7d rolling
           </span>
           {targetDisplay && (
             <span className="text-xs text-gray-400">Target: {targetDisplay}</span>
@@ -425,12 +438,6 @@ function PerfSparkline({ clientId, perf, perfLoading, onConnect }: { clientId: s
             <span className="text-[11px] font-bold tracking-widest text-gray-400 uppercase">
               {hasGoal ? 'No conversions data' : 'No Data'}
             </span>
-            <button
-              onClick={() => onConnect?.()}
-              className="text-[10px] font-semibold px-3 py-1 rounded-full bg-gray-800 text-white hover:bg-gray-600 transition-colors cursor-pointer"
-            >
-              {hasGoal ? 'Configure event' : 'Connect'}
-            </button>
           </div>
         </div>
       </div>
@@ -518,7 +525,7 @@ function PerfSparkline({ clientId, perf, perfLoading, onConnect }: { clientId: s
   return (
     <div className="w-full">
       <div className="flex items-center justify-between mb-1">
-        <span className="text-xs text-gray-400 uppercase tracking-wide font-medium">{metric} · {/cpa|cpl/i.test(metric) ? 'MTD' : '30 day'}</span>
+        <span className="text-xs text-gray-400 uppercase tracking-wide font-medium">{metric} · 7d rolling</span>
       </div>
       <svg ref={svgRef} width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible', cursor: 'crosshair' }} onMouseMove={handleMouseMove} onMouseLeave={() => setHoverIdx(null)}>
         <defs>
@@ -549,20 +556,21 @@ function PerfSparkline({ clientId, perf, perfLoading, onConnect }: { clientId: s
           <line key={i} x1={PL} y1={y} x2={PL + pw} y2={y} stroke="#F3F4F6" strokeWidth={0.5} />
         ))}
 
-        {/* Target dashed line — always at vertical midpoint */}
+        {/* Target dashed line + Y-axis label */}
         {targetY !== null && (
           <>
             <line x1={PL} y1={targetY} x2={PL + pw} y2={targetY}
               stroke="#9CA3AF" strokeWidth={1} strokeDasharray="3 3" />
+            <line x1={PL - 3} y1={targetY} x2={PL} y2={targetY} stroke="#D1D5DB" strokeWidth={0.75} />
             <text
-              x={PL + pw}
-              y={targetY - 3}
+              x={PL - 5}
+              y={targetY + 3.5}
               textAnchor="end"
-              fontSize={7.5}
+              fontSize={8}
               fill="#9CA3AF"
               fontFamily="system-ui, sans-serif"
             >
-              Target {target !== null ? fmtY(target) : ''}
+              {target !== null ? fmtY(target) : ''}
             </text>
           </>
         )}
@@ -860,7 +868,7 @@ export default function HeroHealthSection({
         {/* Col 2: CPA/CTR Sparkline + metric widget + speedometer */}
         <div className="min-w-0">
           <div className="relative w-full border border-gray-100 rounded-lg bg-gray-50/80 px-4 py-4">
-            <PerformanceWidget clientId={clientId} onNeedle={setPerfData} onFetched={() => setPerfReady(true)} floatingGear modalOpen={showPerfConfig} onModalOpenChange={setShowPerfConfig} />
+            <PerformanceWidget clientId={clientId} onNeedle={setPerfData} onFetched={() => setPerfReady(true)} floatingGear modalOpen={showPerfConfig} onModalOpenChange={setShowPerfConfig} onConnect={onConnect} />
             <div className="mt-3">
               <PerfSparkline clientId={clientId} perf={perfData} perfLoading={!perfReady} onConnect={() => setShowPerfConfig(true)} />
             </div>
@@ -878,14 +886,14 @@ export default function HeroHealthSection({
                       {Math.abs(pctChange).toFixed(1)}%
                     </span>
                     <span style={{ fontSize: 9, color: '#9ca3af', fontWeight: 500, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-                      24h
+                      7d
                     </span>
                   </div>
                 );
               })()}
               {/* Speedometer */}
               <div className="flex flex-col items-center">
-                <HealthRing score={healthScore.overallScore} status={healthScore.status} perf={perfData} loading={isLoadingScore} scale={0.6} />
+                <HealthRing score={healthScore.overallScore} status={healthScore.status} perf={perfData} loading={isLoadingScore || !perfReady} scale={0.6} />
                 {perfData?.hasData && (
                   <p className="text-[10px] font-bold text-center leading-tight mt-0.5" style={{ color: perfData.color }}>
                     {perfData.metric.toUpperCase()}

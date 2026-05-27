@@ -66,9 +66,8 @@ export async function GET() {
       throw new Error('No access token found in Nango connection');
     }
 
-    // 4. Get developer token and MCC ID from environment
+    // 4. Get developer token from environment
     const developerToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN;
-    const mccId = process.env.GOOGLE_ADS_MCC_ID;
 
     if (!developerToken) {
       console.error('GOOGLE_ADS_DEVELOPER_TOKEN is not configured');
@@ -90,11 +89,8 @@ export async function GET() {
       'Content-Type': 'application/json',
     };
 
-    // If MCC ID is provided, add it as login-customer-id header for proper account hierarchy handling
-    if (mccId) {
-      listHeaders['login-customer-id'] = mccId;
-      console.log('Using MCC ID as login-customer-id:', mccId);
-    }
+    // Do NOT set login-customer-id for listAccessibleCustomers — the OAuth token scopes
+    // access to all accounts the authenticated user can see, regardless of any MCC hierarchy.
 
     const listResponse = await fetch(listCustomersUrl, {
       method: 'GET',
