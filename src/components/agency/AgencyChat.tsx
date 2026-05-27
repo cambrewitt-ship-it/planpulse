@@ -206,17 +206,46 @@ export const AgencyChat = forwardRef<AgencyChatHandle, AgencyChatProps>(function
 
   useEffect(() => {
     let cancelled = false;
-    const loadBriefing = () => {
+    const CACHE_KEY = 'agency_daily_briefing_cache';
+    const TTL = 12 * 60 * 60 * 1000;
+
+    const fetchAndCache = () => {
       setBriefingLoading(true);
       fetch('/api/agency/daily-briefing')
         .then(r => r.json())
-        .then(data => { if (!cancelled) setDailyBriefing(data.briefing ?? null); })
+        .then(data => {
+          if (!cancelled) {
+            const briefing = data.briefing ?? null;
+            setDailyBriefing(briefing);
+            if (briefing) {
+              try { localStorage.setItem(CACHE_KEY, JSON.stringify({ briefing, ts: Date.now() })); } catch { /* ignore */ }
+            }
+          }
+        })
         .catch(() => { if (!cancelled) setDailyBriefing(null); })
         .finally(() => { if (!cancelled) setBriefingLoading(false); });
     };
-    loadBriefing();
-    const interval = setInterval(loadBriefing, 12 * 60 * 60 * 1000);
-    return () => { cancelled = true; clearInterval(interval); };
+
+    // Forced refresh via reload button — always re-fetch
+    if (briefingTick > 0) {
+      fetchAndCache();
+      return () => { cancelled = true; };
+    }
+
+    // Initial load — use cache if fresh
+    try {
+      const raw = localStorage.getItem(CACHE_KEY);
+      if (raw) {
+        const { briefing, ts } = JSON.parse(raw);
+        if (briefing && Date.now() - ts < TTL) {
+          setDailyBriefing(briefing);
+          return () => { cancelled = true; };
+        }
+      }
+    } catch { /* ignore malformed cache */ }
+
+    fetchAndCache();
+    return () => { cancelled = true; };
   }, [briefingTick]);
 
   useEffect(() => {
