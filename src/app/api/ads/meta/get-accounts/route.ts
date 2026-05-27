@@ -20,7 +20,8 @@ export async function GET(request: NextRequest) {
     const clientId = request.nextUrl.searchParams.get('clientId');
 
     // Query meta_ads_accounts for user's accounts, optionally scoped to a client
-    let query = supabase
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let query: any = supabase
       .from('meta_ads_accounts')
       .select('id, account_id, account_name, is_active, created_at')
       .eq('user_id', user.id);
