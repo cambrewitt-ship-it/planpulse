@@ -142,7 +142,7 @@ export async function POST(request: NextRequest) {
       let metaAdsAccounts: any[] = [];
       {
         if (clientId) {
-          const { data: clientAccounts } = await supabase
+          const { data: clientAccounts } = await (supabase as any)
             .from('meta_ads_accounts')
             .select('*')
             .eq('user_id', user.id)
@@ -155,7 +155,7 @@ export async function POST(request: NextRequest) {
 
         if (metaAdsAccounts.length === 0) {
           // Fall back to any active account for this user (user-level or other clients)
-          const { data: anyAccounts, error: accountsError } = await supabase
+          const { data: anyAccounts, error: accountsError } = await (supabase as any)
             .from('meta_ads_accounts')
             .select('*')
             .eq('user_id', user.id)
