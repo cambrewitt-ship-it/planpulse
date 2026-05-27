@@ -461,6 +461,10 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
   const [completingIds, setCompletingIds] = useState<Set<string>>(new Set());
   const ck = (c: KanbanCard) => `${c.id}:${c.daysUntilDue ?? 'none'}`;
 
+  // Snapshot of completing cards — keeps them rendered during animation even
+  // if actionPointClients refreshes and removes them before the 900ms is up.
+  const [completingCardSnapshots, setCompletingCardSnapshots] = useState<Map<string, KanbanCard>>(new Map());
+
   // Flash/highlight newly AI-created items
   const [flashingIds, setFlashingIds] = useState<Set<string>>(new Set());
 
@@ -672,7 +676,10 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
   async function handleComplete(card: KanbanCard, e?: React.MouseEvent) {
     if (e) fireConfetti(e.clientX, e.clientY);
     const key = ck(card);
+    // Immediately show scratch-out and snapshot the card data so it stays
+    // rendered even if actionPointClients refreshes before the animation ends.
     setCompletingIds(prev => new Set(prev).add(key));
+    setCompletingCardSnapshots(prev => new Map(prev).set(card.id, card));
     try {
       const isGenericTodo = card.tag === 'TODO';
       const res = await fetch('/api/action-points', {
@@ -687,12 +694,19 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
       if (!res.ok) {
         console.error('Failed to complete action point from Kanban');
         setCompletingIds(prev => { const next = new Set(prev); next.delete(key); return next; });
+        setCompletingCardSnapshots(prev => { const next = new Map(prev); next.delete(card.id); return next; });
         return;
       }
-      setTimeout(() => { onActionPointCompleted?.(); }, 900);
+      // Let the animation play for 900ms before removing the card and refreshing
+      setTimeout(() => {
+        setCompletingIds(prev => { const next = new Set(prev); next.delete(key); return next; });
+        setCompletingCardSnapshots(prev => { const next = new Map(prev); next.delete(card.id); return next; });
+        onActionPointCompleted?.();
+      }, 900);
     } catch (err) {
       console.error('Error completing action point from Kanban:', err);
       setCompletingIds(prev => { const next = new Set(prev); next.delete(key); return next; });
+      setCompletingCardSnapshots(prev => { const next = new Map(prev); next.delete(card.id); return next; });
     }
   }
 
@@ -768,6 +782,13 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
     } finally {
       setIsSaving(false);
     }
+  }
+
+  // Re-inject any completing cards that were removed from actionPointClients by
+  // a concurrent refresh before the 900ms animation window is up.
+  const existingIds = new Set(cards.map(c => c.id));
+  for (const [, ghost] of completingCardSnapshots) {
+    if (!existingIds.has(ghost.id)) cards.push(ghost);
   }
 
   // Group by column and sort by days until due (ascending - soonest first)
