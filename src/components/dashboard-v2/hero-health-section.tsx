@@ -349,13 +349,72 @@ function InfoButton({ showInfo, setShowInfo, infoRef }: {
         <div className="absolute right-0 top-5 w-60 bg-white border border-gray-200 rounded-xl shadow-lg p-3 z-50 text-[11px] text-gray-600 leading-relaxed">
           <p className="font-semibold text-gray-800 mb-2">How this chart works</p>
           <p><span className="font-medium text-gray-700">Each point</span> shows the 7-day rolling average — total spend ÷ total conversions over the trailing 7 days. This smooths out noisy single-day spikes.</p>
-          <p className="mt-1.5"><span className="font-medium text-gray-700">Speedometer</span> shows today's 7-day rolling value vs your target.</p>
+          <p className="mt-1.5"><span className="font-medium text-gray-700">Speedometer</span> shows the latest completed 7-day rolling value vs your target.</p>
           <p className="mt-1.5"><span className="font-medium text-gray-700">Arrow badge</span> compares today's rolling value to yesterday's rolling value — a stable 24h signal.</p>
           <p className="mt-1.5"><span className="font-medium text-gray-700">Historical points</span> are locked in once the day closes and will never change.</p>
         </div>
       )}
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Build separate area paths for above/below-target regions.
+// Each segment extends all the way to the chart bottom so red and green
+// never bleed into each other's columns.
+// ---------------------------------------------------------------------------
+
+function buildSplitAreaPaths(
+  pts: { x: number; y: number }[],
+  targetY: number,
+  bottom: number
+): { redPath: string; greenPath: string } {
+  if (pts.length === 0) return { redPath: '', greenPath: '' };
+
+  const isAbove = (p: { x: number; y: number }) => p.y < targetY;
+
+  function crossX(p1: { x: number; y: number }, p2: { x: number; y: number }): number {
+    if (p2.y === p1.y) return p1.x;
+    return p1.x + ((targetY - p1.y) / (p2.y - p1.y)) * (p2.x - p1.x);
+  }
+
+  // Insert crossing points at target-line transitions
+  const aug: { x: number; y: number; above: boolean }[] = [];
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i];
+    if (i > 0) {
+      const prev = pts[i - 1];
+      if (isAbove(prev) !== isAbove(p)) {
+        const cx = crossX(prev, p);
+        aug.push({ x: cx, y: targetY, above: isAbove(prev) });
+        aug.push({ x: cx, y: targetY, above: isAbove(p) });
+      }
+    }
+    aug.push({ x: p.x, y: p.y, above: isAbove(p) });
+  }
+
+  function buildPath(wantAbove: boolean): string {
+    let d = '';
+    let seg: { x: number; y: number }[] = [];
+
+    const flush = () => {
+      if (seg.length < 1) return;
+      const f = seg[0], l = seg[seg.length - 1];
+      d += `M ${f.x.toFixed(1)} ${bottom.toFixed(1)} L ${f.x.toFixed(1)} ${f.y.toFixed(1)}`;
+      for (let i = 1; i < seg.length; i++) d += ` L ${seg[i].x.toFixed(1)} ${seg[i].y.toFixed(1)}`;
+      d += ` L ${l.x.toFixed(1)} ${bottom.toFixed(1)} Z `;
+      seg = [];
+    };
+
+    for (const p of aug) {
+      if (p.above === wantAbove) seg.push(p);
+      else flush();
+    }
+    flush();
+    return d.trim();
+  }
+
+  return { redPath: buildPath(true), greenPath: buildPath(false) };
 }
 
 // ---------------------------------------------------------------------------
@@ -366,18 +425,7 @@ function PerfSparkline({ clientId, perf, perfLoading, onConnect }: { clientId: s
   const [series, setSeries] = useState<Array<{ date: string; value: number }>>([]);
   const [loading, setLoading] = useState(false);
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
-  const [showInfo, setShowInfo] = useState(false);
   const svgRef = useRef<SVGSVGElement>(null);
-  const infoRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!showInfo) return;
-    function handleClick(e: MouseEvent) {
-      if (infoRef.current && !infoRef.current.contains(e.target as Node)) setShowInfo(false);
-    }
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, [showInfo]);
 
   useEffect(() => {
     if (!perf?.metric) return;
@@ -470,7 +518,6 @@ function PerfSparkline({ clientId, perf, perfLoading, onConnect }: { clientId: s
           <span className="text-xs text-gray-300 uppercase tracking-wide font-medium">
             {metric || 'Performance'} · 7d rolling
           </span>
-          <InfoButton showInfo={showInfo} setShowInfo={setShowInfo} infoRef={infoRef} />
         </div>
         <div className="relative">
           {shellSvg}
@@ -539,6 +586,14 @@ function PerfSparkline({ clientId, perf, perfLoading, onConnect }: { clientId: s
     { y: PT + ph, label: fmtY(chartMin) },
   ];
 
+  // When a target exists, colour the line red above and green below.
+  // Direction flips for "higher is better" metrics (ROAS, CTR, Clicks…).
+  const lowerBetter = /cpa|cpc|cpm|cpl|cost/.test(metric.toLowerCase());
+  const aboveColor = lowerBetter ? '#ef4444' : '#22c55e';
+  const belowColor = lowerBetter ? '#22c55e' : '#ef4444';
+  const hasSplit = targetY !== null;
+
+  // Fallback single colour (used when there is no target).
   let lineColor = perf.color ?? '#6366f1';
   if (perf.trend24h) {
     const { pctChange, improving } = perf.trend24h;
@@ -566,17 +621,32 @@ function PerfSparkline({ clientId, perf, perfLoading, onConnect }: { clientId: s
     <div className="w-full">
       <div className="flex items-center justify-between mb-1">
         <span className="text-xs text-gray-400 uppercase tracking-wide font-medium">{metric} · 7d rolling</span>
-        <InfoButton showInfo={showInfo} setShowInfo={setShowInfo} infoRef={infoRef} />
       </div>
       <svg ref={svgRef} width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible', cursor: 'crosshair' }} onMouseMove={handleMouseMove} onMouseLeave={() => setHoverIdx(null)}>
         <defs>
-          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%"   stopColor={lineColor} stopOpacity={0.2} />
-            <stop offset="100%" stopColor={lineColor} stopOpacity={0.01} />
-          </linearGradient>
-          <clipPath id={clipId}>
-            <rect x={PL} y={PT} width={pw} height={ph} />
-          </clipPath>
+          {hasSplit ? (
+            <>
+              <linearGradient id={`${gradId}_a`} x1="0" y1={PT} x2="0" y2={bottom} gradientUnits="userSpaceOnUse">
+                <stop offset="0%"   stopColor={aboveColor} stopOpacity={0.15} />
+                <stop offset="100%" stopColor={aboveColor} stopOpacity={0.03} />
+              </linearGradient>
+              <linearGradient id={`${gradId}_b`} x1="0" y1={PT} x2="0" y2={bottom} gradientUnits="userSpaceOnUse">
+                <stop offset="0%"   stopColor={belowColor} stopOpacity={0.03} />
+                <stop offset="100%" stopColor={belowColor} stopOpacity={0.15} />
+              </linearGradient>
+              <clipPath id={clipId}><rect x={PL} y={PT} width={pw} height={ph} /></clipPath>
+              <clipPath id={`${clipId}_a`}><rect x={PL} y={PT} width={pw} height={targetY! - PT} /></clipPath>
+              <clipPath id={`${clipId}_b`}><rect x={PL} y={targetY!} width={pw} height={bottom - targetY!} /></clipPath>
+</>
+          ) : (
+            <>
+              <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%"   stopColor={lineColor} stopOpacity={0.2} />
+                <stop offset="100%" stopColor={lineColor} stopOpacity={0.01} />
+              </linearGradient>
+              <clipPath id={clipId}><rect x={PL} y={PT} width={pw} height={ph} /></clipPath>
+            </>
+          )}
         </defs>
 
         {/* Axes */}
@@ -633,16 +703,43 @@ function PerfSparkline({ clientId, perf, perfLoading, onConnect }: { clientId: s
           );
         })}
 
-        {/* Area fill */}
-        <path d={areaPath} fill={`url(#${gradId})`} clipPath={`url(#${clipId})`} />
+        {/* Area fill — split by target when available */}
+        {hasSplit ? (() => {
+          const { redPath, greenPath } = buildSplitAreaPaths(pts, targetY!, bottom);
+          return (
+            <>
+              {redPath && <path d={redPath} fill={`url(#${gradId}_a)`} clipPath={`url(#${clipId})`} />}
+              {greenPath && <path d={greenPath} fill={`url(#${gradId}_b)`} clipPath={`url(#${clipId})`} />}
+            </>
+          );
+        })() : (
+          <path d={areaPath} fill={`url(#${gradId})`} clipPath={`url(#${clipId})`} />
+        )}
 
-        {/* Line */}
-        <polyline points={polyPts} fill="none" stroke={lineColor}
-          strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
-          clipPath={`url(#${clipId})`} />
+        {/* Line — red above target, green below (or single colour when no target) */}
+        {hasSplit ? (
+          <>
+            <polyline points={polyPts} fill="none" stroke={aboveColor}
+              strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
+              clipPath={`url(#${clipId}_a)`} />
+            <polyline points={polyPts} fill="none" stroke={belowColor}
+              strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
+              clipPath={`url(#${clipId}_b)`} />
+          </>
+        ) : (
+          <polyline points={polyPts} fill="none" stroke={lineColor}
+            strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
+            clipPath={`url(#${clipId})`} />
+        )}
 
         {/* Latest value dot */}
-        <circle cx={pts[pts.length - 1].x} cy={pts[pts.length - 1].y} r={3} fill={lineColor} />
+        {(() => {
+          const lp = pts[pts.length - 1];
+          const dotColor = hasSplit && targetY !== null
+            ? (lp.y < targetY ? aboveColor : belowColor)
+            : lineColor;
+          return <circle cx={lp.x} cy={lp.y} r={3} fill={dotColor} />;
+        })()}
 
         {/* Hover crosshair + tooltip */}
         {hoverIdx !== null && (() => {
@@ -655,10 +752,13 @@ function PerfSparkline({ clientId, perf, perfLoading, onConnect }: { clientId: s
           const tipW = 54, tipH = 30, tipPad = 6;
           const tipX = hp.x + tipPad + tipW > PL + pw ? hp.x - tipW - tipPad : hp.x + tipPad;
           const tipY = Math.max(PT, Math.min(hp.y - tipH / 2, bottom - tipH));
+          const hoverColor = hasSplit && targetY !== null
+            ? (hp.y < targetY ? aboveColor : belowColor)
+            : lineColor;
           return (
             <g>
               <line x1={hp.x} y1={PT} x2={hp.x} y2={bottom} stroke="#9CA3AF" strokeWidth={0.75} strokeDasharray="3 2" />
-              <circle cx={hp.x} cy={hp.y} r={3.5} fill="white" stroke={lineColor} strokeWidth={1.5} />
+              <circle cx={hp.x} cy={hp.y} r={3.5} fill="white" stroke={hoverColor} strokeWidth={1.5} />
               <rect x={tipX} y={tipY} width={tipW} height={tipH} rx={3} fill="#1C1917" opacity={0.88} />
               <text x={tipX + tipW / 2} y={tipY + 12} textAnchor="middle" fontSize={9.5} fontWeight="700" fill="white" fontFamily="system-ui, sans-serif">{valLabel}</text>
               <text x={tipX + tipW / 2} y={tipY + 23} textAnchor="middle" fontSize={7.5} fill="#9CA3AF" fontFamily="system-ui, sans-serif">{dateLabel}</text>
@@ -704,6 +804,8 @@ export default function HeroHealthSection({
   const [perfData, setPerfData] = useState<PerfData | null>(null);
   const [perfReady, setPerfReady] = useState(false);
   const [showPerfConfig, setShowPerfConfig] = useState(false);
+  const [showChartInfo, setShowChartInfo] = useState(false);
+  const chartInfoRef = useRef<HTMLDivElement>(null);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -716,6 +818,15 @@ export default function HeroHealthSection({
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
   }, [showAmMenu]);
+
+  useEffect(() => {
+    if (!showChartInfo) return;
+    function handleClick(e: MouseEvent) {
+      if (chartInfoRef.current && !chartInfoRef.current.contains(e.target as Node)) setShowChartInfo(false);
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [showChartInfo]);
 
   const handleAssignAm = (am: string | null) => {
     setShowAmMenu(false);
@@ -912,6 +1023,9 @@ export default function HeroHealthSection({
             <PerformanceWidget clientId={clientId} onNeedle={setPerfData} onFetched={() => setPerfReady(true)} floatingGear modalOpen={showPerfConfig} onModalOpenChange={setShowPerfConfig} onConnect={onConnect} />
             <div className="mt-3">
               <PerfSparkline clientId={clientId} perf={perfData} perfLoading={!perfReady} onConnect={() => setShowPerfConfig(true)} />
+            </div>
+            <div className="absolute top-2 right-2" style={{ zIndex: 20 }}>
+              <InfoButton showInfo={showChartInfo} setShowInfo={setShowChartInfo} infoRef={chartInfoRef} />
             </div>
             <div className="absolute top-4 right-4 pointer-events-none flex flex-row items-center gap-2">
               {/* 24h change badge — shown to the left of the speedometer */}

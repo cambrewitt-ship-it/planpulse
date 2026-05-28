@@ -1965,6 +1965,14 @@ export default function DashboardV2() {
     }
   }, []);
 
+  const handleReconnectPlatform = useCallback(() => {
+    setViewMode('client-hub');
+    setTimeout(() => {
+      const section = document.getElementById('platform-connections-section');
+      if (section) section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 100);
+  }, []);
+
   // Called by ChannelPerformanceCard whenever the user changes campaign selection
   const handleCampaignSelectionChange = useCallback((channelKey: string, ids: string[]) => {
     setChannelCampaignSelections(prev => ({ ...prev, [channelKey]: ids }));
@@ -2722,6 +2730,7 @@ export default function DashboardV2() {
                               dateRange={ch.isMultiMonth ? analyticsDateRange : undefined}
                               onAdjust={() => handleAdjustChannel(ch.platform)}
                               onViewReport={() => handleViewReport(ch.platform)}
+                              onReconnect={handleReconnectPlatform}
                               clientId={clientId}
                               planView={planView}
                               channelStartDate={earliestStartDate}
@@ -3014,7 +3023,7 @@ export default function DashboardV2() {
                 </div>
 
                 {/* Ad Platform Connections */}
-                <div className="rounded-lg p-6" style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)' }}>
+                <div id="platform-connections-section" className="rounded-lg p-6" style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)' }}>
                   <AdPlatformConnector clientId={clientId} onConfigNeeded={setAdminNeedsConfig} />
                 </div>
 

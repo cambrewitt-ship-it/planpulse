@@ -69,6 +69,7 @@ export interface ChannelCardProps {
   dateRange?: { startDate: string; endDate: string };
   onAdjust?: () => void;
   onViewReport?: () => void;
+  onReconnect?: () => void;
   clientId?: string;
   channelStartDate?: Date | null;
   channelFlights?: { startWeek: Date | string; endWeek: Date | string }[];
@@ -587,7 +588,7 @@ function inferActionPointChannelType(platform: string, channelName: string): str
   return normalizeChannelType(channelName);
 }
 
-export default function ChannelPerformanceCard({ channel, selectedMonth, dateRange, onAdjust, onViewReport, clientId, channelStartDate, channelFlights, refetchTrigger, benchmarks, presets, clientChannelPresets, onPresetSaved, onCampaignSelectionChange, planView, headerActions }: ChannelCardProps) {
+export default function ChannelPerformanceCard({ channel, selectedMonth, dateRange, onAdjust, onViewReport, onReconnect, clientId, channelStartDate, channelFlights, refetchTrigger, benchmarks, presets, clientChannelPresets, onPresetSaved, onCampaignSelectionChange, planView, headerActions }: ChannelCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [chartType, setChartType] = useState<'spend' | 'metrics'>('spend');
   const [selectedMetrics, setSelectedMetrics] = useState<Set<MetricKey>>(new Set(['impressions']));
@@ -967,7 +968,13 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
     });
   };
 
-  const hasIssues     = (channel.issues?.length ?? 0) > 0;
+  const reconnectIssue = channel.issues?.find(i =>
+    /reconnect|connection not found/i.test(i)
+  ) ?? null;
+  const regularIssues = channel.issues?.filter(i =>
+    !/reconnect|connection not found/i.test(i)
+  ) ?? [];
+  const hasIssues     = regularIssues.length > 0 || !!reconnectIssue;
   const hasChartData  = (channel.chartData?.length ?? 0) > 0;
   // hasMetrics is true only when there's at least one day with real data (not all zeros)
   const hasMetrics    = (filteredMetricsChartData ?? []).some(
@@ -1295,12 +1302,30 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
             </div>
           </div>
 
+          {/* ── Connection expired banner ── */}
+          {reconnectIssue && (
+            <div className="mx-4 mb-3 rounded-lg bg-red-50 border border-red-200 px-3 py-2.5 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 min-w-0">
+                <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0" />
+                <span className="text-xs text-red-700 font-medium">Connection expired — data unavailable</span>
+              </div>
+              {onReconnect ? (
+                <button
+                  onClick={onReconnect}
+                  className="flex-shrink-0 text-xs font-semibold text-white bg-red-500 hover:bg-red-600 px-3 py-1 rounded-md transition-colors"
+                >
+                  Reconnect
+                </button>
+              ) : null}
+            </div>
+          )}
+
           {/* ── Issues warning ── */}
-          {hasIssues && (
+          {regularIssues.length > 0 && (
             <div className="mx-4 mb-3 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 flex gap-2">
               <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
               <ul className="space-y-0.5">
-                {channel.issues!.map((issue, i) => (
+                {regularIssues.map((issue, i) => (
                   <li key={i} className="text-xs text-amber-700">{issue}</li>
                 ))}
               </ul>

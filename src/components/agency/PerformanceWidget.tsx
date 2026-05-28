@@ -587,7 +587,7 @@ export function PerformanceWidget({
       }
       const cur7Val = metricFromDayRow({ spend: cur7Spend, impressions: cur7Imp, clicks: cur7Clicks, conversions: cur7Conv }, primaryGoal.metric);
       const yest7Val = metricFromDayRow({ spend: yest7Spend, impressions: yest7Imp, clicks: yest7Clicks, conversions: yest7Conv }, primaryGoal.metric);
-      actual = cur7Val;
+      actual = yest7Val ?? cur7Val;
       if (cur7Val != null && yest7Val != null && yest7Val !== 0) {
         trend24h = { pctChange: ((cur7Val - yest7Val) / yest7Val) * 100, improving: lowerBetter ? cur7Val < yest7Val : cur7Val > yest7Val };
       }

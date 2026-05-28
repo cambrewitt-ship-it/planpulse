@@ -183,9 +183,15 @@ export async function POST(request: NextRequest) {
       } catch (nangoError: any) {
         const httpStatus = nangoError.response?.status || nangoError.status;
         if (httpStatus === 404) {
+          // Nango has lost the connection — clean up our DB row so the UI shows disconnected
+          await supabase
+            .from('ad_platform_connections')
+            .delete()
+            .eq('connection_id', connection.connection_id);
           return Response.json({
             success: false,
             error: 'Meta Ads connection not found. Please reconnect your account in Platform Connections.',
+            connectionExpired: true,
           }, { status: 424 });
         }
         throw nangoError;
