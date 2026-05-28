@@ -569,27 +569,27 @@ export function PerformanceWidget({
     const lowerBetter = /cpa|cpc|cpm|cpl|cost/.test(mk);
     const actuals = config.metricSource === 'ga4' ? ga4Actuals : combinedActuals;
 
-    // 7-day rolling actual + week-over-week trend.
-    // Sum the last 7 and prior 7 calendar days from last30DaysSeries so both the
-    // speedometer and the WoW badge reflect the same window as the rolling chart.
+    // 7-day rolling actual + 24h change (today's rolling vs yesterday's rolling).
+    // "Yesterday's rolling" = the same 7-day window shifted back 1 day (days 1–7).
+    // Both windows share 6 days of data, so the comparison is stable and smooth.
     let actual: number | null = actuals[mk] ?? null;
     let trend24h: { pctChange: number; improving: boolean } | null = null;
 
     if (config.metricSource !== 'ga4') {
       const dateMap = new Map(last30DaysSeries.map(r => [r.date, r]));
       let cur7Spend = 0, cur7Imp = 0, cur7Clicks = 0, cur7Conv = 0;
-      let prv7Spend = 0, prv7Imp = 0, prv7Clicks = 0, prv7Conv = 0;
+      let yest7Spend = 0, yest7Imp = 0, yest7Clicks = 0, yest7Conv = 0;
       for (let d = 0; d < 7; d++) {
         const curRow = dateMap.get(format(subDays(new Date(), d), 'yyyy-MM-dd'));
         if (curRow) { cur7Spend += curRow.spend; cur7Imp += curRow.impressions; cur7Clicks += curRow.clicks; cur7Conv += curRow.conversions; }
-        const prvRow = dateMap.get(format(subDays(new Date(), d + 7), 'yyyy-MM-dd'));
-        if (prvRow) { prv7Spend += prvRow.spend; prv7Imp += prvRow.impressions; prv7Clicks += prvRow.clicks; prv7Conv += prvRow.conversions; }
+        const yestRow = dateMap.get(format(subDays(new Date(), d + 1), 'yyyy-MM-dd'));
+        if (yestRow) { yest7Spend += yestRow.spend; yest7Imp += yestRow.impressions; yest7Clicks += yestRow.clicks; yest7Conv += yestRow.conversions; }
       }
       const cur7Val = metricFromDayRow({ spend: cur7Spend, impressions: cur7Imp, clicks: cur7Clicks, conversions: cur7Conv }, primaryGoal.metric);
-      const prv7Val = metricFromDayRow({ spend: prv7Spend, impressions: prv7Imp, clicks: prv7Clicks, conversions: prv7Conv }, primaryGoal.metric);
+      const yest7Val = metricFromDayRow({ spend: yest7Spend, impressions: yest7Imp, clicks: yest7Clicks, conversions: yest7Conv }, primaryGoal.metric);
       actual = cur7Val;
-      if (cur7Val != null && prv7Val != null && prv7Val !== 0) {
-        trend24h = { pctChange: ((cur7Val - prv7Val) / prv7Val) * 100, improving: lowerBetter ? cur7Val < prv7Val : cur7Val > prv7Val };
+      if (cur7Val != null && yest7Val != null && yest7Val !== 0) {
+        trend24h = { pctChange: ((cur7Val - yest7Val) / yest7Val) * 100, improving: lowerBetter ? cur7Val < yest7Val : cur7Val > yest7Val };
       }
     } else {
       const yVal = yesterdayActuals[mk] ?? null;

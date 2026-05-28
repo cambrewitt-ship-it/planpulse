@@ -328,14 +328,56 @@ function MetricCard({ title, value, sub, badge, progress, children }: MetricCard
 }
 
 // ---------------------------------------------------------------------------
-// Perf Sparkline — MTD running metric time series for the hero card
+// Info button + tooltip for the chart header
+// ---------------------------------------------------------------------------
+
+function InfoButton({ showInfo, setShowInfo, infoRef }: {
+  showInfo: boolean;
+  setShowInfo: (v: boolean) => void;
+  infoRef: React.RefObject<HTMLDivElement>;
+}) {
+  return (
+    <div className="relative flex-shrink-0" ref={infoRef}>
+      <button
+        onClick={() => setShowInfo(!showInfo)}
+        className="w-4 h-4 rounded-full border border-gray-300 text-gray-400 text-[9px] font-bold flex items-center justify-center hover:border-gray-400 hover:text-gray-600 transition-colors leading-none"
+        aria-label="How this chart is calculated"
+      >
+        i
+      </button>
+      {showInfo && (
+        <div className="absolute right-0 top-5 w-60 bg-white border border-gray-200 rounded-xl shadow-lg p-3 z-50 text-[11px] text-gray-600 leading-relaxed">
+          <p className="font-semibold text-gray-800 mb-2">How this chart works</p>
+          <p><span className="font-medium text-gray-700">Each point</span> shows the 7-day rolling average — total spend ÷ total conversions over the trailing 7 days. This smooths out noisy single-day spikes.</p>
+          <p className="mt-1.5"><span className="font-medium text-gray-700">Speedometer</span> shows today's 7-day rolling value vs your target.</p>
+          <p className="mt-1.5"><span className="font-medium text-gray-700">Arrow badge</span> compares today's rolling value to yesterday's rolling value — a stable 24h signal.</p>
+          <p className="mt-1.5"><span className="font-medium text-gray-700">Historical points</span> are locked in once the day closes and will never change.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Perf Sparkline — 30-day rolling metric time series for the hero card
 // ---------------------------------------------------------------------------
 
 function PerfSparkline({ clientId, perf, perfLoading, onConnect }: { clientId: string; perf: PerfData | null; perfLoading?: boolean; onConnect?: () => void }) {
   const [series, setSeries] = useState<Array<{ date: string; value: number }>>([]);
   const [loading, setLoading] = useState(false);
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const [showInfo, setShowInfo] = useState(false);
   const svgRef = useRef<SVGSVGElement>(null);
+  const infoRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showInfo) return;
+    function handleClick(e: MouseEvent) {
+      if (infoRef.current && !infoRef.current.contains(e.target as Node)) setShowInfo(false);
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [showInfo]);
 
   useEffect(() => {
     if (!perf?.metric) return;
@@ -428,9 +470,7 @@ function PerfSparkline({ clientId, perf, perfLoading, onConnect }: { clientId: s
           <span className="text-xs text-gray-300 uppercase tracking-wide font-medium">
             {metric || 'Performance'} · 7d rolling
           </span>
-          {targetDisplay && (
-            <span className="text-xs text-gray-400">Target: {targetDisplay}</span>
-          )}
+          <InfoButton showInfo={showInfo} setShowInfo={setShowInfo} infoRef={infoRef} />
         </div>
         <div className="relative">
           {shellSvg}
@@ -526,6 +566,7 @@ function PerfSparkline({ clientId, perf, perfLoading, onConnect }: { clientId: s
     <div className="w-full">
       <div className="flex items-center justify-between mb-1">
         <span className="text-xs text-gray-400 uppercase tracking-wide font-medium">{metric} · 7d rolling</span>
+        <InfoButton showInfo={showInfo} setShowInfo={setShowInfo} infoRef={infoRef} />
       </div>
       <svg ref={svgRef} width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible', cursor: 'crosshair' }} onMouseMove={handleMouseMove} onMouseLeave={() => setHoverIdx(null)}>
         <defs>
@@ -886,7 +927,7 @@ export default function HeroHealthSection({
                       {Math.abs(pctChange).toFixed(1)}%
                     </span>
                     <span style={{ fontSize: 9, color: '#9ca3af', fontWeight: 500, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-                      7d
+                      24h
                     </span>
                   </div>
                 );
