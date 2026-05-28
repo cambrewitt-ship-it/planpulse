@@ -150,7 +150,7 @@ export default function ClientActionPointsList({ actionPoints, onToggle }: Props
       display: 'flex',
       flexDirection: 'column',
       background: '#FDFCF8',
-      borderRadius: 6,
+      borderRadius: '0 6px 6px 0',
       border: '0.5px solid #E8E4DC',
       overflow: 'hidden',
       fontFamily: sansFont,

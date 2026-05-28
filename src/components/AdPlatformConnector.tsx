@@ -868,10 +868,28 @@ export default function AdPlatformConnector({ clientId, onConfigNeeded }: AdPlat
           <DialogContent className="max-w-2xl font-[family-name:var(--font-inter)] relative">
             {/* Focusable anchor so focus can be restored here after Nango OAuth popup closes */}
             <div ref={modalFocusRef} tabIndex={-1} className="outline-none" />
+            {loadingStates[openModal] && (
+              <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-white/90 rounded-lg">
+                <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mb-4"></div>
+                <p className="text-sm font-medium text-gray-700">Connecting…</p>
+              </div>
+            )}
             {openModal === 'facebook' && isDiscoveringMetaAccounts && (
               <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-white/90 rounded-lg">
                 <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mb-4"></div>
                 <p className="text-sm font-medium text-gray-700">Loading Ad Accounts</p>
+              </div>
+            )}
+            {openModal === 'google-ads' && isLoadingAccounts && (
+              <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-white/90 rounded-lg">
+                <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mb-4"></div>
+                <p className="text-sm font-medium text-gray-700">Loading Accounts</p>
+              </div>
+            )}
+            {openModal === 'google-analytics' && isLoadingGoogleAnalyticsAccounts && (
+              <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-white/90 rounded-lg">
+                <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mb-4"></div>
+                <p className="text-sm font-medium text-gray-700">Loading Properties</p>
               </div>
             )}
             <DialogHeader>

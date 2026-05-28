@@ -2312,25 +2312,28 @@ export default function DashboardV2() {
                         <span style={{ fontSize: 14, color: 'rgba(255,255,255,0.4)' }}>›</span>
                       </div>
                     ) : (
-                      <div style={{ display: 'flex', width: '100%', height: 240, position: 'relative', borderRadius: 12, gap: 4, overflow: 'hidden' }}>
-                        {/* Spine wrapper — fixed 76px, both spines animate inside */}
-                        <div style={{ width: 76, flexShrink: 0, position: 'relative', height: '100%' }}>
+                      <div style={{ display: 'flex', width: '100%', height: 240, position: 'relative', borderRadius: 12, overflow: 'hidden' }}>
+                        {/* Spine wrapper — fixed 112px, both spines animate inside with peek strip between them */}
+                        <div style={{ width: 112, flexShrink: 0, position: 'relative', height: '100%' }}>
                           {/* Notes spine */}
                           <div
                             onClick={() => { setNotesActiveTab('notes'); setShowFilesMenu(false); setShowTodoMenu(false); }}
                             style={{
-                              position: 'absolute', top: 0, bottom: 0,
-                              left: notesActiveTab === 'notes' ? 40 : 0,
-                              transition: 'left 0.28s cubic-bezier(0.4, 0, 0.2, 1), background 0.15s',
+                              position: 'absolute',
+                              top: notesActiveTab === 'notes' ? 0 : 5,
+                              bottom: notesActiveTab === 'notes' ? 0 : 5,
+                              left: notesActiveTab === 'notes' ? 76 : 0,
+                              transition: 'left 0.28s cubic-bezier(0.4, 0, 0.2, 1), top 0.28s cubic-bezier(0.4, 0, 0.2, 1), bottom 0.28s cubic-bezier(0.4, 0, 0.2, 1), background 0.15s, opacity 0.28s',
+                              filter: notesActiveTab === 'notes' ? 'none' : 'brightness(0.55)',
                               width: 36,
                               background: notesActiveTab === 'notes' ? '#1C1917' : '#2A2622',
                               backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.035) 1px, transparent 1px)',
                               backgroundSize: '5px 5px',
                               display: 'flex', flexDirection: 'column', alignItems: 'center',
                               paddingTop: 10, gap: 8,
-                              zIndex: notesActiveTab === 'notes' ? 2 : 1,
+                              zIndex: notesActiveTab === 'notes' ? 2 : 0,
                               cursor: notesActiveTab === 'notes' ? 'default' : 'pointer',
-                              borderRadius: '12px 0 0 12px',
+                              borderRadius: notesActiveTab === 'notes' ? '12px 0 0 12px' : '8px 0 0 8px',
                             }}
                           >
                             <button
@@ -2352,18 +2355,21 @@ export default function DashboardV2() {
                           <div
                             onClick={() => { setNotesActiveTab('todo'); setShowFilesMenu(false); setShowTodoMenu(false); }}
                             style={{
-                              position: 'absolute', top: 0, bottom: 0,
-                              left: notesActiveTab === 'todo' ? 40 : 0,
-                              transition: 'left 0.28s cubic-bezier(0.4, 0, 0.2, 1), background 0.15s',
+                              position: 'absolute',
+                              top: notesActiveTab === 'todo' ? 0 : 5,
+                              bottom: notesActiveTab === 'todo' ? 0 : 5,
+                              left: notesActiveTab === 'todo' ? 76 : 0,
+                              transition: 'left 0.28s cubic-bezier(0.4, 0, 0.2, 1), top 0.28s cubic-bezier(0.4, 0, 0.2, 1), bottom 0.28s cubic-bezier(0.4, 0, 0.2, 1), background 0.15s, opacity 0.28s',
+                              filter: notesActiveTab === 'todo' ? 'none' : 'brightness(0.55)',
                               width: 36,
                               background: notesActiveTab === 'todo' ? '#4A2220' : '#361918',
                               backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.03) 1px, transparent 1px)',
                               backgroundSize: '5px 5px',
                               display: 'flex', flexDirection: 'column', alignItems: 'center',
                               paddingTop: 10, gap: 8,
-                              zIndex: notesActiveTab === 'todo' ? 2 : 1,
+                              zIndex: notesActiveTab === 'todo' ? 2 : 0,
                               cursor: notesActiveTab === 'todo' ? 'default' : 'pointer',
-                              borderRadius: '12px 0 0 12px',
+                              borderRadius: notesActiveTab === 'todo' ? '12px 0 0 12px' : '8px 0 0 8px',
                             }}
                           >
                             <button
@@ -2380,12 +2386,36 @@ export default function DashboardV2() {
                               <button onClick={e => { e.stopPropagation(); setNotesCollapsed(true); }} title="Collapse" style={{ marginTop: 'auto', marginBottom: 8, background: 'transparent', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.5)', fontSize: 16, lineHeight: 1, padding: 2 }}>‹</button>
                             )}
                           </div>
+
+                          {/* Peek strip — sits in the gap between inactive spine (0–36) and active spine (52–88).
+                              Shows a sliver of the inactive panel's content so it looks like a sheet peeking behind. */}
+                          <div
+                            onClick={() => { setNotesActiveTab(notesActiveTab === 'notes' ? 'todo' : 'notes'); setShowFilesMenu(false); setShowTodoMenu(false); }}
+                            style={{
+                              position: 'absolute', top: 5, bottom: 5,
+                              left: 36, width: 56,
+                              zIndex: 1,
+                              filter: 'brightness(0.55)',
+                              cursor: 'pointer',
+                              transition: 'background 0.28s, background-image 0.28s',
+                              ...(notesActiveTab === 'todo'
+                                ? {
+                                    background: '#FFFFFF',
+                                    backgroundImage: 'repeating-linear-gradient(transparent, transparent 27px, rgba(160,200,240,0.55) 27px, rgba(160,200,240,0.55) 28px)',
+                                    backgroundPositionY: '4px',
+                                  }
+                                : {
+                                    background: '#FFFFFF',
+                                  }
+                              ),
+                            }}
+                          />
                         </div>{/* end spine wrapper */}
 
                         {/* Files slide-out panel — only when Notes tab active */}
                         {notesActiveTab === 'notes' && showFilesMenu && (
                           <div style={{
-                            position: 'absolute', top: 0, left: 80, width: 160, height: '100%',
+                            position: 'absolute', top: 0, left: 116, width: 160, height: '100%',
                             background: '#2C2925', zIndex: 10,
                             display: 'flex', flexDirection: 'column',
                             boxShadow: '2px 0 8px rgba(0,0,0,0.25)',
@@ -2454,7 +2484,7 @@ export default function DashboardV2() {
                         {/* To Do slide-out menu */}
                         {notesActiveTab === 'todo' && showTodoMenu && (
                           <div style={{
-                            position: 'absolute', top: 0, left: 80, width: 160, height: '100%',
+                            position: 'absolute', top: 0, left: 116, width: 160, height: '100%',
                             background: '#2C1715', zIndex: 10,
                             display: 'flex', flexDirection: 'column',
                             boxShadow: '2px 0 8px rgba(0,0,0,0.25)',
@@ -2473,7 +2503,7 @@ export default function DashboardV2() {
                         )}
 
                         {/* Content area — switches between Notes and To Do */}
-                        <div style={{ flex: 1, position: 'relative', minWidth: 0, overflow: 'hidden', borderRadius: 12, height: '100%' }}>
+                        <div style={{ flex: 1, position: 'relative', minWidth: 0, overflow: 'hidden', borderRadius: '0 12px 12px 0', height: '100%' }}>
                           {notesActiveTab === 'notes' ? (
                             <NotesChecklist activeClientId={`${clientId}:${activeFileId}`} />
                           ) : (
@@ -2489,7 +2519,7 @@ export default function DashboardV2() {
 
                   {/* Right: Gantt timeline */}
                   {ganttClients.length > 0 && ganttChannels.length > 0 && (
-                    <div style={{ width: '50vw', flexShrink: 0 }}>
+                    <div style={{ flex: '0 0 60%', minWidth: 0 }}>
                       <div className="border border-gray-100 rounded-lg bg-gray-50/80 px-3 py-2 overflow-x-auto overflow-y-hidden" style={{ maxHeight: 240 }}>
                         <GanttCalendar
                           clients={ganttClients}
