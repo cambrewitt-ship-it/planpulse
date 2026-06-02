@@ -439,7 +439,9 @@ function PerfSparkline({ clientId, perf, perfLoading, onConnect }: { clientId: s
     params.set('metric', perf.metric);
     if (config.platform) params.set('platforms', config.platform);
     if (config.campaignIds?.length) params.set('campaignIds', config.campaignIds.join(','));
-    if (config.metaActionType) params.set('metaActionType', config.metaActionType);
+    // Prefer the value carried through PerfData (always current); fall back to localStorage
+    const metaActionType = perf.metaActionType ?? config.metaActionType;
+    if (metaActionType) params.set('metaActionType', metaActionType);
 
     setLoading(true);
     fetch(`/api/clients/${clientId}/perf-series?${params}`)
@@ -447,7 +449,7 @@ function PerfSparkline({ clientId, perf, perfLoading, onConnect }: { clientId: s
       .then(data => { if (Array.isArray(data.series)) setSeries(data.series); })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [clientId, perf?.metric]);
+  }, [clientId, perf?.metric, perf?.metaActionType]);
 
   // ── Layout constants (shared across all render states) ──────────────────────
   const W = 300, H = 100;
@@ -1034,13 +1036,13 @@ export default function HeroHealthSection({
                 const color = improving ? '#4A7C59' : '#A0442A';
                 return (
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
-                    <span style={{ fontSize: 18, lineHeight: 1, fontWeight: 800, color }}>
+                    <span style={{ fontSize: 21, lineHeight: 1, fontWeight: 800, color }}>
                       {pctChange < 0 ? '↓' : '↑'}
                     </span>
-                    <span style={{ fontSize: 11, fontWeight: 700, lineHeight: 1.1, color }}>
+                    <span style={{ fontSize: 13, fontWeight: 700, lineHeight: 1.1, color }}>
                       {Math.abs(pctChange).toFixed(1)}%
                     </span>
-                    <span style={{ fontSize: 9, color: '#9ca3af', fontWeight: 500, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                    <span style={{ fontSize: 10, color: '#9ca3af', fontWeight: 500, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
                       24h
                     </span>
                   </div>

@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
 
     // Parse request body
     const body = await request.json();
-    const { customerId, accountName, currency } = body;
+    const { customerId, accountName, currency, managerCustomerId } = body;
 
     if (!customerId) {
       return NextResponse.json(
@@ -67,6 +67,7 @@ export async function POST(request: NextRequest) {
           connection_id: connection.connection_id,
           customer_id: cleanedCustomerId,
           account_name: accountName || null,
+          manager_customer_id: managerCustomerId ? managerCustomerId.replace(/-/g, '') : null,
           is_active: true,
           updated_at: new Date().toISOString(),
         },

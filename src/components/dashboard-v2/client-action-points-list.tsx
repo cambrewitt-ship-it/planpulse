@@ -159,10 +159,10 @@ export default function ClientActionPointsList({ actionPoints, onToggle }: Props
       {/* Header */}
       <div style={{ padding: '10px 13px 8px', borderBottom: '0.5px solid #E8E4DC', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
-          <div style={{ fontSize: 9, fontWeight: 400, color: '#B5B0A5', textTransform: 'uppercase', letterSpacing: '0.1em', minWidth: 0 }}>
+          <div style={{ fontSize: 10, fontWeight: 400, color: '#B5B0A5', textTransform: 'uppercase', letterSpacing: '0.1em', minWidth: 0 }}>
             Action Points
             {incomplete.length > 0 && (
-              <span style={{ marginLeft: 5, background: '#A0442A', color: '#fff', borderRadius: 99, padding: '1px 5px', fontSize: 8 }}>
+              <span style={{ marginLeft: 5, background: '#A0442A', color: '#fff', borderRadius: 99, padding: '1px 5px', fontSize: 9 }}>
                 {incomplete.length}
               </span>
             )}
@@ -174,7 +174,7 @@ export default function ClientActionPointsList({ actionPoints, onToggle }: Props
                   key={mode}
                   onClick={() => setFilterMode(mode)}
                   style={{
-                    fontSize: 9,
+                    fontSize: 10,
                     padding: '2px 7px',
                     borderRadius: 99,
                     border: '0.5px solid',
@@ -198,7 +198,7 @@ export default function ClientActionPointsList({ actionPoints, onToggle }: Props
                   key={mode}
                   onClick={() => setViewMode(mode)}
                   style={{
-                    fontSize: 9,
+                    fontSize: 10,
                     padding: '2px 7px',
                     borderRadius: 99,
                     border: '0.5px solid',
@@ -254,7 +254,7 @@ export default function ClientActionPointsList({ actionPoints, onToggle }: Props
               <div style={{
                 padding: '6px 10px',
                 borderBottom: '0.5px solid #E8E4DC',
-                fontSize: 9,
+                fontSize: 10,
                 fontWeight: 600,
                 color: col.label === 'Overdue' ? '#fff' : '#8A8578',
                 background: col.label === 'Overdue' ? '#7F1D1D' : 'transparent',
@@ -272,7 +272,7 @@ export default function ClientActionPointsList({ actionPoints, onToggle }: Props
                     color: col.label === 'Overdue' ? '#fff' : '#8A8578',
                     borderRadius: 99,
                     padding: '0px 5px',
-                    fontSize: 8,
+                    fontSize: 9,
                   }}>
                     {colIncomplete.length}
                   </span>
@@ -282,7 +282,7 @@ export default function ClientActionPointsList({ actionPoints, onToggle }: Props
               {/* Column items — vertically scrollable */}
               <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
                 {col.items.length === 0 ? (
-                  <div style={{ padding: '12px 10px', fontSize: 10, color: '#C5C0B8', fontStyle: 'italic', textAlign: 'center' }}>
+                  <div style={{ padding: '12px 10px', fontSize: 12, color: '#C5C0B8', fontStyle: 'italic', textAlign: 'center' }}>
                     Nothing here
                   </div>
                 ) : (
@@ -299,7 +299,7 @@ export default function ClientActionPointsList({ actionPoints, onToggle }: Props
                       <>
                         <div style={{
                           padding: '4px 10px 3px',
-                          fontSize: 8,
+                          fontSize: 9,
                           color: '#C5C0B8',
                           textTransform: 'uppercase',
                           letterSpacing: '0.1em',
@@ -329,7 +329,7 @@ export default function ClientActionPointsList({ actionPoints, onToggle }: Props
         /* List View */
         <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '8px', display: 'flex', flexDirection: 'column', gap: 4 }}>
           {actionPoints.length === 0 ? (
-            <div style={{ padding: '12px 10px', fontSize: 10, color: '#C5C0B8', fontStyle: 'italic', textAlign: 'center' }}>
+            <div style={{ padding: '12px 10px', fontSize: 12, color: '#C5C0B8', fontStyle: 'italic', textAlign: 'center' }}>
               No action points
             </div>
           ) : (() => {
@@ -339,7 +339,7 @@ export default function ClientActionPointsList({ actionPoints, onToggle }: Props
             return (
               <>
                 {listIncomplete.length === 0 && (
-                  <div style={{ padding: '12px 10px', fontSize: 10, color: '#C5C0B8', fontStyle: 'italic', textAlign: 'center' }}>
+                  <div style={{ padding: '12px 10px', fontSize: 12, color: '#C5C0B8', fontStyle: 'italic', textAlign: 'center' }}>
                     All done!
                   </div>
                 )}
@@ -352,7 +352,7 @@ export default function ClientActionPointsList({ actionPoints, onToggle }: Props
                       onClick={() => setListCompletedOpen(v => !v)}
                       style={{
                         display: 'flex', alignItems: 'center', gap: 5,
-                        fontSize: 9, color: '#B5B0A5', background: 'none', border: 'none',
+                        fontSize: 10, color: '#B5B0A5', background: 'none', border: 'none',
                         cursor: 'pointer', padding: '4px 2px', width: '100%', textAlign: 'left',
                         textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: sansFont,
                       }}
@@ -442,7 +442,7 @@ function ListActionPointRow({ item, onToggle }: { item: ActionPoint; onToggle: (
       {/* Text + meta */}
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{
-          fontSize: 11,
+          fontSize: 13,
           lineHeight: 1.4,
           color: effectiveCompleted || isCompleting ? '#B5B0A5' : '#1C1917',
           textDecoration: effectiveCompleted ? 'line-through' : 'none',
@@ -453,21 +453,21 @@ function ListActionPointRow({ item, onToggle }: { item: ActionPoint; onToggle: (
         <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 3, flexWrap: 'wrap' }}>
           {item.channel_type && (
             <span style={{
-              fontSize: 8, padding: '1px 5px', borderRadius: 99,
+              fontSize: 9, padding: '1px 5px', borderRadius: 99,
               background: '#EDE9E0', color: '#8A8578', fontWeight: 500,
             }}>
               {item.channel_type}
             </span>
           )}
           <span style={{
-            fontSize: 8, padding: '1px 5px', borderRadius: 99,
+            fontSize: 9, padding: '1px 5px', borderRadius: 99,
             background: '#EDE9E0', color: '#8A8578',
           }}>
             {item.category}
           </span>
           {item.due_date && (
             <span style={{
-              fontSize: 8,
+              fontSize: 9,
               color: dueDateColor(item.due_date),
               fontWeight: 500,
             }}>
@@ -542,7 +542,7 @@ function GanttViewActionPoints({ actionPoints, onToggle }: { actionPoints: Actio
             {monthSpans.map((span, i) => (
               <div key={i} style={{
                 width: span.count * DAY_W, flexShrink: 0,
-                padding: '4px 6px', fontSize: 8, fontWeight: 600,
+                padding: '4px 6px', fontSize: 9, fontWeight: 600,
                 color: '#8A8578', textTransform: 'uppercase', letterSpacing: '0.08em',
                 borderLeft: i === 0 ? 'none' : '0.5px solid #E8E4DC',
                 borderBottom: '0.5px solid #E8E4DC',
@@ -563,7 +563,7 @@ function GanttViewActionPoints({ actionPoints, onToggle }: { actionPoints: Actio
               return (
                 <div key={i} style={{
                   width: DAY_W, flexShrink: 0, textAlign: 'center', padding: '3px 0',
-                  fontSize: 8, fontWeight: isToday ? 600 : 400,
+                  fontSize: 9, fontWeight: isToday ? 600 : 400,
                   color: isToday ? '#A0442A' : isWeekend ? '#D5D0C5' : '#8A8578',
                   background: isToday ? 'rgba(160,68,42,0.05)' : 'transparent',
                   borderLeft: isToday ? '0.5px solid rgba(160,68,42,0.3)' : '0.5px solid #F0EDE8',
@@ -612,11 +612,11 @@ function GanttViewActionPoints({ actionPoints, onToggle }: { actionPoints: Actio
                       background: dotColor, boxShadow: `0 0 0 3px ${dotColor}22`,
                     }} />
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 11, lineHeight: 1.3, color: '#1C1917', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: 500 }}>
+                      <div style={{ fontSize: 13, lineHeight: 1.3, color: '#1C1917', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: 500 }}>
                         {card.text}
                       </div>
                       {card.channel_type && (
-                        <div style={{ fontSize: 9, color: '#B5B0A5', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 2 }}>
+                        <div style={{ fontSize: 10, color: '#B5B0A5', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 2 }}>
                           {card.channel_type}
                         </div>
                       )}
@@ -631,7 +631,7 @@ function GanttViewActionPoints({ actionPoints, onToggle }: { actionPoints: Actio
           {noDue.length > 0 && (
             <>
               <div style={{ padding: '6px 8px', borderTop: '0.5px solid #E8E4DC', background: '#F5F2EB' }}>
-                <div style={{ fontSize: 8, color: '#B5B0A5', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600 }}>
+                <div style={{ fontSize: 9, color: '#B5B0A5', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600 }}>
                   No due date
                 </div>
               </div>
@@ -639,11 +639,11 @@ function GanttViewActionPoints({ actionPoints, onToggle }: { actionPoints: Actio
                 <div key={card.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 6, padding: '6px 8px', borderBottom: '0.5px solid #F0EDE8', background: '#F5F2EB' }}>
                   <GanttItemCheckbox item={card} onToggle={onToggle} />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 9, lineHeight: 1.3, color: '#1C1917', fontWeight: 500 }}>
+                    <div style={{ fontSize: 10, lineHeight: 1.3, color: '#1C1917', fontWeight: 500 }}>
                       {card.text}
                     </div>
                     {card.channel_type && (
-                      <span style={{ fontSize: 8, padding: '1px 4px', borderRadius: 99, background: '#EDE9E0', color: '#8A8578', fontWeight: 500, display: 'inline-block', marginTop: 2 }}>
+                      <span style={{ fontSize: 9, padding: '1px 4px', borderRadius: 99, background: '#EDE9E0', color: '#8A8578', fontWeight: 500, display: 'inline-block', marginTop: 2 }}>
                         {card.channel_type}
                       </span>
                     )}
@@ -656,7 +656,7 @@ function GanttViewActionPoints({ actionPoints, onToggle }: { actionPoints: Actio
       </div>
 
       {actionPoints.length === 0 && (
-        <div style={{ padding: '12px', fontSize: 10, color: '#C5C0B8', fontStyle: 'italic', textAlign: 'center' }}>
+        <div style={{ padding: '12px', fontSize: 12, color: '#C5C0B8', fontStyle: 'italic', textAlign: 'center' }}>
           No action points
         </div>
       )}
@@ -778,7 +778,7 @@ function KanbanCard({
       {/* Text + meta */}
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{
-          fontSize: 11,
+          fontSize: 13,
           lineHeight: 1.4,
           color: effectiveCompleted || isCompleting ? '#B5B0A5' : '#1C1917',
           textDecoration: effectiveCompleted ? 'line-through' : 'none',
@@ -794,21 +794,21 @@ function KanbanCard({
         <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 3, flexWrap: 'wrap' }}>
           {item.channel_type && (
             <span style={{
-              fontSize: 8, padding: '1px 5px', borderRadius: 99,
+              fontSize: 9, padding: '1px 5px', borderRadius: 99,
               background: '#EDE9E0', color: '#8A8578', fontWeight: 500,
             }}>
               {item.channel_type}
             </span>
           )}
           <span style={{
-            fontSize: 8, padding: '1px 5px', borderRadius: 99,
+            fontSize: 9, padding: '1px 5px', borderRadius: 99,
             background: '#EDE9E0', color: '#8A8578',
           }}>
             {item.category}
           </span>
           {item.due_date && (
             <span style={{
-              fontSize: 8,
+              fontSize: 9,
               color: dueDateColor(item.due_date),
               fontWeight: 500,
             }}>

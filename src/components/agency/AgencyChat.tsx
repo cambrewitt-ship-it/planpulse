@@ -579,9 +579,9 @@ export const AgencyChat = forwardRef<AgencyChatHandle, AgencyChatProps>(function
                   <div style={{ width: 28, height: 28, borderRadius: 8, border: '2px solid #1C1917', overflow: 'hidden', flexShrink: 0 }}>
                     <img src="/favicon.ico" alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                   </div>
-                  <span style={{ fontSize: 16, color: '#8A8578', fontWeight: 700 }}>AI Agent</span>
-                  <span style={{ fontSize: 12, color: '#B5B0A5', fontWeight: 400 }}>·</span>
-                  <span style={{ fontSize: 12, color: '#B5B0A5', fontWeight: 500 }}>Daily Briefing</span>
+                  <span style={{ fontSize: 19, color: '#8A8578', fontWeight: 700 }}>AI Agent</span>
+                  <span style={{ fontSize: 14, color: '#B5B0A5', fontWeight: 400 }}>·</span>
+                  <span style={{ fontSize: 14, color: '#B5B0A5', fontWeight: 500 }}>Daily Briefing</span>
                   <button
                     onClick={() => setBriefingTick(t => t + 1)}
                     disabled={briefingLoading}
@@ -641,7 +641,7 @@ export const AgencyChat = forwardRef<AgencyChatHandle, AgencyChatProps>(function
             </div>
 
             <div style={{ marginBottom: 10, marginTop: 16, flexShrink: 0 }}>
-              <div style={{ fontSize: 18, fontWeight: 600, color: '#1C1917', lineHeight: 1.25 }}>
+              <div style={{ fontSize: 21, fontWeight: 600, color: '#1C1917', lineHeight: 1.25 }}>
                 Where should we start?
               </div>
             </div>
@@ -734,7 +734,7 @@ export const AgencyChat = forwardRef<AgencyChatHandle, AgencyChatProps>(function
                       border: '1px solid #4A5568',
                       background: '#3D4A5C',
                       color: '#FFFFFF',
-                      fontSize: 13,
+                      fontSize: 15,
                       fontWeight: 500,
                       cursor: 'pointer',
                       ...font,

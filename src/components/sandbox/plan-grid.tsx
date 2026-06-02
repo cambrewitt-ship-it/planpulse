@@ -1,9 +1,10 @@
 "use client";
 
 import React, { useState, useCallback, useEffect, useRef, useMemo } from "react";
-import { Plus, Trash2, Upload, Download, X, Check, Edit2 } from "lucide-react";
+import { Plus, Trash2, Upload, Download, X, Check, Edit2, ChevronDown } from "lucide-react";
 import type { SandboxPlan, PlanRow, Flight, Week, FeeRow, CustomColumn } from "./types";
 import { FLIGHT_COLORS } from "./types";
+import { getChannelLogo } from "@/lib/utils/channel-icons";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -362,9 +363,134 @@ function EditableCell({ value, onChange, className = "", style, rowSpan, bold }:
 
   return (
     <td className={`group cursor-text ${className}`} style={style} rowSpan={rowSpan}
-      onDoubleClick={() => { setDraft(value); setEditing(true); }} title="Double-click to edit">
+      onDoubleClick={() => { setDraft(value); setEditing(true); }} title="Click pencil or double-click to edit">
       <span className={bold ? "font-semibold" : ""}>{value || <span className="text-gray-300">—</span>}</span>
-      <Edit2 className="w-2.5 h-2.5 text-gray-300 inline ml-1 opacity-0 group-hover:opacity-100 transition-opacity" />
+      <Edit2
+        className="w-2.5 h-2.5 text-gray-300 inline ml-1 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer hover:text-blue-400"
+        onClick={e => { e.stopPropagation(); setDraft(value); setEditing(true); }}
+      />
+    </td>
+  );
+}
+
+// ── Channel select cell ───────────────────────────────────────────────────────
+
+interface LibraryChannel {
+  id: string;
+  title: string;
+  channel_type: string;
+}
+
+interface ChannelSelectCellProps {
+  value: string;
+  onChange: (val: string) => void;
+  libraryChannels: LibraryChannel[];
+  className?: string;
+  style?: React.CSSProperties;
+  rowSpan?: number;
+}
+
+function ChannelSelectCell({ value, onChange, libraryChannels, className = "", style, rowSpan }: ChannelSelectCellProps) {
+  const [open, setOpen] = useState(false);
+  const [custom, setCustom] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const cellRef = useRef<HTMLTableCellElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (
+        dropdownRef.current && !dropdownRef.current.contains(e.target as Node) &&
+        cellRef.current && !cellRef.current.contains(e.target as Node)
+      ) {
+        setOpen(false);
+        setCustom(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  useEffect(() => { if (custom && inputRef.current) inputRef.current.focus(); }, [custom]);
+
+  const selectChannel = (name: string) => {
+    onChange(name);
+    setOpen(false);
+    setCustom(false);
+  };
+
+  const icon = getChannelLogo(value, "w-3.5 h-3.5 flex-shrink-0");
+
+  return (
+    <td
+      ref={cellRef}
+      className={`group cursor-pointer ${className}`}
+      style={{ ...style, position: style?.position as React.CSSProperties["position"], overflow: "visible" }}
+      rowSpan={rowSpan}
+      onClick={() => setOpen(o => !o)}
+    >
+      <div className="flex items-center gap-1.5 justify-center w-full">
+        {value ? (
+          <>
+            {icon}
+            <span className="font-semibold text-xs truncate">{value}</span>
+          </>
+        ) : (
+          <span className="text-gray-300 text-xs">— select channel —</span>
+        )}
+        <ChevronDown className="w-3 h-3 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+      </div>
+
+      {open && (
+        <div
+          ref={dropdownRef}
+          className="absolute z-50 bg-white border border-gray-200 rounded-xl shadow-xl py-1 w-52"
+          style={{ top: "100%", left: 0 }}
+          onMouseDown={e => e.stopPropagation()}
+          onClick={e => e.stopPropagation()}
+        >
+          {libraryChannels.length > 0 ? (
+            libraryChannels.map(ch => (
+              <button
+                key={ch.id}
+                onClick={() => selectChannel(ch.channel_type)}
+                className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-blue-50 hover:text-blue-800 transition-colors text-left"
+              >
+                {getChannelLogo(ch.channel_type, "w-4 h-4 flex-shrink-0")}
+                <span className="truncate">{ch.channel_type}</span>
+              </button>
+            ))
+          ) : (
+            <div className="px-3 py-2 text-xs text-gray-400">No library channels yet</div>
+          )}
+          <div className="border-t border-gray-100 mt-1 pt-1">
+            {custom ? (
+              <div className="px-2 pb-1">
+                <input
+                  ref={inputRef}
+                  value={draft}
+                  onChange={e => setDraft(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === "Enter" && draft.trim()) selectChannel(draft.trim());
+                    if (e.key === "Escape") { setCustom(false); setOpen(false); }
+                  }}
+                  placeholder="Type channel name…"
+                  className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-400"
+                />
+              </div>
+            ) : (
+              <button
+                onClick={() => { setDraft(value); setCustom(true); }}
+                className="w-full text-left px-3 py-2 text-xs text-gray-400 hover:bg-gray-50 transition-colors"
+              >
+                Write custom channel…
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </td>
   );
 }
@@ -603,6 +729,7 @@ interface Props {
 
 export function PlanGrid({ plan, onPlanChange, onUpload, outerStyle }: Props) {
   const [rows, setRows] = useState<PlanRow[]>(plan.rows);
+  const [libraryChannels, setLibraryChannels] = useState<LibraryChannel[]>([]);
   const [weeks, setWeeks] = useState<Week[]>(() => {
     if (plan.weeks.length >= 52) return plan.weeks;
     const year = plan.weeks[0]?.year ?? new Date().getFullYear();
@@ -623,6 +750,13 @@ export function PlanGrid({ plan, onPlanChange, onUpload, outerStyle }: Props) {
   const flightAnchorRef = useRef<HTMLElement | null>(null);
   const resizeMoved = useRef(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    fetch('/api/media-channel-library')
+      .then(r => r.ok ? r.json() : [])
+      .then(data => { if (Array.isArray(data)) setLibraryChannels(data); })
+      .catch(() => {});
+  }, []);
 
   const isDragging = dragState !== null;
   const isResizing = resizeState !== null;
@@ -948,7 +1082,20 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
               }}
             />
 
-            {flight.budget > 0 && fmt(flight.budget)}
+            {flight.budget > 0 && (
+              row.isOrganic ? (
+                <span style={{
+                  background: flight.color,
+                  borderRadius: 4,
+                  padding: '1px 5px',
+                  display: 'inline-block',
+                  lineHeight: 1.5,
+                  pointerEvents: 'none',
+                }}>
+                  {fmt(flight.budget)}
+                </span>
+              ) : fmt(flight.budget)
+            )}
 
             {/* Right resize handle */}
             <ResizeHandle
@@ -1197,7 +1344,10 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
                     />
                   )}
                   {span.showChannel && (
-                    <EditableCell value={row.channel} rowSpan={span.channelSpan} bold
+                    <ChannelSelectCell
+                      value={row.channel}
+                      libraryChannels={libraryChannels}
+                      rowSpan={span.channelSpan}
                       onChange={val => {
                         setRows(prev => {
                           const last = rowIdx + span.channelSpan;

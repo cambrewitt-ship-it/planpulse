@@ -216,7 +216,7 @@ export default function OOHCard({ channel, clientId, onUpdateChannel, headerActi
 
         {/* ── Action Points — right column ──────────────── */}
         <div style={{ flex: 1, minWidth: 0, borderLeft: '1px solid #F3F4F6', background: '#FAFAFA', padding: 16 }}>
-          <h3 style={{ fontSize: 13, fontWeight: 600, color: '#1C1917', marginBottom: 10, fontFamily: "'Inter', system-ui, sans-serif" }}>Action Points</h3>
+          <h3 style={{ fontSize: 15, fontWeight: 600, color: '#1C1917', marginBottom: 10, fontFamily: "'Inter', system-ui, sans-serif" }}>Action Points</h3>
           <InlineActionPoints
             channelType="OOH"
             clientId={clientId}

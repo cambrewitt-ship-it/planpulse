@@ -153,7 +153,7 @@ export async function POST(request: NextRequest) {
         // Step 1: Get Google Ads accounts from database
         const { data: googleAdsAccountsData, error: accountsError } = await supabase
           .from('google_ads_accounts')
-          .select('*')
+          .select('customer_id, account_name, manager_customer_id, is_active')
           .eq('user_id', user.id)
           .eq('is_active', true);
 
@@ -264,11 +264,17 @@ export async function POST(request: NextRequest) {
             const apiUrl = `https://googleads.googleapis.com/v21/customers/${cleanCustomerId}/googleAds:search`;
             console.log(`  API URL: ${apiUrl}`);
 
+            // Use the stored manager_customer_id for sub-accounts under an MCC.
+            // Standalone accounts have no manager_customer_id — omit the header entirely.
+            const loginCustomerId = account.manager_customer_id
+              ? account.manager_customer_id.replace(/-/g, '')
+              : null;
+
             const requestHeaders: Record<string, string> = {
               'Authorization': `Bearer ${accessToken}`,
               'developer-token': process.env.GOOGLE_ADS_DEVELOPER_TOKEN || '',
               'Content-Type': 'application/json',
-              'login-customer-id': cleanCustomerId,
+              ...(loginCustomerId ? { 'login-customer-id': loginCustomerId } : {}),
             };
 
             const response = await fetch(

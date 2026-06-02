@@ -465,6 +465,10 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
   // if actionPointClients refreshes and removes them before the 900ms is up.
   const [completingCardSnapshots, setCompletingCardSnapshots] = useState<Map<string, KanbanCard>>(new Map());
 
+  // IDs of cards successfully completed locally — persists so cards never
+  // reappear between animation end and the next actionPointClients refresh.
+  const locallyCompletedIdsRef = useRef<Set<string>>(new Set());
+
   // Flash/highlight newly AI-created items
   const [flashingIds, setFlashingIds] = useState<Set<string>>(new Set());
 
@@ -477,6 +481,7 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
       if (tool === 'complete_action_point') {
         const apId = data.action_point?.id;
         if (apId) {
+          locallyCompletedIdsRef.current.add(apId);
           const match = cardsRef.current.find(c => c.id === apId);
           const key = match ? `${match.id}:${match.daysUntilDue ?? 'none'}` : apId;
           setCompletingIds(prev => new Set(prev).add(key));
@@ -576,6 +581,7 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
   for (const clientGroup of actionPointClients) {
     for (const channelGroup of clientGroup.channels) {
       for (const ap of channelGroup.actionPoints) {
+        if (locallyCompletedIdsRef.current.has(ap.id)) continue;
         let status: KanbanStatus;
         let daysUntilDue: number | null = null;
 
@@ -697,6 +703,9 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
         setCompletingCardSnapshots(prev => { const next = new Map(prev); next.delete(card.id); return next; });
         return;
       }
+      // Mark as permanently completed locally so it never reappears while
+      // the parent's actionPointClients prop is still stale.
+      locallyCompletedIdsRef.current.add(card.id);
       // Let the animation play for 900ms before removing the card and refreshing
       setTimeout(() => {
         setCompletingIds(prev => { const next = new Set(prev); next.delete(key); return next; });
@@ -1056,8 +1065,8 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
         const startDay = dueDays.length ? Math.min(-2, Math.min(...dueDays)) : -2;
         const endDay   = dueDays.length ? Math.max(14, Math.max(...dueDays) + 3) : 14;
         const dayCount = endDay - startDay + 1;
-        const DAY_W = 30;
-        const ROW_H = 36;
+        const DAY_W = 60;
+        const ROW_H = 72;
         const todayMs = today.getTime();
         const withDue = allCardsSorted.filter(c => c.daysUntilDue !== null);
         const noDue   = allCardsSorted.filter(c => c.daysUntilDue === null);
@@ -1324,12 +1333,16 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                   title="Mark complete"
                   style={{
                     width: 14, height: 14, borderRadius: '50%',
-                    border: '1px solid #D5D0C5', background: 'transparent',
+                    border: isCompleting ? '1px solid #4A7C59' : '1px solid #D5D0C5',
+                    background: isCompleting ? '#4A7C59' : 'transparent',
                     cursor: 'pointer', padding: 0,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     flexShrink: 0,
+                    transition: 'background 0.15s, border-color 0.15s',
                   }}
-                />
+                >
+                  {isCompleting && <span style={{ color: '#fff', fontSize: 8, lineHeight: 1, fontWeight: 700 }}>✓</span>}
+                </button>
                 {getChannelIcon(card.channelType)}
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -1370,13 +1383,16 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
         })}
       </div>
     ) : (
-    /* ── Kanban view: 3–4 columns ── */
+    /* ── Kanban view: 3–4 columns, horizontally scrollable showing 2.5 cols ── */
+    <div style={{ overflowX: 'auto', overflowY: 'visible', width: '100%' }}>
     <div
       style={{
         display: 'grid',
-        gridTemplateColumns: `repeat(${hasOverdue ? 4 : 3}, minmax(0, 1fr))`,
-        gap: 6,
-        width: '100%',
+        gridTemplateColumns: `repeat(${hasOverdue ? 4 : 3}, 280px)`,
+        gap: 8,
+        width: 'max-content',
+        minWidth: '100%',
+        paddingBottom: 4,
       }}
     >
       {/* Overdue column — only shown when there are overdue cards */}
@@ -1390,7 +1406,7 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
               <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.7)', marginLeft: 'auto' }}>{overdueCards.length}</span>
             </div>
             <div style={{ position: 'relative' }}>
-              <div style={{ overflowY: 'auto', maxHeight: 340, display: 'flex', flexDirection: 'column', paddingBottom: overdueCards.length > 3 ? 10 : 2 }}>
+              <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', paddingBottom: overdueCards.length > 3 ? 10 : 2 }}>
                 {overdueCards.map((card) => {
                   const isInProgress = inProgressIds.has(card.id);
                   const isCompleting = completingIds.has(ck(card));
@@ -1407,7 +1423,9 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                       </div>
                       <div style={{ padding: '6px 8px', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, flexShrink: 0, paddingTop: 2 }}>
-                          <button type="button" onClick={(e) => { e.stopPropagation(); void handleComplete(card, e); }} title="Mark complete" style={{ width: 14, height: 14, borderRadius: '50%', border: `1px solid #D5D0C5`, background: 'transparent', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }} />
+                          <button type="button" onClick={(e) => { e.stopPropagation(); void handleComplete(card, e); }} title="Mark complete" style={{ width: 14, height: 14, borderRadius: '50%', border: isCompleting ? '1px solid #4A7C59' : '1px solid #D5D0C5', background: isCompleting ? '#4A7C59' : 'transparent', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'background 0.15s, border-color 0.15s' }}>
+                            {isCompleting && <span style={{ color: '#fff', fontSize: 8, lineHeight: 1, fontWeight: 700 }}>✓</span>}
+                          </button>
                           {getChannelIcon(card.channelType)}
                         </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
@@ -1474,7 +1492,6 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
             <div style={{ position: 'relative' }}>
               <div style={{
                 overflowY: 'auto',
-                maxHeight: 340,
                 display: 'flex',
                 flexDirection: 'column',
                 paddingBottom: colCards.length > 3 ? 10 : 2,
@@ -1535,16 +1552,19 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
                         width: 14,
                         height: 14,
                         borderRadius: '50%',
-                        border: `1px solid #D5D0C5`,
-                        background: 'transparent',
+                        border: isCompleting ? '1px solid #4A7C59' : '1px solid #D5D0C5',
+                        background: isCompleting ? '#4A7C59' : 'transparent',
                         cursor: 'pointer',
                         padding: 0,
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
                         flexShrink: 0,
+                        transition: 'background 0.15s, border-color 0.15s',
                       }}
-                    />
+                    >
+                      {isCompleting && <span style={{ color: '#fff', fontSize: 8, lineHeight: 1, fontWeight: 700 }}>✓</span>}
+                    </button>
                     {getChannelIcon(card.channelType)}
                   </div>
 
@@ -1621,6 +1641,7 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
           </div>
         );
       })}
+    </div>
     </div>
     )}
     </div>

@@ -100,14 +100,24 @@ export async function GET(req: NextRequest, { params }: Params) {
     const evtTotals = new Map<string, number>();
     for (const row of rows ?? []) {
       for (const act of ((row.meta_actions as any[]) ?? [])) {
-        if (/^offsite_conversion|^mobile_app_install/.test(act.action_type)) {
-          evtTotals.set(act.action_type, (evtTotals.get(act.action_type) ?? 0) + (parseInt(act.value, 10) || 0));
-        }
+        evtTotals.set(act.action_type, (evtTotals.get(act.action_type) ?? 0) + (parseInt(act.value, 10) || 0));
       }
     }
+    // Pass 1: prefer pixel conversions and app installs
     let bestCount = 0;
     for (const [type, count] of evtTotals) {
-      if (count > bestCount) { bestCount = count; effectiveMetaActionType = type; }
+      if (/^offsite_conversion|^mobile_app_install/.test(type) && count > bestCount) {
+        bestCount = count; effectiveMetaActionType = type;
+      }
+    }
+    // Pass 2: fallback to any meaningful action type
+    if (!effectiveMetaActionType) {
+      const vanity = /^video_view$|^page_engagement$|^post_engagement$|^photo_view$|^comment$|^like$/;
+      for (const [type, count] of evtTotals) {
+        if (!vanity.test(type) && count > bestCount) {
+          bestCount = count; effectiveMetaActionType = type;
+        }
+      }
     }
   }
 

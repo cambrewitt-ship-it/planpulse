@@ -24,7 +24,8 @@ import Link from 'next/link';
 import { MediaPlanChannel } from '@/components/media-plan-builder/media-plan-grid';
 import { UploadWizard } from '@/components/sandbox/upload-wizard';
 import { PlanGrid } from '@/components/sandbox/plan-grid';
-import type { SandboxPlan } from '@/components/sandbox/types';
+import type { SandboxPlan, Week, PlanRow, Flight } from '@/components/sandbox/types';
+import { FLIGHT_COLORS } from '@/components/sandbox/types';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { getClients, getMediaPlans, getPlanById, updateClient, updateClientLogoUrl } from '@/lib/db/plans';
@@ -147,13 +148,14 @@ export default function DashboardV2() {
   const [isLoadingMediaPlanBuilder, setIsLoadingMediaPlanBuilder] = useState(true);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isInitialLoadRef = useRef(true);
+  const metricSourceInitialisedRef = useRef(false);
   const [isEditingClientName, setIsEditingClientName] = useState(false);
   const [editingClientName, setEditingClientName] = useState('');
   const [isSavingClientName, setIsSavingClientName] = useState(false);
   const [isEditingClientNotes, setIsEditingClientNotes] = useState(false);
   const [editingClientNotes, setEditingClientNotes] = useState('');
   const [notesCollapsed, setNotesCollapsed] = useState(false);
-  const [notesActiveTab, setNotesActiveTab] = useState<'notes' | 'todo'>('notes');
+  const [notesActiveTab, setNotesActiveTab] = useState<'notes' | 'todo'>('todo');
   const [noteFiles, setNoteFiles] = useState<{ id: string; name: string }[]>([{ id: 'default', name: 'General' }]);
   const [activeFileId, setActiveFileId] = useState<string>('default');
   const [showFilesMenu, setShowFilesMenu] = useState(false);
@@ -512,6 +514,92 @@ export default function DashboardV2() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sandboxPlanHydrated, isLoadingMediaPlanBuilder, clientSandboxPlan]);
+
+  // Reverse sync: when localStorage has no sandbox plan but DB has channels with flights,
+  // convert the DB data into SandboxPlan format so the media-plan view shows existing data
+  // instead of the upload wizard.
+  useEffect(() => {
+    if (!sandboxPlanHydrated || isLoadingMediaPlanBuilder) return;
+    if (clientSandboxPlan !== null) return;
+
+    const channelsWithFlights = mediaPlanBuilderChannels.filter(
+      ch => (ch.flights?.length ?? 0) > 0
+    );
+    if (!channelsWithFlights.length) return;
+
+    const toMon = (d: Date): Date => {
+      const day = d.getDay();
+      const diff = day === 0 ? 1 : 1 - day;
+      const out = new Date(d);
+      out.setDate(d.getDate() + diff);
+      out.setHours(0, 0, 0, 0);
+      return out;
+    };
+    const isoDate = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const weekLbl = (d: Date) => {
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      return `${d.getDate()}-${months[d.getMonth()]}`;
+    };
+    const monthLbl = (d: Date) =>
+      ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'][d.getMonth()];
+
+    const allTimes: number[] = [];
+    for (const ch of channelsWithFlights) {
+      for (const f of ch.flights) {
+        if (f.startWeek) allTimes.push(new Date(f.startWeek).getTime());
+        if (f.endWeek) allTimes.push(new Date(f.endWeek).getTime());
+      }
+    }
+    if (!allTimes.length) return;
+
+    const planStart = toMon(new Date(Math.min(...allTimes)));
+    const planEnd = toMon(new Date(Math.max(...allTimes)));
+
+    const weeks: Week[] = [];
+    const cur = new Date(planStart);
+    while (cur <= planEnd) {
+      const thu = new Date(cur.getTime() + 3 * 86400000);
+      weeks.push({ weekStart: isoDate(cur), label: weekLbl(cur), month: monthLbl(thu), year: cur.getFullYear() });
+      cur.setDate(cur.getDate() + 7);
+    }
+
+    const rows: PlanRow[] = channelsWithFlights.map((ch, chIdx) => {
+      const isOrganic = ch.channelCategory === 'organic_social';
+      const flights: Flight[] = ch.flights.map((f, fIdx) => {
+        const budget = f.monthlySpend && Object.keys(f.monthlySpend).length > 0
+          ? Object.values(f.monthlySpend).reduce((a: number, b: number) => a + b, 0)
+          : f.weeklyBudget * Math.max(1, Math.round((new Date(f.endWeek).getTime() - new Date(f.startWeek).getTime()) / (7 * 86400000)) + 1);
+        return {
+          id: `db-${f.id || `${chIdx}-${fIdx}`}`,
+          startWeek: isoDate(toMon(new Date(f.startWeek))),
+          endWeek: isoDate(toMon(new Date(f.endWeek))),
+          budget: Math.round(budget),
+          color: (f as any).color || FLIGHT_COLORS[chIdx % FLIGHT_COLORS.length],
+        };
+      });
+      return {
+        id: `db-row-${ch.id || chIdx}`,
+        funnel: '',
+        channel: ch.channelName,
+        detail: ch.channelSubType || '',
+        audience: '',
+        flights,
+        isMasterRow: true,
+        isOrganic,
+      };
+    });
+
+    handleClientPlanChange({
+      id: `db-plan-${clientId}`,
+      title: 'Media Plan',
+      asAtLabel: '',
+      weeks,
+      rows,
+      updatedAt: new Date().toISOString(),
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sandboxPlanHydrated, isLoadingMediaPlanBuilder, clientSandboxPlan, mediaPlanBuilderChannels]);
 
   // Load note files from localStorage
   useEffect(() => {
@@ -999,6 +1087,15 @@ export default function DashboardV2() {
 
       // Extract platform-native event options from the loaded spend data
       setAvailablePlatformEvents(extractPlatformEventOptions(enhancedSpendData));
+
+      // Default metricSource to the connected ad platform on first load
+      if (!metricSourceInitialisedRef.current && enhancedSpendData.length > 0) {
+        metricSourceInitialisedRef.current = true;
+        const hasMeta = enhancedSpendData.some((p: any) => p.platform === 'meta-ads');
+        const hasGoogle = enhancedSpendData.some((p: any) => p.platform === 'google-ads');
+        if (hasMeta) setSelectedMetricSource('meta');
+        else if (hasGoogle) setSelectedMetricSource('google');
+      }
 
       const channelMap = new Map<string, string>();
       enhancedSpendData.forEach((point: any) => {
@@ -2249,7 +2346,7 @@ export default function DashboardV2() {
                       display: 'flex', alignItems: 'center', gap: 6,
                       padding: '8px 14px', borderRadius: 12, border: '0.5px solid #D5D0C5',
                       background: '#FDFCF8', color: '#4A6580',
-                      fontSize: 14, fontWeight: 500, cursor: 'pointer',
+                      fontSize: 16, fontWeight: 500, cursor: 'pointer',
                       fontFamily: "'DM Sans', system-ui, sans-serif",
                     }}
                   >
@@ -2314,15 +2411,15 @@ export default function DashboardV2() {
                         }}
                         title="Expand"
                       >
-                        <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', letterSpacing: '0.1em', writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>
+                        <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', letterSpacing: '0.1em', writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>
                           {notesActiveTab === 'notes' ? 'Notes' : 'To Do'}
                         </span>
-                        <span style={{ fontSize: 14, color: 'rgba(255,255,255,0.4)' }}>›</span>
+                        <span style={{ fontSize: 16, color: 'rgba(255,255,255,0.4)' }}>›</span>
                       </div>
                     ) : (
                       <div style={{ display: 'flex', width: '100%', height: 240, position: 'relative', borderRadius: 12, overflow: 'hidden' }}>
-                        {/* Spine wrapper — fixed 112px, both spines animate inside with peek strip between them */}
-                        <div style={{ width: 112, flexShrink: 0, position: 'relative', height: '100%' }}>
+                        {/* Spine wrapper — fixed 88px, both spines animate inside with peek strip between them */}
+                        <div style={{ width: 88, flexShrink: 0, position: 'relative', height: '100%' }}>
                           {/* Notes spine */}
                           <div
                             onClick={() => { setNotesActiveTab('notes'); setShowFilesMenu(false); setShowTodoMenu(false); }}
@@ -2330,7 +2427,7 @@ export default function DashboardV2() {
                               position: 'absolute',
                               top: notesActiveTab === 'notes' ? 0 : 5,
                               bottom: notesActiveTab === 'notes' ? 0 : 5,
-                              left: notesActiveTab === 'notes' ? 76 : 0,
+                              left: notesActiveTab === 'notes' ? 46 : 0,
                               transition: 'left 0.28s cubic-bezier(0.4, 0, 0.2, 1), top 0.28s cubic-bezier(0.4, 0, 0.2, 1), bottom 0.28s cubic-bezier(0.4, 0, 0.2, 1), background 0.15s, opacity 0.28s',
                               filter: notesActiveTab === 'notes' ? 'none' : 'brightness(0.55)',
                               width: 36,
@@ -2353,9 +2450,9 @@ export default function DashboardV2() {
                                 <span key={i} style={{ width: 14, height: 1.5, background: showFilesMenu && notesActiveTab === 'notes' ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.5)', display: 'block', borderRadius: 1, transition: 'background 0.15s' }} />
                               ))}
                             </button>
-                            <span style={{ fontSize: 9, fontWeight: 700, color: '#FFFFFF', textTransform: 'uppercase', letterSpacing: '0.13em', writingMode: 'vertical-rl', transform: 'rotate(180deg)', whiteSpace: 'nowrap', marginTop: 2 }}>Notes</span>
+                            <span style={{ fontSize: 10, fontWeight: 700, color: '#FFFFFF', textTransform: 'uppercase', letterSpacing: '0.13em', writingMode: 'vertical-rl', transform: 'rotate(180deg)', whiteSpace: 'nowrap', marginTop: 2 }}>Notes</span>
                             {notesActiveTab === 'notes' && (
-                              <button onClick={e => { e.stopPropagation(); setNotesCollapsed(true); }} title="Collapse" style={{ marginTop: 'auto', marginBottom: 8, background: 'transparent', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.5)', fontSize: 16, lineHeight: 1, padding: 2 }}>‹</button>
+                              <button onClick={e => { e.stopPropagation(); setNotesCollapsed(true); }} title="Collapse" style={{ marginTop: 'auto', marginBottom: 8, background: 'transparent', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.5)', fontSize: 18, lineHeight: 1, padding: 2 }}>‹</button>
                             )}
                           </div>
 
@@ -2366,7 +2463,7 @@ export default function DashboardV2() {
                               position: 'absolute',
                               top: notesActiveTab === 'todo' ? 0 : 5,
                               bottom: notesActiveTab === 'todo' ? 0 : 5,
-                              left: notesActiveTab === 'todo' ? 76 : 0,
+                              left: notesActiveTab === 'todo' ? 46 : 0,
                               transition: 'left 0.28s cubic-bezier(0.4, 0, 0.2, 1), top 0.28s cubic-bezier(0.4, 0, 0.2, 1), bottom 0.28s cubic-bezier(0.4, 0, 0.2, 1), background 0.15s, opacity 0.28s',
                               filter: notesActiveTab === 'todo' ? 'none' : 'brightness(0.55)',
                               width: 36,
@@ -2389,9 +2486,9 @@ export default function DashboardV2() {
                                 <span key={i} style={{ width: 14, height: 1.5, background: showTodoMenu && notesActiveTab === 'todo' ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.5)', display: 'block', borderRadius: 1, transition: 'background 0.15s' }} />
                               ))}
                             </button>
-                            <span style={{ fontSize: 9, fontWeight: 700, color: '#FFFFFF', textTransform: 'uppercase', letterSpacing: '0.13em', writingMode: 'vertical-rl', transform: 'rotate(180deg)', whiteSpace: 'nowrap', marginTop: 2 }}>To Do</span>
+                            <span style={{ fontSize: 10, fontWeight: 700, color: '#FFFFFF', textTransform: 'uppercase', letterSpacing: '0.13em', writingMode: 'vertical-rl', transform: 'rotate(180deg)', whiteSpace: 'nowrap', marginTop: 2 }}>To Do</span>
                             {notesActiveTab === 'todo' && (
-                              <button onClick={e => { e.stopPropagation(); setNotesCollapsed(true); }} title="Collapse" style={{ marginTop: 'auto', marginBottom: 8, background: 'transparent', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.5)', fontSize: 16, lineHeight: 1, padding: 2 }}>‹</button>
+                              <button onClick={e => { e.stopPropagation(); setNotesCollapsed(true); }} title="Collapse" style={{ marginTop: 'auto', marginBottom: 8, background: 'transparent', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.5)', fontSize: 18, lineHeight: 1, padding: 2 }}>‹</button>
                             )}
                           </div>
 
@@ -2401,7 +2498,7 @@ export default function DashboardV2() {
                             onClick={() => { setNotesActiveTab(notesActiveTab === 'notes' ? 'todo' : 'notes'); setShowFilesMenu(false); setShowTodoMenu(false); }}
                             style={{
                               position: 'absolute', top: 5, bottom: 5,
-                              left: 36, width: 56,
+                              left: 36, width: 16,
                               zIndex: 1,
                               filter: 'brightness(0.55)',
                               cursor: 'pointer',
@@ -2423,13 +2520,13 @@ export default function DashboardV2() {
                         {/* Files slide-out panel — only when Notes tab active */}
                         {notesActiveTab === 'notes' && showFilesMenu && (
                           <div style={{
-                            position: 'absolute', top: 0, left: 116, width: 160, height: '100%',
+                            position: 'absolute', top: 0, left: 92, width: 160, height: '100%',
                             background: '#2C2925', zIndex: 10,
                             display: 'flex', flexDirection: 'column',
                             boxShadow: '2px 0 8px rgba(0,0,0,0.25)',
                           }}>
                             <div style={{ padding: '10px 12px 8px', borderBottom: '0.5px solid rgba(255,255,255,0.08)' }}>
-                              <div style={{ fontSize: 9, fontWeight: 600, color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>Files</div>
+                              <div style={{ fontSize: 10, fontWeight: 600, color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>Files</div>
                             </div>
                             <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
                               {noteFiles.map(file => (
@@ -2448,14 +2545,14 @@ export default function DashboardV2() {
                                       <rect x="0.5" y="0.5" width="9" height="11" rx="1.5" stroke={activeFileId === file.id ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.25)'} strokeWidth="0.8" fill="none"/>
                                       <path d="M2.5 4h5M2.5 6h5M2.5 8h3" stroke={activeFileId === file.id ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.18)'} strokeWidth="0.7" strokeLinecap="round"/>
                                     </svg>
-                                    <span style={{ fontSize: 11, color: activeFileId === file.id ? '#FFFFFF' : 'rgba(255,255,255,0.5)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    <span style={{ fontSize: 13, color: activeFileId === file.id ? '#FFFFFF' : 'rgba(255,255,255,0.5)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                       {file.name}
                                     </span>
                                   </div>
                                   {noteFiles.length > 1 && (
                                     <button
                                       onClick={e => { e.stopPropagation(); deleteNoteFile(file.id); }}
-                                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.2)', fontSize: 13, padding: 0, lineHeight: 1, flexShrink: 0 }}
+                                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.2)', fontSize: 15, padding: 0, lineHeight: 1, flexShrink: 0 }}
                                     >×</button>
                                   )}
                                 </div>
@@ -2468,7 +2565,7 @@ export default function DashboardV2() {
                                 onKeyDown={e => e.key === 'Enter' && addNoteFile()}
                                 placeholder="New file…"
                                 style={{
-                                  flex: 1, fontSize: 10,
+                                  flex: 1, fontSize: 12,
                                   background: 'rgba(255,255,255,0.06)',
                                   border: '0.5px solid rgba(255,255,255,0.12)',
                                   borderRadius: 3, color: '#fff',
@@ -2480,7 +2577,7 @@ export default function DashboardV2() {
                                 onClick={addNoteFile}
                                 style={{
                                   background: 'rgba(255,255,255,0.1)', border: 'none',
-                                  borderRadius: 3, color: '#fff', fontSize: 15,
+                                  borderRadius: 3, color: '#fff', fontSize: 17,
                                   width: 22, cursor: 'pointer',
                                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                                 }}
@@ -2492,17 +2589,17 @@ export default function DashboardV2() {
                         {/* To Do slide-out menu */}
                         {notesActiveTab === 'todo' && showTodoMenu && (
                           <div style={{
-                            position: 'absolute', top: 0, left: 116, width: 160, height: '100%',
+                            position: 'absolute', top: 0, left: 92, width: 160, height: '100%',
                             background: '#2C1715', zIndex: 10,
                             display: 'flex', flexDirection: 'column',
                             boxShadow: '2px 0 8px rgba(0,0,0,0.25)',
                           }}>
                             <div style={{ padding: '10px 12px 8px', borderBottom: '0.5px solid rgba(255,255,255,0.08)' }}>
-                              <div style={{ fontSize: 9, fontWeight: 600, color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>Options</div>
+                              <div style={{ fontSize: 10, fontWeight: 600, color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>Options</div>
                             </div>
                             <div style={{ flex: 1, padding: '8px 0' }}>
                               {(['Priority', 'Channel'] as const).map(label => (
-                                <div key={label} style={{ padding: '7px 12px', fontSize: 11, color: 'rgba(255,255,255,0.6)', cursor: 'default' }}>
+                                <div key={label} style={{ padding: '7px 12px', fontSize: 13, color: 'rgba(255,255,255,0.6)', cursor: 'default' }}>
                                   {label}
                                 </div>
                               ))}
@@ -2769,19 +2866,19 @@ export default function DashboardV2() {
                 {/* Funnel selector */}
                 <div style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', padding: '20px 24px', marginBottom: 14 }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-                    <span style={{ fontSize: 14, fontWeight: 600, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Funnels</span>
+                    <span style={{ fontSize: 16, fontWeight: 600, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Funnels</span>
                     <button
                       onClick={() => { setEditingFunnel(null); setIsFunnelBuilderOpen(true); }}
-                      style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 12, border: '0.5px solid #D5D0C5', background: '#FDFCF8', color: '#4A6580', fontSize: 13, fontWeight: 500, cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif" }}
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 12, border: '0.5px solid #D5D0C5', background: '#FDFCF8', color: '#4A6580', fontSize: 15, fontWeight: 500, cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif" }}
                     >
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                       Create Funnel
                     </button>
                   </div>
                   {loadingFunnels && funnels.length === 0 ? (
-                    <p style={{ fontSize: 13, color: '#A0998F', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Loading funnels...</p>
+                    <p style={{ fontSize: 15, color: '#A0998F', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Loading funnels...</p>
                   ) : funnels.length === 0 ? (
-                    <p style={{ fontSize: 13, color: '#A0998F', fontFamily: "'DM Sans', system-ui, sans-serif" }}>No funnels created yet. Click &quot;Create Funnel&quot; to get started.</p>
+                    <p style={{ fontSize: 15, color: '#A0998F', fontFamily: "'DM Sans', system-ui, sans-serif" }}>No funnels created yet. Click &quot;Create Funnel&quot; to get started.</p>
                   ) : (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
                       {funnels.map((funnel) => (
@@ -2801,11 +2898,11 @@ export default function DashboardV2() {
                               await calculateFunnel(funnel.id);
                             }}
                             disabled={loadingFunnels}
-                            style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 13, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}
+                            style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 15, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}
                           >
                             {funnel.name}
                           </button>
-                          <span style={{ fontSize: 11, color: '#A0998F', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+                          <span style={{ fontSize: 13, color: '#A0998F', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
                             {(funnel.config as FunnelConfig).stages.length} stages
                           </span>
                           <button
@@ -2913,13 +3010,13 @@ export default function DashboardV2() {
                 {/* Invoices section */}
                 <div style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', padding: '20px 24px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-                    <span style={{ fontSize: 13, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Invoices</span>
+                    <span style={{ fontSize: 15, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Invoices</span>
                     <button
                       onClick={() => setIsInvoiceModalOpen(true)}
                       style={{
                         height: 30, padding: '0 12px', borderRadius: 12,
                         border: '0.5px solid #D5D0C5', background: '#FDFCF8',
-                        color: '#1C1917', fontSize: 12, fontWeight: 500,
+                        color: '#1C1917', fontSize: 14, fontWeight: 500,
                         cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif",
                         display: 'flex', alignItems: 'center', gap: 5,
                       }}
@@ -2928,7 +3025,7 @@ export default function DashboardV2() {
                     </button>
                   </div>
                   {invoiceHistory.length === 0 ? (
-                    <p style={{ fontSize: 13, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>No invoices generated yet.</p>
+                    <p style={{ fontSize: 15, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>No invoices generated yet.</p>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                       {invoiceHistory.map((inv) => {
@@ -2942,8 +3039,8 @@ export default function DashboardV2() {
                             padding: '9px 12px', borderRadius: 10, border: '0.5px solid #E8E4DC',
                             background: '#FAFAF8', fontFamily: "'DM Sans', system-ui, sans-serif",
                           }}>
-                            <span style={{ fontSize: 13, color: '#1C1917', fontWeight: 500 }}>{label}</span>
-                            <span style={{ fontSize: 11, color: '#B5B0A5' }}>Generated {generated}</span>
+                            <span style={{ fontSize: 15, color: '#1C1917', fontWeight: 500 }}>{label}</span>
+                            <span style={{ fontSize: 13, color: '#B5B0A5' }}>Generated {generated}</span>
                           </div>
                         );
                       })}
@@ -2954,13 +3051,13 @@ export default function DashboardV2() {
                 {/* Reports section */}
                 <div style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', padding: '20px 24px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                    <span style={{ fontSize: 13, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Performance Reports</span>
+                    <span style={{ fontSize: 15, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Performance Reports</span>
                     <button
                       onClick={() => setIsReportModalOpen(true)}
                       style={{
                         height: 30, padding: '0 12px', borderRadius: 12,
                         border: '0.5px solid #D5D0C5', background: '#FDFCF8',
-                        color: '#1C1917', fontSize: 12, fontWeight: 500,
+                        color: '#1C1917', fontSize: 14, fontWeight: 500,
                         cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif",
                         display: 'flex', alignItems: 'center', gap: 5,
                       }}
@@ -2968,7 +3065,7 @@ export default function DashboardV2() {
                       + Generate Report
                     </button>
                   </div>
-                  <p style={{ fontSize: 12, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+                  <p style={{ fontSize: 14, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
                     Generate a branded PDF with spend, channel performance, and action points.
                   </p>
                 </div>
@@ -2976,14 +3073,14 @@ export default function DashboardV2() {
                 {/* Client Logo */}
                 <div style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', padding: '20px 24px' }}>
                   <div style={{ marginBottom: 16 }}>
-                    <span style={{ fontSize: 13, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Client Logo</span>
+                    <span style={{ fontSize: 15, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Client Logo</span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                     {client?.logo_url ? (
                       <img src={client.logo_url} alt="Client logo" style={{ width: 56, height: 56, borderRadius: '50%', objectFit: 'cover', border: '0.5px solid #E8E4DC' }} />
                     ) : (
                       <div style={{ width: 56, height: 56, borderRadius: '50%', background: '#F0EDE8', border: '0.5px solid #E8E4DC', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <span style={{ fontSize: 22, fontWeight: 700, color: '#B5B0A5' }}>{client?.name?.charAt(0).toUpperCase()}</span>
+                        <span style={{ fontSize: 25, fontWeight: 700, color: '#B5B0A5' }}>{client?.name?.charAt(0).toUpperCase()}</span>
                       </div>
                     )}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -2993,7 +3090,7 @@ export default function DashboardV2() {
                         style={{
                           height: 30, padding: '0 12px', borderRadius: 12,
                           border: '0.5px solid #D5D0C5', background: '#FDFCF8',
-                          color: '#1C1917', fontSize: 12, fontWeight: 500,
+                          color: '#1C1917', fontSize: 14, fontWeight: 500,
                           cursor: isUploadingLogo ? 'not-allowed' : 'pointer',
                           fontFamily: "'DM Sans', system-ui, sans-serif",
                           opacity: isUploadingLogo ? 0.6 : 1,
@@ -3002,10 +3099,10 @@ export default function DashboardV2() {
                         {isUploadingLogo ? 'Uploading...' : client?.logo_url ? 'Replace Logo' : 'Upload Logo'}
                       </button>
                       {client?.logo_url && (
-                        <span style={{ fontSize: 11, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Logo uploaded</span>
+                        <span style={{ fontSize: 13, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Logo uploaded</span>
                       )}
                       {logoUploadError && (
-                        <span style={{ fontSize: 11, color: '#A0442A', fontFamily: "'DM Sans', system-ui, sans-serif" }}>{logoUploadError}</span>
+                        <span style={{ fontSize: 13, color: '#A0442A', fontFamily: "'DM Sans', system-ui, sans-serif" }}>{logoUploadError}</span>
                       )}
                     </div>
                   </div>
@@ -3032,12 +3129,12 @@ export default function DashboardV2() {
                 {/* Danger Zone */}
                 <div style={{ background: '#FDF7F5', border: '1px solid rgba(160,68,42,0.2)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', padding: '20px 24px' }}>
                   <div style={{ marginBottom: 12 }}>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: '#A0442A', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Danger Zone</span>
+                    <span style={{ fontSize: 15, fontWeight: 600, color: '#A0442A', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Danger Zone</span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', borderRadius: 10, border: '0.5px solid rgba(160,68,42,0.15)', background: '#FDFCF8' }}>
                     <div>
-                      <p style={{ fontSize: 13, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif", margin: 0 }}>Delete this client</p>
-                      <p style={{ fontSize: 12, color: '#8A8578', fontFamily: "'DM Sans', system-ui, sans-serif", margin: '2px 0 0' }}>Permanently remove this client and all associated data. This cannot be undone.</p>
+                      <p style={{ fontSize: 15, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif", margin: 0 }}>Delete this client</p>
+                      <p style={{ fontSize: 14, color: '#8A8578', fontFamily: "'DM Sans', system-ui, sans-serif", margin: '2px 0 0' }}>Permanently remove this client and all associated data. This cannot be undone.</p>
                     </div>
                     {deleteConfirm ? (
                       <div style={{ display: 'flex', gap: 8, flexShrink: 0, marginLeft: 16 }}>
@@ -3058,7 +3155,7 @@ export default function DashboardV2() {
                           style={{
                             height: 30, padding: '0 14px', borderRadius: 12,
                             border: 'none', background: '#A0442A',
-                            color: '#fff', fontSize: 12, fontWeight: 500,
+                            color: '#fff', fontSize: 14, fontWeight: 500,
                             cursor: deleting ? 'not-allowed' : 'pointer',
                             fontFamily: "'DM Sans', system-ui, sans-serif",
                             opacity: deleting ? 0.6 : 1,
@@ -3072,7 +3169,7 @@ export default function DashboardV2() {
                           style={{
                             height: 30, padding: '0 14px', borderRadius: 12,
                             border: '0.5px solid #D5D0C5', background: '#FDFCF8',
-                            color: '#1C1917', fontSize: 12, fontWeight: 500,
+                            color: '#1C1917', fontSize: 14, fontWeight: 500,
                             cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif",
                           }}
                         >
@@ -3085,7 +3182,7 @@ export default function DashboardV2() {
                         style={{
                           height: 30, padding: '0 12px', borderRadius: 12, flexShrink: 0, marginLeft: 16,
                           border: '0.5px solid #F5C5B8', background: '#FDF2EF',
-                          color: '#A0442A', fontSize: 12, fontWeight: 500,
+                          color: '#A0442A', fontSize: 14, fontWeight: 500,
                           cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif",
                         }}
                       >

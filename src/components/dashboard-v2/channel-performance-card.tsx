@@ -391,7 +391,7 @@ function MetricSlot({
     <div ref={ref} style={{ flex: 1, minWidth: 60, position: 'relative' }}>
       {/* Label + swap trigger */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 2, marginBottom: 2 }}>
-        <span style={{ fontSize: 9, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 500 }}>
+        <span style={{ fontSize: 10, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 500 }}>
           {cfg.shortLabel}
         </span>
         {availableSwaps.length > 0 && (
@@ -400,7 +400,7 @@ function MetricSlot({
             title="Swap metric"
             style={{
               background: 'none', border: 'none', padding: '0 1px', cursor: 'pointer',
-              color: '#d1d5db', fontSize: 8, lineHeight: 1, display: 'flex', alignItems: 'center',
+              color: '#d1d5db', fontSize: 9, lineHeight: 1, display: 'flex', alignItems: 'center',
             }}
           >▾</button>
         )}
@@ -417,10 +417,10 @@ function MetricSlot({
               padding: '1px 5px', cursor: 'pointer', maxWidth: 110, overflow: 'hidden',
             }}
           >
-            <span style={{ fontSize: 9, color: '#374151', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 90 }}>
+            <span style={{ fontSize: 10, color: '#374151', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 90 }}>
               {selectedActionType ? actionTypeLabel(selectedActionType) : 'Select event'}
             </span>
-            <span style={{ color: '#9ca3af', fontSize: 8, flexShrink: 0 }}>▾</span>
+            <span style={{ color: '#9ca3af', fontSize: 9, flexShrink: 0 }}>▾</span>
           </button>
           {actionOpen && (
             <div style={{
@@ -437,7 +437,7 @@ function MetricSlot({
                   onClick={e => e.stopPropagation()}
                   style={{
                     width: '100%', border: '1px solid #e5e7eb', borderRadius: 4,
-                    padding: '3px 7px', fontSize: 11, outline: 'none', color: '#374151',
+                    padding: '3px 7px', fontSize: 13, outline: 'none', color: '#374151',
                     boxSizing: 'border-box',
                   }}
                 />
@@ -448,7 +448,7 @@ function MetricSlot({
                     actionTypeLabel(t).toLowerCase().includes(actionSearch.toLowerCase())
                   );
                   if (filtered.length === 0) {
-                    return <div style={{ padding: '8px 10px', fontSize: 11, color: '#9ca3af' }}>No events found</div>;
+                    return <div style={{ padding: '8px 10px', fontSize: 13, color: '#9ca3af' }}>No events found</div>;
                   }
                   return filtered.map(type => (
                     <button
@@ -456,7 +456,7 @@ function MetricSlot({
                       onClick={() => { onActionTypeChange?.(type); setActionOpen(false); }}
                       style={{
                         display: 'block', width: '100%', textAlign: 'left',
-                        padding: '6px 10px', fontSize: 11,
+                        padding: '6px 10px', fontSize: 13,
                         color: type === selectedActionType ? '#2563eb' : '#374151',
                         fontWeight: type === selectedActionType ? 600 : 400,
                         background: type === selectedActionType ? '#eff6ff' : 'transparent',
@@ -483,7 +483,7 @@ function MetricSlot({
             display: 'block', width: '100%', textAlign: 'left',
             background: isActive ? `${cfg.color}12` : 'transparent',
             border: 'none', borderRadius: 8, padding: '1px 3px', cursor: 'pointer',
-            fontSize: 13, fontWeight: 600,
+            fontSize: 15, fontWeight: 600,
             color: isActive ? cfg.color : '#1f2937',
             transition: 'background 0.15s',
           }}
@@ -492,14 +492,14 @@ function MetricSlot({
           {displayValue}
         </button>
       ) : (
-        <span style={{ fontSize: 13, fontWeight: 600, color: '#1f2937', display: 'block', padding: '1px 3px' }}>
+        <span style={{ fontSize: 15, fontWeight: 600, color: '#1f2937', display: 'block', padding: '1px 3px' }}>
           {displayValue}
         </span>
       )}
 
       {/* Benchmark */}
       {benchmark ? (
-        <div style={{ fontSize: 9, marginTop: 2, padding: '0 3px', display: 'flex', alignItems: 'center', gap: 2 }}>
+        <div style={{ fontSize: 10, marginTop: 2, padding: '0 3px', display: 'flex', alignItems: 'center', gap: 2 }}>
           <span style={{ color: '#d1d5db' }}>bm</span>
           <span style={{ fontWeight: 500, color: isGood === null ? '#9ca3af' : isGood ? '#10b981' : '#ef4444' }}>
             {formatBenchmarkValue(benchmark.benchmark_value, benchmark.unit)}
@@ -523,7 +523,7 @@ function MetricSlot({
               onClick={() => { onSwap(k); setSwapOpen(false); }}
               style={{
                 display: 'block', width: '100%', textAlign: 'left',
-                padding: '6px 10px', fontSize: 11, color: '#374151',
+                padding: '6px 10px', fontSize: 13, color: '#374151',
                 background: 'transparent', border: 'none', cursor: 'pointer',
               }}
               onMouseEnter={e => (e.currentTarget.style.background = '#f9fafb')}
@@ -1406,7 +1406,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                             <XAxis
                               dataKey="date"
-                              tick={{ fontSize: 11 }}
+                              tick={{ fontSize: 13 }}
                               tickMargin={6}
                               tickFormatter={(value) => new Date(value).getDate().toString()}
                               interval={
@@ -1416,7 +1416,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                               }
                             />
                             <YAxis
-                              tick={{ fontSize: 12 }}
+                              tick={{ fontSize: 14 }}
                               tickFormatter={(value) => `$${value}`}
                               width={56}
                             />
@@ -1557,7 +1557,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                               <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                               <XAxis
                                 dataKey="date"
-                                tick={{ fontSize: 11 }}
+                                tick={{ fontSize: 13 }}
                                 tickMargin={6}
                                 tickFormatter={(value: string) => {
                                   const parts = value.split('-');
@@ -1580,7 +1580,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                                   yAxisId={key}
                                   orientation={i === 0 ? 'left' : 'right'}
                                   hide={axisMode === 'hidden'}
-                                  tick={{ fontSize: 11 }}
+                                  tick={{ fontSize: 13 }}
                                   tickFormatter={METRIC_CONFIG[key].formatAxis}
                                   width={axisMode !== 'hidden' ? 60 : 0}
                                   stroke={axisMode === 'dual' ? METRIC_CONFIG[key].color : '#6b7280'}

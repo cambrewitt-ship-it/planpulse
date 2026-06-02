@@ -540,6 +540,7 @@ export interface Database {
             connection_id: string;
             customer_id: string;
             account_name: string | null;
+            manager_customer_id: string | null;
             is_active: boolean;
             created_at: string;
             updated_at: string;
@@ -550,6 +551,7 @@ export interface Database {
             connection_id: string;
             customer_id: string;
             account_name?: string | null;
+            manager_customer_id?: string | null;
             is_active?: boolean;
             created_at?: string;
             updated_at?: string;
@@ -560,6 +562,7 @@ export interface Database {
             connection_id?: string;
             customer_id?: string;
             account_name?: string | null;
+            manager_customer_id?: string | null;
             is_active?: boolean;
             updated_at?: string;
           };

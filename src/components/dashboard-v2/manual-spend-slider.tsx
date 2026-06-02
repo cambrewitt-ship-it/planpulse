@@ -61,11 +61,11 @@ export default function ManualSpendSlider({ planned, actual, onChange, accentCol
     }}>
       {/* Label */}
       <div style={{ flexShrink: 0, width: 72 }}>
-        <div style={{ fontSize: 9, fontWeight: 600, color: '#8A8578', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+        <div style={{ fontSize: 10, fontWeight: 600, color: '#8A8578', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
           Actual Spend
         </div>
         {planned > 0 && (
-          <div style={{ fontSize: 9, color: pct > 100 ? '#A0442A' : '#8A8578', fontWeight: pct > 100 ? 600 : 400, marginTop: 1 }}>
+          <div style={{ fontSize: 10, color: pct > 100 ? '#A0442A' : '#8A8578', fontWeight: pct > 100 ? 600 : 400, marginTop: 1 }}>
             {pct}% of plan
           </div>
         )}
@@ -163,7 +163,7 @@ export default function ManualSpendSlider({ planned, actual, onChange, accentCol
                 {isMajor && (
                   <div style={{
                     marginTop: 2,
-                    fontSize: 7.5,
+                    fontSize: 9,
                     fontWeight: isActive ? 700 : 400,
                     color: isActive ? (pct > 100 ? '#A0442A' : accentColor) : '#B5B0A5',
                     whiteSpace: 'nowrap',
@@ -191,7 +191,7 @@ export default function ManualSpendSlider({ planned, actual, onChange, accentCol
             onBlur={commitEdit}
             onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') setEditing(false); }}
             style={{
-              width: 72, fontSize: 11, fontWeight: 600, color: '#1C1917',
+              width: 72, fontSize: 13, fontWeight: 600, color: '#1C1917',
               border: '0.5px solid #D5D0C5', borderRadius: 4,
               padding: '2px 5px', textAlign: 'right',
               background: '#fff', outline: 'none', fontFamily: "'DM Sans', system-ui, sans-serif",
@@ -204,7 +204,7 @@ export default function ManualSpendSlider({ planned, actual, onChange, accentCol
             title="Click to enter amount"
             style={{
               background: 'none', border: 'none', cursor: 'text', padding: '2px 4px',
-              fontSize: 11, fontWeight: 600,
+              fontSize: 13, fontWeight: 600,
               color: actual > 0 ? '#1C1917' : '#C5C0B8',
               fontFamily: "'DM Sans', system-ui, sans-serif",
               borderRadius: 4,
@@ -215,7 +215,7 @@ export default function ManualSpendSlider({ planned, actual, onChange, accentCol
           </button>
         )}
         {planned > 0 && (
-          <div style={{ fontSize: 9, color: '#B5B0A5', marginTop: 1 }}>of {fmt(planned)}</div>
+          <div style={{ fontSize: 10, color: '#B5B0A5', marginTop: 1 }}>of {fmt(planned)}</div>
         )}
       </div>
     </div>

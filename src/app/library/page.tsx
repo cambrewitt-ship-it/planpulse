@@ -927,7 +927,7 @@ export default function LibraryPage() {
   if (loading) {
     return (
       <div style={{ minHeight: '100vh', background: '#F5F3EF', display: 'flex', alignItems: 'center', justifyContent: 'center', ...pageFont }}>
-        <div style={{ textAlign: 'center', color: '#8A8578', fontSize: 15 }}>Loading...</div>
+        <div style={{ textAlign: 'center', color: '#8A8578', fontSize: 17 }}>Loading...</div>
       </div>
     );
   }
@@ -1033,7 +1033,7 @@ export default function LibraryPage() {
               borderRadius: 12,
               border: '1px solid rgba(232,228,220,0.9)',
               background: '#FDFCF8',
-              fontSize: 14,
+              fontSize: 16,
               color: '#1C1917',
               outline: 'none',
               boxShadow: showSearchResults && searchResults.length > 0 ? '0 2px 12px rgba(0,0,0,0.08)' : '0 1px 4px rgba(0,0,0,0.04)',
@@ -1068,7 +1068,7 @@ export default function LibraryPage() {
             }}
           >
             {searchResults.length === 0 ? (
-              <div style={{ padding: '16px 16px', color: '#A09890', fontSize: 13 }}>No results for &ldquo;{searchQuery}&rdquo;</div>
+              <div style={{ padding: '16px 16px', color: '#A09890', fontSize: 15 }}>No results for &ldquo;{searchQuery}&rdquo;</div>
             ) : (
               <>
                 {searchResults.map((result, i) => (
@@ -1100,10 +1100,10 @@ export default function LibraryPage() {
                       )}
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 13, color: '#1C1917', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <div style={{ fontSize: 15, color: '#1C1917', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {result.matchText}
                       </div>
-                      <div style={{ fontSize: 11, color: '#A09890', marginTop: 1 }}>{result.subtitle}</div>
+                      <div style={{ fontSize: 13, color: '#A09890', marginTop: 1 }}>{result.subtitle}</div>
                     </div>
                     <div style={{ flexShrink: 0 }}>
                       <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 7h8M8 4l3 3-3 3" stroke="#C4BEB6" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
@@ -1149,7 +1149,7 @@ export default function LibraryPage() {
       {activeTab === 'playbooks' && (
         <div>
           {playbooksLoading ? (
-            <div style={{ textAlign: 'center', color: '#8A8578', padding: '48px 0', fontSize: 15 }}>Loading...</div>
+            <div style={{ textAlign: 'center', color: '#8A8578', padding: '48px 0', fontSize: 17 }}>Loading...</div>
           ) : playbookDocs.length === 0 ? (
             <div
               style={{
@@ -1158,7 +1158,7 @@ export default function LibraryPage() {
               }}
             >
               <BookOpen style={{ width: 40, height: 40, margin: '0 auto 12px', color: '#C4A882' }} />
-              <p style={{ color: '#8A8578', marginBottom: 16, fontSize: 15 }}>No playbooks uploaded yet</p>
+              <p style={{ color: '#8A8578', marginBottom: 16, fontSize: 17 }}>No playbooks uploaded yet</p>
               <Button onClick={() => setIsPlaybookDialogOpen(true)}>
                 <Upload className="h-4 w-4 mr-2" />
                 Upload your first playbook
@@ -1184,10 +1184,10 @@ export default function LibraryPage() {
                       <FileText style={{ width: 18, height: 18, color: '#C4A882' }} />
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 600, fontSize: 14, color: '#1C1917', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <div style={{ fontWeight: 600, fontSize: 16, color: '#1C1917', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {doc.file_name}
                       </div>
-                      <div style={{ fontSize: 12, color: '#8A8578', marginTop: 2 }}>
+                      <div style={{ fontSize: 14, color: '#8A8578', marginTop: 2 }}>
                         {categoryLabel(doc.doc_category)}
                         {' · '}
                         {doc.is_text_doc ? 'Text' : 'File'}
@@ -1205,7 +1205,7 @@ export default function LibraryPage() {
                   {doc.text_content && (
                     <div style={{
                       background: '#F5F3EF', borderRadius: 10, padding: '10px 12px',
-                      fontSize: 12, color: '#6B6460', lineHeight: 1.6,
+                      fontSize: 14, color: '#6B6460', lineHeight: 1.6,
                       maxHeight: 80, overflow: 'hidden',
                       display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical',
                     }}>
@@ -1214,7 +1214,7 @@ export default function LibraryPage() {
                   )}
 
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 2 }}>
-                    <span style={{ fontSize: 11, color: '#A09890' }}>
+                    <span style={{ fontSize: 13, color: '#A09890' }}>
                       {new Date(doc.uploaded_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}
                       {' · '}
                       {doc.uploader_name}
@@ -1224,7 +1224,7 @@ export default function LibraryPage() {
                         href={doc.file_url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        style={{ fontSize: 11, color: '#C4A882', textDecoration: 'none', fontWeight: 500 }}
+                        style={{ fontSize: 13, color: '#C4A882', textDecoration: 'none', fontWeight: 500 }}
                       >
                         Download
                       </a>
@@ -1252,7 +1252,7 @@ export default function LibraryPage() {
             <button
               onClick={() => setPlaybookUploadMode('file')}
               style={{
-                flex: 1, padding: '6px 0', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 500,
+                flex: 1, padding: '6px 0', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 15, fontWeight: 500,
                 background: playbookUploadMode === 'file' ? '#FDFCF8' : 'transparent',
                 color: playbookUploadMode === 'file' ? '#1C1917' : '#8A8578',
                 boxShadow: playbookUploadMode === 'file' ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
@@ -1263,7 +1263,7 @@ export default function LibraryPage() {
             <button
               onClick={() => setPlaybookUploadMode('text')}
               style={{
-                flex: 1, padding: '6px 0', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 500,
+                flex: 1, padding: '6px 0', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 15, fontWeight: 500,
                 background: playbookUploadMode === 'text' ? '#FDFCF8' : 'transparent',
                 color: playbookUploadMode === 'text' ? '#1C1917' : '#8A8578',
                 boxShadow: playbookUploadMode === 'text' ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
@@ -1319,16 +1319,16 @@ export default function LibraryPage() {
                 {playbookFile ? (
                   <div>
                     <FileText style={{ width: 28, height: 28, margin: '0 auto 8px', color: '#C4A882' }} />
-                    <p style={{ fontSize: 13, color: '#1C1917', fontWeight: 500 }}>{playbookFile.name}</p>
-                    <p style={{ fontSize: 11, color: '#A09890', marginTop: 2 }}>
+                    <p style={{ fontSize: 15, color: '#1C1917', fontWeight: 500 }}>{playbookFile.name}</p>
+                    <p style={{ fontSize: 13, color: '#A09890', marginTop: 2 }}>
                       {(playbookFile.size / 1024).toFixed(0)} KB · Click to change
                     </p>
                   </div>
                 ) : (
                   <div>
                     <Upload style={{ width: 28, height: 28, margin: '0 auto 8px', color: '#C4A882' }} />
-                    <p style={{ fontSize: 13, color: '#8A8578' }}>Drop a file here or click to browse</p>
-                    <p style={{ fontSize: 11, color: '#A09890', marginTop: 4 }}>PDF, DOCX, TXT, MD, CSV · Max 50 MB</p>
+                    <p style={{ fontSize: 15, color: '#8A8578' }}>Drop a file here or click to browse</p>
+                    <p style={{ fontSize: 13, color: '#A09890', marginTop: 4 }}>PDF, DOCX, TXT, MD, CSV · Max 50 MB</p>
                   </div>
                 )}
               </div>

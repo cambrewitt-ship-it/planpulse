@@ -14,6 +14,7 @@ export interface GanttClient {
   name: string;
   initials: string;
   color: string;
+  logo_url?: string | null;
 }
 
 export interface GanttChannel {

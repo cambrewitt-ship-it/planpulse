@@ -342,8 +342,7 @@ export function NotesChecklist({ filteredClientIds, activeClientId }: NotesCheck
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
-            <div style={{ fontSize: 9, fontWeight: 600, color: '#8A8578', textTransform: 'uppercase', letterSpacing: '0.12em' }}>Notes</div>
-            <div style={{ fontSize: 9, color: '#C0BBC0', marginTop: 1 }}>Only visible to you</div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: '#8A8578', textTransform: 'uppercase', letterSpacing: '0.12em' }}>Notes</div>
           </div>
           {/* Mode toggle */}
           <div style={{

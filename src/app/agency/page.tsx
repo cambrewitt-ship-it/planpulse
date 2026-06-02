@@ -12,9 +12,9 @@ import { TodayCard } from '@/components/agency/TodayCard';
 import { AgencyChat, type AgencyChatHandle } from '@/components/agency/AgencyChat';
 import { KanbanBoard, type KanbanBoardHandle } from '@/components/agency/KanbanBoard';
 import { NotesChecklist } from '@/components/agency/NotesChecklist';
-import { CalendarPanel } from '@/components/agency/CalendarPanel';
 import { DateRangePicker } from '@/components/ui/date-range-picker';
 import { FullscreenGanttView, type GanttAPMarker } from '@/components/agency/FullscreenGanttView';
+import { AgencyTimeline, ZOOM_LEVELS as TIMELINE_ZOOM_LEVELS, DEFAULT_ZOOM as DEFAULT_TIMELINE_ZOOM } from '@/components/agency/AgencyTimeline';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -99,8 +99,7 @@ export default function AgencyDashboard() {
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const [amFilter, setAmFilter] = useState('All');
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
-  const [selectedDay, setSelectedDay] = useState<number | null>(() => new Date().getDate());
-  
+
   // Date range state - default to YTD (Jan 1 - now)
   const [dateRange, setDateRange] = useState<{ startDate: string; endDate: string }>(() => {
     const today = new Date();
@@ -148,7 +147,9 @@ export default function AgencyDashboard() {
   const kanbanRef = useRef<KanbanBoardHandle>(null);
   const chatRef = useRef<AgencyChatHandle>(null);
   const [kanbanView, setKanbanView] = useState<'kanban' | 'list' | 'gantt'>('kanban');
-  const [activeCardTab, setActiveCardTab] = useState<'clients' | 'todo'>('todo');
+  const [activeCardTab, setActiveCardTab] = useState<'clients' | 'todo' | 'timeline'>('timeline');
+  const [timelineZoom, setTimelineZoom] = useState(DEFAULT_TIMELINE_ZOOM);
+  const [timelineSort, setTimelineSort] = useState<'default' | 'ending-soon' | 'starting-soon'>('ending-soon');
   const today = useMemo(() => new Date(), []);
   const monthLabel = `${MONTH_NAMES[today.getMonth()]} ${today.getFullYear()}`;
 
@@ -311,6 +312,7 @@ export default function AgencyDashboard() {
         id: c.id, name: c.name,
         initials: c.name.split(' ').map((w: string) => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase(),
         color: COLORS[Math.abs(hash) % COLORS.length],
+        logo_url: c.logo_url ?? null,
       };
     }),
     [filteredClients]
@@ -329,6 +331,37 @@ export default function AgencyDashboard() {
     ),
     [filteredClients]
   );
+
+  const sortedGanttClients = useMemo(() => {
+    if (timelineSort === 'default') return ganttClients;
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    const nearestDate = (clientId: string): string | null => {
+      const clientChannels = ganttChannels.filter(ch => ch.client_id === clientId);
+      const dates = clientChannels
+        .map(ch => timelineSort === 'ending-soon' ? ch.end_date : ch.start_date)
+        .filter((d): d is string => !!d);
+      if (dates.length === 0) return null;
+      if (timelineSort === 'ending-soon') {
+        // Nearest future end date, fallback to most recent past
+        const future = dates.filter(d => d >= todayStr).sort();
+        return future.length > 0 ? future[0] : dates.sort().at(-1)!;
+      } else {
+        // Nearest future start date
+        const future = dates.filter(d => d >= todayStr).sort();
+        return future.length > 0 ? future[0] : dates.sort().at(-1)!;
+      }
+    };
+
+    return [...ganttClients].sort((a, b) => {
+      const da = nearestDate(a.id);
+      const db = nearestDate(b.id);
+      if (!da && !db) return 0;
+      if (!da) return 1;
+      if (!db) return -1;
+      return da < db ? -1 : da > db ? 1 : 0;
+    });
+  }, [ganttClients, ganttChannels, timelineSort]);
 
   const ganttAPMarkers = useMemo<GanttAPMarker[]>(() =>
     filteredActionPointClients.flatMap(c =>
@@ -577,7 +610,7 @@ export default function AgencyDashboard() {
                           <rect x="0.5" y="0.5" width="9" height="11" rx="1.5" stroke={activeFileId === file.id ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.25)'} strokeWidth="0.8" fill="none"/>
                           <path d="M2.5 4h5M2.5 6h5M2.5 8h3" stroke={activeFileId === file.id ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.18)'} strokeWidth="0.7" strokeLinecap="round"/>
                         </svg>
-                        <span style={{ fontSize: 11, color: activeFileId === file.id ? '#FFFFFF' : 'rgba(255,255,255,0.5)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <span style={{ fontSize: 13, color: activeFileId === file.id ? '#FFFFFF' : 'rgba(255,255,255,0.5)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {file.name}
                         </span>
                       </div>
@@ -644,12 +677,13 @@ export default function AgencyDashboard() {
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
-            height: 360,
+            flex: 1,
           }}>
             {/* ── Tab bar ── */}
             <div style={{ display: 'flex', flexShrink: 0, borderBottom: '1.5px solid #E8E4DC', position: 'relative' }}>
-              {(['clients', 'todo'] as const).map(tab => {
+              {(['clients', 'todo', 'timeline'] as const).map(tab => {
                 const isActive = activeCardTab === tab;
+                const label = tab === 'clients' ? 'Clients' : tab === 'todo' ? 'To Do' : 'Timeline';
                 return (
                   <button
                     key={tab}
@@ -657,7 +691,7 @@ export default function AgencyDashboard() {
                     style={{
                       flex: 1,
                       padding: isActive ? '12px 0 13.5px' : '14px 0 10px',
-                      fontSize: 14,
+                      fontSize: 18,
                       fontWeight: isActive ? 700 : 500,
                       color: isActive ? '#1C1917' : '#FFFFFF',
                       background: isActive ? '#FDFCF8' : '#3D3A36',
@@ -670,13 +704,100 @@ export default function AgencyDashboard() {
                       letterSpacing: isActive ? '-0.01em' : 0,
                       position: 'relative',
                       zIndex: isActive ? 2 : 1,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 8,
                     }}
                   >
-                    {tab === 'clients' ? 'Clients' : 'To Do'}
+                    {label}
+                    {tab === 'timeline' && isActive && (
+                      <span
+                        style={{ display: 'flex', alignItems: 'center', gap: 3 }}
+                        onClick={e => e.stopPropagation()}
+                      >
+                        <span
+                          role="button"
+                          onClick={() => setTimelineZoom(z => Math.max(z - 1, 0))}
+                          style={{
+                            width: 16, height: 16, borderRadius: 3,
+                            border: '1px solid #D8D4CC',
+                            background: timelineZoom === 0 ? '#F0EDE8' : '#FDFCF8',
+                            color: timelineZoom === 0 ? '#C0BBB4' : '#6B6560',
+                            cursor: timelineZoom === 0 ? 'default' : 'pointer',
+                            fontSize: 12, lineHeight: 1,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontFamily: "'DM Sans', system-ui, sans-serif",
+                            userSelect: 'none',
+                          }}
+                        >−</span>
+                        <span style={{
+                          fontSize: 10, fontWeight: 700, color: '#8A8578',
+                          minWidth: 32, textAlign: 'center',
+                          fontFamily: "'DM Sans', system-ui, sans-serif",
+                          letterSpacing: '0.03em',
+                        }}>
+                          {TIMELINE_ZOOM_LEVELS[timelineZoom].label}
+                        </span>
+                        <span
+                          role="button"
+                          onClick={() => setTimelineZoom(z => Math.min(z + 1, TIMELINE_ZOOM_LEVELS.length - 1))}
+                          style={{
+                            width: 16, height: 16, borderRadius: 3,
+                            border: '1px solid #D8D4CC',
+                            background: timelineZoom === TIMELINE_ZOOM_LEVELS.length - 1 ? '#F0EDE8' : '#FDFCF8',
+                            color: timelineZoom === TIMELINE_ZOOM_LEVELS.length - 1 ? '#C0BBB4' : '#6B6560',
+                            cursor: timelineZoom === TIMELINE_ZOOM_LEVELS.length - 1 ? 'default' : 'pointer',
+                            fontSize: 12, lineHeight: 1,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontFamily: "'DM Sans', system-ui, sans-serif",
+                            userSelect: 'none',
+                          }}
+                        >+</span>
+                      </span>
+                    )}
                   </button>
                 );
               })}
             </div>
+
+            {/* ── Timeline sort bar (shown only when timeline tab active) ── */}
+            {activeCardTab === 'timeline' && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '6px 10px', flexShrink: 0,
+                borderBottom: '1px solid #E8E4DC',
+                background: '#F7F5F0',
+              }}>
+                <span style={{ fontSize: 10, fontWeight: 600, color: '#B5B0A5', textTransform: 'uppercase', letterSpacing: '0.06em', marginRight: 2, fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+                  Sort
+                </span>
+                {([
+                  { key: 'default',      label: 'Default'       },
+                  { key: 'ending-soon',  label: 'Ending soon'   },
+                  { key: 'starting-soon',label: 'Starting soon' },
+                ] as const).map(opt => {
+                  const active = timelineSort === opt.key;
+                  return (
+                    <button
+                      key={opt.key}
+                      onClick={() => setTimelineSort(opt.key)}
+                      style={{
+                        fontSize: 10, fontWeight: active ? 700 : 500,
+                        color: active ? '#FDFCF8' : '#6B6560',
+                        background: active ? '#1C1917' : '#ECEAE4',
+                        border: 'none', borderRadius: 6,
+                        padding: '3px 9px', cursor: 'pointer',
+                        fontFamily: "'DM Sans', system-ui, sans-serif",
+                        transition: 'all 0.12s',
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
 
             {/* ── Tab: Clients ── */}
             {activeCardTab === 'clients' && (
@@ -697,9 +818,22 @@ export default function AgencyDashboard() {
               </div>
             )}
 
+            {/* ── Tab: Timeline ── */}
+            {activeCardTab === 'timeline' && (
+              <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+                <AgencyTimeline
+                  clients={sortedGanttClients}
+                  channels={ganttChannels}
+                  actionPointMarkers={ganttAPMarkers}
+                  zoomIdx={timelineZoom}
+                  onZoomChange={setTimelineZoom}
+                />
+              </div>
+            )}
+
             {/* ── Tab: To Do (Action Points) ── */}
             {activeCardTab === 'todo' && (
-              <>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
                 <div style={{ display: 'flex', alignItems: 'center', padding: '10px 17px 0', marginBottom: 10, flexShrink: 0 }}>
                   <button
                     onClick={() => kanbanRef.current?.startAdding()}
@@ -748,30 +882,8 @@ export default function AgencyDashboard() {
                     onAccountManagerCreated={fetchAccountManagers}
                   />
                 </div>
-              </>
+              </div>
             )}
-          </div>
-
-          {/* Gantt / Calendar */}
-          <div style={{
-            background: 'linear-gradient(135deg, #2F3439 0%, #4B5057 100%)',
-            border: '1px solid rgba(107,114,128,0.75)',
-            borderRadius: 18,
-            minWidth: 0,
-            boxShadow: '0 4px 24px rgba(0,0,0,0.18), 0 1px 8px rgba(0,0,0,0.12)',
-            overflow: 'hidden',
-            flex: 1,
-            minHeight: 0,
-          }}>
-            <CalendarPanel
-              clients={filteredClients}
-              actionPointClients={filteredActionPointClients}
-              filteredClientIds={filteredIds}
-              selectedDay={selectedDay}
-              onDaySelect={setSelectedDay}
-              currentMonth={today}
-              onOpenTimeline={() => setShowFullscreenGantt(true)}
-            />
           </div>
 
         </div>

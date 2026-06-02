@@ -287,8 +287,8 @@ export default function OtherChannelCard({
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
               {/* Notepad header */}
               <div style={{ padding: '8px 13px 6px', borderBottom: '1.5px solid #E0E8F4', background: '#FFFFFF' }}>
-                <div style={{ fontSize: 9, fontWeight: 600, color: '#8A8578', textTransform: 'uppercase', letterSpacing: '0.12em' }}>Notes</div>
-                <div style={{ fontSize: 9, color: '#C0BBC0', marginTop: 1 }}>Only visible to you</div>
+                <div style={{ fontSize: 10, fontWeight: 600, color: '#8A8578', textTransform: 'uppercase', letterSpacing: '0.12em' }}>Notes</div>
+                <div style={{ fontSize: 10, color: '#C0BBC0', marginTop: 1 }}>Only visible to you</div>
               </div>
 
               {/* Ruled paper area */}
@@ -337,7 +337,7 @@ export default function OtherChannelCard({
                           onBlur={() => handleBlur(note.id)}
                           onKeyDown={e => handleKeyDown(e, note.id, idx)}
                           style={{
-                            width: '100%', fontSize: 12, lineHeight: '1.4',
+                            width: '100%', fontSize: 14, lineHeight: '1.4',
                             color: note.done ? '#B5B0A5' : '#1C1917',
                             textDecoration: note.done ? 'line-through' : 'none',
                             background: 'transparent', border: 'none', outline: 'none',
@@ -345,7 +345,7 @@ export default function OtherChannelCard({
                           }}
                         />
                         {activeDateStr && (
-                          <div style={{ fontSize: 9, color: note.done ? '#B5B0A5' : dueDateColor(activeDateStr) }}>
+                          <div style={{ fontSize: 10, color: note.done ? '#B5B0A5' : dueDateColor(activeDateStr) }}>
                             {formatDueDate(activeDateStr)}
                           </div>
                         )}
@@ -368,7 +368,7 @@ export default function OtherChannelCard({
                           </svg>
                         </button>
                         <button onClick={() => deleteNote(note.id)}
-                          style={{ width: 16, height: 16, borderRadius: '50%', border: 'none', background: '#F5EDE9', color: '#A0442A', fontSize: 10, lineHeight: 1, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                          style={{ width: 16, height: 16, borderRadius: '50%', border: 'none', background: '#F5EDE9', color: '#A0442A', fontSize: 12, lineHeight: 1, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                           aria-label="Delete note"
                         >×</button>
                       </div>
@@ -386,10 +386,10 @@ export default function OtherChannelCard({
                       onChange={e => setEditTexts(prev => ({ ...prev, [DRAFT_ID]: e.target.value }))}
                       onKeyDown={e => handleKeyDown(e, DRAFT_ID, notes.length)}
                       placeholder={notes.length > 0 ? 'New note…' : 'Start typing…'}
-                      style={{ width: '100%', fontSize: 12, lineHeight: '1.4', color: '#1C1917', background: 'transparent', border: 'none', outline: 'none', fontFamily: 'inherit', padding: 0 }}
+                      style={{ width: '100%', fontSize: 14, lineHeight: '1.4', color: '#1C1917', background: 'transparent', border: 'none', outline: 'none', fontFamily: 'inherit', padding: 0 }}
                     />
                     {(editDates[DRAFT_ID]) && (
-                      <div style={{ fontSize: 9, color: '#8A8578' }}>{formatDueDate(editDates[DRAFT_ID])}</div>
+                      <div style={{ fontSize: 10, color: '#8A8578' }}>{formatDueDate(editDates[DRAFT_ID])}</div>
                     )}
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0, marginTop: 2 }}>

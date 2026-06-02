@@ -3,6 +3,7 @@
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { MediaPlanChannel } from '@/components/media-plan-builder/media-plan-grid';
+import { getPlatformForChannel } from '@/lib/utils/channel-pacing';
 import { ListTodo, CheckCircle2, Circle, ChevronDown, ChevronUp, Trash2, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { format, parseISO } from 'date-fns';
@@ -157,18 +158,23 @@ export default function TodoSection({ mediaPlanBuilderChannels, clientId, embedd
   const fetchAll = async () => {
     setLoading(true);
     try {
-      // Get unique channel types from the media plan builder channels
-      // Normalize to proper case for matching with action_points channel_type
+      // Resolve canonical channel_type values using the same platform mapping as InlineActionPoints.
+      // Simple title-case is wrong for names like "Google Search" (stored as "Google Ads" in the DB).
       const channelTypes = new Set<string>();
       mediaPlanBuilderChannels.forEach(channel => {
         if (channel.channelName) {
-          // Convert from "META ADS" to "Meta Ads" format
-          const normalizedName = channel.channelName
-            .toLowerCase()
-            .split(' ')
-            .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-            .join(' ');
-          channelTypes.add(normalizedName);
+          const platform = getPlatformForChannel(channel.channelName);
+          const canonical =
+            platform === 'meta-ads' ? 'Meta Ads' :
+            platform === 'google-ads' ? 'Google Ads' :
+            platform === 'linkedin-ads' ? 'LinkedIn Ads' :
+            platform === 'tiktok-ads' ? 'TikTok Ads' :
+            platform === 'snapchat-ads' ? 'Snapchat Ads' :
+            platform === 'pinterest-ads' ? 'Pinterest Ads' :
+            platform === 'instagram-ads' ? 'Instagram Ads' :
+            channel.channelName.toLowerCase().split(' ')
+              .map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+          channelTypes.add(canonical);
         }
       });
 

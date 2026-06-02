@@ -25,7 +25,7 @@ function Toast({ message, onDismiss }: { message: string; onDismiss: () => void 
         color: '#FDFCF8',
         borderRadius: 6,
         padding: '10px 16px',
-        fontSize: 13,
+        fontSize: 15,
         zIndex: 9999,
         boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
         ...pageFont,

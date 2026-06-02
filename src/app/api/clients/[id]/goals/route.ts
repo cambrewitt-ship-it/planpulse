@@ -186,19 +186,29 @@ export async function GET(_req: NextRequest, { params }: Params) {
       if (filterCampaignIds.length > 0) autoActQuery = autoActQuery.in('campaign_id', filterCampaignIds);
       const { data: autoActRows } = await autoActQuery;
 
-      // Tally each offsite/app conversion action type — pick the one with the highest count.
-      // Using a single winner avoids double-counting across related event types.
+      // Tally all action types — prefer offsite/app conversions (pixel-based), then fall back to
+      // any meaningful action type (e.g. link_click, lead) if no pixel events are found.
       const evtTotals = new Map<string, number>();
       for (const row of autoActRows ?? []) {
         for (const act of ((row.meta_actions as any[]) ?? [])) {
-          if (/^offsite_conversion|^mobile_app_install/.test(act.action_type)) {
-            evtTotals.set(act.action_type, (evtTotals.get(act.action_type) ?? 0) + (parseInt(act.value, 10) || 0));
-          }
+          evtTotals.set(act.action_type, (evtTotals.get(act.action_type) ?? 0) + (parseInt(act.value, 10) || 0));
         }
       }
+      // Pass 1: offsite pixel conversions and app installs
       let bestCount = 0;
       for (const [type, count] of evtTotals) {
-        if (count > bestCount) { bestCount = count; autoMetaActionType = type; }
+        if (/^offsite_conversion|^mobile_app_install/.test(type) && count > bestCount) {
+          bestCount = count; autoMetaActionType = type;
+        }
+      }
+      // Pass 2: fallback to any meaningful action type (exclude vanity engagement metrics)
+      if (!autoMetaActionType) {
+        const vanity = /^video_view$|^page_engagement$|^post_engagement$|^photo_view$|^comment$|^like$/;
+        for (const [type, count] of evtTotals) {
+          if (!vanity.test(type) && count > bestCount) {
+            bestCount = count; autoMetaActionType = type;
+          }
+        }
       }
       if (autoMetaActionType && bestCount > 0) {
         actuals['meta-ads'].conversions = bestCount;
@@ -301,6 +311,34 @@ export async function GET(_req: NextRequest, { params }: Params) {
     prev7DaysActuals = aggregateAdRows(prev7Rows ?? []);
     yesterdayActuals = aggregateAdRows(yesterdayRows ?? []);
     dayBeforeActuals = aggregateAdRows(dayBeforeRows ?? []);
+
+    // Fallback: if step 4b didn't detect an action type (e.g. no MTD rows on the
+    // first day of a new month), detect from the 30-day series window instead.
+    // The series rows already include meta_actions so no extra query is needed.
+    if (!metaActionType && !autoMetaActionType && activePlatforms.includes('meta-ads')) {
+      const evtTotals = new Map<string, number>();
+      for (const row of seriesRows ?? []) {
+        for (const act of ((row.meta_actions as any[]) ?? [])) {
+          evtTotals.set(act.action_type, (evtTotals.get(act.action_type) ?? 0) + (parseInt(act.value, 10) || 0));
+        }
+      }
+      // Pass 1: prefer pixel conversions and app installs
+      let bestCount = 0;
+      for (const [type, count] of evtTotals) {
+        if (/^offsite_conversion|^mobile_app_install/.test(type) && count > bestCount) {
+          bestCount = count; autoMetaActionType = type;
+        }
+      }
+      // Pass 2: fallback to any meaningful action type
+      if (!autoMetaActionType) {
+        const vanity = /^video_view$|^page_engagement$|^post_engagement$|^photo_view$|^comment$|^like$/;
+        for (const [type, count] of evtTotals) {
+          if (!vanity.test(type) && count > bestCount) {
+            bestCount = count; autoMetaActionType = type;
+          }
+        }
+      }
+    }
 
     // Build ordered daily series (oldest → newest), one entry per date with data.
     // Apply metaActionType conversion override per-day — same logic as the monthly override.

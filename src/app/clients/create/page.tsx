@@ -95,10 +95,10 @@ interface IntelDocument {
 const STEPS: { num: Step; label: string; icon: React.ElementType }[] = [
   { num: 1, label: 'Details', icon: Building2 },
   { num: 2, label: 'Plan', icon: BarChart2 },
-  { num: 3, label: 'Goal', icon: Target },
-  { num: 4, label: 'Connect', icon: Wifi },
-  { num: 5, label: 'Accounts', icon: List },
-  { num: 6, label: 'Campaigns', icon: GitBranch },
+  { num: 3, label: 'Connect', icon: Wifi },
+  { num: 4, label: 'Accounts', icon: List },
+  { num: 5, label: 'Campaigns', icon: GitBranch },
+  { num: 6, label: 'Goal', icon: Target },
   { num: 7, label: 'Intel', icon: FileText },
 ];
 
@@ -111,16 +111,15 @@ const PLATFORMS: Platform[] = [
 ];
 
 const GOAL_METRICS = [
-  { value: 'cpa', label: 'CPA – Cost per Acquisition' },
-  { value: 'cpc', label: 'CPC – Cost per Click' },
-  { value: 'cpl', label: 'CPL – Cost per Lead' },
-  { value: 'roas', label: 'ROAS – Return on Ad Spend' },
-  { value: 'ctr', label: 'CTR – Click-through Rate (%)' },
-  { value: 'cpm', label: 'CPM – Cost per 1,000 Impressions' },
-  { value: 'conversions', label: 'Conversions' },
-  { value: 'clicks', label: 'Clicks' },
-  { value: 'impressions', label: 'Impressions' },
-  { value: 'spend', label: 'Spend (Budget)' },
+  { value: 'CPA', label: 'CPA – Cost per Acquisition' },
+  { value: 'CPC', label: 'CPC – Cost per Click' },
+  { value: 'CPL', label: 'CPL – Cost per Lead' },
+  { value: 'ROAS', label: 'ROAS – Return on Ad Spend' },
+  { value: 'CTR', label: 'CTR – Click-through Rate (%)' },
+  { value: 'CPM', label: 'CPM – Cost per 1,000 Impressions' },
+  { value: 'Conversions', label: 'Conversions' },
+  { value: 'Clicks', label: 'Clicks' },
+  { value: 'Impressions', label: 'Impressions' },
 ];
 
 const INTEL_FILE_TYPES = [
@@ -134,6 +133,45 @@ const INTEL_FILE_TYPES = [
   { value: 'handover_notes', label: 'Handover Notes' },
   { value: 'other', label: 'Other' },
 ];
+
+const META_DEFAULT_EVENTS: Array<{ name: string; count: number }> = [
+  { name: 'offsite_conversion.fb_pixel_purchase', count: 0 },
+  { name: 'offsite_conversion.fb_pixel_lead', count: 0 },
+  { name: 'offsite_conversion.fb_pixel_complete_registration', count: 0 },
+  { name: 'offsite_conversion.fb_pixel_add_to_cart', count: 0 },
+  { name: 'offsite_conversion.fb_pixel_initiate_checkout', count: 0 },
+  { name: 'offsite_conversion.fb_pixel_view_content', count: 0 },
+  { name: 'offsite_conversion.fb_pixel_contact', count: 0 },
+  { name: 'offsite_conversion.fb_pixel_schedule', count: 0 },
+  { name: 'mobile_app_install', count: 0 },
+  { name: 'link_click', count: 0 },
+];
+
+const GA4_DEFAULT_EVENTS: string[] = [
+  'purchase', 'generate_lead', 'begin_checkout', 'add_to_cart',
+  'view_item', 'sign_up', 'form_submit', 'page_view',
+];
+
+const META_ACTION_LABELS: Record<string, string> = {
+  'offsite_conversion.fb_pixel_purchase':              'Purchases',
+  'offsite_conversion.fb_pixel_add_to_cart':           'Add to Cart',
+  'offsite_conversion.fb_pixel_initiate_checkout':     'Checkout Started',
+  'offsite_conversion.fb_pixel_complete_registration': 'Registrations',
+  'offsite_conversion.fb_pixel_lead':                  'Pixel Leads',
+  'offsite_conversion.fb_pixel_view_content':          'Content Views',
+  'offsite_conversion.fb_pixel_contact':               'Contact',
+  'offsite_conversion.fb_pixel_schedule':              'Schedule',
+  'link_click':                                        'Link Clicks',
+  'mobile_app_install':                                'App Installs',
+};
+
+function metaActionLabel(key: string): string {
+  return META_ACTION_LABELS[key] ??
+    key.replace('offsite_conversion.fb_pixel_', '')
+       .replace('offsite_conversion.', '')
+       .replace(/_/g, ' ')
+       .replace(/\b\w/g, c => c.toUpperCase());
+}
 
 // ── Platform SVG logos ────────────────────────────────────────────────────────
 
@@ -197,10 +235,17 @@ export default function CreateClientPage() {
   const [sandboxPlan, setSandboxPlan] = useState<SandboxPlan | null>(null);
   const [sandboxPlanHydrated, setSandboxPlanHydrated] = useState(false);
 
-  // ── Step 3: Performance Goal ──
+  // ── Step 6: Performance Goal ──
   const [goalMetric, setGoalMetric] = useState('');
   const [goalTarget, setGoalTarget] = useState('');
   const [goalSaving, setGoalSaving] = useState(false);
+  const [goalMetricSource, setGoalMetricSource] = useState<'ad' | 'ga4'>('ad');
+  const [goalMetaActionType, setGoalMetaActionType] = useState('');
+  const [goalGa4EventName, setGoalGa4EventName] = useState('');
+  const [goalAvailableGa4Events, setGoalAvailableGa4Events] = useState<string[]>([]);
+  const [goalAvailableMetaEvents, setGoalAvailableMetaEvents] = useState<Array<{ name: string; count: number }>>([]);
+  const [goalEventsSyncing, setGoalEventsSyncing] = useState(false);
+  const [goalMetaCustomEvent, setGoalMetaCustomEvent] = useState('');
 
   // ── Step 4: Client Intel Hub ──
   const [intelDocs, setIntelDocs] = useState<IntelDocument[]>([]);
@@ -294,7 +339,10 @@ export default function CreateClientPage() {
       const seen = new Set<string>();
       const rows: LinkableRow[] = [];
       for (const row of sandboxPlan.rows) {
-        const channelName = (row.channel ?? '').trim();
+        const channelRaw = (row.channel ?? '').trim();
+        const funnelRaw = (row.funnel ?? '').trim();
+        // Fall back to funnel if channel is empty (can happen when the parser assigns channels to the funnel column)
+        const channelName = channelRaw || (LINKABLE_KWS.some(kw => funnelRaw.toLowerCase().includes(kw)) ? funnelRaw : '');
         if (!channelName) continue;
         if (!LINKABLE_KWS.some((kw) => channelName.toLowerCase().includes(kw))) continue;
         const detail = (row.detail ?? '').trim();
@@ -366,8 +414,12 @@ export default function CreateClientPage() {
     // Collect flights per channel, deduped by flight ID (skip slave rows which share a flight group)
     const channelMap = new Map<string, { subType?: string; flightMap: Map<string, { startWeek: string; endWeek: string; budget: number; color: string; id: string }> }>();
 
+    const LINKABLE_KWS_LOCAL = ['meta', 'facebook', 'instagram', 'google', 'youtube', 'search', 'display', 'shopping', 'pmax', 'performance max'];
     for (const row of plan.rows) {
-      const key = row.channel?.trim();
+      const channelRaw = row.channel?.trim();
+      const funnelRaw = row.funnel?.trim();
+      // Fall back to funnel when channel is empty and the funnel value looks like a paid platform
+      const key = channelRaw || (funnelRaw && LINKABLE_KWS_LOCAL.some(kw => funnelRaw.toLowerCase().includes(kw)) ? funnelRaw : '');
       if (!key) continue;
       if (!channelMap.has(key)) channelMap.set(key, { subType: row.detail?.trim() || undefined, flightMap: new Map() });
       if (row.isMasterRow === false) continue;
@@ -436,8 +488,8 @@ export default function CreateClientPage() {
   // ── Step 3 handlers: Performance Goal ────────────────────────────────────────
 
   const handleSaveGoal = async () => {
-    if (!clientId) { setStep(4); return; }
-    if (!goalMetric || !goalTarget) { setStep(4); return; }
+    if (!clientId) { setStep(7); return; }
+    if (!goalMetric || !goalTarget) { setStep(7); return; }
     setGoalSaving(true);
     try {
       await fetch(`/api/clients/${clientId}/goals`, {
@@ -450,9 +502,18 @@ export default function CreateClientPage() {
           is_primary: true,
         }),
       });
+      try {
+        localStorage.setItem(`perf_widget_${clientId}`, JSON.stringify({
+          platform: '',
+          campaignIds: [],
+          metricSource: goalMetricSource,
+          ga4EventName: goalGa4EventName,
+          metaActionType: goalMetaActionType === '__custom__' ? goalMetaCustomEvent.trim() : goalMetaActionType,
+        }));
+      } catch {}
     } catch {}
     setGoalSaving(false);
-    setStep(4);
+    setStep(7);
   };
 
   // ── Step 4 handlers: Client Intel Hub ────────────────────────────────────────
@@ -491,7 +552,7 @@ export default function CreateClientPage() {
   // ── Step 5 handlers: Connect Platforms ───────────────────────────────────────
 
   useEffect(() => {
-    if (step === 4 && clientId) fetchConnectionStatus();
+    if (step === 3 && clientId) fetchConnectionStatus();
   }, [step, clientId]);
 
   const fetchConnectionStatus = async () => {
@@ -556,9 +617,9 @@ export default function CreateClientPage() {
 
   const anyConnected = Object.values(connectionStatus).some(Boolean);
 
-  // When advancing from Step 4 to Step 5, load accounts for connected platforms
-  const handleAdvanceToStep5 = async () => {
-    setStep(5);
+  // When advancing from Step 3 to Step 4, load accounts for connected platforms
+  const handleAdvanceToStep4 = async () => {
+    setStep(4);
     if (connectionStatus.facebook) discoverMetaAccounts();
     if (connectionStatus['google-ads']) fetchGadsAccounts();
     if (connectionStatus['google-analytics']) discoverGaAccounts();
@@ -728,7 +789,7 @@ export default function CreateClientPage() {
   // ── Step 7 handlers ───────────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (step === 6 && connectionStatus.facebook) loadCampaigns();
+    if (step === 5 && connectionStatus.facebook) loadCampaigns();
   }, [step]);
 
   useEffect(() => {
@@ -786,8 +847,69 @@ export default function CreateClientPage() {
       });
     } catch {}
     setCampaignsSaving(false);
-    setStep(7);
+    setStep(6);
   };
+
+  // ── Step 6: fetch spend data then poll for conversion events ──────────────────
+  // ad_performance_metrics (where events come from) is only populated when the
+  // spend fetch APIs are called. We trigger those here for connected platforms so
+  // the events appear with real counts without requiring a dashboard visit first.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (step !== 6 || !clientId) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+    let polls = 0;
+    const MAX_POLLS = 20;
+
+    const poll = async () => {
+      try {
+        const r = await fetch(`/api/clients/${clientId}/goals`);
+        const json = r.ok ? await r.json() : null;
+        if (stopped) return;
+        if (json) {
+          setGoalAvailableGa4Events(json.ga4Events ?? []);
+          setGoalAvailableMetaEvents(json.metaEvents ?? []);
+          const hasCounts = (json.metaEvents ?? []).some((e: { count: number }) => e.count > 0)
+            || (json.ga4Events ?? []).length > 0;
+          if (hasCounts || polls >= MAX_POLLS) {
+            setGoalEventsSyncing(false);
+            return;
+          }
+        }
+      } catch {}
+      if (!stopped && polls < MAX_POLLS) {
+        polls++;
+        timer = setTimeout(poll, 5000);
+      } else {
+        setGoalEventsSyncing(false);
+      }
+    };
+
+    // Trigger spend data fetch so ad_performance_metrics gets populated for this client.
+    // Fire-and-forget — polling below will pick up the data once it lands.
+    const today = new Date();
+    const endDate = today.toISOString().split('T')[0];
+    const startDate = new Date(today.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    if (connectionStatus.facebook) {
+      fetch('/api/ads/meta/fetch-spend', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ startDate, endDate, clientId }),
+      }).catch(() => {});
+    }
+    if (connectionStatus['google-ads']) {
+      fetch('/api/ads/fetch-spend', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ platform: 'google-ads', startDate, endDate, clientId }),
+      }).catch(() => {});
+    }
+
+    setGoalEventsSyncing(true);
+    poll();
+    return () => { stopped = true; clearTimeout(timer); };
+  }, [step, clientId]); // connectionStatus captured at mount; won't change after Step 3
 
   // ── Render ─────────────────────────────────────────────────────────────────────
 
@@ -910,59 +1032,161 @@ export default function CreateClientPage() {
           </div>
         )}
 
-        {/* ── Step 3: Performance Goal ───────────────────────────────────────── */}
-        {step === 3 && clientId && (
-          <Card className="max-w-lg mx-auto" style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18 }}>
-            <CardHeader>
-              <CardTitle>Performance Goal</CardTitle>
-              <CardDescription>Set a primary KPI target for this client</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-5">
-              <div className="grid gap-2">
-                <Label htmlFor="goal-metric">Primary KPI</Label>
-                <select
-                  id="goal-metric"
-                  value={goalMetric}
-                  onChange={(e) => setGoalMetric(e.target.value)}
-                  className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                >
-                  <option value="">Select a metric…</option>
-                  {GOAL_METRICS.map((m) => (
-                    <option key={m.value} value={m.value}>{m.label}</option>
-                  ))}
-                </select>
-              </div>
+        {/* ── Step 6: Performance Goal ───────────────────────────────────────── */}
+        {step === 6 && clientId && (() => {
+          const mergedMetaEvents = [
+            ...goalAvailableMetaEvents,
+            ...META_DEFAULT_EVENTS.filter(d => !goalAvailableMetaEvents.some(e => e.name === d.name)),
+          ];
+          const mergedGa4Events = [
+            ...goalAvailableGa4Events,
+            ...GA4_DEFAULT_EVENTS.filter(d => !goalAvailableGa4Events.includes(d)),
+          ];
+          const showMetaEvents = goalMetricSource === 'ad' && connectionStatus.facebook;
+          const showGa4Events = goalMetricSource === 'ga4';
+          return (
+            <Card className="max-w-lg mx-auto" style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18 }}>
+              <CardHeader>
+                <CardTitle>Performance Goal</CardTitle>
+                <CardDescription>Set your primary KPI and the conversion event to measure against</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-5">
+                {/* KPI + Target */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="grid gap-2">
+                    <Label htmlFor="goal-metric">Primary KPI</Label>
+                    <select
+                      id="goal-metric"
+                      value={goalMetric}
+                      onChange={(e) => setGoalMetric(e.target.value)}
+                      className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                    >
+                      <option value="">Select a metric…</option>
+                      {GOAL_METRICS.map((m) => (
+                        <option key={m.value} value={m.value}>{m.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="goal-target">Target Value</Label>
+                    <Input
+                      id="goal-target"
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={goalTarget}
+                      onChange={(e) => setGoalTarget(e.target.value)}
+                      placeholder="e.g. 25.00"
+                    />
+                  </div>
+                </div>
 
-              <div className="grid gap-2">
-                <Label htmlFor="goal-target">Target Value</Label>
-                <Input
-                  id="goal-target"
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={goalTarget}
-                  onChange={(e) => setGoalTarget(e.target.value)}
-                  placeholder="e.g. 25.00"
-                />
-              </div>
+                {/* Data Source toggle */}
+                <div className="grid gap-2">
+                  <Label>Data Source</Label>
+                  <div className="flex gap-2">
+                    {(['ad', 'ga4'] as const).map((src) => (
+                      <button
+                        key={src}
+                        type="button"
+                        onClick={() => setGoalMetricSource(src)}
+                        className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+                          goalMetricSource === src
+                            ? 'bg-[rgba(74,101,128,0.1)] border-[#4A6580] text-[#4A6580]'
+                            : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'
+                        }`}
+                      >
+                        {src === 'ad' ? 'Ad Platform' : 'GA4'}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-xs text-gray-400">
+                    {goalMetricSource === 'ga4'
+                      ? 'Uses GA4 event count as the conversion denominator for cost metrics'
+                      : 'Uses ad platform reported conversions / actions'}
+                  </p>
+                </div>
 
-              <div className="flex gap-2 pt-2">
-                <Button
-                  onClick={handleSaveGoal}
-                  disabled={goalSaving}
-                  className="flex-1"
-                >
-                  {goalSaving
-                    ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving…</>
-                    : goalMetric && goalTarget
-                      ? <>Save Goal & Continue<ArrowRight className="h-4 w-4 ml-2" /></>
-                      : <>Continue<ArrowRight className="h-4 w-4 ml-2" /></>
-                  }
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+                {/* GA4 Conversion Event */}
+                {showGa4Events && (
+                  <div className="grid gap-2">
+                    <Label htmlFor="goal-ga4-event">GA4 Conversion Event</Label>
+                    <select
+                      id="goal-ga4-event"
+                      value={goalGa4EventName}
+                      onChange={(e) => setGoalGa4EventName(e.target.value)}
+                      className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                    >
+                      <option value="">— select event —</option>
+                      {mergedGa4Events.map((ev) => (
+                        <option key={ev} value={ev}>{ev}</option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-gray-400">This event count becomes the denominator for CPA / CPL calculation</p>
+                  </div>
+                )}
+
+                {/* Meta Conversion Event */}
+                {showMetaEvents && (
+                  <div className="grid gap-2">
+                    <div className="flex items-center gap-2">
+                      <Label htmlFor="goal-meta-event">Meta Conversion Event</Label>
+                      {goalEventsSyncing && (
+                        <span className="flex items-center gap-1 text-xs text-amber-600">
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                          Syncing data…
+                        </span>
+                      )}
+                    </div>
+                    <select
+                      id="goal-meta-event"
+                      value={goalMetaActionType}
+                      onChange={(e) => setGoalMetaActionType(e.target.value)}
+                      disabled={goalEventsSyncing}
+                      className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <option value="">— auto-detect best event —</option>
+                      {mergedMetaEvents.map((ev) => (
+                        <option key={ev.name} value={ev.name}>
+                          {metaActionLabel(ev.name)}{ev.count > 0 ? ` (${ev.count.toLocaleString()})` : ''}
+                        </option>
+                      ))}
+                      <option value="__custom__">Custom event…</option>
+                    </select>
+                    {goalMetaActionType === '__custom__' && (
+                      <Input
+                        placeholder="e.g. offsite_conversion.fb_pixel_purchase"
+                        value={goalMetaCustomEvent}
+                        onChange={(e) => setGoalMetaCustomEvent(e.target.value)}
+                        className="text-sm font-mono"
+                      />
+                    )}
+                    <p className="text-xs text-gray-400">
+                      {goalEventsSyncing
+                        ? 'Fetching your conversion event counts from Meta — counts will appear shortly'
+                        : 'Used as the conversion count for CPA / CPL on the performance gauge'}
+                    </p>
+                  </div>
+                )}
+
+                <div className="flex gap-2 pt-2">
+                  <Button
+                    onClick={handleSaveGoal}
+                    disabled={goalSaving}
+                    className="flex-1"
+                  >
+                    {goalSaving
+                      ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving…</>
+                      : goalMetric && goalTarget
+                        ? <>Save Goal & Continue<ArrowRight className="h-4 w-4 ml-2" /></>
+                        : <>Continue<ArrowRight className="h-4 w-4 ml-2" /></>
+                    }
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })()}
 
         {/* ── Step 7: Client Intel Hub (optional final step) ─────────────────── */}
         {step === 7 && clientId && (
@@ -1050,8 +1274,8 @@ export default function CreateClientPage() {
           </div>
         )}
 
-        {/* ── Step 4: Connect Platforms ──────────────────────────────────────── */}
-        {step === 4 && clientId && (
+        {/* ── Step 3: Connect Platforms ──────────────────────────────────────── */}
+        {step === 3 && clientId && (
           <div className="max-w-xl mx-auto space-y-4">
             <div>
               <h2 className="text-xl font-semibold">Connect Ad Platforms</h2>
@@ -1108,7 +1332,7 @@ export default function CreateClientPage() {
             </Card>
 
             <Button
-              onClick={handleAdvanceToStep5}
+              onClick={handleAdvanceToStep4}
               disabled={isCheckingConnections}
               className="w-full"
             >
@@ -1117,8 +1341,8 @@ export default function CreateClientPage() {
           </div>
         )}
 
-        {/* ── Step 5: Configure Accounts ─────────────────────────────────────── */}
-        {step === 5 && (
+        {/* ── Step 4: Configure Accounts ─────────────────────────────────────── */}
+        {step === 4 && (
           <div className="max-w-2xl mx-auto space-y-5">
             <div>
               <h2 className="text-xl font-semibold">Load Ad Accounts</h2>
@@ -1307,7 +1531,7 @@ export default function CreateClientPage() {
 
             {/* Continue button */}
             <Button
-              onClick={() => connectionStatus.facebook ? setStep(6) : setStep(7)}
+              onClick={() => connectionStatus.facebook ? setStep(5) : setStep(6)}
               disabled={connectionStatus.facebook ? !metaSaved : false}
               className={`w-full ${connectionStatus.facebook && !metaSaved ? 'bg-white text-gray-400 border border-gray-200 hover:bg-white' : ''}`}
             >
@@ -1320,8 +1544,8 @@ export default function CreateClientPage() {
           </div>
         )}
 
-        {/* ── Step 6: Link Campaigns ─────────────────────────────────────────── */}
-        {step === 6 && (
+        {/* ── Step 5: Link Campaigns ─────────────────────────────────────────── */}
+        {step === 5 && (
           <div className="max-w-2xl mx-auto space-y-4">
             <div>
               <h2 className="text-xl font-semibold">Link Campaigns</h2>

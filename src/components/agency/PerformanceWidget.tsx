@@ -17,6 +17,7 @@ export interface PerfData {
   trend?: { pctChange: number; improving: boolean } | null;
   trend24h?: { pctChange: number; improving: boolean } | null;
   dailySeries: number[];  // last 30 days of metric values, oldest first (only days with data)
+  metaActionType?: string;
 }
 
 interface WidgetConfig {
@@ -559,7 +560,7 @@ export function PerformanceWidget({
     const primaryGoal = goals.find(g => g.is_primary) ?? goals[0] ?? null;
 
     if (!primaryGoal) {
-      const noData: PerfData = { needle: 0.5, metric: '', actualLabel: '', targetLabel: '', targetValue: null, color: '#B5B0A5', hasData: false, trend: null, trend24h: null, dailySeries: [] };
+      const noData: PerfData = { needle: 0.5, metric: '', actualLabel: '', targetLabel: '', targetValue: null, color: '#B5B0A5', hasData: false, trend: null, trend24h: null, dailySeries: [], metaActionType: config.metaActionType };
       setPerfData(noData);
       onNeedleRef.current?.(noData);
       return;
@@ -587,7 +588,7 @@ export function PerformanceWidget({
       }
       const cur7Val = metricFromDayRow({ spend: cur7Spend, impressions: cur7Imp, clicks: cur7Clicks, conversions: cur7Conv }, primaryGoal.metric);
       const yest7Val = metricFromDayRow({ spend: yest7Spend, impressions: yest7Imp, clicks: yest7Clicks, conversions: yest7Conv }, primaryGoal.metric);
-      actual = yest7Val ?? cur7Val;
+      actual = cur7Val ?? yest7Val;
       if (cur7Val != null && yest7Val != null && yest7Val !== 0) {
         trend24h = { pctChange: ((cur7Val - yest7Val) / yest7Val) * 100, improving: lowerBetter ? cur7Val < yest7Val : cur7Val > yest7Val };
       }
@@ -623,6 +624,7 @@ export function PerformanceWidget({
         trend,
         trend24h,
         dailySeries,
+        metaActionType: config.metaActionType,
       };
       setPerfData(noData);
       onNeedleRef.current?.(noData);
@@ -642,10 +644,11 @@ export function PerformanceWidget({
       trend,
       trend24h,
       dailySeries,
+      metaActionType: config.metaActionType,
     };
     setPerfData(data);
     onNeedleRef.current?.(data);
-  }, [goals, combinedActuals, ga4Actuals, last7DaysActuals, prev7DaysActuals, yesterdayActuals, dayBeforeActuals, last30DaysSeries, config.metricSource]);
+  }, [goals, combinedActuals, ga4Actuals, last7DaysActuals, prev7DaysActuals, yesterdayActuals, dayBeforeActuals, last30DaysSeries, config.metricSource, config.metaActionType]);
 
   const handleSave = useCallback((newConfig: WidgetConfig) => {
     persistConfig(clientId, newConfig);

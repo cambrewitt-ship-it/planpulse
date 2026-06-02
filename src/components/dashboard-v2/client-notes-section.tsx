@@ -158,7 +158,7 @@ export default function ClientNotesSection({ clientId, onNotesChange }: ClientNo
     <div className="bg-white rounded-xl border border-gray-200 p-4">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <span style={{ fontSize: 14 }}>📝</span>
+          <span style={{ fontSize: 16 }}>📝</span>
           <span className="text-sm font-semibold text-gray-800">Notes</span>
           {notes.filter(n => !n.done).length > 0 && (
             <span className="text-xs font-medium text-gray-400">
