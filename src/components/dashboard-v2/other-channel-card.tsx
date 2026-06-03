@@ -439,6 +439,8 @@ export default function OtherChannelCard({
         actual={manualActualSpend}
         onChange={handleSpendChange}
         accentColor="#4A6580"
+        flightStart={channel.flights && channel.flights.length > 0 ? channel.flights[0].startWeek : null}
+        flightEnd={channel.flights && channel.flights.length > 0 ? channel.flights[channel.flights.length - 1].endWeek : null}
       />
     </div>
   );

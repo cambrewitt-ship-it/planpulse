@@ -119,9 +119,10 @@ export async function GET() {
     const managerIds = accountDetails.filter(a => a.isManager).map(a => a.customerId);
     console.log(`Manager (MCC) accounts: ${managerIds.join(', ') || 'none'}`);
 
-    // For each manager account, query its client sub-accounts so we can map
-    // sub-account ID → parent manager ID.
+    // For each manager account, query ALL sub-accounts at any depth so we can map
+    // sub-account ID → parent manager ID and capture their names.
     const clientToManager: Record<string, string> = {};
+    const subAccountNames: Record<string, string> = {};
 
     for (const managerId of managerIds) {
       try {
@@ -136,7 +137,7 @@ export async function GET() {
               'login-customer-id': managerId,
             },
             body: JSON.stringify({
-              query: `SELECT customer_client.id, customer_client.manager FROM customer_client WHERE customer_client.level = 1`,
+              query: `SELECT customer_client.id, customer_client.descriptive_name, customer_client.manager FROM customer_client`,
             }),
           }
         );
@@ -147,6 +148,9 @@ export async function GET() {
             const clientId = result.customerClient?.id?.toString();
             if (clientId && clientId !== managerId) {
               clientToManager[clientId] = managerId;
+              if (result.customerClient?.descriptiveName) {
+                subAccountNames[clientId] = result.customerClient.descriptiveName;
+              }
             }
           }
         }
@@ -157,10 +161,25 @@ export async function GET() {
 
     console.log('Client → Manager map:', clientToManager);
 
+    // Start with directly-accessible accounts
+    const directAccountIds = new Set(accountDetails.map(a => a.customerId));
+
+    // Add any sub-accounts discovered via manager queries that weren't in the direct list
+    for (const [clientId, managerId] of Object.entries(clientToManager)) {
+      if (!directAccountIds.has(clientId)) {
+        accountDetails.push({
+          customerId: clientId,
+          descriptiveName: subAccountNames[clientId] ?? null,
+          currencyCode: null,
+          isManager: false,
+        });
+      }
+    }
+
     // Build the final accounts list with resolved managerCustomerId
     const accounts = accountDetails.map(a => ({
       customerId: a.customerId,
-      descriptiveName: a.descriptiveName,
+      descriptiveName: a.descriptiveName ?? subAccountNames[a.customerId] ?? null,
       currencyCode: a.currencyCode,
       isManager: a.isManager,
       // Sub-accounts get their parent manager ID; manager/standalone accounts get null

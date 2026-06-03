@@ -267,6 +267,8 @@ export default function DisplayNativeCard({ channel, clientId, onUpdateChannel, 
         actual={manualActualSpend}
         onChange={handleSpendChange}
         accentColor={isDisplay ? '#0891b2' : '#0d9488'}
+        flightStart={startDate}
+        flightEnd={endDate}
       />
     </div>
   );

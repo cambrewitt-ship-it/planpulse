@@ -478,12 +478,8 @@ export async function GET() {
         'Authorization': `Bearer ${accessToken}`,
         'developer-token': developerToken,
         'Content-Type': 'application/json',
+        'login-customer-id': testCustomerId,
       };
-
-      // Add login-customer-id if MCC is configured
-      if (cleanMccId) {
-        queryHeaders['login-customer-id'] = cleanMccId;
-      }
 
       try {
         const queryResponse = await fetch(searchUrl, {
@@ -577,15 +573,16 @@ export async function GET() {
         const testQuery = `SELECT customer.id, customer.descriptive_name FROM customer LIMIT 1`;
         const testUrl = `https://googleads.googleapis.com/v21/customers/${cleanCustomerId}/googleAds:search`;
 
+        const loginId = account.manager_customer_id
+          ? account.manager_customer_id.replace(/-/g, '')
+          : cleanCustomerId;
+
         const testHeaders: Record<string, string> = {
           'Authorization': `Bearer ${accessToken}`,
           'developer-token': developerToken,
           'Content-Type': 'application/json',
+          'login-customer-id': loginId,
         };
-
-        if (cleanMccId) {
-          testHeaders['login-customer-id'] = cleanMccId;
-        }
 
         try {
           const testResponse = await fetch(testUrl, {

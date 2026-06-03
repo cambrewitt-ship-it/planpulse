@@ -21,7 +21,12 @@ export async function GET(request: NextRequest) {
 
     const user = session.user;
     const clientId = request.nextUrl.searchParams.get('clientId');
-    console.log(`[google-ads/campaigns] user=${user.id} clientId=${clientId}`);
+    // Optional comma-separated list of customer IDs to restrict results to
+    const customerIdsParam = request.nextUrl.searchParams.get('customerIds');
+    const filterCustomerIds = customerIdsParam
+      ? new Set(customerIdsParam.split(',').map(id => id.replace(/-/g, '').trim()).filter(Boolean))
+      : null;
+    console.log(`[google-ads/campaigns] user=${user.id} clientId=${clientId} filterCustomerIds=${customerIdsParam ?? 'all'}`);
 
     // Get the active Google Ads connection — try client-specific first, fall back to any active connection
     let connection: { connection_id: string } | null = null;
@@ -55,14 +60,18 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ campaigns: [] });
     }
 
-    // google_ads_accounts has no client_id column — fetch all active accounts for this user
-    const { data: accountsData, error: accountsError } = await supabase
+    // Fetch active accounts for this user, optionally filtered to specific customer IDs
+    const accountsQuery = supabase
       .from('google_ads_accounts')
-      .select('customer_id, account_name')
+      .select('customer_id, account_name, manager_customer_id')
       .eq('user_id', user.id)
       .eq('is_active', true);
-    const googleAdsAccounts = (accountsData ?? []) as Array<{ customer_id: string; account_name: string }>;
-    console.log(`[google-ads/campaigns] accounts found: ${googleAdsAccounts.length}`, accountsError?.message ?? '');
+    const { data: accountsData, error: accountsError } = await accountsQuery;
+    let googleAdsAccounts = (accountsData ?? []) as Array<{ customer_id: string; account_name: string; manager_customer_id: string | null }>;
+    if (filterCustomerIds && filterCustomerIds.size > 0) {
+      googleAdsAccounts = googleAdsAccounts.filter(a => filterCustomerIds.has(a.customer_id.replace(/-/g, '')));
+    }
+    console.log(`[google-ads/campaigns] accounts found: ${googleAdsAccounts.length} (filtered: ${filterCustomerIds ? 'yes' : 'no'})`, accountsError?.message ?? '');
 
     if (googleAdsAccounts.length === 0) {
       return NextResponse.json({ campaigns: [] });
@@ -97,7 +106,7 @@ export async function GET(request: NextRequest) {
 
     for (const account of googleAdsAccounts) {
       const cleanCustomerId = account.customer_id.replace(/-/g, '');
-      console.log(`[google-ads/campaigns] querying account ${account.customer_id} (clean: ${cleanCustomerId})`);
+      console.log(`[google-ads/campaigns] querying account ${account.customer_id} (clean: ${cleanCustomerId}, manager: ${account.manager_customer_id ?? 'none'})`);
 
       if (cleanCustomerId.length !== 10) {
         console.log(`[google-ads/campaigns] skipping — unexpected customer ID length ${cleanCustomerId.length}`);
@@ -105,11 +114,17 @@ export async function GET(request: NextRequest) {
       }
 
       try {
+        // For sub-accounts (has a manager), login as the manager.
+        // For direct accounts, login as the account itself.
+        const loginCustomerId = account.manager_customer_id
+          ? account.manager_customer_id.replace(/-/g, '')
+          : cleanCustomerId;
+
         const headers: Record<string, string> = {
           'Authorization': `Bearer ${accessToken}`,
           'developer-token': developerToken,
           'Content-Type': 'application/json',
-          'login-customer-id': cleanCustomerId,
+          'login-customer-id': loginCustomerId,
         };
 
         const response = await fetch(

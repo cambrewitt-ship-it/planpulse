@@ -141,6 +141,7 @@ export default function AdPlatformConnector({ clientId, onConfigNeeded }: AdPlat
   const [newAccountName, setNewAccountName] = useState('');
   const [isLoadingAccounts, setIsLoadingAccounts] = useState(false);
   const [isSavingAccount, setIsSavingAccount] = useState(false);
+  const [isDiscoveringGoogleAdsAccounts, setIsDiscoveringGoogleAdsAccounts] = useState(false);
   const [accountMessage, setAccountMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Meta Ads account management state
@@ -429,6 +430,43 @@ export default function AdPlatformConnector({ clientId, onConfigNeeded }: AdPlat
     } catch (error) {
       console.error('Error deleting account:', error);
       setAccountMessage({ type: 'error', text: 'Failed to remove account. Please try again.' });
+    }
+  };
+
+  const handleDiscoverGoogleAdsAccounts = async () => {
+    setIsDiscoveringGoogleAdsAccounts(true);
+    setAccountMessage(null);
+    try {
+      const res = await fetch('/api/ads/google-ads/accounts');
+      const data = await res.json();
+      if (!res.ok) {
+        setAccountMessage({ type: 'error', text: data.error || 'Failed to discover accounts.' });
+        return;
+      }
+      const accounts: Array<{ customerId: string; descriptiveName: string | null; isManager: boolean; managerCustomerId: string | null }> = data.accounts ?? [];
+      const toSave = accounts.filter(a => !a.isManager);
+      if (toSave.length === 0) {
+        setAccountMessage({ type: 'error', text: 'No advertiser accounts found. Make sure you connected with the right Google account.' });
+        return;
+      }
+      await Promise.all(toSave.map(a =>
+        fetch('/api/ads/google-ads/save-account', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            customerId: a.customerId,
+            accountName: a.descriptiveName ?? undefined,
+            managerCustomerId: a.managerCustomerId ?? undefined,
+          }),
+        })
+      ));
+      await fetchGoogleAdsAccounts();
+      setAccountMessage({ type: 'success', text: `Found and saved ${toSave.length} account${toSave.length > 1 ? 's' : ''}.` });
+      setTimeout(() => setAccountMessage(null), 4000);
+    } catch {
+      setAccountMessage({ type: 'error', text: 'Failed to discover accounts. Please try again.' });
+    } finally {
+      setIsDiscoveringGoogleAdsAccounts(false);
     }
   };
 
@@ -1006,6 +1044,21 @@ export default function AdPlatformConnector({ clientId, onConfigNeeded }: AdPlat
                           {accountMessage.text}
                         </div>
                       )}
+
+                      <Button
+                        onClick={handleDiscoverGoogleAdsAccounts}
+                        disabled={isDiscoveringGoogleAdsAccounts}
+                        variant="outline"
+                        className="w-full"
+                      >
+                        {isDiscoveringGoogleAdsAccounts ? 'Finding accounts…' : 'Find my Google Ads accounts'}
+                      </Button>
+
+                      <div className="relative flex items-center gap-2 py-1">
+                        <div className="flex-1 border-t border-gray-200" />
+                        <span className="text-xs text-gray-400 shrink-0">or add manually</span>
+                        <div className="flex-1 border-t border-gray-200" />
+                      </div>
 
                       <div className="bg-gray-50 p-4 rounded-lg space-y-3">
                         <h4 className="font-bold text-sm text-gray-900 font-[family-name:var(--font-inter)]">Add New Account</h4>

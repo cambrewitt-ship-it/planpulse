@@ -23,9 +23,10 @@ export interface PerfData {
 interface WidgetConfig {
   platform: '' | 'meta-ads' | 'google-ads';
   campaignIds: string[];
-  metricSource: 'ad' | 'ga4';
-  ga4EventName: string;    // GA4 metric_name used as conversion denominator
-  metaActionType: string;  // meta_actions action_type used as conversion count
+  metricSource: 'ad' | 'meta' | 'google-ads' | 'ga4';
+  ga4EventName: string;
+  metaActionType: string;
+  googleAdsConversionAction: string;
 }
 
 interface Campaign {
@@ -52,6 +53,23 @@ const PLATFORM_OPTIONS = [
   { id: '' as const, label: 'All' },
   { id: 'meta-ads' as const, label: 'Meta' },
   { id: 'google-ads' as const, label: 'Google' },
+];
+
+// Common Google Ads conversion action names
+const GOOGLE_ADS_DEFAULT_CONVERSIONS = [
+  'Purchase',
+  'Lead',
+  'Sign-up',
+  'Add to cart',
+  'Begin checkout',
+  'Contact',
+  'Submit lead form',
+  'Book appointment',
+  'Request quote',
+  'Get directions',
+  'Phone call leads',
+  'Outbound click',
+  'Download',
 ];
 
 // Default Meta pixel / app action types — shown even before data is synced
@@ -134,7 +152,7 @@ function loadConfig(clientId: string): WidgetConfig {
 }
 
 function defaultConfig(): WidgetConfig {
-  return { platform: '', campaignIds: [], metricSource: 'ad', ga4EventName: '', metaActionType: '' };
+  return { platform: '', campaignIds: [], metricSource: 'ad', ga4EventName: '', metaActionType: '', googleAdsConversionAction: '' };
 }
 
 function persistConfig(clientId: string, config: WidgetConfig) {
@@ -230,15 +248,10 @@ function ConfigModal({ clientId, initialConfig, goals, campaigns, ga4Events, met
     ? campaigns.filter(c => c.platform === editConfig.platform)
     : campaigns;
 
-  // Show Meta event picker whenever metric source is 'ad' — Meta events are
-  // relevant for all-platforms and meta-only selections. Hiding it for Google
-  // doesn't help since users may have mixed accounts.
-  const showMetaEvents = editConfig.metricSource === 'ad' && editConfig.platform !== 'google-ads';
-
-  // Show GA4 event picker when GA4 source selected
+  const showMetaEvents = editConfig.metricSource === 'meta' || editConfig.metricSource === 'ad';
+  const showGoogleAdsConversion = editConfig.metricSource === 'google-ads';
   const showGa4Events = editConfig.metricSource === 'ga4';
 
-  // Needs configuration nudge
   const needsConversionEvent =
     (editConfig.metricSource === 'ga4' && !editConfig.ga4EventName && ga4Events.length > 0) ||
     (showMetaEvents && !editConfig.metaActionType && mergedMetaEvents.length > 0);
@@ -337,9 +350,13 @@ function ConfigModal({ clientId, initialConfig, goals, campaigns, ga4Events, met
 
         {/* ── Metric Source ── */}
         <div style={{ marginBottom: 20 }}>
-          <span style={sectionLabel}>Metric Source</span>
-          <div style={{ display: 'flex', gap: 6 }}>
-            {([{ id: 'ad', label: 'Ad Platform' }, { id: 'ga4', label: 'GA4' }] as const).map(src => (
+          <span style={sectionLabel}>Conversion Source</span>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' as const }}>
+            {([
+              { id: 'meta' as const, label: 'Meta' },
+              { id: 'google-ads' as const, label: 'Google Ads' },
+              { id: 'ga4' as const, label: 'GA4' },
+            ]).map(src => (
               <button key={src.id} onClick={() => setEditConfig(c => ({ ...c, metricSource: src.id }))} style={pill(editConfig.metricSource === src.id)}>
                 {src.label}
               </button>
@@ -348,7 +365,9 @@ function ConfigModal({ clientId, initialConfig, goals, campaigns, ga4Events, met
           <p style={{ fontSize: 10, color: '#B5B0A5', marginTop: 5 }}>
             {editConfig.metricSource === 'ga4'
               ? 'Uses GA4 event count as conversion denominator for cost metrics'
-              : 'Uses ad platform reported conversions / actions'}
+              : editConfig.metricSource === 'google-ads'
+                ? 'Uses Google Ads reported conversions'
+                : 'Uses Meta reported actions / conversions'}
           </p>
         </div>
 
@@ -387,7 +406,7 @@ function ConfigModal({ clientId, initialConfig, goals, campaigns, ga4Events, met
         {/* ── Conversion Event (Meta) ── */}
         {showMetaEvents && (
           <div style={{ marginBottom: 20 }}>
-            <span style={sectionLabel}>Conversion Event</span>
+            <span style={sectionLabel}>Meta Conversion Event</span>
             <select
               value={editConfig.metaActionType}
               onChange={e => setEditConfig(c => ({ ...c, metaActionType: e.target.value }))}
@@ -401,7 +420,37 @@ function ConfigModal({ clientId, initialConfig, goals, campaigns, ga4Events, met
               ))}
             </select>
             <p style={{ fontSize: 10, color: '#B5B0A5', marginTop: 4 }}>
-              Same events shown on the channel performance cards. Used as the conversion count for CPA/CPL.
+              Used as the conversion count for CPA / CPL.
+            </p>
+          </div>
+        )}
+
+        {/* ── Conversion Action (Google Ads) ── */}
+        {showGoogleAdsConversion && (
+          <div style={{ marginBottom: 20 }}>
+            <span style={sectionLabel}>Google Ads Conversion Action</span>
+            <select
+              value={editConfig.googleAdsConversionAction}
+              onChange={e => setEditConfig(c => ({ ...c, googleAdsConversionAction: e.target.value }))}
+              style={selectStyle}
+            >
+              <option value="">— All Conversions (default) —</option>
+              {GOOGLE_ADS_DEFAULT_CONVERSIONS.map(name => (
+                <option key={name} value={name}>{name}</option>
+              ))}
+              <option value="__custom__">Custom…</option>
+            </select>
+            {editConfig.googleAdsConversionAction === '__custom__' && (
+              <input
+                type="text"
+                placeholder="Conversion action name"
+                value={''}
+                onChange={e => setEditConfig(c => ({ ...c, googleAdsConversionAction: e.target.value }))}
+                style={{ ...selectStyle, marginTop: 6 }}
+              />
+            )}
+            <p style={{ fontSize: 10, color: '#B5B0A5', marginTop: 4 }}>
+              Used as the conversion count for CPA / CPL. Matches the name in your Google Ads account.
             </p>
           </div>
         )}
@@ -530,6 +579,7 @@ export function PerformanceWidget({
     if (config.platform) params.set('platforms', config.platform);
     if (config.ga4EventName) params.set('ga4EventName', config.ga4EventName);
     if (config.metaActionType) params.set('metaActionType', config.metaActionType);
+    if (config.googleAdsConversionAction) params.set('googleAdsConversionAction', config.googleAdsConversionAction);
 
     fetch(`/api/clients/${clientId}/goals?${params}`)
       .then(r => r.ok ? r.json() : null)
@@ -659,9 +709,13 @@ export function PerformanceWidget({
   // Badge text
   const sourceBadge = config.metricSource === 'ga4'
     ? `GA4${config.ga4EventName ? ` · ${config.ga4EventName}` : ' · no event'}`
-    : config.platform === 'meta-ads'
-      ? `Meta${config.metaActionType ? ` · ${metaActionLabel(config.metaActionType)}` : ''}`
-      : config.platform === 'google-ads' ? 'Google' : 'All platforms';
+    : config.metricSource === 'google-ads'
+      ? `Google Ads${config.googleAdsConversionAction && config.googleAdsConversionAction !== '__custom__' ? ` · ${config.googleAdsConversionAction}` : ''}`
+      : config.metricSource === 'meta'
+        ? `Meta${config.metaActionType ? ` · ${metaActionLabel(config.metaActionType)}` : ''}`
+        : config.platform === 'meta-ads'
+          ? `Meta${config.metaActionType ? ` · ${metaActionLabel(config.metaActionType)}` : ''}`
+          : config.platform === 'google-ads' ? 'Google' : 'All platforms';
 
   const noData = !perfData?.hasData;
 

@@ -67,6 +67,13 @@ interface SavedGadsAccount {
   accountName: string | null;
 }
 
+interface DiscoveredGadsAccount {
+  customerId: string;
+  descriptiveName: string | null;
+  isManager: boolean;
+  managerCustomerId: string | null;
+}
+
 interface MetaCampaign {
   id: string;
   name: string;
@@ -74,6 +81,11 @@ interface MetaCampaign {
   effectiveStatus: string;
   accountId: string;
   accountName: string | null;
+}
+
+interface GoogleCampaign {
+  id: string;
+  name: string;
 }
 
 interface LinkableRow {
@@ -150,6 +162,12 @@ const META_DEFAULT_EVENTS: Array<{ name: string; count: number }> = [
 const GA4_DEFAULT_EVENTS: string[] = [
   'purchase', 'generate_lead', 'begin_checkout', 'add_to_cart',
   'view_item', 'sign_up', 'form_submit', 'page_view',
+];
+
+const GOOGLE_ADS_DEFAULT_CONVERSIONS: string[] = [
+  'Purchase', 'Lead', 'Sign-up', 'Add to cart', 'Begin checkout',
+  'Contact', 'Submit lead form', 'Book appointment', 'Request quote',
+  'Get directions', 'Phone call leads', 'Outbound click', 'Download',
 ];
 
 const META_ACTION_LABELS: Record<string, string> = {
@@ -239,7 +257,8 @@ export default function CreateClientPage() {
   const [goalMetric, setGoalMetric] = useState('');
   const [goalTarget, setGoalTarget] = useState('');
   const [goalSaving, setGoalSaving] = useState(false);
-  const [goalMetricSource, setGoalMetricSource] = useState<'ad' | 'ga4'>('ad');
+  const [goalMetricSource, setGoalMetricSource] = useState<'ad' | 'meta' | 'google-ads' | 'ga4'>('meta');
+  const [goalGoogleAdsConversionAction, setGoalGoogleAdsConversionAction] = useState('');
   const [goalMetaActionType, setGoalMetaActionType] = useState('');
   const [goalGa4EventName, setGoalGa4EventName] = useState('');
   const [goalAvailableGa4Events, setGoalAvailableGa4Events] = useState<string[]>([]);
@@ -282,6 +301,11 @@ export default function CreateClientPage() {
   const [gadsSaving, setGadsSaving] = useState(false);
   const [gadsLoading, setGadsLoading] = useState(false);
   const [gadsMsg, setGadsMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [gadsDiscovering, setGadsDiscovering] = useState(false);
+  const [gadsDiscovered, setGadsDiscovered] = useState<DiscoveredGadsAccount[]>([]);
+  const [gadsSelected, setGadsSelected] = useState<Set<string>>(new Set());
+  const [gadsSearch, setGadsSearch] = useState('');
+  const [gadsSavingSelected, setGadsSavingSelected] = useState(false);
 
   // ── Step 6: Google Analytics properties ──
   const [gaDiscovered, setGaDiscovered] = useState<DiscoveredGAAccount[]>([]);
@@ -293,6 +317,7 @@ export default function CreateClientPage() {
 
   // ── Step 7: campaigns ──
   const [metaCampaigns, setMetaCampaigns] = useState<MetaCampaign[]>([]);
+  const [googleCampaigns, setGoogleCampaigns] = useState<GoogleCampaign[]>([]);
   const [channelCampaignMap, setChannelCampaignMap] = useState<Record<string, string[]>>({});
   const [campaignsLoading, setCampaignsLoading] = useState(false);
   const [campaignsSaving, setCampaignsSaving] = useState(false);
@@ -509,6 +534,7 @@ export default function CreateClientPage() {
           metricSource: goalMetricSource,
           ga4EventName: goalGa4EventName,
           metaActionType: goalMetaActionType === '__custom__' ? goalMetaCustomEvent.trim() : goalMetaActionType,
+          googleAdsConversionAction: goalGoogleAdsConversionAction === '__custom__' ? '' : goalGoogleAdsConversionAction,
         }));
       } catch {}
     } catch {}
@@ -621,7 +647,7 @@ export default function CreateClientPage() {
   const handleAdvanceToStep4 = async () => {
     setStep(4);
     if (connectionStatus.facebook) discoverMetaAccounts();
-    if (connectionStatus['google-ads']) fetchGadsAccounts();
+    if (connectionStatus['google-ads']) discoverGadsAccounts();
     if (connectionStatus['google-analytics']) discoverGaAccounts();
   };
 
@@ -692,6 +718,80 @@ export default function CreateClientPage() {
     setGadsLoading(false);
   };
 
+  const formatGadsId = (id: string) => id.replace(/(\d{3})(\d{3})(\d{4})/, '$1-$2-$3');
+
+  const discoverGadsAccounts = async () => {
+    setGadsDiscovering(true);
+    setGadsMsg(null);
+    setGadsDiscovered([]);
+    setGadsSelected(new Set());
+    setGadsSearch('');
+    try {
+      const res = await fetch('/api/ads/google-ads/accounts');
+      const data = await res.json();
+      if (!res.ok) {
+        setGadsMsg({ type: 'error', text: data.error ?? 'Failed to discover accounts.' });
+        return;
+      }
+      const advertiserAccounts: DiscoveredGadsAccount[] = (data.accounts ?? []).filter((a: DiscoveredGadsAccount) => !a.isManager);
+      if (advertiserAccounts.length === 0) {
+        setGadsMsg({ type: 'error', text: 'No advertiser accounts found. Make sure you connected with the right Google account.' });
+        return;
+      }
+      setGadsDiscovered(advertiserAccounts);
+      setGadsSelected(new Set()); // user picks what they want
+    } catch {
+      setGadsMsg({ type: 'error', text: 'Failed to discover accounts. Please try again.' });
+    }
+    setGadsDiscovering(false);
+  };
+
+  const toggleGadsAccount = (customerId: string) => {
+    setGadsSelected(prev => {
+      const next = new Set(prev);
+      next.has(customerId) ? next.delete(customerId) : next.add(customerId);
+      return next;
+    });
+  };
+
+  const saveSelectedGadsAccounts = async () => {
+    if (gadsSelected.size === 0) return;
+    setGadsSavingSelected(true);
+    setGadsMsg(null);
+    try {
+      const toSave = gadsDiscovered.filter(a => gadsSelected.has(a.customerId));
+      await Promise.all(toSave.map(a =>
+        fetch('/api/ads/google-ads/save-account', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            customerId: a.customerId,
+            accountName: a.descriptiveName ?? undefined,
+            managerCustomerId: a.managerCustomerId ?? undefined,
+          }),
+        })
+      ));
+      // Update the saved list from what was just saved — no DB fetch so we don't pull in other clients' accounts
+      const newlySaved: SavedGadsAccount[] = toSave.map(a => ({
+        id: a.customerId,
+        customerId: a.customerId,
+        displayCustomerId: formatGadsId(a.customerId),
+        accountName: a.descriptiveName ?? null,
+      }));
+      setGadsSaved(prev => {
+        const existing = new Set(prev.map(p => p.customerId));
+        return [...prev, ...newlySaved.filter(n => !existing.has(n.customerId))];
+      });
+      setGadsDiscovered([]);
+      setGadsSelected(new Set());
+      setGadsMsg({ type: 'success', text: `${toSave.length} account${toSave.length > 1 ? 's' : ''} saved.` });
+      setTimeout(() => setGadsMsg(null), 3000);
+    } catch {
+      setGadsMsg({ type: 'error', text: 'Failed to save accounts. Please try again.' });
+    }
+    setGadsSavingSelected(false);
+  };
+
   const addGadsAccount = async () => {
     if (!gadsCustomerId.trim()) return;
     setGadsSaving(true);
@@ -705,9 +805,14 @@ export default function CreateClientPage() {
       const data = await res.json();
       if (res.ok) {
         setGadsMsg({ type: 'success', text: 'Account added!' });
+        const cleanId = gadsCustomerId.replace(/[-\s]/g, '');
+        const name = gadsAccountName.trim() || null;
+        setGadsSaved(prev => {
+          if (prev.some(p => p.customerId === cleanId)) return prev;
+          return [...prev, { id: cleanId, customerId: cleanId, displayCustomerId: formatGadsId(cleanId), accountName: name }];
+        });
         setGadsCustomerId('');
         setGadsAccountName('');
-        await fetchGadsAccounts();
         setTimeout(() => setGadsMsg(null), 3000);
       } else {
         setGadsMsg({ type: 'error', text: data.error ?? 'Failed to add account.' });
@@ -725,7 +830,7 @@ export default function CreateClientPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ accountId }),
       });
-      await fetchGadsAccounts();
+      setGadsSaved(prev => prev.filter(a => a.id !== accountId));
     } catch {}
   };
 
@@ -789,7 +894,7 @@ export default function CreateClientPage() {
   // ── Step 7 handlers ───────────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (step === 5 && connectionStatus.facebook) loadCampaigns();
+    if (step === 5 && (connectionStatus.facebook || connectionStatus['google-ads'])) loadCampaigns();
   }, [step]);
 
   useEffect(() => {
@@ -805,13 +910,35 @@ export default function CreateClientPage() {
   const loadCampaigns = async () => {
     setCampaignsLoading(true);
     try {
-      const res = await fetch(clientId ? `/api/ads/meta/campaigns?clientId=${clientId}` : '/api/ads/meta/campaigns');
-      if (res.ok) {
-        const data = await res.json();
-        const raw: MetaCampaign[] = data.campaigns ?? [];
-        const unique = Array.from(new Map(raw.map((c) => [c.id, c])).values());
-        setMetaCampaigns(unique);
-      }
+      await Promise.all([
+        connectionStatus.facebook
+          ? fetch(clientId ? `/api/ads/meta/campaigns?clientId=${clientId}` : '/api/ads/meta/campaigns')
+              .then(r => r.ok ? r.json() : null)
+              .then(data => {
+                if (data?.campaigns) {
+                  const raw: MetaCampaign[] = data.campaigns ?? [];
+                  setMetaCampaigns(Array.from(new Map(raw.map((c) => [c.id, c])).values()));
+                }
+              })
+              .catch(() => {})
+          : Promise.resolve(),
+        connectionStatus['google-ads'] && gadsSaved.length > 0
+          ? (() => {
+              const ids = gadsSaved.map(a => a.customerId).join(',');
+              const url = clientId
+                ? `/api/ads/google-ads/campaigns?clientId=${clientId}&customerIds=${ids}`
+                : `/api/ads/google-ads/campaigns?customerIds=${ids}`;
+              return fetch(url)
+                .then(r => r.ok ? r.json() : null)
+                .then(data => {
+                  if (data?.campaigns) {
+                    setGoogleCampaigns(data.campaigns.map((c: any) => ({ id: c.id, name: c.name })));
+                  }
+                })
+                .catch(() => {});
+            })()
+          : Promise.resolve(),
+      ]);
     } catch {}
     setCampaignsLoading(false);
   };
@@ -849,6 +976,16 @@ export default function CreateClientPage() {
     setCampaignsSaving(false);
     setStep(6);
   };
+
+  // Set a sensible default metric source when entering the performance goal step
+  useEffect(() => {
+    if (step !== 6) return;
+    setGoalMetricSource(
+      connectionStatus.facebook ? 'meta'
+      : connectionStatus['google-ads'] ? 'google-ads'
+      : 'ga4'
+    );
+  }, [step]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Step 6: fetch spend data then poll for conversion events ──────────────────
   // ad_performance_metrics (where events come from) is only populated when the
@@ -1042,7 +1179,8 @@ export default function CreateClientPage() {
             ...goalAvailableGa4Events,
             ...GA4_DEFAULT_EVENTS.filter(d => !goalAvailableGa4Events.includes(d)),
           ];
-          const showMetaEvents = goalMetricSource === 'ad' && connectionStatus.facebook;
+          const showMetaEvents = (goalMetricSource === 'meta' || goalMetricSource === 'ad') && connectionStatus.facebook;
+          const showGoogleAdsConversion = goalMetricSource === 'google-ads' && connectionStatus['google-ads'];
           const showGa4Events = goalMetricSource === 'ga4';
           return (
             <Card className="max-w-lg mx-auto" style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18 }}>
@@ -1081,29 +1219,35 @@ export default function CreateClientPage() {
                   </div>
                 </div>
 
-                {/* Data Source toggle */}
+                {/* Conversion Source toggle */}
                 <div className="grid gap-2">
-                  <Label>Data Source</Label>
-                  <div className="flex gap-2">
-                    {(['ad', 'ga4'] as const).map((src) => (
+                  <Label>Conversion Source</Label>
+                  <div className="flex gap-2 flex-wrap">
+                    {[
+                      ...(connectionStatus.facebook ? [{ id: 'meta' as const, label: 'Meta' }] : []),
+                      ...(connectionStatus['google-ads'] ? [{ id: 'google-ads' as const, label: 'Google Ads' }] : []),
+                      { id: 'ga4' as const, label: 'GA4' },
+                    ].map((src) => (
                       <button
-                        key={src}
+                        key={src.id}
                         type="button"
-                        onClick={() => setGoalMetricSource(src)}
+                        onClick={() => setGoalMetricSource(src.id)}
                         className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
-                          goalMetricSource === src
+                          goalMetricSource === src.id
                             ? 'bg-[rgba(74,101,128,0.1)] border-[#4A6580] text-[#4A6580]'
                             : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'
                         }`}
                       >
-                        {src === 'ad' ? 'Ad Platform' : 'GA4'}
+                        {src.label}
                       </button>
                     ))}
                   </div>
                   <p className="text-xs text-gray-400">
                     {goalMetricSource === 'ga4'
                       ? 'Uses GA4 event count as the conversion denominator for cost metrics'
-                      : 'Uses ad platform reported conversions / actions'}
+                      : goalMetricSource === 'google-ads'
+                        ? 'Uses Google Ads reported conversions'
+                        : 'Uses Meta reported actions / conversions'}
                   </p>
                 </div>
 
@@ -1123,6 +1267,34 @@ export default function CreateClientPage() {
                       ))}
                     </select>
                     <p className="text-xs text-gray-400">This event count becomes the denominator for CPA / CPL calculation</p>
+                  </div>
+                )}
+
+                {/* Google Ads Conversion Action */}
+                {showGoogleAdsConversion && (
+                  <div className="grid gap-2">
+                    <Label htmlFor="goal-gads-conversion">Google Ads Conversion Action</Label>
+                    <select
+                      id="goal-gads-conversion"
+                      value={goalGoogleAdsConversionAction}
+                      onChange={(e) => setGoalGoogleAdsConversionAction(e.target.value)}
+                      className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                    >
+                      <option value="">— All Conversions (default) —</option>
+                      {GOOGLE_ADS_DEFAULT_CONVERSIONS.map((name) => (
+                        <option key={name} value={name}>{name}</option>
+                      ))}
+                      <option value="__custom__">Custom…</option>
+                    </select>
+                    {goalGoogleAdsConversionAction === '__custom__' && (
+                      <input
+                        type="text"
+                        placeholder="Exact conversion action name from Google Ads"
+                        onChange={(e) => setGoalGoogleAdsConversionAction(e.target.value)}
+                        className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm focus:outline-none focus:ring-1 focus:ring-ring font-mono"
+                      />
+                    )}
+                    <p className="text-xs text-gray-400">Used as the conversion count for CPA / CPL on the performance gauge</p>
                   </div>
                 )}
 
@@ -1437,45 +1609,108 @@ export default function CreateClientPage() {
                       {gadsMsg.text}
                     </p>
                   )}
-                  <div className="space-y-2">
-                    <div className="flex gap-2">
+                  {gadsMsg && (
+                    <p className={`text-sm rounded-lg p-2.5 border ${gadsMsg.type === 'success' ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-200 text-red-800'}`}>
+                      {gadsMsg.text}
+                    </p>
+                  )}
+
+                  {/* Discover flow */}
+                  {gadsDiscovering ? (
+                    <div className="flex items-center justify-center py-6 gap-3">
+                      <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
+                      <span className="text-sm text-gray-500">Finding accounts&hellip;</span>
+                    </div>
+                  ) : gadsDiscovered.length > 0 ? (
+                    <>
                       <Input
-                        placeholder="Customer ID (123-456-7890)"
-                        value={gadsCustomerId}
-                        onChange={e => setGadsCustomerId(e.target.value)}
-                        className="text-sm font-mono"
-                      />
-                      <Input
-                        placeholder="Name (optional)"
-                        value={gadsAccountName}
-                        onChange={e => setGadsAccountName(e.target.value)}
+                        placeholder="Search accounts…"
+                        value={gadsSearch}
+                        onChange={e => setGadsSearch(e.target.value)}
                         className="text-sm"
                       />
-                      <Button size="sm" onClick={addGadsAccount} disabled={gadsSaving || !gadsCustomerId.trim()}>
-                        {gadsSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                      <div className="space-y-1.5 max-h-52 overflow-y-auto">
+                        {gadsDiscovered
+                          .filter(a => {
+                            const q = gadsSearch.toLowerCase();
+                            return !q || formatGadsId(a.customerId).includes(q) || (a.descriptiveName ?? '').toLowerCase().includes(q);
+                          })
+                          .map(a => {
+                            const alreadySaved = gadsSaved.some(s => s.customerId === a.customerId);
+                            return (
+                              <label key={a.customerId} className={`flex items-center gap-3 p-2.5 rounded-lg border cursor-pointer transition-colors ${gadsSelected.has(a.customerId) ? 'border-blue-300 bg-blue-50' : 'border-gray-200 bg-white hover:border-gray-300'}`}>
+                                <input type="checkbox" checked={gadsSelected.has(a.customerId)} onChange={() => toggleGadsAccount(a.customerId)} className="w-4 h-4 text-blue-600 rounded" />
+                                <span className="text-sm font-mono text-gray-900">
+                                  {formatGadsId(a.customerId)}{a.descriptiveName ? ` | ${a.descriptiveName}` : ''}
+                                </span>
+                                {alreadySaved && <span className="ml-auto text-xs text-gray-400">saved</span>}
+                              </label>
+                            );
+                          })}
+                      </div>
+                      <Button size="sm" onClick={saveSelectedGadsAccounts} disabled={gadsSavingSelected || gadsSelected.size === 0} className="w-full">
+                        {gadsSavingSelected ? <><Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />Saving&hellip;</> : `Save ${gadsSelected.size > 0 ? gadsSelected.size + ' ' : ''}Account${gadsSelected.size !== 1 ? 's' : ''}`}
                       </Button>
-                    </div>
-                    <p className="text-xs text-gray-400">Find your 10-digit Customer ID in the top-right of Google Ads</p>
-                  </div>
+                      <button onClick={() => { setGadsDiscovered([]); setGadsSelected(new Set()); }} className="text-xs text-gray-400 hover:text-gray-600 w-full text-center">Cancel</button>
+                    </>
+                  ) : (
+                    <>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={discoverGadsAccounts}
+                        disabled={gadsDiscovering}
+                        className="w-full"
+                      >
+                        Find my Google Ads accounts
+                      </Button>
+                      <div className="relative flex items-center gap-2">
+                        <div className="flex-1 border-t border-gray-200" />
+                        <span className="text-xs text-gray-400 shrink-0">or add manually</span>
+                        <div className="flex-1 border-t border-gray-200" />
+                      </div>
+                      <div className="space-y-2">
+                        <div className="flex gap-2">
+                          <Input
+                            placeholder="Customer ID (123-456-7890)"
+                            value={gadsCustomerId}
+                            onChange={e => setGadsCustomerId(e.target.value)}
+                            className="text-sm font-mono"
+                          />
+                          <Input
+                            placeholder="Name (optional)"
+                            value={gadsAccountName}
+                            onChange={e => setGadsAccountName(e.target.value)}
+                            className="text-sm"
+                          />
+                          <Button size="sm" onClick={addGadsAccount} disabled={gadsSaving || !gadsCustomerId.trim()}>
+                            {gadsSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                          </Button>
+                        </div>
+                        <p className="text-xs text-gray-400">Find your 10-digit Customer ID in the top-right of Google Ads</p>
+                      </div>
+                    </>
+                  )}
+
+                  {/* Saved accounts list */}
                   {gadsLoading ? (
                     <div className="flex justify-center py-4"><Loader2 className="h-5 w-5 animate-spin text-gray-400" /></div>
                   ) : gadsSaved.length > 0 ? (
-                    <div className="space-y-2">
+                    <div className="space-y-1.5 pt-1">
                       {gadsSaved.map(acc => (
                         <div key={acc.id} className="flex items-center justify-between p-2.5 rounded-lg border border-gray-200 bg-white">
-                          <div>
-                            <p className="text-sm font-mono font-medium text-gray-900">{acc.displayCustomerId}</p>
-                            {acc.accountName && <p className="text-xs text-gray-400">{acc.accountName}</p>}
-                          </div>
-                          <button onClick={() => removeGadsAccount(acc.id)} className="text-gray-400 hover:text-red-500 transition-colors">
+                          <p className="text-sm font-mono text-gray-900">
+                            {acc.displayCustomerId}{acc.accountName ? ` | ${acc.accountName}` : ''}
+                          </p>
+                          <button onClick={() => removeGadsAccount(acc.id)} className="text-gray-400 hover:text-red-500 transition-colors ml-3 shrink-0">
                             <Trash2 className="h-4 w-4" />
                           </button>
                         </div>
                       ))}
                     </div>
-                  ) : (
+                  ) : gadsDiscovered.length === 0 ? (
                     <p className="text-xs text-center text-gray-400 py-2">No accounts added yet</p>
-                  )}
+                  ) : null}
                 </CardContent>
               </Card>
             )}
@@ -1557,7 +1792,7 @@ export default function CreateClientPage() {
                 {campaignsLoading ? (
                   <div className="flex flex-col items-center justify-center py-14 gap-3">
                     <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
-                    <p className="text-sm text-gray-500">Loading campaigns from Meta&hellip;</p>
+                    <p className="text-sm text-gray-500">Loading campaigns&hellip;</p>
                   </div>
                 ) : linkableRows.length === 0 ? (
                   <div className="py-10 text-center space-y-2">
@@ -1570,7 +1805,7 @@ export default function CreateClientPage() {
                       const selectedIds = channelCampaignMap[row.id] ?? [];
                       const platformLogoId: PlatformId = row.platform === 'meta' ? 'facebook' : 'google-ads';
                       const platformConnected = row.platform === 'meta' ? connectionStatus.facebook : connectionStatus['google-ads'];
-                      const rowCampaigns = row.platform === 'meta' ? metaCampaigns : [];
+                      const rowCampaigns = row.platform === 'meta' ? metaCampaigns : googleCampaigns;
                       const [dropOpen, setDropOpen] = [
                         openCampaignDropdown === row.id,
                         (v: boolean) => setOpenCampaignDropdown(v ? row.id : null),
@@ -1723,47 +1958,97 @@ export default function CreateClientPage() {
             </p>
           )}
 
-          <div className="space-y-2">
-            <div className="flex gap-2">
+          {/* Discover flow */}
+          {gadsDiscovering ? (
+            <div className="flex items-center justify-center py-6 gap-3">
+              <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
+              <span className="text-sm text-gray-500">Finding accounts&hellip;</span>
+            </div>
+          ) : gadsDiscovered.length > 0 ? (
+            <div className="space-y-3">
               <Input
-                placeholder="Customer ID (123-456-7890)"
-                value={gadsCustomerId}
-                onChange={(e) => setGadsCustomerId(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && addGadsAccount()}
-                className="text-sm font-mono"
-              />
-              <Input
-                placeholder="Name (optional)"
-                value={gadsAccountName}
-                onChange={(e) => setGadsAccountName(e.target.value)}
+                placeholder="Search accounts…"
+                value={gadsSearch}
+                onChange={e => setGadsSearch(e.target.value)}
                 className="text-sm"
               />
-              <Button size="sm" onClick={addGadsAccount} disabled={gadsSaving || !gadsCustomerId.trim()}>
-                {gadsSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+              <div className="space-y-1.5 max-h-52 overflow-y-auto">
+                {gadsDiscovered
+                  .filter(a => {
+                    const q = gadsSearch.toLowerCase();
+                    return !q || formatGadsId(a.customerId).includes(q) || (a.descriptiveName ?? '').toLowerCase().includes(q);
+                  })
+                  .map(a => {
+                    const alreadySaved = gadsSaved.some(s => s.customerId === a.customerId);
+                    return (
+                      <label key={a.customerId} className={`flex items-center gap-3 p-2.5 rounded-lg border cursor-pointer transition-colors ${gadsSelected.has(a.customerId) ? 'border-blue-300 bg-blue-50' : 'border-gray-200 bg-white hover:border-gray-300'}`}>
+                        <input type="checkbox" checked={gadsSelected.has(a.customerId)} onChange={() => toggleGadsAccount(a.customerId)} className="w-4 h-4 text-blue-600 rounded" />
+                        <span className="text-sm font-mono text-gray-900">
+                          {formatGadsId(a.customerId)}{a.descriptiveName ? ` | ${a.descriptiveName}` : ''}
+                        </span>
+                        {alreadySaved && <span className="ml-auto text-xs text-gray-400">saved</span>}
+                      </label>
+                    );
+                  })}
+              </div>
+              <Button size="sm" onClick={saveSelectedGadsAccounts} disabled={gadsSavingSelected || gadsSelected.size === 0} className="w-full">
+                {gadsSavingSelected ? <><Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />Saving&hellip;</> : `Save ${gadsSelected.size > 0 ? gadsSelected.size + ' ' : ''}Account${gadsSelected.size !== 1 ? 's' : ''}`}
               </Button>
+              <button onClick={() => { setGadsDiscovered([]); setGadsSelected(new Set()); }} className="text-xs text-gray-400 hover:text-gray-600 w-full text-center">Cancel</button>
             </div>
-            <p className="text-xs text-gray-400">Find your 10-digit Customer ID in the top-right corner of Google Ads</p>
-          </div>
+          ) : (
+            <div className="space-y-3">
+              <Button size="sm" variant="outline" onClick={discoverGadsAccounts} disabled={gadsDiscovering} className="w-full">
+                Find my Google Ads accounts
+              </Button>
+              <div className="relative flex items-center gap-2">
+                <div className="flex-1 border-t border-gray-200" />
+                <span className="text-xs text-gray-400 shrink-0">or add manually</span>
+                <div className="flex-1 border-t border-gray-200" />
+              </div>
+              <div className="space-y-2">
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Customer ID (123-456-7890)"
+                    value={gadsCustomerId}
+                    onChange={(e) => setGadsCustomerId(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && addGadsAccount()}
+                    className="text-sm font-mono"
+                  />
+                  <Input
+                    placeholder="Name (optional)"
+                    value={gadsAccountName}
+                    onChange={(e) => setGadsAccountName(e.target.value)}
+                    className="text-sm"
+                  />
+                  <Button size="sm" onClick={addGadsAccount} disabled={gadsSaving || !gadsCustomerId.trim()}>
+                    {gadsSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                  </Button>
+                </div>
+                <p className="text-xs text-gray-400">Find your 10-digit Customer ID in the top-right corner of Google Ads</p>
+              </div>
+            </div>
+          )}
 
+          {/* Saved accounts */}
           {gadsLoading ? (
             <div className="flex justify-center py-4"><Loader2 className="h-5 w-5 animate-spin text-gray-400" /></div>
           ) : gadsSaved.length > 0 ? (
-            <div className="space-y-2 max-h-48 overflow-y-auto">
+            <div className="space-y-1.5 max-h-48 overflow-y-auto">
               {gadsSaved.map((acc) => (
                 <div key={acc.id} className="flex items-center justify-between p-2.5 rounded-lg border border-gray-200 bg-white">
-                  <div>
-                    <p className="text-sm font-mono font-medium text-gray-900">{acc.displayCustomerId}</p>
-                    {acc.accountName && <p className="text-xs text-gray-400">{acc.accountName}</p>}
-                  </div>
-                  <button onClick={() => removeGadsAccount(acc.id)} className="text-gray-400 hover:text-red-500 transition-colors">
+                  <p className="text-sm font-mono text-gray-900">
+                    {acc.displayCustomerId}{acc.accountName ? ` | ${acc.accountName}` : ''}
+                  </p>
+                  <button onClick={() => removeGadsAccount(acc.id)} className="text-gray-400 hover:text-red-500 transition-colors ml-3 shrink-0">
                     <Trash2 className="h-4 w-4" />
                   </button>
                 </div>
               ))}
             </div>
-          ) : (
+          ) : gadsDiscovered.length === 0 ? (
             <p className="text-xs text-center text-gray-400 py-2">No accounts added yet</p>
-          )}
+          ) : null}
 
           <Button onClick={() => setShowGadsModal(false)} disabled={gadsSaved.length === 0} className="w-full">
             {gadsSaved.length > 0

@@ -7,15 +7,31 @@ interface ManualSpendSliderProps {
   actual: number;
   onChange: (value: number) => void;
   accentColor?: string; // hex, e.g. '#4A7C59'
+  flightStart?: Date | string | null;
+  flightEnd?: Date | string | null;
 }
 
 function fmt(v: number): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(v);
 }
 
-export default function ManualSpendSlider({ planned, actual, onChange, accentColor = '#4A6580' }: ManualSpendSliderProps) {
+export default function ManualSpendSlider({ planned, actual, onChange, accentColor = '#4A6580', flightStart, flightEnd }: ManualSpendSliderProps) {
   // When no planned budget is set, use a sensible default so the slider can still be dragged.
   const max = planned > 0 ? Math.max(planned * 1.25, actual * 1.1) : Math.max(actual * 1.5, 5000);
+
+  // Planned spend progress bar — based on flight elapsed time
+  let plannedBarPct = 0;
+  let expectedSpend = 0;
+  const showPlannedBar = !!(flightStart && flightEnd && planned > 0);
+  if (showPlannedBar) {
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const start = new Date(flightStart!); start.setHours(0, 0, 0, 0);
+    const end = new Date(flightEnd!); end.setHours(0, 0, 0, 0);
+    const totalDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / 86400000));
+    const daysElapsed = Math.max(0, Math.min(totalDays, Math.round((today.getTime() - start.getTime()) / 86400000)));
+    plannedBarPct = Math.min(100, (daysElapsed / totalDays) * 100);
+    expectedSpend = planned * (plannedBarPct / 100);
+  }
   const [editing, setEditing] = useState(false);
   const [inputVal, setInputVal] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -55,10 +71,34 @@ export default function ManualSpendSlider({ planned, actual, onChange, accentCol
       borderTop: '0.5px solid #E8E4DC',
       padding: '8px 14px 10px',
       background: '#FAFAF8',
-      display: 'flex',
-      alignItems: 'center',
-      gap: 10,
     }}>
+      {/* Planned spend progress bar */}
+      {showPlannedBar && (
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 }}>
+            <div style={{ fontSize: 10, fontWeight: 600, color: '#8A8578', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+              Planned Spend
+            </div>
+            <div style={{ fontSize: 10, color: '#8A8578', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+              <span style={{ fontWeight: 600 }}>{fmt(expectedSpend)}</span>
+              <span style={{ color: '#C5C0B8' }}> of {fmt(planned)}</span>
+            </div>
+          </div>
+          <div style={{ height: 6, borderRadius: 99, background: '#E8E4DC', overflow: 'hidden', position: 'relative' }}>
+            <div style={{
+              position: 'absolute', top: 0, left: 0, height: '100%',
+              width: `${plannedBarPct}%`,
+              background: accentColor,
+              opacity: 0.45,
+              borderRadius: 99,
+              transition: 'width 0.4s ease',
+            }} />
+          </div>
+        </div>
+      )}
+
+      {/* Actual spend row */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
       {/* Label */}
       <div style={{ flexShrink: 0, width: 72 }}>
         <div style={{ fontSize: 10, fontWeight: 600, color: '#8A8578', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
@@ -218,6 +258,7 @@ export default function ManualSpendSlider({ planned, actual, onChange, accentCol
           <div style={{ fontSize: 10, color: '#B5B0A5', marginTop: 1 }}>of {fmt(planned)}</div>
         )}
       </div>
+      </div>{/* end actual spend row */}
     </div>
   );
 }

@@ -234,6 +234,8 @@ export default function OOHCard({ channel, clientId, onUpdateChannel, headerActi
         actual={manualActualSpend}
         onChange={handleSpendChange}
         accentColor="#EA8A50"
+        flightStart={startDate}
+        flightEnd={endDate}
       />
     </div>
   );
