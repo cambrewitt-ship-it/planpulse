@@ -66,17 +66,18 @@ export async function POST(
     const { data } = storageClient.storage.from(BUCKET_NAME).getPublicUrl(path);
     const publicUrl = data.publicUrl;
 
-    // Update logo_url using the session client (same auth path as browser SDK)
+    // Update logo_url — no user_id filter; RLS enforces access for authenticated users.
+    // If this fails, the client will still save the URL via a separate DB call.
     const { error: dbError } = await supabase
       .from('clients')
       .update({ logo_url: publicUrl })
-      .eq('id', clientId)
-      .eq('user_id', session.user.id);
+      .eq('id', clientId);
 
     if (dbError) {
-      return NextResponse.json({ error: `Uploaded but failed to save URL: ${dbError.message}` }, { status: 500 });
+      console.error('Logo upload route: DB update failed:', dbError.message);
     }
 
+    // Always return the URL so callers can save it themselves if the DB update above failed.
     return NextResponse.json({ url: publicUrl });
   } catch (error: any) {
     console.error('Logo upload error:', error);

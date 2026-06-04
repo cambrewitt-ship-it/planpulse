@@ -1042,10 +1042,10 @@ export default function HeroHealthSection({
                     <span style={{ fontSize: 21, lineHeight: 1, fontWeight: 800, color }}>
                       {pctChange < 0 ? '↓' : '↑'}
                     </span>
-                    <span style={{ fontSize: 13, fontWeight: 700, lineHeight: 1.1, color }}>
+                    <span style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.1, color }}>
                       {Math.abs(pctChange).toFixed(1)}%
                     </span>
-                    <span style={{ fontSize: 10, color: '#9ca3af', fontWeight: 500, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                    <span style={{ fontSize: 12, color: '#9ca3af', fontWeight: 500, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
                       24h
                     </span>
                   </div>

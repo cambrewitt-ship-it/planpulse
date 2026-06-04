@@ -893,7 +893,7 @@ export default function AdPlatformConnector({ clientId, onConfigNeeded }: AdPlat
                 </span>
               )}
               {platform.comingSoon && (
-                <span className="absolute bottom-2 text-xs text-gray-500">Coming Soon</span>
+                <span className="absolute bottom-2 text-sm text-gray-500">Coming Soon</span>
               )}
             </button>
           );
@@ -1064,7 +1064,7 @@ export default function AdPlatformConnector({ clientId, onConfigNeeded }: AdPlat
                         <h4 className="font-bold text-sm text-gray-900 font-[family-name:var(--font-inter)]">Add New Account</h4>
                         
                         <div>
-                          <Label htmlFor="customerId" className="text-xs font-medium text-gray-700">
+                          <Label htmlFor="customerId" className="text-sm font-medium text-gray-700">
                             Google Ads Customer ID *
                           </Label>
                           <Input
@@ -1076,13 +1076,13 @@ export default function AdPlatformConnector({ clientId, onConfigNeeded }: AdPlat
                             className="mt-1"
                             disabled={isSavingAccount}
                           />
-                          <p className="text-xs text-gray-500 mt-1">
+                          <p className="text-sm text-gray-500 mt-1">
                             Find your Customer ID in Google Ads (top right corner, 10-digit number)
                           </p>
                         </div>
 
                         <div>
-                          <Label htmlFor="accountName" className="text-xs font-medium text-gray-700">
+                          <Label htmlFor="accountName" className="text-sm font-medium text-gray-700">
                             Account Name (Optional)
                           </Label>
                           <Input
@@ -1129,11 +1129,11 @@ export default function AdPlatformConnector({ clientId, onConfigNeeded }: AdPlat
                                       {account.displayCustomerId}
                                     </span>
                                     {account.isActive && (
-                                      <span className="text-xs text-green-600">●</span>
+                                      <span className="text-sm text-green-600">●</span>
                                     )}
                                   </div>
                                   {account.accountName && (
-                                    <p className="text-xs text-gray-500 mt-0.5">
+                                    <p className="text-sm text-gray-500 mt-0.5">
                                       {account.accountName}
                                     </p>
                                   )}
@@ -1184,7 +1184,7 @@ export default function AdPlatformConnector({ clientId, onConfigNeeded }: AdPlat
 
                         {discoveredMetaAccounts.length > 0 && (
                           <div className="space-y-2">
-                            <p className="text-xs text-gray-600 font-medium">
+                            <p className="text-sm text-gray-600 font-medium">
                               Select accounts to add:
                             </p>
                             <Input
@@ -1213,7 +1213,7 @@ export default function AdPlatformConnector({ clientId, onConfigNeeded }: AdPlat
                                     <div className="text-sm font-medium text-gray-900">
                                       {account.accountName}
                                     </div>
-                                    <div className="text-xs text-gray-500 font-mono">
+                                    <div className="text-sm text-gray-500 font-mono">
                                       {account.accountId}
                                     </div>
                                   </div>
@@ -1256,10 +1256,10 @@ export default function AdPlatformConnector({ clientId, onConfigNeeded }: AdPlat
                                       {account.accountName || 'Unnamed Account'}
                                     </span>
                                     {account.isActive && (
-                                      <span className="text-xs text-green-600">●</span>
+                                      <span className="text-sm text-green-600">●</span>
                                     )}
                                   </div>
-                                  <p className="text-xs text-gray-500 font-mono mt-0.5">
+                                  <p className="text-sm text-gray-500 font-mono mt-0.5">
                                     {account.accountId}
                                   </p>
                                 </div>
@@ -1309,7 +1309,7 @@ export default function AdPlatformConnector({ clientId, onConfigNeeded }: AdPlat
 
                         {discoveredGoogleAnalyticsAccounts.length > 0 && (
                           <div className="space-y-2">
-                            <p className="text-xs text-gray-600 font-medium">
+                            <p className="text-sm text-gray-600 font-medium">
                               Select properties to add:
                             </p>
                             <div className="max-h-48 overflow-y-auto space-y-2 border border-gray-200 rounded p-2">
@@ -1328,11 +1328,11 @@ export default function AdPlatformConnector({ clientId, onConfigNeeded }: AdPlat
                                     <div className="text-sm font-medium text-gray-900">
                                       {account.propertyName}
                                     </div>
-                                    <div className="text-xs text-gray-500 font-mono">
+                                    <div className="text-sm text-gray-500 font-mono">
                                       {account.propertyId}
                                     </div>
                                     {account.accountName && (
-                                      <div className="text-xs text-gray-400">
+                                      <div className="text-sm text-gray-400">
                                         Account: {account.accountName}
                                       </div>
                                     )}
@@ -1376,14 +1376,14 @@ export default function AdPlatformConnector({ clientId, onConfigNeeded }: AdPlat
                                       {account.propertyName || 'Unnamed Property'}
                                     </span>
                                     {account.isActive && (
-                                      <span className="text-xs text-green-600">●</span>
+                                      <span className="text-sm text-green-600">●</span>
                                     )}
                                   </div>
-                                  <p className="text-xs text-gray-500 font-mono mt-0.5">
+                                  <p className="text-sm text-gray-500 font-mono mt-0.5">
                                     {account.propertyId}
                                   </p>
                                   {account.accountName && (
-                                    <p className="text-xs text-gray-400 mt-0.5">
+                                    <p className="text-sm text-gray-400 mt-0.5">
                                       Account: {account.accountName}
                                     </p>
                                   )}

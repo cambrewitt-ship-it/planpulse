@@ -417,9 +417,12 @@ export default function CreateClientPage() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ data: base64, contentType: logoFile.type || 'image/png', ext }),
           });
-          if (res.ok) {
-            const { url } = await res.json();
-            await updateClientLogoUrl(newId, url);
+          // Always parse the URL — the route returns it even when its own DB update fails.
+          const uploadedUrl: string | null = await res.json()
+            .then((d: { url?: string }) => d?.url ?? null)
+            .catch(() => null);
+          if (uploadedUrl) {
+            await updateClientLogoUrl(newId, uploadedUrl);
           }
         } catch {}
       }

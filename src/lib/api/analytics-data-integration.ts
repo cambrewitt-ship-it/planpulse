@@ -203,113 +203,84 @@ export async function fetchSpendData(
   const spendData: SpendDataPoint[] = [];
   const errors: string[] = [];
 
-  // Fetch Meta Ads spend
-  try {
-    const metaResponse = await fetch('/api/ads/meta/fetch-spend', {
+  const [metaResult, googleResult] = await Promise.allSettled([
+    fetch('/api/ads/meta/fetch-spend', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        startDate,
-        endDate,
-        clientId,
-      }),
-    });
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ startDate, endDate, clientId }),
+    }).then(r => r.json().catch(() => ({}))),
+    fetch('/api/ads/fetch-spend', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ platform: 'google-ads', startDate, endDate, clientId }),
+    }).then(r => r.json().catch(() => ({}))),
+  ]);
 
-    const metaData = await metaResponse.json().catch(() => ({}));
-    console.log('[fetchSpendData] Meta response status:', metaResponse.status, 'success:', metaData.success, 'data count:', metaData.data?.length, 'errors:', metaData.errors);
-    if (metaResponse.ok) {
-      if (metaData.success && metaData.data) {
-        metaData.data.forEach((item: any) => {
-          // Meta returns dateStart/dateStop, use dateStart
-          // Normalize date format to YYYY-MM-DD
-          const dateStr = item.dateStart || item.dateStop || '';
-          const normalizedDate = dateStr.includes('T')
-            ? dateStr.split('T')[0]
-            : dateStr;
-
-          spendData.push({
-            date: normalizedDate,
-            spend: item.spend || 0,
-            platform: 'meta-ads',
-            accountName: item.accountName,
-            impressions: item.impressions || 0,
-            clicks: item.clicks || 0,
-            ctr: item.ctr || 0,
-            cpc: item.cpc || 0,
-            conversions: item.conversions || 0,
-            campaignId: item.campaignId || '',
-            campaignName: item.campaignName || '',
-            actions: item.actions || [],
-          });
+  // Process Meta result
+  if (metaResult.status === 'fulfilled') {
+    const metaData = metaResult.value;
+    if (metaData.success && metaData.data) {
+      metaData.data.forEach((item: any) => {
+        const dateStr = item.dateStart || item.dateStop || '';
+        const normalizedDate = dateStr.includes('T') ? dateStr.split('T')[0] : dateStr;
+        spendData.push({
+          date: normalizedDate,
+          spend: item.spend || 0,
+          platform: 'meta-ads',
+          accountName: item.accountName,
+          impressions: item.impressions || 0,
+          clicks: item.clicks || 0,
+          ctr: item.ctr || 0,
+          cpc: item.cpc || 0,
+          conversions: item.conversions || 0,
+          campaignId: item.campaignId || '',
+          campaignName: item.campaignName || '',
+          actions: item.actions || [],
         });
-        // Surface per-account errors even when overall request succeeded
-        if (metaData.errors && metaData.errors.length > 0) {
-          metaData.errors.forEach((err: any) => {
-            errors.push(`Meta Ads (${err.accountName || err.accountId}): ${err.error}`);
-          });
-        }
-      } else if (!metaData.success) {
-        errors.push(`Meta Ads: ${metaData.error || 'Unknown error'}`);
+      });
+      if (metaData.errors?.length) {
+        metaData.errors.forEach((err: any) => {
+          errors.push(`Meta Ads (${err.accountName || err.accountId}): ${err.error}`);
+        });
       }
-    } else {
-      errors.push(`Meta Ads: ${metaData.error || `HTTP ${metaResponse.status}`}`);
+    } else if (metaData.error) {
+      errors.push(`Meta Ads: ${metaData.error}`);
     }
-  } catch (error: any) {
-    errors.push(`Meta Ads: ${error.message}`);
+  } else {
+    errors.push(`Meta Ads: ${metaResult.reason?.message || 'Unknown error'}`);
   }
 
-  // Fetch Google Ads spend
-  try {
-    const googleResponse = await fetch('/api/ads/fetch-spend', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        platform: 'google-ads',
-        startDate,
-        endDate,
-        clientId,
-      }),
-    });
-
-    const googleData = await googleResponse.json().catch(() => ({}));
-    if (googleResponse.ok) {
-      if (googleData.success && googleData.data) {
-        googleData.data.forEach((item: any) => {
-          // Normalize date format to YYYY-MM-DD
-          const dateStr = item.date || item.dateStart || '';
-          const normalizedDate = dateStr.includes('T')
-            ? dateStr.split('T')[0]
-            : dateStr;
-
-          spendData.push({
-            date: normalizedDate,
-            spend: item.spend || 0,
-            platform: 'google-ads',
-            accountName: item.accountName,
-            impressions: item.impressions || 0,
-            clicks: item.clicks || 0,
-            ctr: item.ctr || 0,
-            cpc: item.cpc || 0,
-            conversions: item.conversions || 0,
-            campaignId: item.campaignId || '',
-            campaignName: item.campaignName || '',
-          });
+  // Process Google Ads result
+  if (googleResult.status === 'fulfilled') {
+    const googleData = googleResult.value;
+    if (googleData.success && googleData.data) {
+      googleData.data.forEach((item: any) => {
+        const dateStr = item.date || item.dateStart || '';
+        const normalizedDate = dateStr.includes('T') ? dateStr.split('T')[0] : dateStr;
+        spendData.push({
+          date: normalizedDate,
+          spend: item.spend || 0,
+          platform: 'google-ads',
+          accountName: item.accountName,
+          impressions: item.impressions || 0,
+          clicks: item.clicks || 0,
+          ctr: item.ctr || 0,
+          cpc: item.cpc || 0,
+          conversions: item.conversions || 0,
+          campaignId: item.campaignId || '',
+          campaignName: item.campaignName || '',
         });
-        if (googleData.errors?.length) {
-          googleData.errors.forEach((err: any) => {
-            errors.push(`Google Ads (${err.accountName || err.customerId}): ${err.error}`);
-          });
-        }
+      });
+      if (googleData.errors?.length) {
+        googleData.errors.forEach((err: any) => {
+          errors.push(`Google Ads (${err.accountName || err.customerId}): ${err.error}`);
+        });
       }
-    } else {
-      errors.push(`Google Ads: ${googleData.error || `Request failed with status code ${googleResponse.status}`}`);
+    } else if (googleData.error) {
+      errors.push(`Google Ads: ${googleData.error}`);
     }
-  } catch (error: any) {
-    errors.push(`Google Ads: ${error.message}`);
+  } else {
+    errors.push(`Google Ads: ${googleResult.reason?.message || 'Unknown error'}`);
   }
 
   return { data: spendData, errors: errors.length > 0 ? errors : undefined };
@@ -333,42 +304,27 @@ export async function fetchAnalyticsData(
 
   const errors: string[] = [];
 
-  // Fetch GA4 data
-  const ga4Result = await fetchGA4Data(
-    startDate,
-    endDate,
-    metrics,
-    propertyId,
-    clientId,
-    eventName
-  );
+  const [ga4Result, spendResult] = await Promise.all([
+    fetchGA4Data(startDate, endDate, metrics, propertyId, clientId, eventName),
+    includeSpendData
+      ? fetchSpendData(startDate, endDate, clientId)
+      : Promise.resolve({ data: [] as SpendDataPoint[], errors: undefined }),
+  ]);
 
   if (ga4Result.error) {
     errors.push(ga4Result.error);
   }
-  
-  // Store GA4-specific error details if API not enabled
-  const ga4Error = ga4Result.error;
-  const ga4ErrorDetails = ga4Result.errorDetails;
-  const ga4ActivationUrl = ga4Result.activationUrl;
-
-  // Fetch spend data if requested
-  let spendData: SpendDataPoint[] = [];
-  if (includeSpendData) {
-    const spendResult = await fetchSpendData(startDate, endDate, clientId);
-    spendData = spendResult.data;
-    if (spendResult.errors) {
-      errors.push(...spendResult.errors);
-    }
+  if (spendResult.errors) {
+    errors.push(...spendResult.errors);
   }
 
   return {
     ga4Data: ga4Result.data,
-    spendData,
+    spendData: spendResult.data,
     errors: errors.length > 0 ? errors : undefined,
-    ga4Error: ga4Error,
-    ga4ErrorDetails: ga4ErrorDetails,
-    ga4ActivationUrl: ga4ActivationUrl,
+    ga4Error: ga4Result.error,
+    ga4ErrorDetails: ga4Result.errorDetails,
+    ga4ActivationUrl: ga4Result.activationUrl,
   } as any;
 }
 

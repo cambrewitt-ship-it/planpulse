@@ -56,7 +56,7 @@ const BTN_SECONDARY: React.CSSProperties = {
   border: '0.5px solid #D5D0C5',
   background: '#FDFCF8',
   color: '#1C1917',
-  fontSize: 14,
+  fontSize: 15,
   fontWeight: 500,
   cursor: 'pointer',
   fontFamily: "'DM Sans', system-ui, sans-serif",
@@ -72,7 +72,7 @@ const BTN_PRIMARY: React.CSSProperties = {
   border: 'none',
   background: '#4A6580',
   color: '#fff',
-  fontSize: 14,
+  fontSize: 15,
   fontWeight: 500,
   cursor: 'pointer',
   fontFamily: "'DM Sans', system-ui, sans-serif",
@@ -84,7 +84,7 @@ const INPUT_STYLE: React.CSSProperties = {
   borderRadius: 10,
   background: '#FAFAF8',
   padding: '8px 12px',
-  fontSize: 15,
+  fontSize: 16,
   color: '#1C1917',
   fontFamily: "'DM Sans', system-ui, sans-serif",
   outline: 'none',
@@ -98,7 +98,7 @@ const SELECT_STYLE: React.CSSProperties = {
   borderRadius: 10,
   border: '0.5px solid #D5D0C5',
   background: '#FAFAF8',
-  fontSize: 14,
+  fontSize: 15,
   color: '#1C1917',
   fontFamily: "'DM Sans', system-ui, sans-serif",
   outline: 'none',
@@ -143,7 +143,7 @@ function NoteCard({
       fontFamily: "'DM Sans', system-ui, sans-serif",
     }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-        <p style={{ flex: 1, fontSize: 15, color: '#1C1917', lineHeight: 1.6, margin: 0, whiteSpace: 'pre-wrap' }}>
+        <p style={{ flex: 1, fontSize: 16, color: '#1C1917', lineHeight: 1.6, margin: 0, whiteSpace: 'pre-wrap' }}>
           {note.note_body}
         </p>
         <button
@@ -157,17 +157,17 @@ function NoteCard({
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
         <span style={{
-          fontSize: 12, fontWeight: 600, padding: '2px 7px',
+          fontSize: 13, fontWeight: 600, padding: '2px 7px',
           borderRadius: 8, letterSpacing: '0.05em', textTransform: 'uppercase' as const,
           background: colors.bg, color: colors.text, border: `0.5px solid ${colors.border}`,
         }}>
           {NOTE_TYPE_LABELS[note.note_type]}
         </span>
-        <span style={{ fontSize: 13, color: '#B5B0A5' }}>
+        <span style={{ fontSize: 14, color: '#B5B0A5' }}>
           {note.author_name}
         </span>
-        <span style={{ fontSize: 13, color: '#B5B0A5' }}>·</span>
-        <span style={{ fontSize: 13, color: '#B5B0A5' }}>
+        <span style={{ fontSize: 14, color: '#B5B0A5' }}>·</span>
+        <span style={{ fontSize: 14, color: '#B5B0A5' }}>
           {formatDistanceToNow(new Date(note.created_at), { addSuffix: true })}
         </span>
       </div>
@@ -224,7 +224,7 @@ function AddNoteForm({
         autoFocus
       />
       {error && (
-        <p style={{ fontSize: 14, color: '#A0442A', margin: '6px 0 0', fontFamily: "'DM Sans', system-ui, sans-serif" }}>{error}</p>
+        <p style={{ fontSize: 15, color: '#A0442A', margin: '6px 0 0', fontFamily: "'DM Sans', system-ui, sans-serif" }}>{error}</p>
       )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
         <select value={type} onChange={e => setType(e.target.value as typeof type)} style={SELECT_STYLE}>
@@ -286,7 +286,7 @@ function SectionDocUploader({ clientId, fileType }: { clientId: string; fileType
   return (
     <div style={{ marginTop: 16, borderTop: '0.5px solid #E8E4DC', paddingTop: 14 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: docs.length > 0 ? 10 : 0 }}>
-        <span style={{ fontSize: 13, fontWeight: 700, color: '#8A8578', textTransform: 'uppercase', letterSpacing: '0.07em', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+        <span style={{ fontSize: 14, fontWeight: 700, color: '#8A8578', textTransform: 'uppercase', letterSpacing: '0.07em', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
           Uploaded Files
         </span>
         <label style={{
@@ -310,7 +310,7 @@ function SectionDocUploader({ clientId, fileType }: { clientId: string; fileType
         </label>
       </div>
 
-      {error && <p style={{ fontSize: 14, color: '#A0442A', margin: '6px 0', fontFamily: "'DM Sans', system-ui, sans-serif" }}>{error}</p>}
+      {error && <p style={{ fontSize: 15, color: '#A0442A', margin: '6px 0', fontFamily: "'DM Sans', system-ui, sans-serif" }}>{error}</p>}
 
       {docs.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -321,25 +321,25 @@ function SectionDocUploader({ clientId, fileType }: { clientId: string; fileType
               <div key={doc.id} style={{ borderRadius: 10, border: '0.5px solid #E8E4DC', background: '#FAFAF8', overflow: 'hidden' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px' }}>
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8A8578" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-                  <span style={{ flex: 1, fontSize: 14, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <span style={{ flex: 1, fontSize: 15, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {doc.file_name}
                   </span>
                   {hasContent && (
                     <span style={{
-                      fontSize: 12, fontWeight: 600, padding: '1px 6px', borderRadius: 6,
+                      fontSize: 13, fontWeight: 600, padding: '1px 6px', borderRadius: 6,
                       background: 'rgba(74,124,89,0.1)', color: '#4A7C59', border: '0.5px solid rgba(74,124,89,0.25)',
                       fontFamily: "'DM Sans', system-ui, sans-serif", whiteSpace: 'nowrap',
                     }}>
                       AI readable
                     </span>
                   )}
-                  <span style={{ fontSize: 13, color: '#B5B0A5', whiteSpace: 'nowrap', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+                  <span style={{ fontSize: 14, color: '#B5B0A5', whiteSpace: 'nowrap', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
                     {format(new Date(doc.uploaded_at), 'd MMM yyyy')}
                   </span>
                   {hasContent && (
                     <button
                       onClick={() => setExpandedDoc(isExpanded ? null : doc.id)}
-                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#4A6580', fontSize: 13, fontFamily: "'DM Sans', system-ui, sans-serif", flexShrink: 0 }}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#4A6580', fontSize: 14, fontFamily: "'DM Sans', system-ui, sans-serif", flexShrink: 0 }}
                     >
                       {isExpanded ? 'Hide' : 'View'}
                     </button>
@@ -353,7 +353,7 @@ function SectionDocUploader({ clientId, fileType }: { clientId: string; fileType
                 {hasContent && isExpanded && (
                   <div style={{
                     borderTop: '0.5px solid #E8E4DC', padding: '10px 14px',
-                    fontSize: 15, color: '#1C1917', lineHeight: 1.7, whiteSpace: 'pre-wrap',
+                    fontSize: 16, color: '#1C1917', lineHeight: 1.7, whiteSpace: 'pre-wrap',
                     fontFamily: "'DM Sans', system-ui, sans-serif", maxHeight: 280, overflowY: 'auto',
                   }}>
                     {doc.text_content}
@@ -442,7 +442,7 @@ function HandoverNotesSection({ clientId }: { clientId: string }) {
           ))}
         </div>
       ) : notes.length === 0 ? (
-        <p style={{ fontSize: 15, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+        <p style={{ fontSize: 16, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
           No notes yet. Add the first handover note for this client.
         </p>
       ) : (
@@ -455,7 +455,7 @@ function HandoverNotesSection({ clientId }: { clientId: string }) {
           {pinned.length > 0 && unpinned.length > 0 && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '2px 0' }}>
               <div style={{ flex: 1, height: '0.5px', background: '#E8E4DC' }} />
-              <span style={{ fontSize: 12, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif", whiteSpace: 'nowrap' }}>Earlier</span>
+              <span style={{ fontSize: 13, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif", whiteSpace: 'nowrap' }}>Earlier</span>
               <div style={{ flex: 1, height: '0.5px', background: '#E8E4DC' }} />
             </div>
           )}
@@ -508,10 +508,10 @@ function BriefField({ label, value }: { label: string; value: string | number | 
   if (!value && value !== 0) return null;
   return (
     <div style={{ marginBottom: 12 }}>
-      <span style={{ fontSize: 13, fontWeight: 600, color: '#8A8578', textTransform: 'uppercase' as const, letterSpacing: '0.07em', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+      <span style={{ fontSize: 14, fontWeight: 600, color: '#8A8578', textTransform: 'uppercase' as const, letterSpacing: '0.07em', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
         {label}
       </span>
-      <p style={{ fontSize: 15, color: '#1C1917', marginTop: 4, lineHeight: 1.6, fontFamily: "'DM Sans', system-ui, sans-serif", whiteSpace: 'pre-wrap' }}>
+      <p style={{ fontSize: 16, color: '#1C1917', marginTop: 4, lineHeight: 1.6, fontFamily: "'DM Sans', system-ui, sans-serif", whiteSpace: 'pre-wrap' }}>
         {typeof value === 'number' ? `$${value.toLocaleString()}` : value}
       </p>
     </div>
@@ -550,7 +550,7 @@ function BriefVersionModal({
             Brief Version {version.version}
           </span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ fontSize: 13, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+            <span style={{ fontSize: 14, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
               Saved {format(new Date(version.saved_at), 'd MMM yyyy, h:mm a')}
             </span>
             <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#8A8578', fontSize: 21, lineHeight: 1 }}>×</button>
@@ -563,7 +563,7 @@ function BriefVersionModal({
         <BriefField label="Target Audience" value={d.target_audience} />
         <BriefField label="Brief" value={d.brief_body} />
         {!d.objectives && !d.kpis && !d.budget && !d.start_date && !d.target_audience && !d.brief_body && (
-          <p style={{ fontSize: 15, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>No content recorded in this version.</p>
+          <p style={{ fontSize: 16, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>No content recorded in this version.</p>
         )}
       </div>
     </div>
@@ -682,7 +682,7 @@ function BriefSection({ clientId, onLockChange }: { clientId: string; onLockChan
             <span style={SECTION_TITLE_STYLE}>Campaign Brief</span>
             {brief?.is_locked && (
               <span style={{
-                fontSize: 12, fontWeight: 600, padding: '2px 8px', borderRadius: 8,
+                fontSize: 13, fontWeight: 600, padding: '2px 8px', borderRadius: 8,
                 background: '#F0EDE8', color: '#8A8578', border: '0.5px solid #E0DCD4',
                 fontFamily: "'DM Sans', system-ui, sans-serif", letterSpacing: '0.05em',
                 textTransform: 'uppercase' as const,
@@ -715,7 +715,7 @@ function BriefSection({ clientId, onLockChange }: { clientId: string; onLockChan
           </div>
         ) : editing ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {error && <p style={{ fontSize: 14, color: '#A0442A', fontFamily: "'DM Sans', system-ui, sans-serif" }}>{error}</p>}
+            {error && <p style={{ fontSize: 15, color: '#A0442A', fontFamily: "'DM Sans', system-ui, sans-serif" }}>{error}</p>}
             {([
               { key: 'objectives', label: 'Objectives', multiline: true },
               { key: 'kpis', label: 'KPIs', multiline: true },
@@ -726,7 +726,7 @@ function BriefSection({ clientId, onLockChange }: { clientId: string; onLockChan
               { key: 'brief_body', label: 'Brief Body', multiline: true },
             ] as Array<{ key: keyof typeof form; label: string; multiline: boolean; type?: string }>).map(({ key, label, multiline, type }) => (
               <div key={key}>
-                <label style={{ fontSize: 13, fontWeight: 600, color: '#8A8578', textTransform: 'uppercase' as const, letterSpacing: '0.07em', fontFamily: "'DM Sans', system-ui, sans-serif", display: 'block', marginBottom: 4 }}>
+                <label style={{ fontSize: 14, fontWeight: 600, color: '#8A8578', textTransform: 'uppercase' as const, letterSpacing: '0.07em', fontFamily: "'DM Sans', system-ui, sans-serif", display: 'block', marginBottom: 4 }}>
                   {label}
                 </label>
                 {multiline ? (
@@ -770,7 +770,7 @@ function BriefSection({ clientId, onLockChange }: { clientId: string; onLockChan
         ) : brief ? (
           <div>
             {brief.is_locked && brief.locked_at && (
-              <p style={{ fontSize: 14, color: '#8A8578', marginBottom: 12, fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+              <p style={{ fontSize: 15, color: '#8A8578', marginBottom: 12, fontFamily: "'DM Sans', system-ui, sans-serif" }}>
                 Locked by {brief.locked_by_name ?? 'Team member'} on {format(new Date(brief.locked_at), 'd MMM yyyy')}
               </p>
             )}
@@ -788,11 +788,11 @@ function BriefSection({ clientId, onLockChange }: { clientId: string; onLockChan
             <BriefField label="Target Audience" value={brief.target_audience} />
             <BriefField label="Brief Body" value={brief.brief_body} />
             {!brief.objectives && !brief.kpis && !brief.budget && !brief.start_date && !brief.target_audience && !brief.brief_body && (
-              <p style={{ fontSize: 15, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>No brief content yet. Click Edit Brief to fill it in.</p>
+              <p style={{ fontSize: 16, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>No brief content yet. Click Edit Brief to fill it in.</p>
             )}
           </div>
         ) : (
-          <p style={{ fontSize: 15, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+          <p style={{ fontSize: 16, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
             No brief created yet. Click Create Brief to get started.
           </p>
         )}
@@ -800,7 +800,7 @@ function BriefSection({ clientId, onLockChange }: { clientId: string; onLockChan
         {/* Version History */}
         {showVersions && versions.length > 0 && (
           <div style={{ marginTop: 16, borderTop: '0.5px solid #E8E4DC', paddingTop: 14 }}>
-            <span style={{ fontSize: 14, fontWeight: 600, color: '#8A8578', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Version History</span>
+            <span style={{ fontSize: 15, fontWeight: 600, color: '#8A8578', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Version History</span>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
               {versions.map(v => (
                 <button
@@ -813,8 +813,8 @@ function BriefSection({ clientId, onLockChange }: { clientId: string; onLockChan
                     fontFamily: "'DM Sans', system-ui, sans-serif",
                   }}
                 >
-                  <span style={{ fontSize: 15, color: '#1C1917', fontWeight: 500 }}>Version {v.version}</span>
-                  <span style={{ fontSize: 13, color: '#B5B0A5' }}>
+                  <span style={{ fontSize: 16, color: '#1C1917', fontWeight: 500 }}>Version {v.version}</span>
+                  <span style={{ fontSize: 14, color: '#B5B0A5' }}>
                     {format(new Date(v.saved_at), 'd MMM yyyy, h:mm a')}
                   </span>
                 </button>
@@ -898,12 +898,12 @@ function GoalEditor({
   const floorAuto = hasTarget ? calcFloor(targetNum, direction) : null;
 
   const labelStyle: React.CSSProperties = {
-    fontSize: 12, fontWeight: 700, color: '#8A8578', textTransform: 'uppercase',
+    fontSize: 13, fontWeight: 700, color: '#8A8578', textTransform: 'uppercase',
     letterSpacing: '0.07em', fontFamily: "'DM Sans', system-ui, sans-serif", marginBottom: 4, display: 'block',
   };
   const numInput: React.CSSProperties = {
     width: 90, height: 30, borderRadius: 8, border: '0.5px solid #D5D0C5',
-    background: '#FAFAF8', textAlign: 'center' as const, fontSize: 15,
+    background: '#FAFAF8', textAlign: 'center' as const, fontSize: 16,
     color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif", outline: 'none',
     padding: '0 8px',
   };
@@ -951,7 +951,7 @@ function GoalEditor({
             {GOAL_TYPE_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
           </select>
         </div>
-        <span style={{ fontSize: 14, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif", paddingBottom: 6 }}>via</span>
+        <span style={{ fontSize: 15, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif", paddingBottom: 6 }}>via</span>
         <div>
           <span style={labelStyle}>Metric</span>
           <select
@@ -988,27 +988,27 @@ function GoalEditor({
       {hasTarget && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, flexWrap: 'wrap' as const }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-            <span style={{ fontSize: 12, fontWeight: 700, color: '#4A7C59', textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Stretch</span>
+            <span style={{ fontSize: 13, fontWeight: 700, color: '#4A7C59', textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Stretch</span>
             <span style={{ fontSize: 16, fontWeight: 700, color: '#4A7C59', fontFamily: "'DM Sans', system-ui, sans-serif" }}>{stretchAuto}</span>
-            <span style={{ fontSize: 12, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>auto</span>
+            <span style={{ fontSize: 13, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>auto</span>
           </div>
-          <span style={{ color: '#D5D0C5', fontSize: 14 }}>·</span>
+          <span style={{ color: '#D5D0C5', fontSize: 15 }}>·</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-            <span style={{ fontSize: 12, fontWeight: 700, color: '#4A6580', textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Target</span>
+            <span style={{ fontSize: 13, fontWeight: 700, color: '#4A6580', textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Target</span>
             <span style={{ fontSize: 16, fontWeight: 700, color: '#4A6580', fontFamily: "'DM Sans', system-ui, sans-serif" }}>{targetNum}</span>
           </div>
-          <span style={{ color: '#D5D0C5', fontSize: 14 }}>·</span>
+          <span style={{ color: '#D5D0C5', fontSize: 15 }}>·</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-            <span style={{ fontSize: 12, fontWeight: 700, color: '#A0442A', textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Floor</span>
+            <span style={{ fontSize: 13, fontWeight: 700, color: '#A0442A', textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Floor</span>
             <span style={{ fontSize: 16, fontWeight: 700, color: '#A0442A', fontFamily: "'DM Sans', system-ui, sans-serif" }}>{floorAuto}</span>
-            <span style={{ fontSize: 12, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>auto</span>
+            <span style={{ fontSize: 13, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>auto</span>
           </div>
           <div style={{ flex: 1 }} />
           {dirty && (
             <button
               onClick={handleSave}
               disabled={saving}
-              style={{ ...BTN_PRIMARY, height: 28, fontSize: 13, opacity: saving ? 0.6 : 1 }}
+              style={{ ...BTN_PRIMARY, height: 28, fontSize: 14, opacity: saving ? 0.6 : 1 }}
             >
               {saving ? 'Saving…' : 'Save Goal'}
             </button>
@@ -1022,7 +1022,7 @@ function GoalEditor({
           <button
             onClick={handleSave}
             disabled={saving || !hasTarget}
-            style={{ ...BTN_PRIMARY, height: 28, fontSize: 13, opacity: (saving || !hasTarget) ? 0.4 : 1 }}
+            style={{ ...BTN_PRIMARY, height: 28, fontSize: 14, opacity: (saving || !hasTarget) ? 0.4 : 1 }}
           >
             {saving ? 'Saving…' : 'Save Goal'}
           </button>
@@ -1071,7 +1071,7 @@ function GoalsSection({ clientId }: { clientId: string }) {
   }
 
   const subLabel: React.CSSProperties = {
-    fontSize: 12, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
+    fontSize: 13, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
     fontFamily: "'DM Sans', system-ui, sans-serif",
   };
 
@@ -1130,7 +1130,7 @@ function GoalsSection({ clientId }: { clientId: string }) {
                 />
               )}
               {secondaryGoals.length === 0 && !addingSecondary && (
-                <p style={{ fontSize: 14, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif", margin: 0 }}>
+                <p style={{ fontSize: 15, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif", margin: 0 }}>
                   No secondary goals yet — use these to track additional KPIs alongside your primary goal.
                 </p>
               )}
@@ -1263,7 +1263,7 @@ function DocumentsSection({ clientId }: { clientId: string }) {
   }
 
   const modeBtn = (mode: 'file' | 'text'): React.CSSProperties => ({
-    height: 32, padding: '0 16px', borderRadius: 9999, fontSize: 15, fontWeight: 500,
+    height: 32, padding: '0 16px', borderRadius: 9999, fontSize: 16, fontWeight: 500,
     cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif",
     border: uploadMode === mode ? 'none' : '1px solid #D5D0C5',
     background: uploadMode === mode ? '#4A6580' : '#FDFCF8',
@@ -1282,7 +1282,7 @@ function DocumentsSection({ clientId }: { clientId: string }) {
 
       {/* Type selector always visible */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-        <span style={{ fontSize: 14, color: '#8A8578', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Type:</span>
+        <span style={{ fontSize: 15, color: '#8A8578', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Type:</span>
         <select value={fileType} onChange={e => setFileType(e.target.value)} style={SELECT_STYLE}>
           {DOC_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
@@ -1297,7 +1297,7 @@ function DocumentsSection({ clientId }: { clientId: string }) {
             placeholder="Document title (e.g. Brand Voice Guidelines)"
             style={{
               width: '100%', border: '0.5px solid #D5D0C5', borderRadius: 10,
-              background: '#FAFAF8', padding: '8px 12px', fontSize: 15,
+              background: '#FAFAF8', padding: '8px 12px', fontSize: 16,
               color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif",
               outline: 'none', marginBottom: 8, boxSizing: 'border-box',
             }}
@@ -1309,7 +1309,7 @@ function DocumentsSection({ clientId }: { clientId: string }) {
             style={{ ...INPUT_STYLE, minHeight: 120, boxSizing: 'border-box' }}
           />
           {uploadError && (
-            <p style={{ fontSize: 14, color: '#A0442A', margin: '6px 0 0', fontFamily: "'DM Sans', system-ui, sans-serif" }}>{uploadError}</p>
+            <p style={{ fontSize: 15, color: '#A0442A', margin: '6px 0 0', fontFamily: "'DM Sans', system-ui, sans-serif" }}>{uploadError}</p>
           )}
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
             <button onClick={() => { setUploadMode('file'); setUploadError(null); }} style={BTN_SECONDARY}>Cancel</button>
@@ -1343,10 +1343,10 @@ function DocumentsSection({ clientId }: { clientId: string }) {
               <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/>
             </svg>
             <div>
-              <p style={{ fontSize: 15, fontWeight: 600, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif", margin: '0 0 2px' }}>
+              <p style={{ fontSize: 16, fontWeight: 600, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif", margin: '0 0 2px' }}>
                 {uploading ? 'Uploading…' : dragging ? 'Drop to upload' : 'Click to upload a file'}
               </p>
-              <p style={{ fontSize: 13, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif", margin: 0 }}>
+              <p style={{ fontSize: 14, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif", margin: 0 }}>
                 PDF, DOCX, TXT — AI readable · or drag & drop
               </p>
             </div>
@@ -1359,7 +1359,7 @@ function DocumentsSection({ clientId }: { clientId: string }) {
             />
           </label>
           {uploadError && (
-            <p style={{ fontSize: 14, color: '#A0442A', marginBottom: 10, fontFamily: "'DM Sans', system-ui, sans-serif" }}>{uploadError}</p>
+            <p style={{ fontSize: 15, color: '#A0442A', marginBottom: 10, fontFamily: "'DM Sans', system-ui, sans-serif" }}>{uploadError}</p>
           )}
         </>
       )}
@@ -1369,7 +1369,7 @@ function DocumentsSection({ clientId }: { clientId: string }) {
           {[1, 2].map(i => <div key={i} style={{ height: 40, borderRadius: 8, background: '#F0EDE8' }} />)}
         </div>
       ) : documents.length === 0 ? (
-        <p style={{ fontSize: 15, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+        <p style={{ fontSize: 16, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
           No documents yet — upload files or add text to build your client intel library.
         </p>
       ) : (
@@ -1387,11 +1387,11 @@ function DocumentsSection({ clientId }: { clientId: string }) {
                   ) : (
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8A8578" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
                   )}
-                  <span style={{ flex: 1, fontSize: 15, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <span style={{ flex: 1, fontSize: 16, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {doc.file_name}
                   </span>
                   <span style={{
-                    fontSize: 12, fontWeight: 600, padding: '2px 6px', borderRadius: 6,
+                    fontSize: 13, fontWeight: 600, padding: '2px 6px', borderRadius: 6,
                     background: '#F0EDE8', color: '#8A8578', border: '0.5px solid #E0DCD4',
                     fontFamily: "'DM Sans', system-ui, sans-serif", letterSpacing: '0.04em',
                     textTransform: 'uppercase' as const, whiteSpace: 'nowrap',
@@ -1400,24 +1400,24 @@ function DocumentsSection({ clientId }: { clientId: string }) {
                   </span>
                   {hasContent && (
                     <span style={{
-                      fontSize: 12, fontWeight: 600, padding: '2px 6px', borderRadius: 6,
+                      fontSize: 13, fontWeight: 600, padding: '2px 6px', borderRadius: 6,
                       background: 'rgba(74,124,89,0.1)', color: '#4A7C59', border: '0.5px solid rgba(74,124,89,0.25)',
                       fontFamily: "'DM Sans', system-ui, sans-serif", whiteSpace: 'nowrap',
                     }}>
                       AI readable
                     </span>
                   )}
-                  <span style={{ fontSize: 13, color: '#B5B0A5', whiteSpace: 'nowrap', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+                  <span style={{ fontSize: 14, color: '#B5B0A5', whiteSpace: 'nowrap', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
                     {format(new Date(doc.uploaded_at), 'd MMM yyyy')}
                   </span>
-                  <span style={{ fontSize: 13, color: '#B5B0A5', whiteSpace: 'nowrap', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+                  <span style={{ fontSize: 14, color: '#B5B0A5', whiteSpace: 'nowrap', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
                     {doc.uploader_name}
                   </span>
                   {hasContent && (
                     <button
                       onClick={() => setExpandedDoc(isExpanded ? null : doc.id)}
                       title={isExpanded ? 'Collapse' : 'View content'}
-                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#4A6580', flexShrink: 0, fontSize: 13, fontFamily: "'DM Sans', system-ui, sans-serif" }}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#4A6580', flexShrink: 0, fontSize: 14, fontFamily: "'DM Sans', system-ui, sans-serif" }}
                     >
                       {isExpanded ? 'Hide' : 'View'}
                     </button>
@@ -1437,7 +1437,7 @@ function DocumentsSection({ clientId }: { clientId: string }) {
                 {hasContent && isExpanded && (
                   <div style={{
                     borderTop: '0.5px solid #E8E4DC', padding: '10px 14px',
-                    fontSize: 15, color: '#1C1917', lineHeight: 1.7,
+                    fontSize: 16, color: '#1C1917', lineHeight: 1.7,
                     fontFamily: "'DM Sans', system-ui, sans-serif", whiteSpace: 'pre-wrap',
                     background: '#FAFAF8', maxHeight: 300, overflowY: 'auto',
                   }}>

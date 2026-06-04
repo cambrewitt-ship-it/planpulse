@@ -3,7 +3,7 @@
 
 'use client';
 
-import { useMemo, useRef, useEffect } from 'react';
+import { useMemo, useRef, useEffect, useState, useCallback } from 'react';
 import { Radio } from 'lucide-react';
 import { getChannelLogo } from '@/lib/utils/channel-icons';
 
@@ -206,9 +206,21 @@ export function GanttCalendar({
 
   // Layout constants
   const LABEL_COL = 130;
-  const DAY_WIDTH = 38;
-  const RULER_BG  = '#374151';
-  const Z_STICKY  = 20; // above all timeline z-indices (bars=4, dots=5, markers=6)
+  const Z_STICKY  = 20;
+  const ZOOM_STEPS = [12, 18, 26, 38, 52, 68];
+  const [zoomIdx, setZoomIdx] = useState(3); // default: 38px/day
+  const dayWidth = ZOOM_STEPS[zoomIdx];
+
+  const scrollToToday = useCallback(() => {
+    if (!containerRef.current || todayIdx === null) return;
+    const containerW = containerRef.current.clientWidth - LABEL_COL;
+    containerRef.current.scrollLeft = Math.max(0, todayIdx * dayWidth - containerW * 0.3);
+  }, [todayIdx, dayWidth]);
+
+  useEffect(() => {
+    scrollToToday();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zoomIdx]);
 
   const filteredSet = useMemo(() => new Set(filteredClientIds), [filteredClientIds]);
   const filteredClients = useMemo(
@@ -264,10 +276,11 @@ export function GanttCalendar({
 
   const maxDensity = useMemo(() => Math.max(...densityByIdx, 1), [densityByIdx]);
 
-  // Scroll to today on mount — yesterday sits at the left edge, today + 8 days visible ahead
+  // Scroll to today on mount
   useEffect(() => {
     if (!containerRef.current || todayIdx === null) return;
-    containerRef.current.scrollLeft = Math.max(0, (todayIdx - 1) * DAY_WIDTH);
+    const containerW = containerRef.current.clientWidth - LABEL_COL;
+    containerRef.current.scrollLeft = Math.max(0, todayIdx * ZOOM_STEPS[3] - containerW * 0.3);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -276,47 +289,43 @@ export function GanttCalendar({
     onDaySelect(selectedDay === d ? null : d);
   };
 
-  const totalW = totalDays * DAY_WIDTH;
+  const totalW = totalDays * dayWidth;
 
   // Helper: get pixel left for a date string
   const pxLeft = (dateStr: string) => {
     const idx = dateIndex.get(dateStr);
-    return idx !== undefined ? idx * DAY_WIDTH : null;
+    return idx !== undefined ? idx * dayWidth : null;
   };
 
-  const todayPx = todayIdx !== null ? todayIdx * DAY_WIDTH : null;
+  const todayPx = todayIdx !== null ? todayIdx * dayWidth : null;
 
   return (
     <div
       ref={containerRef}
-      style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 394, width: '100%', minWidth: 0, background: '#1F2937', borderRadius: 4, fontFamily: "'DM Sans', system-ui, sans-serif" }}
+      style={{ overflowX: 'auto', overflowY: 'auto', height: '100%', width: '100%', minWidth: 0, background: 'transparent', borderRadius: 4, fontFamily: "'DM Sans', system-ui, sans-serif" }}
     >
       <div style={{ width: LABEL_COL + totalW, position: 'relative' }}>
 
         {/* ── Month header row ──────────────────────────────── */}
-        <div style={{ display: 'grid', gridTemplateColumns: `${LABEL_COL}px ${totalW}px`, height: 18 }}>
-          <div style={{
-            position: 'sticky', left: 0, zIndex: Z_STICKY,
-            background: RULER_BG,
-            borderBottom: '0.5px solid rgba(255,255,255,0.08)',
-          }} />
-          <div style={{ position: 'relative', background: RULER_BG, borderBottom: '0.5px solid rgba(255,255,255,0.08)' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: `${LABEL_COL}px ${totalW}px`, height: 18, position: 'sticky', top: 0 }}>
+          <div style={{ background: '#F9FAFB', borderBottom: '1px solid #E5E7EB', position: 'sticky', left: 0, zIndex: Z_STICKY + 5 }} />
+          <div style={{ position: 'relative', background: '#F9FAFB', borderBottom: '1px solid #E5E7EB', zIndex: Z_STICKY + 3 }}>
             {monthGroups.map(grp => (
               <div
                 key={grp.label}
                 style={{
                   position: 'absolute',
-                  left: grp.startIdx * DAY_WIDTH,
-                  width: grp.dayCount * DAY_WIDTH,
+                  left: grp.startIdx * dayWidth,
+                  width: grp.dayCount * dayWidth,
                   height: '100%',
                   display: 'flex', alignItems: 'center',
                   paddingLeft: 6,
-                  borderLeft: '0.5px solid rgba(0,0,0,0.10)',
+                  borderLeft: '1px solid #E5E7EB',
                   boxSizing: 'border-box',
                   overflow: 'hidden',
                 }}
               >
-                <span style={{ fontSize: 8, fontWeight: 600, color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: '0.08em', whiteSpace: 'nowrap' }}>
+                <span style={{ fontSize: 9, fontWeight: 700, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.07em', whiteSpace: 'nowrap' }}>
                   {grp.label}
                 </span>
               </div>
@@ -325,67 +334,85 @@ export function GanttCalendar({
         </div>
 
         {/* ── Day ruler row ──────────────────────────────────── */}
-        <div style={{ display: 'grid', gridTemplateColumns: `${LABEL_COL}px ${totalW}px`, height: 28 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: `${LABEL_COL}px ${totalW}px`, height: 28, position: 'sticky', top: 18 }}>
           <div style={{
-            display: 'flex', alignItems: 'flex-end',
-            paddingBottom: 4, paddingLeft: 8,
-            position: 'sticky', left: 0, zIndex: Z_STICKY,
-            background: RULER_BG,
+            background: '#F9FAFB', borderBottom: '1px solid #E5E7EB',
+            position: 'sticky', left: 0, zIndex: Z_STICKY + 5,
+            display: 'flex', alignItems: 'center', gap: 4, padding: '0 6px',
           }}>
-            <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.7)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-              Client
-            </span>
+            <button
+              onClick={scrollToToday}
+              style={{
+                fontSize: 9, fontWeight: 600, color: '#374151',
+                background: '#E5E7EB', border: 'none', borderRadius: 4,
+                padding: '2px 6px', cursor: 'pointer', lineHeight: 1.4,
+                fontFamily: "'DM Sans', system-ui, sans-serif",
+                letterSpacing: '0.02em',
+              }}
+            >Today</button>
+            <button
+              onClick={() => setZoomIdx(i => Math.max(i - 1, 0))}
+              disabled={zoomIdx === 0}
+              style={{
+                width: 18, height: 18, borderRadius: 4,
+                background: zoomIdx === 0 ? '#F3F4F6' : '#E5E7EB',
+                border: 'none', cursor: zoomIdx === 0 ? 'default' : 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 14, fontWeight: 500, color: zoomIdx === 0 ? '#D1D5DB' : '#374151',
+                lineHeight: 1, flexShrink: 0,
+              }}
+            >−</button>
+            <button
+              onClick={() => setZoomIdx(i => Math.min(i + 1, ZOOM_STEPS.length - 1))}
+              disabled={zoomIdx === ZOOM_STEPS.length - 1}
+              style={{
+                width: 18, height: 18, borderRadius: 4,
+                background: zoomIdx === ZOOM_STEPS.length - 1 ? '#F3F4F6' : '#E5E7EB',
+                border: 'none', cursor: zoomIdx === ZOOM_STEPS.length - 1 ? 'default' : 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 14, fontWeight: 500, color: zoomIdx === ZOOM_STEPS.length - 1 ? '#D1D5DB' : '#374151',
+                lineHeight: 1, flexShrink: 0,
+              }}
+            >+</button>
           </div>
-
-          <div style={{ position: 'relative', height: 28, background: RULER_BG }}>
-            {/* Day numbers */}
+          <div style={{ position: 'relative', background: '#F9FAFB', borderBottom: '1px solid #E5E7EB', zIndex: Z_STICKY + 3 }}>
             {dayList.map((dateStr, idx) => {
               const dayNum = parseInt(dateStr.slice(8, 10), 10);
               const isToday = dateStr === todayStr;
-              const dotCount = densityByIdx[idx];
-              const dotSize = dotCount > 0 ? Math.max(2, Math.round((dotCount / maxDensity) * 4)) : 0;
               return (
                 <div
                   key={dateStr}
-                  onClick={() => handleDayClick(dateStr)}
                   style={{
                     position: 'absolute',
-                    left: idx * DAY_WIDTH,
-                    width: DAY_WIDTH,
+                    left: idx * dayWidth,
+                    width: dayWidth,
                     height: '100%',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    justifyContent: 'flex-end',
-                    paddingBottom: 3,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
                     cursor: 'pointer',
-                    gap: 1,
                     userSelect: 'none',
                   }}
+                  onClick={() => handleDayClick(dateStr)}
                 >
-                  <div style={{
-                    width: dotSize, height: dotSize,
-                    borderRadius: '50%',
-                    background: dotCount > 0 ? 'rgba(255,255,255,0.35)' : 'transparent',
-                    flexShrink: 0, marginBottom: 1,
-                  }} />
                   <span style={{
-                    fontSize: isToday ? 9 : 7.5,
-                    fontWeight: isToday ? 600 : 400,
-                    color: isToday ? '#ffffff' : 'rgba(255,255,255,0.65)',
+                    fontSize: isToday ? 10 : 9,
+                    fontWeight: isToday ? 700 : 400,
+                    color: isToday ? '#111827' : '#9CA3AF',
                     lineHeight: 1,
                     fontFamily: "'DM Sans', system-ui, sans-serif",
                   }}>
                     {dayNum}
                   </span>
+                  {isToday && (
+                    <div style={{
+                      position: 'absolute', bottom: 2,
+                      width: 3, height: 3, borderRadius: '50%',
+                      background: '#111827',
+                    }} />
+                  )}
                 </div>
               );
             })}
-
-            {/* Today amber band in ruler */}
-            {todayPx !== null && (
-              <TodayOverlay px={todayPx} dayWidth={DAY_WIDTH} />
-            )}
+            {todayPx !== null && <TodayOverlay px={todayPx} dayWidth={dayWidth} />}
           </div>
         </div>
 
@@ -395,43 +422,7 @@ export function GanttCalendar({
           const rowBg = ROW_COLORS[clientIdx % 2];
 
           return (
-            <div key={client.id}>
-              <div style={{ height: '0.5px', background: 'rgba(255,255,255,0.08)' }} />
-
-              {/* Client header row */}
-              <div style={{ display: 'grid', gridTemplateColumns: `${LABEL_COL}px ${totalW}px`, height: 24 }}>
-                <div style={{
-                  display: 'flex', alignItems: 'center', gap: 5,
-                  paddingLeft: 8,
-                  position: 'sticky', left: 0, zIndex: Z_STICKY,
-                  background: rowBg,
-                }}>
-                  <div style={{
-                    width: 15, height: 15, borderRadius: 3,
-                    background: 'rgba(255,255,255,0.08)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-                  }}>
-                    <span style={{ fontSize: 8, fontWeight: 500, color: '#E6F0FF' }}>{client.initials}</span>
-                  </div>
-                  <span style={{ fontSize: 11, fontWeight: 500, color: '#000000', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {client.name}
-                  </span>
-                </div>
-
-                <div style={{ position: 'relative', background: '#FDFCF8', height: 24 }}>
-                  {todayPx !== null && <TodayOverlay px={todayPx} dayWidth={DAY_WIDTH} />}
-                  {/* Month dividers */}
-                  {monthGroups.slice(1).map(grp => (
-                    <div key={grp.label} style={{
-                      position: 'absolute', left: grp.startIdx * DAY_WIDTH,
-                      top: 0, bottom: 0, width: '0.5px',
-                      background: 'rgba(255,255,255,0.08)', pointerEvents: 'none',
-                    }} />
-                  ))}
-                </div>
-              </div>
-
-              {/* Per-channel sub-rows */}
+            <div key={client.id}>{/* Per-channel sub-rows */}
               {clientChannels.map(ch => {
                 if (!ch.start_date && !ch.end_date) return null;
 
@@ -449,8 +440,8 @@ export function GanttCalendar({
 
                 if (endIdx < startIdx) return null;
 
-                const barLeft  = startIdx * DAY_WIDTH;
-                const barWidth = (endIdx - startIdx + 1) * DAY_WIDTH;
+                const barLeft  = startIdx * dayWidth;
+                const barWidth = (endIdx - startIdx + 1) * dayWidth;
 
                 const hcKey        = `${client.id}:${normalizeChannelLabel(ch.label)}`;
                 const chHealthChecks = hcByClientChannel.get(hcKey) || [];
@@ -466,7 +457,7 @@ export function GanttCalendar({
                 return (
                   <div
                     key={ch.id}
-                    style={{ display: 'grid', gridTemplateColumns: `${LABEL_COL}px ${totalW}px`, height: 24 }}
+                    style={{ display: 'grid', gridTemplateColumns: `${LABEL_COL}px ${totalW}px`, height: 42 }}
                   >
                     {/* Channel label */}
                     <div style={{
@@ -474,27 +465,26 @@ export function GanttCalendar({
                       paddingLeft: 18, overflow: 'hidden',
                       position: 'sticky', left: 0, zIndex: Z_STICKY,
                       background: rowBg,
-                      boxShadow: 'inset -1px 0 0 rgba(255,255,255,0.08)',
                     }}>
                       <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         {getChannelIcon(ch.label, ch.type)}
                       </div>
-                      <span style={{ fontSize: 9, fontWeight: 600, color: '#1C1917', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <span style={{ fontSize: 14, fontWeight: 600, color: '#1C1917', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {ch.label}
                       </span>
                     </div>
 
                     {/* Timeline area */}
-                    <div style={{ position: 'relative', overflow: 'visible', background: '#FDFCF8' }}>
+                    <div style={{ position: 'relative', overflow: 'visible', background: 'transparent' }}>
                       {/* Today overlay */}
-                      {todayPx !== null && <TodayOverlay px={todayPx} dayWidth={DAY_WIDTH} />}
+                      {todayPx !== null && <TodayOverlay px={todayPx} dayWidth={dayWidth} />}
 
                       {/* Month dividers */}
                       {monthGroups.slice(1).map(grp => (
                         <div key={grp.label} style={{
-                          position: 'absolute', left: grp.startIdx * DAY_WIDTH,
+                          position: 'absolute', left: grp.startIdx * dayWidth,
                           top: 0, bottom: 0, width: '0.5px',
-                          background: 'rgba(255,255,255,0.08)', pointerEvents: 'none',
+                          background: 'rgba(0,0,0,0.06)', pointerEvents: 'none',
                         }} />
                       ))}
 
@@ -504,9 +494,9 @@ export function GanttCalendar({
                         left: barLeft,
                         width: barWidth,
                         top: '50%', transform: 'translateY(-50%)',
-                        height: 7,
+                        height: 16,
                         background: barColor.bg,
-                        borderRadius: 3,
+                        borderRadius: 5,
                         opacity: barOpacity,
                         zIndex: 4,
                         boxSizing: 'border-box',
@@ -517,7 +507,7 @@ export function GanttCalendar({
                         position: 'absolute',
                         left: barLeft,
                         top: '50%', transform: 'translate(-50%, -50%)',
-                        width: 5, height: 5, borderRadius: '50%',
+                        width: 9, height: 9, borderRadius: '50%',
                         background: startDotColor,
                         opacity: barOpacity, zIndex: 5,
                       }} />
@@ -527,7 +517,7 @@ export function GanttCalendar({
                         position: 'absolute',
                         left: barLeft + barWidth,
                         top: '50%', transform: 'translate(-50%, -50%)',
-                        width: 5, height: 5, borderRadius: '50%',
+                        width: 9, height: 9, borderRadius: '50%',
                         background: endDotColor,
                         opacity: barOpacity, zIndex: 5,
                       }} />
@@ -542,7 +532,7 @@ export function GanttCalendar({
                             title={`Health check: ${hc.due_date}`}
                             style={{
                               position: 'absolute',
-                              left: px + DAY_WIDTH / 2,
+                              left: px + dayWidth / 2,
                               top: '50%',
                               transform: 'translate(-50%, -50%) rotate(45deg)',
                               width: 7, height: 7,
@@ -564,7 +554,7 @@ export function GanttCalendar({
                             title={`Set Up due: ${sp.due_date}`}
                             style={{
                               position: 'absolute',
-                              left: px + DAY_WIDTH / 2,
+                              left: px + dayWidth / 2,
                               top: '50%',
                               transform: 'translate(-50%, -50%)',
                               width: 5, height: 5, borderRadius: '50%',
@@ -582,82 +572,6 @@ export function GanttCalendar({
           );
         })}
 
-        {/* ── Activity density bar ───────────────────────────────── */}
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: `${LABEL_COL}px ${totalW}px`,
-          height: 18, marginTop: 4,
-          borderTop: '0.5px solid rgba(255,255,255,0.08)',
-        }}>
-          <div style={{
-            display: 'flex', alignItems: 'flex-end',
-            paddingLeft: 8, paddingBottom: 2,
-            position: 'sticky', left: 0, zIndex: Z_STICKY,
-            background: RULER_BG,
-          }}>
-            <span style={{ fontSize: 7, color: '#D8E4FF', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-              Activity
-            </span>
-          </div>
-          <div style={{ position: 'relative', height: 18 }}>
-            {dayList.map((_, idx) => {
-              const count    = densityByIdx[idx];
-              const heightPx = count > 0 ? Math.max(1, Math.round((count / maxDensity) * 10)) : 0;
-              return (
-                <div
-                  key={idx}
-                  style={{
-                    position: 'absolute',
-                    left: idx * DAY_WIDTH,
-                    width: DAY_WIDTH,
-                    height: '100%',
-                    display: 'flex', alignItems: 'flex-end', paddingBottom: 2,
-                  }}
-                >
-                  {count > 0 && (
-                    <div style={{
-                      width: '80%', height: heightPx,
-                      background: 'rgba(138, 133, 120, 0.45)',
-                      borderRadius: 1, margin: '0 auto',
-                    }} />
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* ── Legend ────────────────────────────────────────────── */}
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 12,
-          padding: '5px 10px', flexWrap: 'wrap',
-          borderTop: '0.5px solid rgba(255,255,255,0.08)',
-        }}>
-          {[
-            { color: '#1E40AF', border: '#60A5FA', label: 'Active (Paid)' },
-            { color: '#0F766E', border: '#7DD3FC', label: 'Active (Organic)' },
-            { color: '#2563EB', border: '#60A5FA', label: 'Completed' },
-            { color: '#1E3A8A', border: '#93C5FD', label: 'Upcoming' },
-          ].map(item => (
-            <span key={item.label} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 8, color: '#D8E4FF', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
-              <span style={{
-                display: 'inline-block', width: 16, height: 5, borderRadius: 2,
-                background: item.color,
-                border: `1px solid ${item.border}`,
-                verticalAlign: 'middle',
-              }} />
-              {item.label}
-            </span>
-          ))}
-          <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 8, color: '#D8E4FF' }}>
-            <span style={{ display: 'inline-block', width: 7, height: 7, background: '#ABC7FF', border: '1px solid rgba(147,197,253,0.80)', transform: 'rotate(45deg)', verticalAlign: 'middle' }} />
-            Health Check
-          </span>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 8, color: '#D8E4FF' }}>
-            <span style={{ display: 'inline-block', width: 5, height: 5, borderRadius: '50%', background: '#60A5FA', verticalAlign: 'middle' }} />
-            Set Up
-          </span>
-        </div>
 
       </div>
     </div>

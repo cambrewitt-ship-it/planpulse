@@ -28,9 +28,9 @@ import type { SandboxPlan, Week, PlanRow, Flight } from '@/components/sandbox/ty
 import { FLIGHT_COLORS } from '@/components/sandbox/types';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
-import { getClients, getMediaPlans, getPlanById, updateClient, updateClientLogoUrl } from '@/lib/db/plans';
-import { fetchAnalyticsData, fetchSpendData, calculateCostPerMetric, calculateCostPerPlatformMetric, extractPlatformEventOptions, SpendDataPoint, CostMetricPoint, MetricSource, PlatformEventOption } from '@/lib/api/analytics-data-integration';
-import { subDays, addDays, format, differenceInDays, parseISO, startOfMonth, endOfMonth, startOfYear } from 'date-fns';
+import { getClientById, getMediaPlans, getPlanById, updateClient, updateClientLogoUrl } from '@/lib/db/plans';
+import { fetchAnalyticsData, calculateCostPerMetric, calculateCostPerPlatformMetric, extractPlatformEventOptions, SpendDataPoint, CostMetricPoint, MetricSource, PlatformEventOption } from '@/lib/api/analytics-data-integration';
+import { subDays, addDays, format, differenceInDays, parseISO, startOfMonth, endOfMonth } from 'date-fns';
 import { FunnelStage, MediaPlanFunnel, FunnelConfig } from '@/lib/types/funnel';
 import { calculateHealthScore, type HealthScoreResult } from '@/lib/utils/health-score';
 import { calculatePerformanceHealth, type PerformanceHealthResult } from '@/lib/calculate-performance-health';
@@ -291,7 +291,7 @@ export default function DashboardV2() {
   const [analyticsDateRange, setAnalyticsDateRange] = useState(() => {
     const today = new Date();
     return {
-      startDate: format(startOfYear(today), 'yyyy-MM-dd'),
+      startDate: format(subDays(today, 30), 'yyyy-MM-dd'),
       endDate: format(today, 'yyyy-MM-dd'),
     };
   });
@@ -664,59 +664,6 @@ export default function DashboardV2() {
     setSelectedMonth(monthAnchor);
   }, [analyticsDateRange.startDate, selectedMonth]);
 
-  // Fetch spend data specifically for the current analyticsDateRange (used by channel cards)
-  useEffect(() => {
-    if (!clientId) return;
-    let cancelled = false;
-
-    const fetchMonthSpend = async () => {
-      try {
-        const rangeStart = analyticsDateRange.startDate;
-        const rangeEnd   = analyticsDateRange.endDate;
-
-        // Call the spend APIs directly — same approach as MediaChannels.
-        // Avoids going through fetchAnalyticsData which also fetches GA4 data;
-        // a GA4 failure there would silently swallow the spend result.
-        const spendResult = await fetchSpendData(rangeStart, rangeEnd, clientId);
-
-        if (cancelled) return;
-
-        console.log('[fetchMonthSpend] spendResult:', {
-          dataCount: spendResult.data?.length,
-          errors: spendResult.errors,
-          sample: spendResult.data?.slice(0, 3),
-        });
-
-        if (spendResult.errors?.length) {
-          console.warn('[fetchMonthSpend] Spend API errors:', spendResult.errors);
-          setSpendApiErrors(spendResult.errors);
-        } else {
-          setSpendApiErrors([]);
-        }
-
-        const enhanced = (spendResult.data || []).map((point: any) => ({
-          ...point,
-          channelId:   point.platform && point.accountName
-            ? `${point.platform}_${point.accountName}`
-            : point.platform || 'unknown',
-          channelName: getChannelDisplayNameFromPlatform(point.platform),
-        }));
-
-        setChannelMonthSpendData(enhanced);
-        setIsLoadingSpend(false);
-      } catch (err) {
-        if (!cancelled) {
-          console.error('Error loading channel month spend data:', err);
-          setChannelMonthSpendData([]);
-          setIsLoadingSpend(false);
-        }
-      }
-    };
-
-    fetchMonthSpend();
-    return () => { cancelled = true; };
-  }, [clientId, analyticsDateRange.startDate, analyticsDateRange.endDate]); // eslint-disable-line react-hooks/exhaustive-deps
-
   // Fetch all Meta campaigns (not limited to spend data) so the campaign
   // filter dropdown in each channel card shows the full account campaign list.
   useEffect(() => {
@@ -889,8 +836,7 @@ export default function DashboardV2() {
 
   const loadData = async () => {
     try {
-      const clients = await getClients();
-      const foundClient = clients?.find((c: Client) => c.id === clientId);
+      const foundClient = await getClientById(clientId);
       setClient(foundClient || null);
 
       const clientPlans = await getMediaPlans(clientId);
@@ -1041,6 +987,7 @@ export default function DashboardV2() {
     if (!clientId) return;
 
     setLoadingAnalytics(true);
+    setIsLoadingSpend(true);
     try {
       const allMetricKeys = METRIC_OPTIONS.map((m: any) => m.value);
 
@@ -1083,6 +1030,9 @@ export default function DashboardV2() {
       });
 
       setSpendData(enhancedSpendData);
+      setChannelMonthSpendData(enhancedSpendData);
+      setIsLoadingSpend(false);
+      setSpendApiErrors((result as any).errors?.filter((e: string) => !e.startsWith('GA4')) ?? []);
       setGa4Data(result.ga4Data || []);
 
       // Extract platform-native event options from the loaded spend data
@@ -1143,6 +1093,7 @@ export default function DashboardV2() {
       setCacError('Failed to load analytics data');
       setCacErrorDetails(error.message || 'Unknown error');
       setCacMetrics([]);
+      setIsLoadingSpend(false);
     } finally {
       setLoadingAnalytics(false);
     }
@@ -1194,14 +1145,18 @@ export default function DashboardV2() {
   const loadFunnels = async () => {
     setLoadingFunnels(true);
     try {
-      const channelsResponse = await fetch(`/api/media-plan/channels?clientId=${clientId}`);
-      const channelsData = await channelsResponse.json();
+      const [channelsResponse, funnelsResponse] = await Promise.all([
+        fetch(`/api/media-plan/channels?clientId=${clientId}`),
+        fetch(`/api/funnels?clientId=${clientId}`),
+      ]);
+      const [channelsData, data] = await Promise.all([
+        channelsResponse.json(),
+        funnelsResponse.json(),
+      ]);
+
       if (channelsData.success && channelsData.channels) {
         setMediaChannels(channelsData.channels);
       }
-
-      const response = await fetch(`/api/funnels?clientId=${clientId}`);
-      const data = await response.json();
 
       if (data.success && data.funnels) {
         setFunnels(data.funnels);
@@ -2180,12 +2135,12 @@ export default function DashboardV2() {
       {/* ── Top nav bar ── */}
       <header className="sticky top-0 z-10 px-6 py-3" style={{ background: '#FDFCF8', borderBottom: '0.5px solid #E8E4DC' }}>
         <div className="max-w-7xl mx-auto flex items-center gap-3">
-          <Link href="/agency" className="flex items-center gap-1 text-xs font-medium px-2 py-1 rounded" style={{ color: '#8A8578', border: '0.5px solid #E8E4DC', background: 'transparent' }}>
+          <Link href="/agency" className="flex items-center gap-1 text-sm font-medium px-2 py-1 rounded" style={{ color: '#8A8578', border: '0.5px solid #E8E4DC', background: 'transparent' }}>
             ← Back
           </Link>
-          <span className="text-sm font-medium" style={{ color: '#1C1917' }}>{client?.name ?? 'Loading…'}</span>
+          <span className="text-base font-medium" style={{ color: '#1C1917' }}>{client?.name ?? 'Loading…'}</span>
           <div className="ml-auto flex items-center gap-2">
-            <span className="text-xs text-gray-500">Analytics Period:</span>
+            <span className="text-sm text-gray-500">Analytics Period:</span>
             <DateRangePicker
               value={analyticsDateRange}
               onChange={setAnalyticsDateRange}
@@ -2213,7 +2168,7 @@ export default function DashboardV2() {
 
         {/* ── Error banner ── */}
         {dashboardError && (
-          <div className="rounded-lg px-4 py-3 text-sm flex items-start gap-2" style={{ background: '#F5EDE0', border: '0.5px solid rgba(176,112,48,0.25)', color: '#B07030', borderRadius: 12 }}>
+          <div className="rounded-lg px-4 py-3 text-base flex items-start gap-2" style={{ background: '#F5EDE0', border: '0.5px solid rgba(176,112,48,0.25)', color: '#B07030', borderRadius: 12 }}>
             <span className="mt-0.5">⚠</span>
             {dashboardError}
           </div>
@@ -2280,7 +2235,7 @@ export default function DashboardV2() {
               ) : (
                 /* Edge case: no media plan channels set up yet */
                 <div className="bg-white rounded-xl border border-gray-200 p-8 text-center">
-                  <p className="text-gray-500 text-sm">
+                  <p className="text-gray-500 text-base">
                     No media plan data found. Add channels in the Media Plan Builder to see your health score.
                   </p>
                 </div>
@@ -2362,12 +2317,12 @@ export default function DashboardV2() {
                   {/* Month Selector for Channel Cards (overview only) */}
                   {viewMode === 'overview' && (
                     <div className="flex items-center gap-2">
-                      <label className="text-sm text-gray-600">Channel View:</label>
+                      <label className="text-base text-gray-600">Channel View:</label>
                       <input
                         type="month"
                         value={format(selectedMonth, 'yyyy-MM')}
                         onChange={(e) => setSelectedMonth(new Date(e.target.value))}
-                        className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
+                        className="px-3 py-1.5 border border-gray-300 rounded-lg text-base"
                       />
                     </div>
                   )}
@@ -2380,7 +2335,7 @@ export default function DashboardV2() {
             {viewMode === 'overview' && (
               <>
                 {/* Top row: [Notes + To Do combined card] | Gantt */}
-                <div style={{ display: 'flex', gap: 16, alignItems: 'start' }}>
+                <div style={{ display: 'flex', gap: 16, alignItems: 'stretch' }}>
                   {/* Combined Notes + To Do card */}
                   <div style={{
                     flex: 1,
@@ -2411,7 +2366,7 @@ export default function DashboardV2() {
                         }}
                         title="Expand"
                       >
-                        <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', letterSpacing: '0.1em', writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>
+                        <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', letterSpacing: '0.1em', writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>
                           {notesActiveTab === 'notes' ? 'Notes' : 'To Do'}
                         </span>
                         <span style={{ fontSize: 16, color: 'rgba(255,255,255,0.4)' }}>›</span>
@@ -2450,7 +2405,7 @@ export default function DashboardV2() {
                                 <span key={i} style={{ width: 14, height: 1.5, background: showFilesMenu && notesActiveTab === 'notes' ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.5)', display: 'block', borderRadius: 1, transition: 'background 0.15s' }} />
                               ))}
                             </button>
-                            <span style={{ fontSize: 10, fontWeight: 700, color: '#FFFFFF', textTransform: 'uppercase', letterSpacing: '0.13em', writingMode: 'vertical-rl', transform: 'rotate(180deg)', whiteSpace: 'nowrap', marginTop: 2 }}>Notes</span>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: '#FFFFFF', textTransform: 'uppercase', letterSpacing: '0.13em', writingMode: 'vertical-rl', transform: 'rotate(180deg)', whiteSpace: 'nowrap', marginTop: 2 }}>Notes</span>
                             {notesActiveTab === 'notes' && (
                               <button onClick={e => { e.stopPropagation(); setNotesCollapsed(true); }} title="Collapse" style={{ marginTop: 'auto', marginBottom: 8, background: 'transparent', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.5)', fontSize: 18, lineHeight: 1, padding: 2 }}>‹</button>
                             )}
@@ -2486,7 +2441,7 @@ export default function DashboardV2() {
                                 <span key={i} style={{ width: 14, height: 1.5, background: showTodoMenu && notesActiveTab === 'todo' ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.5)', display: 'block', borderRadius: 1, transition: 'background 0.15s' }} />
                               ))}
                             </button>
-                            <span style={{ fontSize: 10, fontWeight: 700, color: '#FFFFFF', textTransform: 'uppercase', letterSpacing: '0.13em', writingMode: 'vertical-rl', transform: 'rotate(180deg)', whiteSpace: 'nowrap', marginTop: 2 }}>To Do</span>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: '#FFFFFF', textTransform: 'uppercase', letterSpacing: '0.13em', writingMode: 'vertical-rl', transform: 'rotate(180deg)', whiteSpace: 'nowrap', marginTop: 2 }}>To Do</span>
                             {notesActiveTab === 'todo' && (
                               <button onClick={e => { e.stopPropagation(); setNotesCollapsed(true); }} title="Collapse" style={{ marginTop: 'auto', marginBottom: 8, background: 'transparent', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.5)', fontSize: 18, lineHeight: 1, padding: 2 }}>‹</button>
                             )}
@@ -2526,7 +2481,7 @@ export default function DashboardV2() {
                             boxShadow: '2px 0 8px rgba(0,0,0,0.25)',
                           }}>
                             <div style={{ padding: '10px 12px 8px', borderBottom: '0.5px solid rgba(255,255,255,0.08)' }}>
-                              <div style={{ fontSize: 10, fontWeight: 600, color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>Files</div>
+                              <div style={{ fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>Files</div>
                             </div>
                             <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
                               {noteFiles.map(file => (
@@ -2545,14 +2500,14 @@ export default function DashboardV2() {
                                       <rect x="0.5" y="0.5" width="9" height="11" rx="1.5" stroke={activeFileId === file.id ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.25)'} strokeWidth="0.8" fill="none"/>
                                       <path d="M2.5 4h5M2.5 6h5M2.5 8h3" stroke={activeFileId === file.id ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.18)'} strokeWidth="0.7" strokeLinecap="round"/>
                                     </svg>
-                                    <span style={{ fontSize: 13, color: activeFileId === file.id ? '#FFFFFF' : 'rgba(255,255,255,0.5)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    <span style={{ fontSize: 14, color: activeFileId === file.id ? '#FFFFFF' : 'rgba(255,255,255,0.5)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                       {file.name}
                                     </span>
                                   </div>
                                   {noteFiles.length > 1 && (
                                     <button
                                       onClick={e => { e.stopPropagation(); deleteNoteFile(file.id); }}
-                                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.2)', fontSize: 15, padding: 0, lineHeight: 1, flexShrink: 0 }}
+                                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.2)', fontSize: 16, padding: 0, lineHeight: 1, flexShrink: 0 }}
                                     >×</button>
                                   )}
                                 </div>
@@ -2565,7 +2520,7 @@ export default function DashboardV2() {
                                 onKeyDown={e => e.key === 'Enter' && addNoteFile()}
                                 placeholder="New file…"
                                 style={{
-                                  flex: 1, fontSize: 12,
+                                  flex: 1, fontSize: 13,
                                   background: 'rgba(255,255,255,0.06)',
                                   border: '0.5px solid rgba(255,255,255,0.12)',
                                   borderRadius: 3, color: '#fff',
@@ -2595,11 +2550,11 @@ export default function DashboardV2() {
                             boxShadow: '2px 0 8px rgba(0,0,0,0.25)',
                           }}>
                             <div style={{ padding: '10px 12px 8px', borderBottom: '0.5px solid rgba(255,255,255,0.08)' }}>
-                              <div style={{ fontSize: 10, fontWeight: 600, color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>Options</div>
+                              <div style={{ fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>Options</div>
                             </div>
                             <div style={{ flex: 1, padding: '8px 0' }}>
                               {(['Priority', 'Channel'] as const).map(label => (
-                                <div key={label} style={{ padding: '7px 12px', fontSize: 13, color: 'rgba(255,255,255,0.6)', cursor: 'default' }}>
+                                <div key={label} style={{ padding: '7px 12px', fontSize: 14, color: 'rgba(255,255,255,0.6)', cursor: 'default' }}>
                                   {label}
                                 </div>
                               ))}
@@ -2624,8 +2579,8 @@ export default function DashboardV2() {
 
                   {/* Right: Gantt timeline */}
                   {ganttClients.length > 0 && ganttChannels.length > 0 && (
-                    <div style={{ flex: '0 0 60%', minWidth: 0 }}>
-                      <div className="border border-gray-100 rounded-lg bg-gray-50/80 px-3 py-2 overflow-x-auto overflow-y-hidden" style={{ maxHeight: 240 }}>
+                    <div style={{ flex: '0 0 60%', minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                      <div className="border border-gray-100 rounded-lg bg-gray-50/80 px-3 py-2" style={{ flex: 1, overflow: 'hidden' }}>
                         <GanttCalendar
                           clients={ganttClients}
                           channels={ganttChannels}
@@ -2683,10 +2638,10 @@ export default function DashboardV2() {
                 ) : channelCards.length > 0 ? (
                   <div className="bg-white rounded-xl border border-gray-200 p-6">
                     <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-base font-bold" style={{ color: '#1C1917', fontFamily: "'Inter', system-ui, sans-serif" }}>Channel Performance</h3>
+                      <h3 className="text-lg font-bold" style={{ color: '#1C1917', fontFamily: "'Inter', system-ui, sans-serif" }}>Channel Performance</h3>
                       <div className="flex items-center gap-3">
                         {commission > 0 && (
-                          <div className="flex items-center rounded-full border border-gray-200 overflow-hidden text-xs">
+                          <div className="flex items-center rounded-full border border-gray-200 overflow-hidden text-sm">
                             <button
                               onClick={() => setPlanView('gross')}
                               className={`px-3 py-1 transition-colors ${planView === 'gross' ? 'bg-gray-900 text-white' : 'bg-white text-gray-500 hover:text-gray-700'}`}
@@ -2701,7 +2656,7 @@ export default function DashboardV2() {
                             </button>
                           </div>
                         )}
-                        <label className="text-xs text-gray-500 font-medium whitespace-nowrap">Commission</label>
+                        <label className="text-sm text-gray-500 font-medium whitespace-nowrap">Commission</label>
                         <div className="relative flex items-center">
                           <input
                             type="number"
@@ -2711,10 +2666,10 @@ export default function DashboardV2() {
                             value={commission || ''}
                             onChange={e => handleCommissionChange(e.target.value === '' ? 0 : parseFloat(e.target.value))}
                             placeholder="0"
-                            className="w-16 text-right text-xs border border-gray-200 rounded-md px-2 py-1 pr-5 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                            className="w-16 text-right text-sm border border-gray-200 rounded-md px-2 py-1 pr-5 focus:outline-none focus:ring-1 focus:ring-blue-400"
                             style={{ fontFamily: "'Inter', system-ui, sans-serif" }}
                           />
-                          <span className="absolute right-2 text-xs text-gray-400 pointer-events-none">%</span>
+                          <span className="absolute right-2 text-sm text-gray-400 pointer-events-none">%</span>
                         </div>
                       </div>
                     </div>
@@ -2853,7 +2808,7 @@ export default function DashboardV2() {
                 ) : (
                   !isLoadingMediaPlanBuilder && (
                     <div className="bg-white rounded-xl border border-gray-200 p-6 text-center">
-                      <p className="text-gray-400 text-sm">No channel data yet — connect an ad platform to see performance.</p>
+                      <p className="text-gray-400 text-base">No channel data yet — connect an ad platform to see performance.</p>
                     </div>
                   )
                 )}
@@ -2869,16 +2824,16 @@ export default function DashboardV2() {
                     <span style={{ fontSize: 16, fontWeight: 600, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Funnels</span>
                     <button
                       onClick={() => { setEditingFunnel(null); setIsFunnelBuilderOpen(true); }}
-                      style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 12, border: '0.5px solid #D5D0C5', background: '#FDFCF8', color: '#4A6580', fontSize: 15, fontWeight: 500, cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif" }}
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 12, border: '0.5px solid #D5D0C5', background: '#FDFCF8', color: '#4A6580', fontSize: 16, fontWeight: 500, cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif" }}
                     >
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                       Create Funnel
                     </button>
                   </div>
                   {loadingFunnels && funnels.length === 0 ? (
-                    <p style={{ fontSize: 15, color: '#A0998F', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Loading funnels...</p>
+                    <p style={{ fontSize: 16, color: '#A0998F', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Loading funnels...</p>
                   ) : funnels.length === 0 ? (
-                    <p style={{ fontSize: 15, color: '#A0998F', fontFamily: "'DM Sans', system-ui, sans-serif" }}>No funnels created yet. Click &quot;Create Funnel&quot; to get started.</p>
+                    <p style={{ fontSize: 16, color: '#A0998F', fontFamily: "'DM Sans', system-ui, sans-serif" }}>No funnels created yet. Click &quot;Create Funnel&quot; to get started.</p>
                   ) : (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
                       {funnels.map((funnel) => (
@@ -2898,11 +2853,11 @@ export default function DashboardV2() {
                               await calculateFunnel(funnel.id);
                             }}
                             disabled={loadingFunnels}
-                            style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 15, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}
+                            style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 16, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}
                           >
                             {funnel.name}
                           </button>
-                          <span style={{ fontSize: 13, color: '#A0998F', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+                          <span style={{ fontSize: 14, color: '#A0998F', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
                             {(funnel.config as FunnelConfig).stages.length} stages
                           </span>
                           <button
@@ -3010,13 +2965,13 @@ export default function DashboardV2() {
                 {/* Invoices section */}
                 <div style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', padding: '20px 24px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-                    <span style={{ fontSize: 15, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Invoices</span>
+                    <span style={{ fontSize: 16, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Invoices</span>
                     <button
                       onClick={() => setIsInvoiceModalOpen(true)}
                       style={{
                         height: 30, padding: '0 12px', borderRadius: 12,
                         border: '0.5px solid #D5D0C5', background: '#FDFCF8',
-                        color: '#1C1917', fontSize: 14, fontWeight: 500,
+                        color: '#1C1917', fontSize: 15, fontWeight: 500,
                         cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif",
                         display: 'flex', alignItems: 'center', gap: 5,
                       }}
@@ -3025,7 +2980,7 @@ export default function DashboardV2() {
                     </button>
                   </div>
                   {invoiceHistory.length === 0 ? (
-                    <p style={{ fontSize: 15, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>No invoices generated yet.</p>
+                    <p style={{ fontSize: 16, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>No invoices generated yet.</p>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                       {invoiceHistory.map((inv) => {
@@ -3039,8 +2994,8 @@ export default function DashboardV2() {
                             padding: '9px 12px', borderRadius: 10, border: '0.5px solid #E8E4DC',
                             background: '#FAFAF8', fontFamily: "'DM Sans', system-ui, sans-serif",
                           }}>
-                            <span style={{ fontSize: 15, color: '#1C1917', fontWeight: 500 }}>{label}</span>
-                            <span style={{ fontSize: 13, color: '#B5B0A5' }}>Generated {generated}</span>
+                            <span style={{ fontSize: 16, color: '#1C1917', fontWeight: 500 }}>{label}</span>
+                            <span style={{ fontSize: 14, color: '#B5B0A5' }}>Generated {generated}</span>
                           </div>
                         );
                       })}
@@ -3051,13 +3006,13 @@ export default function DashboardV2() {
                 {/* Reports section */}
                 <div style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', padding: '20px 24px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                    <span style={{ fontSize: 15, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Performance Reports</span>
+                    <span style={{ fontSize: 16, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Performance Reports</span>
                     <button
                       onClick={() => setIsReportModalOpen(true)}
                       style={{
                         height: 30, padding: '0 12px', borderRadius: 12,
                         border: '0.5px solid #D5D0C5', background: '#FDFCF8',
-                        color: '#1C1917', fontSize: 14, fontWeight: 500,
+                        color: '#1C1917', fontSize: 15, fontWeight: 500,
                         cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif",
                         display: 'flex', alignItems: 'center', gap: 5,
                       }}
@@ -3065,7 +3020,7 @@ export default function DashboardV2() {
                       + Generate Report
                     </button>
                   </div>
-                  <p style={{ fontSize: 14, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+                  <p style={{ fontSize: 15, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
                     Generate a branded PDF with spend, channel performance, and action points.
                   </p>
                 </div>
@@ -3073,7 +3028,7 @@ export default function DashboardV2() {
                 {/* Client Logo */}
                 <div style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', padding: '20px 24px' }}>
                   <div style={{ marginBottom: 16 }}>
-                    <span style={{ fontSize: 15, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Client Logo</span>
+                    <span style={{ fontSize: 16, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Client Logo</span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                     {client?.logo_url ? (
@@ -3090,7 +3045,7 @@ export default function DashboardV2() {
                         style={{
                           height: 30, padding: '0 12px', borderRadius: 12,
                           border: '0.5px solid #D5D0C5', background: '#FDFCF8',
-                          color: '#1C1917', fontSize: 14, fontWeight: 500,
+                          color: '#1C1917', fontSize: 15, fontWeight: 500,
                           cursor: isUploadingLogo ? 'not-allowed' : 'pointer',
                           fontFamily: "'DM Sans', system-ui, sans-serif",
                           opacity: isUploadingLogo ? 0.6 : 1,
@@ -3099,10 +3054,10 @@ export default function DashboardV2() {
                         {isUploadingLogo ? 'Uploading...' : client?.logo_url ? 'Replace Logo' : 'Upload Logo'}
                       </button>
                       {client?.logo_url && (
-                        <span style={{ fontSize: 13, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Logo uploaded</span>
+                        <span style={{ fontSize: 14, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Logo uploaded</span>
                       )}
                       {logoUploadError && (
-                        <span style={{ fontSize: 13, color: '#A0442A', fontFamily: "'DM Sans', system-ui, sans-serif" }}>{logoUploadError}</span>
+                        <span style={{ fontSize: 14, color: '#A0442A', fontFamily: "'DM Sans', system-ui, sans-serif" }}>{logoUploadError}</span>
                       )}
                     </div>
                   </div>
@@ -3129,12 +3084,12 @@ export default function DashboardV2() {
                 {/* Danger Zone */}
                 <div style={{ background: '#FDF7F5', border: '1px solid rgba(160,68,42,0.2)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', padding: '20px 24px' }}>
                   <div style={{ marginBottom: 12 }}>
-                    <span style={{ fontSize: 15, fontWeight: 600, color: '#A0442A', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Danger Zone</span>
+                    <span style={{ fontSize: 16, fontWeight: 600, color: '#A0442A', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Danger Zone</span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', borderRadius: 10, border: '0.5px solid rgba(160,68,42,0.15)', background: '#FDFCF8' }}>
                     <div>
-                      <p style={{ fontSize: 15, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif", margin: 0 }}>Delete this client</p>
-                      <p style={{ fontSize: 14, color: '#8A8578', fontFamily: "'DM Sans', system-ui, sans-serif", margin: '2px 0 0' }}>Permanently remove this client and all associated data. This cannot be undone.</p>
+                      <p style={{ fontSize: 16, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif", margin: 0 }}>Delete this client</p>
+                      <p style={{ fontSize: 15, color: '#8A8578', fontFamily: "'DM Sans', system-ui, sans-serif", margin: '2px 0 0' }}>Permanently remove this client and all associated data. This cannot be undone.</p>
                     </div>
                     {deleteConfirm ? (
                       <div style={{ display: 'flex', gap: 8, flexShrink: 0, marginLeft: 16 }}>
@@ -3155,7 +3110,7 @@ export default function DashboardV2() {
                           style={{
                             height: 30, padding: '0 14px', borderRadius: 12,
                             border: 'none', background: '#A0442A',
-                            color: '#fff', fontSize: 14, fontWeight: 500,
+                            color: '#fff', fontSize: 15, fontWeight: 500,
                             cursor: deleting ? 'not-allowed' : 'pointer',
                             fontFamily: "'DM Sans', system-ui, sans-serif",
                             opacity: deleting ? 0.6 : 1,
@@ -3169,7 +3124,7 @@ export default function DashboardV2() {
                           style={{
                             height: 30, padding: '0 14px', borderRadius: 12,
                             border: '0.5px solid #D5D0C5', background: '#FDFCF8',
-                            color: '#1C1917', fontSize: 14, fontWeight: 500,
+                            color: '#1C1917', fontSize: 15, fontWeight: 500,
                             cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif",
                           }}
                         >
@@ -3182,7 +3137,7 @@ export default function DashboardV2() {
                         style={{
                           height: 30, padding: '0 12px', borderRadius: 12, flexShrink: 0, marginLeft: 16,
                           border: '0.5px solid #F5C5B8', background: '#FDF2EF',
-                          color: '#A0442A', fontSize: 14, fontWeight: 500,
+                          color: '#A0442A', fontSize: 15, fontWeight: 500,
                           cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif",
                         }}
                       >

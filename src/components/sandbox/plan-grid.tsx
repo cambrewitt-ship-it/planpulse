@@ -4,11 +4,11 @@ import React, { useState, useCallback, useEffect, useRef, useMemo } from "react"
 import { Plus, Trash2, Upload, Download, X, Check, Edit2, ChevronDown } from "lucide-react";
 import type { SandboxPlan, PlanRow, Flight, Week, FeeRow, CustomColumn } from "./types";
 import { FLIGHT_COLORS } from "./types";
-import { getChannelLogo } from "@/lib/utils/channel-icons";
+import { getChannelLogo, PRESET_CHANNELS } from "@/lib/utils/channel-icons";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const COL_WIDTHS = { del: 32, funnel: 100, channel: 140, detail: 140, audience: 160, total: 110 };
+const COL_WIDTHS = { del: 32, channel: 140, total: 110 };
 const CUSTOM_COL_W = 140;
 const WEEK_W = 72;
 const WEEK_W_MIN = 28;
@@ -16,17 +16,6 @@ const WEEK_W_MAX = 120;
 const WEEK_W_STEP = 8;
 const ROW_H = 38;
 const HEADER_H = 32;
-const LEFT_COLS_WIDTH =
-  COL_WIDTHS.del + COL_WIDTHS.funnel + COL_WIDTHS.channel + COL_WIDTHS.detail + COL_WIDTHS.audience + COL_WIDTHS.total;
-
-const LEFT_OFFSETS = {
-  del: 0,
-  funnel: COL_WIDTHS.del,
-  channel: COL_WIDTHS.del + COL_WIDTHS.funnel,
-  detail: COL_WIDTHS.del + COL_WIDTHS.funnel + COL_WIDTHS.channel,
-  audience: COL_WIDTHS.del + COL_WIDTHS.funnel + COL_WIDTHS.channel + COL_WIDTHS.detail,
-  total: COL_WIDTHS.del + COL_WIDTHS.funnel + COL_WIDTHS.channel + COL_WIDTHS.detail + COL_WIDTHS.audience,
-};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -71,28 +60,19 @@ function generateWeeksForYear(year: number, count: number): Week[] {
 }
 
 interface RowSpan {
-  showFunnel: boolean; funnelSpan: number;
   showChannel: boolean; channelSpan: number;
 }
 
 function computeRowSpans(rows: PlanRow[]): RowSpan[] {
-  const result: RowSpan[] = rows.map(() => ({ showFunnel: false, funnelSpan: 1, showChannel: false, channelSpan: 1 }));
+  const result: RowSpan[] = rows.map(() => ({ showChannel: false, channelSpan: 1 }));
   let i = 0;
   while (i < rows.length) {
-    const funnel = rows[i].funnel;
+    const channel = rows[i].channel;
     let j = i;
-    while (j < rows.length && rows[j].funnel === funnel) j++;
-    result[i].showFunnel = true;
-    result[i].funnelSpan = j - i;
-    let k = i;
-    while (k < j) {
-      const channel = rows[k].channel;
-      let m = k;
-      while (m < j && rows[m].channel === channel) m++;
-      result[k].showChannel = true;
-      result[k].channelSpan = m - k;
-      k = m;
-    }
+    while (j < rows.length && rows[j].channel === channel && channel !== "") j++;
+    if (j === i) j = i + 1; // empty channel: no span
+    result[i].showChannel = true;
+    result[i].channelSpan = j - i;
     i = j;
   }
   return result;
@@ -362,13 +342,9 @@ function EditableCell({ value, onChange, className = "", style, rowSpan, bold }:
   }
 
   return (
-    <td className={`group cursor-text ${className}`} style={style} rowSpan={rowSpan}
-      onDoubleClick={() => { setDraft(value); setEditing(true); }} title="Click pencil or double-click to edit">
+    <td className={`cursor-text ${className}`} style={style} rowSpan={rowSpan}
+      onClick={() => { setDraft(value); setEditing(true); }}>
       <span className={bold ? "font-semibold" : ""}>{value || <span className="text-gray-300">—</span>}</span>
-      <Edit2
-        className="w-2.5 h-2.5 text-gray-300 inline ml-1 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer hover:text-blue-400"
-        onClick={e => { e.stopPropagation(); setDraft(value); setEditing(true); }}
-      />
     </td>
   );
 }
@@ -427,11 +403,11 @@ function ChannelSelectCell({ value, onChange, libraryChannels, className = "", s
     <td
       ref={cellRef}
       className={`group cursor-pointer ${className}`}
-      style={{ ...style, position: style?.position as React.CSSProperties["position"], overflow: "visible" }}
+      style={{ ...style, position: style?.position as React.CSSProperties["position"], overflow: "visible", zIndex: open ? 40 : (style?.zIndex ?? 10) }}
       rowSpan={rowSpan}
       onClick={() => setOpen(o => !o)}
     >
-      <div className="flex items-center gap-1.5 justify-center w-full">
+      <div className="relative flex items-center gap-1.5 justify-center w-full">
         {value ? (
           <>
             {icon}
@@ -441,56 +417,60 @@ function ChannelSelectCell({ value, onChange, libraryChannels, className = "", s
           <span className="text-gray-300 text-xs">— select channel —</span>
         )}
         <ChevronDown className="w-3 h-3 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
-      </div>
 
-      {open && (
-        <div
-          ref={dropdownRef}
-          className="absolute z-50 bg-white border border-gray-200 rounded-xl shadow-xl py-1 w-52"
-          style={{ top: "100%", left: 0 }}
-          onMouseDown={e => e.stopPropagation()}
-          onClick={e => e.stopPropagation()}
-        >
-          {libraryChannels.length > 0 ? (
-            libraryChannels.map(ch => (
-              <button
-                key={ch.id}
-                onClick={() => selectChannel(ch.channel_type)}
-                className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-blue-50 hover:text-blue-800 transition-colors text-left"
-              >
-                {getChannelLogo(ch.channel_type, "w-4 h-4 flex-shrink-0")}
-                <span className="truncate">{ch.channel_type}</span>
-              </button>
-            ))
-          ) : (
-            <div className="px-3 py-2 text-xs text-gray-400">No library channels yet</div>
-          )}
-          <div className="border-t border-gray-100 mt-1 pt-1">
-            {custom ? (
-              <div className="px-2 pb-1">
-                <input
-                  ref={inputRef}
-                  value={draft}
-                  onChange={e => setDraft(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === "Enter" && draft.trim()) selectChannel(draft.trim());
-                    if (e.key === "Escape") { setCustom(false); setOpen(false); }
-                  }}
-                  placeholder="Type channel name…"
-                  className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-400"
-                />
-              </div>
-            ) : (
-              <button
-                onClick={() => { setDraft(value); setCustom(true); }}
-                className="w-full text-left px-3 py-2 text-xs text-gray-400 hover:bg-gray-50 transition-colors"
-              >
-                Write custom channel…
-              </button>
-            )}
+        {open && (
+          <div
+            ref={dropdownRef}
+            className="absolute z-50 bg-white border border-gray-200 rounded-xl shadow-xl py-1 w-52"
+            style={{ top: "calc(100% + 4px)", left: 0 }}
+            onMouseDown={e => e.stopPropagation()}
+            onClick={e => e.stopPropagation()}
+          >
+            {(() => {
+              const presetSet = new Set(PRESET_CHANNELS.map(c => c.toLowerCase()));
+              const extraLibrary = libraryChannels.filter(ch => !presetSet.has(ch.channel_type.toLowerCase()));
+              const allChannels = [
+                ...extraLibrary.map(ch => ch.channel_type),
+                ...PRESET_CHANNELS,
+              ];
+              return allChannels.map(name => (
+                <button
+                  key={name}
+                  onClick={() => selectChannel(name)}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-blue-50 hover:text-blue-800 transition-colors text-left"
+                >
+                  {getChannelLogo(name, "w-4 h-4 flex-shrink-0")}
+                  <span className="truncate">{name}</span>
+                </button>
+              ));
+            })()}
+            <div className="border-t border-gray-100 mt-1 pt-1">
+              {custom ? (
+                <div className="px-2 pb-1">
+                  <input
+                    ref={inputRef}
+                    value={draft}
+                    onChange={e => setDraft(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === "Enter" && draft.trim()) selectChannel(draft.trim());
+                      if (e.key === "Escape") { setCustom(false); setOpen(false); }
+                    }}
+                    placeholder="Type channel name…"
+                    className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  />
+                </div>
+              ) : (
+                <button
+                  onClick={() => { setDraft(value); setCustom(true); }}
+                  className="w-full text-left px-3 py-2 text-xs text-gray-400 hover:bg-gray-50 transition-colors"
+                >
+                  Write custom channel…
+                </button>
+              )}
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </td>
   );
 }
@@ -745,7 +725,6 @@ export function PlanGrid({ plan, onPlanChange, onUpload, outerStyle }: Props) {
   const [showBudgetPrompt, setShowBudgetPrompt] = useState(false);
   const [pendingDrag, setPendingDrag] = useState<DragState | null>(null);
   const [dragEndPos, setDragEndPos] = useState<{ x: number; y: number } | null>(null);
-  const [showAddRow, setShowAddRow] = useState(false);
   const [selectedColor, setSelectedColor] = useState(FLIGHT_COLORS[0]);
   const flightAnchorRef = useRef<HTMLElement | null>(null);
   const resizeMoved = useRef(false);
@@ -753,19 +732,33 @@ export function PlanGrid({ plan, onPlanChange, onUpload, outerStyle }: Props) {
 
   useEffect(() => {
     fetch('/api/media-channel-library')
-      .then(r => r.ok ? r.json() : [])
-      .then(data => { if (Array.isArray(data)) setLibraryChannels(data); })
+      .then(r => r.ok ? r.json() : { data: [] })
+      .then(res => { if (Array.isArray(res.data)) setLibraryChannels(res.data); })
       .catch(() => {});
   }, []);
 
   const isDragging = dragState !== null;
   const isResizing = resizeState !== null;
 
-  const dynamicTotalLeft = LEFT_OFFSETS.audience + COL_WIDTHS.audience + customColumns.length * CUSTOM_COL_W;
-  const leftColSpan = 5 + customColumns.length; // DEL + FUNNEL + CHANNEL + DETAIL + AUDIENCE + custom cols
+  // DEL + CHANNEL + custom cols (dynamic)
+  const channelLeft = COL_WIDTHS.del;
+  const dynamicTotalLeft = COL_WIDTHS.del + COL_WIDTHS.channel + customColumns.length * CUSTOM_COL_W;
+  const totalLeftColsWidth = dynamicTotalLeft + COL_WIDTHS.total; // pixel offset where weeks begin
+  const leftColSpan = 2 + customColumns.length; // DEL + CHANNEL + custom cols
 
   const planYear = weeks[0]?.year ?? new Date().getFullYear();
   const yearOptions = Array.from({ length: 7 }, (_, i) => new Date().getFullYear() - 2 + i);
+
+  // Scroll to today's week on mount if the plan year matches the current year
+  useEffect(() => {
+    if (!scrollRef.current) return;
+    const today = new Date().toISOString().slice(0, 10);
+    if (planYear !== new Date().getFullYear()) return;
+    const todayIdx = weeks.reduce((best, w, i) => (w.weekStart <= today ? i : best), -1);
+    if (todayIdx < 0) return;
+    scrollRef.current.scrollLeft = todayIdx * WEEK_W;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // run once on mount only
 
   // Sync rows + weeks + fees + customColumns to parent
   useEffect(() => {
@@ -826,6 +819,10 @@ export function PlanGrid({ plan, onPlanChange, onUpload, outerStyle }: Props) {
 
   const deleteRow = useCallback((rowId: string) => {
     setRows(prev => prev.filter(r => r.id !== rowId));
+  }, []);
+
+  const addBlankRow = useCallback(() => {
+    setRows(prev => [...prev, { id: uid(), funnel: "", channel: "", detail: "", audience: "", flights: [] }]);
   }, []);
 
   const addFlight = useCallback((rowId: string, startIdx: number, endIdx: number, budget: number, color: string) => {
@@ -926,7 +923,7 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
     const handleMove = (e: MouseEvent) => {
       if (!scrollRef.current) return;
       const rect = scrollRef.current.getBoundingClientRect();
-      const weekX = e.clientX - rect.left - LEFT_COLS_WIDTH + scrollRef.current.scrollLeft;
+      const weekX = e.clientX - rect.left - totalLeftColsWidth + scrollRef.current.scrollLeft;
       const idx = Math.max(0, Math.min(weeks.length - 1, Math.floor(weekX / weekWidth)));
       setDragState(prev => prev ? { ...prev, endIdx: idx } : null);
     };
@@ -942,7 +939,7 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
       resizeMoved.current = true;
       const rect = scrollRef.current.getBoundingClientRect();
       const scrollLeft = scrollRef.current.scrollLeft;
-      const weekX = e.clientX - rect.left - LEFT_COLS_WIDTH + scrollLeft;
+      const weekX = e.clientX - rect.left - totalLeftColsWidth + scrollLeft;
       const weekIdx = Math.max(0, Math.min(weeks.length - 1, Math.floor(weekX / weekWidth)));
 
       setRows(prev => prev.map(row => {
@@ -1002,7 +999,7 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
                 e.preventDefault();
                 if (!scrollRef.current) return;
                 const rect = scrollRef.current.getBoundingClientRect();
-                const weekX = e.clientX - rect.left - LEFT_COLS_WIDTH + scrollRef.current.scrollLeft;
+                const weekX = e.clientX - rect.left - totalLeftColsWidth + scrollRef.current.scrollLeft;
                 const weekIdx = Math.max(0, Math.min(weeks.length - 1, Math.floor(weekX / weekWidth)));
                 startDrag(row.id, weekIdx);
               }}
@@ -1141,7 +1138,7 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
             e.preventDefault();
             if (!scrollRef.current) return;
             const rect = scrollRef.current.getBoundingClientRect();
-            const weekX = e.clientX - rect.left - LEFT_COLS_WIDTH + scrollRef.current.scrollLeft;
+            const weekX = e.clientX - rect.left - totalLeftColsWidth + scrollRef.current.scrollLeft;
             const weekIdx = Math.max(0, Math.min(weeks.length - 1, Math.floor(weekX / weekWidth)));
             startDrag(row.id, weekIdx);
           }}
@@ -1215,7 +1212,7 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
         </div>
 
         <button
-          onClick={() => setShowAddRow(true)}
+          onClick={addBlankRow}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 transition-colors"
         >
           <Plus className="w-3.5 h-3.5" /> Add row
@@ -1233,14 +1230,11 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
       <div ref={scrollRef} className="flex-1 overflow-auto bg-white">
         <table
           className="border-collapse"
-          style={{ tableLayout: "fixed", minWidth: `${LEFT_COLS_WIDTH + weeks.length * weekWidth}px` }}
+          style={{ tableLayout: "fixed", minWidth: `${totalLeftColsWidth + weeks.length * weekWidth}px` }}
         >
           <colgroup>
             <col style={{ width: COL_WIDTHS.del }} />
-            <col style={{ width: COL_WIDTHS.funnel }} />
             <col style={{ width: COL_WIDTHS.channel }} />
-            <col style={{ width: COL_WIDTHS.detail }} />
-            <col style={{ width: COL_WIDTHS.audience }} />
             {customColumns.map(c => <col key={c.id} style={{ width: CUSTOM_COL_W }} />)}
             <col style={{ width: COL_WIDTHS.total }} />
             {weeks.map(w => <col key={w.weekStart} style={{ width: weekWidth }} />)}
@@ -1248,7 +1242,7 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
 
           <thead>
             <tr style={{ height: HEADER_H }}>
-              <th colSpan={6 + customColumns.length} className={stickyHeader}
+              <th colSpan={2 + customColumns.length} className={stickyHeader}
                 style={{ position: "sticky", left: 0, top: 0, zIndex: 30, textAlign: "left" }} />
               {monthGroups.map(mg => (
                 <th key={`${mg.month}-${mg.year}`} colSpan={mg.count}
@@ -1261,18 +1255,13 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
 
             <tr style={{ height: HEADER_H }}>
               <th className={stickyHeader}
-                style={{ position: "sticky", left: LEFT_OFFSETS.del, top: HEADER_H, zIndex: 20 }} />
-              {(["FUNNEL", "CHANNEL", "DETAIL", "AUDIENCE"] as const).map((label, i) => {
-                const offsets = [LEFT_OFFSETS.funnel, LEFT_OFFSETS.channel, LEFT_OFFSETS.detail, LEFT_OFFSETS.audience];
-                return (
-                  <th key={label} className={stickyHeader}
-                    style={{ position: "sticky", left: offsets[i], top: HEADER_H, zIndex: 20, textAlign: "left" }}>
-                    {label}
-                  </th>
-                );
-              })}
+                style={{ position: "sticky", left: 0, top: HEADER_H, zIndex: 20 }} />
+              <th className={stickyHeader}
+                style={{ position: "sticky", left: channelLeft, top: HEADER_H, zIndex: 20, textAlign: "left" }}>
+                CHANNEL
+              </th>
               {customColumns.map((col, ci) => {
-                const colLeft = LEFT_OFFSETS.audience + COL_WIDTHS.audience + ci * CUSTOM_COL_W;
+                const colLeft = COL_WIDTHS.del + COL_WIDTHS.channel + ci * CUSTOM_COL_W;
                 return (
                   <th key={col.id}
                     className={`${stickyHeader} group/colhdr`}
@@ -1321,7 +1310,7 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
                 <tr key={row.id} style={{ height: ROW_H }} className="group">
                   <td
                     className={`${stickyBase} text-center align-middle`}
-                    style={{ position: "sticky", left: LEFT_OFFSETS.del, zIndex: 10 }}
+                    style={{ position: "sticky", left: 0, zIndex: 10 }}
                   >
                     <button
                       onClick={() => deleteRow(row.id)}
@@ -1331,18 +1320,6 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </td>
-                  {span.showFunnel && (
-                    <EditableCell value={row.funnel} rowSpan={span.funnelSpan} bold
-                      onChange={val => {
-                        setRows(prev => {
-                          const last = rowIdx + span.funnelSpan;
-                          return prev.map((r, i) => i >= rowIdx && i < last ? { ...r, funnel: val } : r);
-                        });
-                      }}
-                      className={`${stickyBase} text-center align-middle bg-gray-50`}
-                      style={{ position: "sticky", left: LEFT_OFFSETS.funnel, zIndex: 10 }}
-                    />
-                  )}
                   {span.showChannel && (
                     <ChannelSelectCell
                       value={row.channel}
@@ -1357,24 +1334,14 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
                       className={`${stickyBase} text-center align-middle`}
                       style={{
                         position: "sticky",
-                        left: LEFT_OFFSETS.channel,
+                        left: channelLeft,
                         zIndex: 10,
                         ...(row.isOrganic ? { background: 'repeating-linear-gradient(-45deg, #f5f3ff, #f5f3ff 8px, #ede9fe 8px, #ede9fe 16px)' } : {}),
                       }}
                     />
                   )}
-                  <EditableCell value={row.detail}
-                    onChange={val => updateRow(row.id, r => ({ ...r, detail: val }))}
-                    className={`${stickyBase} text-left align-middle`}
-                    style={{ position: "sticky", left: LEFT_OFFSETS.detail, zIndex: 10 }}
-                  />
-                  <EditableCell value={row.audience}
-                    onChange={val => updateRow(row.id, r => ({ ...r, audience: val }))}
-                    className={`${stickyBase} text-left align-middle`}
-                    style={{ position: "sticky", left: LEFT_OFFSETS.audience, zIndex: 10 }}
-                  />
                   {customColumns.map((col, ci) => {
-                    const colLeft = LEFT_OFFSETS.audience + COL_WIDTHS.audience + ci * CUSTOM_COL_W;
+                    const colLeft = COL_WIDTHS.del + COL_WIDTHS.channel + ci * CUSTOM_COL_W;
                     return (
                       <EditableCell
                         key={col.id}
@@ -1443,7 +1410,7 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
                 style={{ position: "sticky", left: 0, zIndex: 10 }}
               >
                 <button
-                  onClick={() => setShowAddRow(true)}
+                  onClick={addBlankRow}
                   className="flex items-center gap-1.5 px-2 text-xs text-gray-300 hover:text-blue-500 font-medium transition-colors w-full py-1"
                 >
                   <Plus className="w-3 h-3" /> Add channel
@@ -1488,17 +1455,6 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
             setDragEndPos(null);
           }}
           onCancel={() => { setShowBudgetPrompt(false); setPendingDrag(null); setDragEndPos(null); }}
-        />
-      )}
-
-      {showAddRow && (
-        <AddRowModal
-          existingFunnels={[...new Set(rows.map(r => r.funnel).filter(Boolean))]}
-          existingChannels={[...new Set(rows.map(r => r.channel).filter(Boolean))]}
-          onAdd={({ funnel, channel, detail, audience }) => {
-            setRows(prev => [...prev, { id: uid(), funnel, channel, detail, audience, flights: [] }]);
-          }}
-          onClose={() => setShowAddRow(false)}
         />
       )}
 

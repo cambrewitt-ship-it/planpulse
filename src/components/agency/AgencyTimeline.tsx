@@ -41,26 +41,32 @@ function extractTwoDominantColors(imgEl: HTMLImageElement): [string, string] | n
     ctx.drawImage(imgEl, 0, 0, size, size);
     const { data } = ctx.getImageData(0, 0, size, size);
 
-    // Collect non-transparent, non-white pixels, quantised to 4-bit per channel
-    const freq = new Map<string, { count: number; r: number; g: number; b: number }>();
+    // Two passes: one excluding near-white (to find the primary), one including all opaque pixels (to find secondary)
+    const freqColored = new Map<string, { count: number; r: number; g: number; b: number }>();
+    const freqAll     = new Map<string, { count: number; r: number; g: number; b: number }>();
     for (let i = 0; i < data.length; i += 4) {
       const [r, g, b, a] = [data[i], data[i+1], data[i+2], data[i+3]];
-      if (a < 128 || isTooLight(r, g, b)) continue;
+      if (a < 128) continue;
       const key = `${r >> 4},${g >> 4},${b >> 4}`;
-      const entry = freq.get(key);
-      if (entry) { entry.count++; entry.r += r; entry.g += g; entry.b += b; }
-      else freq.set(key, { count: 1, r, g, b });
+      const addTo = (map: typeof freqAll) => {
+        const entry = map.get(key);
+        if (entry) { entry.count++; entry.r += r; entry.g += g; entry.b += b; }
+        else map.set(key, { count: 1, r, g, b });
+      };
+      addTo(freqAll);
+      if (!isTooLight(r, g, b)) addTo(freqColored);
     }
 
-    if (freq.size === 0) return null;
+    if (freqColored.size === 0) return null;
 
-    const sorted = [...freq.values()]
-      .sort((a, b) => b.count - a.count)
-      .map(e => [Math.round(e.r / e.count), Math.round(e.g / e.count), Math.round(e.b / e.count)] as [number, number, number]);
+    const toRgb = (map: typeof freqAll) =>
+      [...map.values()]
+        .sort((a, b) => b.count - a.count)
+        .map(e => [Math.round(e.r / e.count), Math.round(e.g / e.count), Math.round(e.b / e.count)] as [number, number, number]);
 
-    const c1 = sorted[0];
-    // Find second color that is sufficiently different from c1
-    const c2 = sorted.find(c => colorDistance(c, c1) > 60) ?? null;
+    const c1 = toRgb(freqColored)[0];
+    // Secondary: most frequent pixel (from all pixels) that contrasts sufficiently with primary
+    const c2 = toRgb(freqAll).find(c => colorDistance(c, c1) > 60) ?? null;
     if (!c2) return null;
     return [rgbToHex(...c1), rgbToHex(...c2)];
   } catch {
@@ -86,8 +92,20 @@ function useLogoColors(logoUrl: string | null | undefined): [string, string] | n
   return colors;
 }
 
-function stripeBackground(c1: string, c2: string): string {
-  return `repeating-linear-gradient(-45deg, ${c1} 0px, ${c1} 7px, ${c2} 7px, ${c2} 14px)`;
+function stripeBackground(primary: string, secondary: string): string {
+  // 3 thin secondary lines centered at 14px, 28px (halfway), 42px within the 56px bar height
+  return [
+    `linear-gradient(`,
+    `  0deg,`,
+    `  ${primary}   0px,  ${primary}  12px,`,
+    `  ${secondary} 12px, ${secondary} 16px,`,
+    `  ${primary}  16px,  ${primary}  26px,`,
+    `  ${secondary} 26px, ${secondary} 30px,`,
+    `  ${primary}  30px,  ${primary}  40px,`,
+    `  ${secondary} 40px, ${secondary} 44px,`,
+    `  ${primary}  44px,  ${primary}  56px`,
+    `)`,
+  ].join('');
 }
 
 const DAY_MS    = 86400000;
@@ -320,7 +338,7 @@ function ClientTimelineRow({
             left: barX, top: '50%', transform: 'translateY(-50%)',
             width: barW, height: 56,
             background: barBackground,
-            borderRadius: 3,
+            borderRadius: 12,
             zIndex: 2,
             opacity: hovered ? 0 : 1,
             transition: 'opacity 0.15s',

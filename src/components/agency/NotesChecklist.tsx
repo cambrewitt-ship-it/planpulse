@@ -342,7 +342,7 @@ export function NotesChecklist({ filteredClientIds, activeClientId }: NotesCheck
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
-            <div style={{ fontSize: 13, fontWeight: 600, color: '#8A8578', textTransform: 'uppercase', letterSpacing: '0.12em' }}>Notes</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: '#8A8578', textTransform: 'uppercase', letterSpacing: '0.12em' }}>Notes</div>
           </div>
           {/* Mode toggle */}
           <div style={{
@@ -357,7 +357,7 @@ export function NotesChecklist({ filteredClientIds, activeClientId }: NotesCheck
                 key={m}
                 onClick={() => switchMode(m)}
                 style={{
-                  fontSize: 9,
+                  fontSize: 11,
                   fontWeight: 600,
                   padding: '3px 8px',
                   borderRadius: 4,
@@ -397,7 +397,7 @@ export function NotesChecklist({ filteredClientIds, activeClientId }: NotesCheck
               display: 'block',
               width: '100%',
               minHeight: '100%',
-              fontSize: 12,
+              fontSize: 13,
               lineHeight: '28px',
               color: '#1C1917',
               background: 'transparent',
@@ -528,7 +528,7 @@ function NoteRow({ note, text, dateValue, inputRef, onToggle, onTextChange, onDa
           onKeyDown={onKeyDown}
           style={{
             width: '100%',
-            fontSize: 12,
+            fontSize: 13,
             lineHeight: '1.4',
             color: note.done ? '#B5B0A5' : '#1C1917',
             textDecoration: note.done ? 'line-through' : 'none',
@@ -542,7 +542,7 @@ function NoteRow({ note, text, dateValue, inputRef, onToggle, onTextChange, onDa
           }}
         />
         {activeDateStr && (
-          <div style={{ fontSize: 9, color: note.done ? '#B5B0A5' : dueDateColor(activeDateStr) }}>
+          <div style={{ fontSize: 11, color: note.done ? '#B5B0A5' : dueDateColor(activeDateStr) }}>
             {formatDueDate(activeDateStr)}
           </div>
         )}
@@ -578,7 +578,7 @@ function NoteRow({ note, text, dateValue, inputRef, onToggle, onTextChange, onDa
           onClick={onDelete}
           style={{
             width: 16, height: 16, borderRadius: '50%', border: 'none',
-            background: '#F5EDE9', color: '#A0442A', fontSize: 10,
+            background: '#F5EDE9', color: '#A0442A', fontSize: 12,
             lineHeight: 1, cursor: 'pointer', display: 'flex',
             alignItems: 'center', justifyContent: 'center',
           }}
@@ -643,7 +643,7 @@ function DraftRow({ text, dateValue, inputRef, onTextChange, onDateChange, onKey
           placeholder={hasNotes ? 'New item…' : 'Start typing…'}
           style={{
             width: '100%',
-            fontSize: 12,
+            fontSize: 13,
             lineHeight: '1.4',
             color: '#1C1917',
             background: 'transparent',
@@ -656,7 +656,7 @@ function DraftRow({ text, dateValue, inputRef, onTextChange, onDateChange, onKey
           }}
         />
         {dateValue && (
-          <div style={{ fontSize: 9, color: '#8A8578' }}>
+          <div style={{ fontSize: 11, color: '#8A8578' }}>
             {formatDueDate(dateValue)}
           </div>
         )}

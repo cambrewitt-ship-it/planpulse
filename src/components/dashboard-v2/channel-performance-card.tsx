@@ -223,21 +223,21 @@ function BenchmarkRow({
 
   return (
     <div className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
-      <span className="text-xs text-gray-500 truncate flex-1 min-w-0 pr-2">{benchmark.metric_label}</span>
+      <span className="text-base text-gray-500 truncate flex-1 min-w-0 pr-2">{benchmark.metric_label}</span>
       <div className="flex items-center gap-2 flex-shrink-0">
         {hasReal && (
           <>
-            <span className={`text-xs font-semibold ${isGood ? 'text-emerald-600' : 'text-red-500'}`}>
+            <span className={`text-base font-semibold ${isGood ? 'text-emerald-600' : 'text-red-500'}`}>
               {formatRealValue(realValue, benchmark.unit)}
             </span>
-            <span className="text-xs text-gray-300">vs</span>
+            <span className="text-base text-gray-300">vs</span>
           </>
         )}
-        <span className="text-xs text-gray-400">
+        <span className="text-base text-gray-400">
           {formatBenchmarkValue(benchmark.benchmark_value, benchmark.unit)}
         </span>
         {hasReal && (
-          <span className={`text-xs ${isGood ? 'text-emerald-500' : 'text-red-400'}`}>
+          <span className={`text-base ${isGood ? 'text-emerald-500' : 'text-red-400'}`}>
             {isGood ? '↑' : '↓'}
           </span>
         )}
@@ -266,7 +266,7 @@ function PlatformIcon({ platform }: { platform: string }) {
 function StatusBadge({ status }: { status: ChannelCardProps['channel']['status'] }) {
   const c = STATUS_CONFIG[status];
   return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${c.bg} ${c.text} ${c.border}`}>
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-base font-medium border ${c.bg} ${c.text} ${c.border}`}>
       <span className={`w-1.5 h-1.5 rounded-full ${c.dot}`} />
       {c.label}
     </span>
@@ -295,7 +295,7 @@ function PacingBar({
 
   return (
     <div className="space-y-1">
-      <div className="flex justify-between text-xs text-gray-500">
+      <div className="flex justify-between text-base text-gray-500">
         <span>Pacing</span>
         <span className={displayPct > 100 ? 'text-red-600 font-medium' : displayPct < 85 ? 'text-amber-600 font-medium' : 'text-emerald-600 font-medium'}>
           {fmt(displayPct, 'percent', 0)} of target
@@ -312,7 +312,7 @@ function PacingBar({
           title="Planned target"
         />
       </div>
-      <div className="flex justify-between text-xs text-gray-400">
+      <div className="flex justify-between text-base text-gray-400">
         <span>{fmt(currentSpend, 'currency', 0)} spent</span>
         <span>{fmt(plannedSpend, 'currency', 0)}{plannedLabel ? ` ${plannedLabel}` : ' planned'}</span>
       </div>
@@ -391,7 +391,7 @@ function MetricSlot({
     <div ref={ref} style={{ flex: 1, minWidth: 60, position: 'relative' }}>
       {/* Label + swap trigger */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 2, marginBottom: 2 }}>
-        <span style={{ fontSize: 10, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 500 }}>
+        <span style={{ fontSize: 12, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 500 }}>
           {cfg.shortLabel}
         </span>
         {availableSwaps.length > 0 && (
@@ -400,7 +400,7 @@ function MetricSlot({
             title="Swap metric"
             style={{
               background: 'none', border: 'none', padding: '0 1px', cursor: 'pointer',
-              color: '#d1d5db', fontSize: 9, lineHeight: 1, display: 'flex', alignItems: 'center',
+              color: '#d1d5db', fontSize: 11, lineHeight: 1, display: 'flex', alignItems: 'center',
             }}
           >▾</button>
         )}
@@ -417,10 +417,10 @@ function MetricSlot({
               padding: '1px 5px', cursor: 'pointer', maxWidth: 110, overflow: 'hidden',
             }}
           >
-            <span style={{ fontSize: 10, color: '#374151', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 90 }}>
+            <span style={{ fontSize: 12, color: '#374151', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 90 }}>
               {selectedActionType ? actionTypeLabel(selectedActionType) : 'Select event'}
             </span>
-            <span style={{ color: '#9ca3af', fontSize: 9, flexShrink: 0 }}>▾</span>
+            <span style={{ color: '#9ca3af', fontSize: 11, flexShrink: 0 }}>▾</span>
           </button>
           {actionOpen && (
             <div style={{
@@ -437,7 +437,7 @@ function MetricSlot({
                   onClick={e => e.stopPropagation()}
                   style={{
                     width: '100%', border: '1px solid #e5e7eb', borderRadius: 4,
-                    padding: '3px 7px', fontSize: 13, outline: 'none', color: '#374151',
+                    padding: '3px 7px', fontSize: 14, outline: 'none', color: '#374151',
                     boxSizing: 'border-box',
                   }}
                 />
@@ -448,7 +448,7 @@ function MetricSlot({
                     actionTypeLabel(t).toLowerCase().includes(actionSearch.toLowerCase())
                   );
                   if (filtered.length === 0) {
-                    return <div style={{ padding: '8px 10px', fontSize: 13, color: '#9ca3af' }}>No events found</div>;
+                    return <div style={{ padding: '8px 10px', fontSize: 14, color: '#9ca3af' }}>No events found</div>;
                   }
                   return filtered.map(type => (
                     <button
@@ -456,7 +456,7 @@ function MetricSlot({
                       onClick={() => { onActionTypeChange?.(type); setActionOpen(false); }}
                       style={{
                         display: 'block', width: '100%', textAlign: 'left',
-                        padding: '6px 10px', fontSize: 13,
+                        padding: '6px 10px', fontSize: 14,
                         color: type === selectedActionType ? '#2563eb' : '#374151',
                         fontWeight: type === selectedActionType ? 600 : 400,
                         background: type === selectedActionType ? '#eff6ff' : 'transparent',
@@ -483,7 +483,7 @@ function MetricSlot({
             display: 'block', width: '100%', textAlign: 'left',
             background: isActive ? `${cfg.color}12` : 'transparent',
             border: 'none', borderRadius: 8, padding: '1px 3px', cursor: 'pointer',
-            fontSize: 15, fontWeight: 600,
+            fontSize: 16, fontWeight: 600,
             color: isActive ? cfg.color : '#1f2937',
             transition: 'background 0.15s',
           }}
@@ -492,14 +492,14 @@ function MetricSlot({
           {displayValue}
         </button>
       ) : (
-        <span style={{ fontSize: 15, fontWeight: 600, color: '#1f2937', display: 'block', padding: '1px 3px' }}>
+        <span style={{ fontSize: 16, fontWeight: 600, color: '#1f2937', display: 'block', padding: '1px 3px' }}>
           {displayValue}
         </span>
       )}
 
       {/* Benchmark */}
       {benchmark ? (
-        <div style={{ fontSize: 10, marginTop: 2, padding: '0 3px', display: 'flex', alignItems: 'center', gap: 2 }}>
+        <div style={{ fontSize: 12, marginTop: 2, padding: '0 3px', display: 'flex', alignItems: 'center', gap: 2 }}>
           <span style={{ color: '#d1d5db' }}>bm</span>
           <span style={{ fontWeight: 500, color: isGood === null ? '#9ca3af' : isGood ? '#10b981' : '#ef4444' }}>
             {formatBenchmarkValue(benchmark.benchmark_value, benchmark.unit)}
@@ -523,7 +523,7 @@ function MetricSlot({
               onClick={() => { onSwap(k); setSwapOpen(false); }}
               style={{
                 display: 'block', width: '100%', textAlign: 'left',
-                padding: '6px 10px', fontSize: 13, color: '#374151',
+                padding: '6px 10px', fontSize: 14, color: '#374151',
                 background: 'transparent', border: 'none', cursor: 'pointer',
               }}
               onMouseEnter={e => (e.currentTarget.style.background = '#f9fafb')}
@@ -1104,7 +1104,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                         className="flex flex-col items-start gap-0 text-left min-w-0"
                       >
                         <div className="flex items-center gap-1">
-                          <h3 className="text-sm font-bold" style={{ color: '#1C1917', fontFamily: "'Inter', system-ui, sans-serif" }}>
+                          <h3 className="text-base font-bold" style={{ color: '#1C1917', fontFamily: "'Inter', system-ui, sans-serif" }}>
                             {channel.name.toUpperCase()}
                             {campaignSubtitle && (
                               <span className="text-gray-500"> — {campaignSubtitle}</span>
@@ -1124,7 +1124,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                               value={campaignSearch}
                               onChange={e => setCampaignSearch(e.target.value)}
                               onClick={e => e.stopPropagation()}
-                              className="w-full text-xs px-2 py-1.5 border border-gray-200 rounded-md outline-none focus:border-blue-400 placeholder-gray-400"
+                              className="w-full text-base px-2 py-1.5 border border-gray-200 rounded-md outline-none focus:border-blue-400 placeholder-gray-400"
                             />
                           </div>
                           <div className="max-h-56 overflow-y-auto py-1">
@@ -1132,7 +1132,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                             {!campaignSearch && (
                               <button
                                 onClick={() => { setSelectedCampaignIds(new Set()); if (clientId) { try { localStorage.setItem(`channel-campaigns-${clientId}-${channel.id ?? channel.name}`, JSON.stringify([])); } catch {} } }}
-                                className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors border-b border-gray-100 ${!isNoneSelected && selectedCampaignIds.size === 0 ? 'font-semibold text-blue-600 bg-blue-50' : 'text-gray-600 hover:bg-gray-50'}`}
+                                className={`w-full flex items-center gap-2 px-3 py-1.5 text-base transition-colors border-b border-gray-100 ${!isNoneSelected && selectedCampaignIds.size === 0 ? 'font-semibold text-blue-600 bg-blue-50' : 'text-gray-600 hover:bg-gray-50'}`}
                               >
                                 <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0 ${!isNoneSelected && selectedCampaignIds.size === 0 ? 'bg-blue-600 border-blue-600' : 'border-gray-300'}`}>
                                   {!isNoneSelected && selectedCampaignIds.size === 0 && <span className="text-white text-[8px] leading-none">✓</span>}
@@ -1150,7 +1150,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                                   setCampaignDropdownOpen(false);
                                   setCampaignSearch('');
                                 }}
-                                className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors border-b border-gray-100 ${isNoneSelected ? 'font-semibold text-amber-600 bg-amber-50' : 'text-gray-600 hover:bg-gray-50'}`}
+                                className={`w-full flex items-center gap-2 px-3 py-1.5 text-base transition-colors border-b border-gray-100 ${isNoneSelected ? 'font-semibold text-amber-600 bg-amber-50' : 'text-gray-600 hover:bg-gray-50'}`}
                               >
                                 <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0 ${isNoneSelected ? 'bg-amber-500 border-amber-500' : 'border-gray-300'}`}>
                                   {isNoneSelected && <span className="text-white text-[8px] leading-none">✓</span>}
@@ -1166,7 +1166,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                                   <button
                                     key={c.id}
                                     onClick={() => toggleCampaign(c.id)}
-                                    className="w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors hover:bg-gray-50 text-gray-700"
+                                    className="w-full flex items-center gap-2 px-3 py-1.5 text-base transition-colors hover:bg-gray-50 text-gray-700"
                                   >
                                     <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0 ${checked ? 'bg-blue-600 border-blue-600' : 'border-gray-300'}`}>
                                       {checked && <span className="text-white text-[8px] leading-none">✓</span>}
@@ -1176,20 +1176,20 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                                 );
                               })}
                             {campaignSearch && channel.campaigns.filter(c => c.name.toLowerCase().includes(campaignSearch.toLowerCase())).length === 0 && (
-                              <p className="px-3 py-2 text-xs text-gray-400">No campaigns match</p>
+                              <p className="px-3 py-2 text-base text-gray-400">No campaigns match</p>
                             )}
                           </div>
                         </div>
                       )}
                     </div>
                   ) : (
-                    <h3 className="text-sm font-bold truncate" style={{ color: '#1C1917', fontFamily: "'Inter', system-ui, sans-serif" }}>{channel.name}</h3>
+                    <h3 className="text-base font-bold truncate" style={{ color: '#1C1917', fontFamily: "'Inter', system-ui, sans-serif" }}>{channel.name}</h3>
                   )}
                 </div>
                 {channel.format && (
-                  <p className="text-xs text-gray-500 mt-0.5 uppercase tracking-wide">{channel.format}</p>
+                  <p className="text-base text-gray-500 mt-0.5 uppercase tracking-wide">{channel.format}</p>
                 )}
-                <p className="text-xs text-gray-400 mt-0.5 capitalize">
+                <p className="text-base text-gray-400 mt-0.5 capitalize">
                   {channel.platform.replace('-', ' ')}
                 </p>
               </div>
@@ -1203,10 +1203,10 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                     const label = hasCommission ? (planView === 'gross' ? ' gross' : ' net') : '';
                     return (
                       <>
-                        <p className="text-sm font-bold text-gray-900">
+                        <p className="text-base font-bold text-gray-900">
                           {fmt(filteredMetrics.spend ?? channel.currentSpend, 'currency', 0)}
                         </p>
-                        <p className="text-xs text-gray-400">
+                        <p className="text-base text-gray-400">
                           of {fmt(displayPlanned, 'currency', 0)}{label}
                         </p>
                       </>
@@ -1245,7 +1245,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                 <button
                   onClick={() => setPresetOpen(v => !v)}
                   disabled={savingPreset}
-                  className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 transition-colors"
+                  className="flex items-center gap-1 text-base text-gray-500 hover:text-gray-700 transition-colors"
                 >
                   <span className="font-medium">{activePresetName ?? 'Select preset'}</span>
                   <ChevronDown className="w-3 h-3" />
@@ -1256,7 +1256,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                       <button
                         key={p.id}
                         onClick={() => handlePresetSelect(p.name)}
-                        className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 transition-colors ${p.name === activePresetName ? 'font-medium text-blue-600' : 'text-gray-700'}`}
+                        className={`w-full text-left px-3 py-1.5 text-base hover:bg-gray-50 transition-colors ${p.name === activePresetName ? 'font-medium text-blue-600' : 'text-gray-700'}`}
                       >
                         {p.name}
                       </button>
@@ -1307,12 +1307,12 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
             <div className="mx-4 mb-3 rounded-lg bg-red-50 border border-red-200 px-3 py-2.5 flex items-center justify-between gap-3">
               <div className="flex items-center gap-2 min-w-0">
                 <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0" />
-                <span className="text-xs text-red-700 font-medium">Connection expired — data unavailable</span>
+                <span className="text-base text-red-700 font-medium">Connection expired — data unavailable</span>
               </div>
               {onReconnect ? (
                 <button
                   onClick={onReconnect}
-                  className="flex-shrink-0 text-xs font-semibold text-white bg-red-500 hover:bg-red-600 px-3 py-1 rounded-md transition-colors"
+                  className="flex-shrink-0 text-base font-semibold text-white bg-red-500 hover:bg-red-600 px-3 py-1 rounded-md transition-colors"
                 >
                   Reconnect
                 </button>
@@ -1326,7 +1326,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
               <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
               <ul className="space-y-0.5">
                 {regularIssues.map((issue, i) => (
-                  <li key={i} className="text-xs text-amber-700">{issue}</li>
+                  <li key={i} className="text-base text-amber-700">{issue}</li>
                 ))}
               </ul>
             </div>
@@ -1342,7 +1342,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
               <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
                 <button
                   onClick={() => setChartType('spend')}
-                  className={`px-3 py-1 text-xs rounded transition-colors ${
+                  className={`px-3 py-1 text-base rounded transition-colors ${
                     chartType === 'spend'
                       ? 'bg-white font-medium shadow-sm text-gray-900'
                       : 'text-gray-600 hover:text-gray-800'
@@ -1352,7 +1352,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                 </button>
                 <button
                   onClick={() => { setChartType('metrics'); if (hasMetrics) setIsExpanded(true); }}
-                  className={`px-3 py-1 text-xs rounded transition-colors ${
+                  className={`px-3 py-1 text-base rounded transition-colors ${
                     chartType === 'metrics'
                       ? 'bg-white font-medium shadow-sm text-gray-900'
                       : 'text-gray-600 hover:text-gray-800'
@@ -1368,7 +1368,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
               {onAdjust && (
                 <button
                   onClick={onAdjust}
-                  className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                  className="flex items-center gap-1 px-3 py-1.5 text-base font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
                 >
                   <ExternalLink className="w-3 h-3" />
                   Open
@@ -1377,7 +1377,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
               {onViewReport && (
                 <button
                   onClick={onViewReport}
-                  className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                  className="flex items-center gap-1 px-3 py-1.5 text-base font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
                 >
                   <FileText className="w-3 h-3" />
                   Report
@@ -1406,7 +1406,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                             <XAxis
                               dataKey="date"
-                              tick={{ fontSize: 13 }}
+                              tick={{ fontSize: 14 }}
                               tickMargin={6}
                               tickFormatter={(value) => new Date(value).getDate().toString()}
                               interval={
@@ -1416,7 +1416,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                               }
                             />
                             <YAxis
-                              tick={{ fontSize: 14 }}
+                              tick={{ fontSize: 15 }}
                               tickFormatter={(value) => `$${value}`}
                               width={56}
                             />
@@ -1470,7 +1470,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                           {monthLabels.map(ml => (
                             <span
                               key={ml.key}
-                              className="text-xs font-semibold text-gray-600 text-center truncate"
+                              className="text-base font-semibold text-gray-600 text-center truncate"
                               style={{ width: `${ml.widthPct}%` }}
                             >
                               {ml.month}
@@ -1481,7 +1481,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
 
                       {isExpanded && (
                         <div className="mt-2 flex items-center justify-end">
-                          <div className="flex items-center gap-4 text-xs text-gray-500">
+                          <div className="flex items-center gap-4 text-base text-gray-500">
                             <span className="flex items-center gap-1.5">
                               <span className="w-3 h-0.5 rounded-full bg-emerald-500 inline-block" />
                               Actual Spend
@@ -1495,7 +1495,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                       )}
                     </>
                   ) : (
-                    <p className="text-xs text-gray-400 text-center py-8">No spend data available for this period.</p>
+                    <p className="text-base text-gray-400 text-center py-8">No spend data available for this period.</p>
                   )}
                 </>
               )}
@@ -1511,7 +1511,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                         <button
                           key={key}
                           onClick={() => handleMetricClick(key)}
-                          className={`px-2 py-0.5 rounded-full text-xs font-medium border transition-all ${
+                          className={`px-2 py-0.5 rounded-full text-base font-medium border transition-all ${
                             isActive
                               ? 'text-white border-transparent'
                               : 'text-gray-600 bg-white border-gray-200 hover:border-gray-300'
@@ -1535,7 +1535,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                     return (
                       <>
                         {axisMode === 'hidden' && (
-                          <p className="text-xs text-gray-400 mb-2 text-right">
+                          <p className="text-base text-gray-400 mb-2 text-right">
                             Relative scale — each line scaled independently
                           </p>
                         )}
@@ -1557,7 +1557,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                               <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                               <XAxis
                                 dataKey="date"
-                                tick={{ fontSize: 13 }}
+                                tick={{ fontSize: 14 }}
                                 tickMargin={6}
                                 tickFormatter={(value: string) => {
                                   const parts = value.split('-');
@@ -1580,7 +1580,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                                   yAxisId={key}
                                   orientation={i === 0 ? 'left' : 'right'}
                                   hide={axisMode === 'hidden'}
-                                  tick={{ fontSize: 13 }}
+                                  tick={{ fontSize: 14 }}
                                   tickFormatter={METRIC_CONFIG[key].formatAxis}
                                   width={axisMode !== 'hidden' ? 60 : 0}
                                   stroke={axisMode === 'dual' ? METRIC_CONFIG[key].color : '#6b7280'}
@@ -1634,7 +1634,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                       </>
                     );
                   })() : (
-                    <p className="text-xs text-gray-400 text-center py-8">No metrics data available for this period.</p>
+                    <p className="text-base text-gray-400 text-center py-8">No metrics data available for this period.</p>
                   )}
                 </>
               )}
@@ -1653,7 +1653,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                 <div className="flex justify-center pb-3 pt-1">
                   <button
                     onClick={() => setIsExpanded(prev => !prev)}
-                    className="px-4 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-full transition-colors"
+                    className="px-4 py-1.5 text-base font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-full transition-colors"
                   >
                     {isExpanded ? '▲ See Less' : '▼ See More'}
                   </button>
@@ -1667,7 +1667,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
         {clientId && (
           <div className="flex-shrink-0 w-64 bg-white flex flex-col self-stretch overflow-hidden">
             <div className="px-4 pt-4 flex-shrink-0">
-              <h3 className="text-sm font-semibold text-gray-900 mb-3" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>Action Points</h3>
+              <h3 className="text-base font-semibold text-gray-900 mb-3" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>Action Points</h3>
             </div>
             <div className="relative flex-1 min-h-0">
               <div className={`h-full px-4 pb-6 ${isExpanded ? 'overflow-y-auto' : 'overflow-hidden'}`}>

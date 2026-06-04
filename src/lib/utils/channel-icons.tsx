@@ -1,6 +1,26 @@
 import React from 'react';
 import { Radio } from 'lucide-react';
 
+export const PRESET_CHANNELS = [
+  'Meta Ads',
+  'Google Ads',
+  'TikTok Ads',
+  'YouTube Ads',
+  'Instagram Ads',
+  'LinkedIn Ads',
+  'Twitter Ads',
+  'Reddit Ads',
+  'Pinterest Ads',
+  'Programmatic',
+  'Native Ads',
+  'EDM / Email',
+  'OOH',
+  'Radio',
+  'Linear TV',
+  'SVOD',
+  'BVOD',
+];
+
 /**
  * Returns a colored SVG logo for a media channel
  * @param channelType - The channel type name (e.g., "Google Ads", "Meta Ads", etc.)

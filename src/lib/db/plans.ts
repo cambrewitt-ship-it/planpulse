@@ -18,6 +18,21 @@ export async function getClients() {
   return data;
 }
 
+export async function getClientById(clientId: string) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not authenticated');
+
+  const { data, error } = await supabase
+    .from('clients')
+    .select('*')
+    .eq('id', clientId)
+    .eq('user_id', user.id)
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
 export async function createClient(name: string) {
   // Get the current user
   const { data: { user } } = await supabase.auth.getUser();
