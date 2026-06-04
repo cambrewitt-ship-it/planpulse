@@ -442,6 +442,9 @@ function PerfSparkline({ clientId, perf, perfLoading, onConnect }: { clientId: s
     // Prefer the value carried through PerfData (always current); fall back to localStorage
     const metaActionType = perf.metaActionType ?? config.metaActionType;
     if (metaActionType) params.set('metaActionType', metaActionType);
+    // Pass the browser's local date so the server uses the client's timezone (not UTC)
+    const now = new Date();
+    params.set('clientDate', `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`);
 
     setLoading(true);
     fetch(`/api/clients/${clientId}/perf-series?${params}`)

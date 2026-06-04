@@ -36,7 +36,11 @@ export async function GET(req: NextRequest, { params }: Params) {
   const filterPlatforms = (url.searchParams.get('platforms') ?? '').split(',').filter(Boolean);
   const metaActionType = url.searchParams.get('metaActionType') ?? null;
 
-  const today = new Date();
+  // Use the client's local date if provided (avoids UTC vs local timezone mismatch)
+  const clientDateParam = url.searchParams.get('clientDate');
+  const today = (clientDateParam && /^\d{4}-\d{2}-\d{2}$/.test(clientDateParam))
+    ? parseISO(clientDateParam)
+    : new Date();
   const todayStr = format(today, 'yyyy-MM-dd');
   const yesterdayStr = format(subDays(today, 1), 'yyyy-MM-dd');
   const activePlatforms = filterPlatforms.length > 0 ? filterPlatforms : ['meta-ads', 'google-ads'];

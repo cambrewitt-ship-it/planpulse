@@ -1192,7 +1192,12 @@ export default function CreateClientPage() {
                 {/* KPI + Target */}
                 <div className="grid grid-cols-2 gap-3">
                   <div className="grid gap-2">
-                    <Label htmlFor="goal-metric">Primary KPI</Label>
+                    <div className="flex items-center gap-1.5">
+                      <Label htmlFor="goal-metric">Primary KPI</Label>
+                      {!goalMetric && (
+                        <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-red-500 text-white text-[9px] font-bold flex-shrink-0">!</span>
+                      )}
+                    </div>
                     <select
                       id="goal-metric"
                       value={goalMetric}
@@ -1206,7 +1211,12 @@ export default function CreateClientPage() {
                     </select>
                   </div>
                   <div className="grid gap-2">
-                    <Label htmlFor="goal-target">Target Value</Label>
+                    <div className="flex items-center gap-1.5">
+                      <Label htmlFor="goal-target">Target Value</Label>
+                      {!goalTarget && (
+                        <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-red-500 text-white text-[9px] font-bold flex-shrink-0">!</span>
+                      )}
+                    </div>
                     <Input
                       id="goal-target"
                       type="number"
@@ -1303,6 +1313,9 @@ export default function CreateClientPage() {
                   <div className="grid gap-2">
                     <div className="flex items-center gap-2">
                       <Label htmlFor="goal-meta-event">Meta Conversion Event</Label>
+                      {!goalMetaActionType && (
+                        <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-red-500 text-white text-[9px] font-bold flex-shrink-0">!</span>
+                      )}
                       {goalEventsSyncing && (
                         <span className="flex items-center gap-1 text-xs text-amber-600">
                           <Loader2 className="h-3 w-3 animate-spin" />
@@ -1341,18 +1354,24 @@ export default function CreateClientPage() {
                   </div>
                 )}
 
-                <div className="flex gap-2 pt-2">
+                <div className="flex flex-col gap-2 pt-2">
                   <Button
                     onClick={handleSaveGoal}
-                    disabled={goalSaving}
-                    className="flex-1"
+                    disabled={goalSaving || !goalMetric || !goalTarget || (showMetaEvents && !goalMetaActionType)}
+                    className="w-full"
                   >
                     {goalSaving
                       ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving…</>
-                      : goalMetric && goalTarget
-                        ? <>Save Goal & Continue<ArrowRight className="h-4 w-4 ml-2" /></>
-                        : <>Continue<ArrowRight className="h-4 w-4 ml-2" /></>
+                      : <>Save Goal & Continue<ArrowRight className="h-4 w-4 ml-2" /></>
                     }
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={goToDashboard}
+                    className="w-full bg-white text-gray-500 border-gray-200 hover:bg-gray-50"
+                  >
+                    Set Up in Dashboard Later
                   </Button>
                 </div>
               </CardContent>
