@@ -13,12 +13,10 @@ export async function GET(request: NextRequest) {
     const nango = new Nango({ secretKey });
     const supabase = await createClient();
 
-    const { data: { session }, error: authError } = await supabase.auth.getSession();
-    if (authError || !session?.user) {
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-
-    const user = session.user;
     const clientId = request.nextUrl.searchParams.get('clientId');
 
     // Find the connection — try client-specific first, fall back to any active connection.

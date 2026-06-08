@@ -48,8 +48,8 @@ function channelToPlatform(channelName: string): string | null {
 export async function GET(_req: NextRequest, { params }: Params) {
   const clientId = await resolveId(params);
   const supabase = await createClient();
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   // Optional filters from widget config
   const url = new URL(_req.url);
@@ -390,12 +390,14 @@ export async function GET(_req: NextRequest, { params }: Params) {
   if (ga4Totals.activeUsers > 0) ga4Actuals.cpc = totalSpend / ga4Totals.activeUsers;
   if (totalImpressions > 0 && ga4Totals.activeUsers > 0) ga4Actuals.ctr = (ga4Totals.activeUsers / totalImpressions) * 100;
 
-  // 7. Available campaigns for widget modal (always unfiltered, MTD)
+  // 7. Available campaigns for widget modal — look back 90 days so paused or
+  // early-month campaigns aren't hidden due to no MTD spend
+  const ninetyDaysAgo = format(subDays(new Date(), 90), 'yyyy-MM-dd');
   const { data: campaignRows } = await supabase
     .from('ad_performance_metrics')
     .select('campaign_id, campaign_name, platform')
     .eq('client_id', clientId)
-    .gte('date', monthStart)
+    .gte('date', ninetyDaysAgo)
     .not('campaign_id', 'like', 'manual-override-%')
     .order('campaign_name');
 
@@ -409,7 +411,6 @@ export async function GET(_req: NextRequest, { params }: Params) {
 
   // 9. Available Meta conversion action types from meta_actions JSONB
   // Look back 90 days so early-month or sparse accounts still surface their events
-  const ninetyDaysAgo = format(subDays(new Date(), 90), 'yyyy-MM-dd');
   const { data: metaEvtRows } = await supabase
     .from('ad_performance_metrics')
     .select('meta_actions')
@@ -452,8 +453,8 @@ export async function GET(_req: NextRequest, { params }: Params) {
 export async function POST(req: NextRequest, { params }: Params) {
   const clientId = await resolveId(params);
   const supabase = await createClient();
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const body = await req.json();
   const { id, channel, metric, benchmark_id, target_value, stretch_value, floor_value, brief_id, goal_type, is_primary } = body;
@@ -474,7 +475,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         target_value: target_value ?? null,
         stretch_value: stretch_value ?? null,
         floor_value: floor_value ?? null,
-        set_by: session.user.id,
+        set_by: user.id,
         set_at: new Date().toISOString(),
       })
       .eq('id', id)
@@ -511,7 +512,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       target_value: target_value ?? null,
       stretch_value: stretch_value ?? null,
       floor_value: floor_value ?? null,
-      set_by: session.user.id,
+      set_by: user.id,
     })
     .select()
     .single();
@@ -535,8 +536,8 @@ export async function POST(req: NextRequest, { params }: Params) {
 export async function DELETE(req: NextRequest, { params }: Params) {
   const clientId = await resolveId(params);
   const supabase = await createClient();
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { searchParams } = new URL(req.url);
   const goalId = searchParams.get('id');

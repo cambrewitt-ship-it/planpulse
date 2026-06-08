@@ -26,13 +26,8 @@ interface MetaAdMetrics {
 }
 
 export async function POST(request: NextRequest) {
-  console.log('=== POST /api/ads/meta/fetch-spend ===');
-  console.log('Request received');
-  
   try {
-    // Parse request body
     const body = await request.json();
-    console.log('Request body:', body);
     const { startDate, endDate, clientId } = body;
 
     // Validate required parameters
@@ -64,17 +59,15 @@ export async function POST(request: NextRequest) {
     // Get authenticated user
     const supabase = await createClient();
     
-    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    const { data: { user }, error: sessionError } = await supabase.auth.getUser();
 
     if (sessionError) {
-      console.error('Failed to retrieve session:', sessionError);
+      console.error('Failed to retrieve user:', sessionError);
       return Response.json(
         { error: 'Unable to verify session' },
         { status: 500 }
       );
     }
-
-    const user = session?.user;
 
     if (!user || !user.id) {
       return Response.json({ error: 'Unauthorized' }, { status: 401 });
@@ -129,11 +122,6 @@ export async function POST(request: NextRequest) {
     }
 
     const nango = new Nango({ secretKey: nangoSecretKey });
-
-    console.log('=== META ADS DATA FETCH ===');
-    console.log('Date Range:', { startDate, endDate });
-    console.log('User ID:', user.id);
-    console.log('Connection ID:', connection.connection_id);
 
     try {
       // Step 1: Get Meta Ads accounts.

@@ -14,12 +14,10 @@ export async function GET(request: NextRequest) {
     const nango = new Nango({ secretKey });
     const supabase = await createClient();
 
-    const { data: { session }, error: authError } = await supabase.auth.getSession();
-    if (authError || !session?.user) {
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-
-    const user = session.user;
     const clientId = request.nextUrl.searchParams.get('clientId');
     // Optional comma-separated list of customer IDs to restrict results to
     const customerIdsParam = request.nextUrl.searchParams.get('customerIds');
@@ -60,14 +58,30 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ campaigns: [] });
     }
 
-    // Fetch active accounts for this user, optionally filtered to specific customer IDs
-    const accountsQuery = supabase
+    // Fetch active accounts — prefer client-scoped rows, fall back to connection-scoped.
+    let accountsQuery = supabase
       .from('google_ads_accounts')
       .select('customer_id, account_name, manager_customer_id')
       .eq('user_id', user.id)
       .eq('is_active', true);
+    if (clientId) {
+      accountsQuery = accountsQuery.eq('client_id', clientId);
+    } else {
+      accountsQuery = accountsQuery.eq('connection_id', connection.connection_id);
+    }
     const { data: accountsData, error: accountsError } = await accountsQuery;
     let googleAdsAccounts = (accountsData ?? []) as Array<{ customer_id: string; account_name: string; manager_customer_id: string | null }>;
+    // If client_id filter returned nothing (accounts saved before the column existed),
+    // fall back to connection-scoped accounts so existing setups keep working.
+    if (clientId && googleAdsAccounts.length === 0) {
+      const { data: fallback } = await supabase
+        .from('google_ads_accounts')
+        .select('customer_id, account_name, manager_customer_id')
+        .eq('user_id', user.id)
+        .eq('connection_id', connection.connection_id)
+        .eq('is_active', true);
+      googleAdsAccounts = (fallback ?? []) as Array<{ customer_id: string; account_name: string; manager_customer_id: string | null }>;
+    }
     if (filterCustomerIds && filterCustomerIds.size > 0) {
       googleAdsAccounts = googleAdsAccounts.filter(a => filterCustomerIds.has(a.customer_id.replace(/-/g, '')));
     }
@@ -106,10 +120,8 @@ export async function GET(request: NextRequest) {
 
     for (const account of googleAdsAccounts) {
       const cleanCustomerId = account.customer_id.replace(/-/g, '');
-      console.log(`[google-ads/campaigns] querying account ${account.customer_id} (clean: ${cleanCustomerId}, manager: ${account.manager_customer_id ?? 'none'})`);
 
       if (cleanCustomerId.length !== 10) {
-        console.log(`[google-ads/campaigns] skipping — unexpected customer ID length ${cleanCustomerId.length}`);
         continue;
       }
 
@@ -134,12 +146,19 @@ export async function GET(request: NextRequest) {
 
         if (!response.ok) {
           const errText = await response.text();
+          let errJson: any = null;
+          try { errJson = JSON.parse(errText); } catch {}
+          const isNotEnabled = errJson?.error?.details?.[0]?.errors?.[0]?.errorCode?.authorizationError === 'CUSTOMER_NOT_ENABLED';
+          if (isNotEnabled) {
+            supabase.from('google_ads_accounts').update({ is_active: false })
+              .eq('user_id', user.id).eq('customer_id', account.customer_id).then(() => {});
+            continue;
+          }
           console.log(`[google-ads/campaigns] API error ${response.status} for ${cleanCustomerId}: ${errText.substring(0, 300)}`);
           continue;
         }
 
         const data = await response.json();
-        console.log(`[google-ads/campaigns] ${cleanCustomerId} returned ${data.results?.length ?? 0} campaigns`);
         for (const result of (data.results ?? [])) {
           const id = result.campaign?.id?.toString();
           const name = result.campaign?.name;

@@ -5,41 +5,20 @@ import { Nango } from '@nangohq/node';
 import { toNangoPlatform } from '@/lib/platform-mapping';
 
 export async function POST(request: NextRequest) {
-  console.log('');
-  console.log('╔══════════════════════════════════════════════════════════════╗');
-  console.log('║  POST /api/ads/google-analytics/fetch-data                   ║');
-  console.log('╚══════════════════════════════════════════════════════════════╝');
-  console.log('Timestamp:', new Date().toISOString());
-  
   let body: any = null;
-  
+
   try {
-    // Parse request body with error handling
     try {
       body = await request.json();
     } catch (parseError: any) {
-      console.error('GA4 API Error: Failed to parse request body:', parseError);
       return NextResponse.json({
         success: false,
         error: 'Invalid request body',
         errorDetails: parseError.message,
-        stack: process.env.NODE_ENV === 'development' ? parseError.stack : undefined,
       }, { status: 400 });
     }
 
     const { startDate, endDate, metrics, propertyId, clientId, eventName, eventNames } = body;
-
-    // Log all incoming parameters
-    console.log('GA4 API route called with params:', {
-      propertyId: propertyId || '(not specified - will use all active properties)',
-      clientId: clientId || '(not specified)',
-      startDate,
-      endDate,
-      metrics: metrics || '(using defaults)',
-      eventName: eventName || '(not specified - all events)',
-      eventNames: eventNames || '(not specified)',
-      timestamp: new Date().toISOString(),
-    });
 
     // Validate required parameters
     if (!startDate || !endDate) {
@@ -86,10 +65,10 @@ export async function POST(request: NextRequest) {
     // Get authenticated user
     const supabase = await createClient();
     
-    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    const { data: { user }, error: sessionError } = await supabase.auth.getUser();
 
     if (sessionError) {
-      console.error('GA4 API Error: Failed to retrieve session:', sessionError);
+      console.error('GA4 API Error: Failed to retrieve user:', sessionError);
       return NextResponse.json({
         success: false,
         error: 'Unable to verify session',
@@ -97,18 +76,14 @@ export async function POST(request: NextRequest) {
       }, { status: 500 });
     }
 
-    const user = session?.user;
-
     if (!user || !user.id) {
-      console.error('GA4 API Error: Unauthorized - no user in session');
+      console.error('GA4 API Error: Unauthorized - no authenticated user');
       return NextResponse.json({
         success: false,
         error: 'Unauthorized',
-        errorDetails: 'No authenticated user found in session',
+        errorDetails: 'No authenticated user found',
       }, { status: 401 });
     }
-
-    console.log('Authenticated user:', user.id);
 
     // Look up user's connection for Google Analytics
     let query = supabase
@@ -178,10 +153,6 @@ export async function POST(request: NextRequest) {
     }
 
     console.log('=== GA4 DATA FETCH ===');
-    console.log('Date Range:', { startDate, endDate });
-    console.log('Metrics:', requestedMetrics);
-    console.log('User ID:', user.id);
-    console.log('Connection ID:', connection.connection_id);
 
     // Get Google Analytics properties from database
     console.log('Querying GA4 properties from database...');

@@ -18,19 +18,17 @@ export async function GET(request: Request) {
 
   // Get authenticated user
   const {
-    data: { session },
+    data: { user },
     error: sessionError,
-  } = await supabase.auth.getSession();
+  } = await supabase.auth.getUser();
 
   if (sessionError) {
-    console.error("Failed to retrieve session:", sessionError);
+    console.error("Failed to retrieve user:", sessionError);
     return NextResponse.json(
       { error: "Unable to verify session" },
       { status: 500 },
     );
   }
-
-  const user = session?.user;
 
   if (!user || !user.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
