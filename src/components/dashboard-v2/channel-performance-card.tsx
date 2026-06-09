@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { differenceInDays, parseISO } from 'date-fns';
 import { AlertTriangle, ChevronDown, ExternalLink, FileText } from 'lucide-react';
 import InlineActionPoints from './inline-action-points';
 import type { ChannelBenchmark, MetricPreset, ClientChannelPreset } from '@/types/database';
@@ -911,6 +912,50 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
     });
   }, [selectedCampaignIds, channel.rawSpendPoints, channel.chartData, matchesSelection, allSelectedRepresented]);
 
+  // ── Overspend forecast ───────────────────────────────────────────────────────
+  // Projects end-of-period spend from current daily burn rate.
+  const overspendForecast = useMemo(() => {
+    if (isNoneSelected) return null;
+    const spend = filteredMetrics.spend;
+    const planned = channel.plannedSpend;
+    if (!spend || spend <= 0 || !planned || planned <= 0) return null;
+
+    const now = new Date();
+    let periodStartStr: string;
+    let periodEndStr: string;
+
+    if (dateRange) {
+      periodStartStr = dateRange.startDate;
+      periodEndStr = dateRange.endDate;
+    } else if (selectedMonth) {
+      const y = selectedMonth.getFullYear();
+      const m = selectedMonth.getMonth();
+      const lastDay = new Date(y, m + 1, 0).getDate();
+      periodStartStr = `${y}-${String(m + 1).padStart(2, '0')}-01`;
+      periodEndStr = `${y}-${String(m + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+    } else {
+      return null;
+    }
+
+    const periodStart = parseISO(periodStartStr);
+    const periodEnd = parseISO(periodEndStr);
+
+    if (now > periodEnd) return null;
+
+    const totalDays = Math.max(1, differenceInDays(periodEnd, periodStart) + 1);
+    const daysElapsed = Math.max(1, Math.min(totalDays, differenceInDays(now, periodStart) + 1));
+    const daysRemaining = Math.max(0, differenceInDays(periodEnd, now));
+
+    if (daysRemaining === 0) return null;
+
+    const dailyBurnRate = spend / daysElapsed;
+    const projectedEndSpend = spend + dailyBurnRate * daysRemaining;
+    const overspendAmount = projectedEndSpend - planned;
+    const overspendPct = (overspendAmount / planned) * 100;
+
+    return { projectedEndSpend, overspendAmount, overspendPct, dailyBurnRate, daysRemaining };
+  }, [isNoneSelected, filteredMetrics.spend, channel.plannedSpend, dateRange, selectedMonth]);
+
   // Benchmark / preset derived values
   const benchmarkChannelName = inferBenchmarkChannelName(channel.platform, channel.name);
   const channelBenchmarks = (benchmarks ?? []).filter(b => b.channel_name === benchmarkChannelName);
@@ -1047,6 +1092,55 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
       visibleChartData = fullChartData;
     }
   }
+
+  // Extend visibleChartData with projected spend points for future dates.
+  // The projected line continues from the last actual point to period-end.
+  const chartDataWithProjection: Array<typeof visibleChartData[0] & { projectedSpend?: number | null }> = (() => {
+    if (!overspendForecast || !visibleChartData.length) {
+      return visibleChartData.map(p => ({ ...p, projectedSpend: null as number | null }));
+    }
+
+    let lastActualSpend: number | null = null;
+    let lastActualDate: string | null = null;
+
+    for (let i = visibleChartData.length - 1; i >= 0; i--) {
+      const p = visibleChartData[i];
+      if (p.actualSpend !== null && typeof p.actualSpend === 'number') {
+        lastActualSpend = p.actualSpend;
+        lastActualDate = p.date;
+        break;
+      }
+    }
+
+    if (lastActualSpend === null || !lastActualDate) {
+      return visibleChartData.map(p => ({ ...p, projectedSpend: null as number | null }));
+    }
+
+    const lastActualMs = parseISO(lastActualDate).getTime();
+    const msPerDay = 86400000;
+
+    // Mark the last actual point as the projection anchor; include future points from fullChartData
+    const withProjection = visibleChartData.map((p, i) => ({
+      ...p,
+      projectedSpend: i === visibleChartData.length - 1 && typeof p.actualSpend === 'number'
+        ? p.actualSpend
+        : null as number | null,
+    }));
+
+    // Append future (post-actual) points from the full period data
+    const futurePoints = fullChartData
+      .filter(p => parseISO(p.date).getTime() > lastActualMs)
+      .map(p => {
+        const daysAfter = Math.round((parseISO(p.date).getTime() - lastActualMs) / msPerDay);
+        return {
+          ...p,
+          actualSpend: null,
+          projectedSpend: lastActualSpend! + overspendForecast.dailyBurnRate * daysAfter,
+        };
+      });
+
+    return [...withProjection, ...futurePoints];
+  })();
 
   // Build month labels for the visible range.
   const monthLabels: { key: string; month: string; position: number; widthPct: number; firstDate: string }[] = [];
@@ -1234,6 +1328,32 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                   );
                 })()}
               </div>
+
+              {/* ── Overspend forecast badge ── */}
+              {overspendForecast && !isNoneSelected && (
+                <div className="row-start-3 col-start-1 col-end-4 pt-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-gray-400 flex items-center gap-1">
+                      <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
+                        <polyline points="1,8 3.5,5 5.5,6.5 9,2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                      Forecast · {overspendForecast.daysRemaining}d left
+                    </span>
+                    <div className="flex items-center gap-1.5 text-xs">
+                      <span className="text-gray-600 font-medium">{fmt(overspendForecast.projectedEndSpend, 'currency', 0)} projected</span>
+                      <span className={`font-semibold ${
+                        overspendForecast.overspendPct > 10 ? 'text-red-600'
+                        : overspendForecast.overspendPct > 0 ? 'text-amber-600'
+                        : overspendForecast.overspendPct >= -10 ? 'text-emerald-600'
+                        : 'text-amber-600'
+                      }`}>
+                        {overspendForecast.overspendAmount >= 0 ? '+' : ''}{fmt(Math.abs(overspendForecast.overspendAmount), 'currency', 0)}{' '}
+                        ({overspendForecast.overspendPct >= 0 ? '+' : ''}{Math.round(overspendForecast.overspendPct)}%)
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -1400,7 +1520,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                       <div className="h-64">
                         <ResponsiveContainer width="100%" height="100%">
                           <ComposedChart
-                            data={visibleChartData}
+                            data={chartDataWithProjection}
                             margin={{ top: 10, right: 16, left: 0, bottom: 8 }}
                           >
                             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
@@ -1410,8 +1530,8 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                               tickMargin={6}
                               tickFormatter={(value) => new Date(value).getDate().toString()}
                               interval={
-                                visibleChartData.length > 60 ? 6
-                                : visibleChartData.length > 35 ? 4
+                                chartDataWithProjection.length > 60 ? 6
+                                : chartDataWithProjection.length > 35 ? 4
                                 : 0
                               }
                             />
@@ -1428,7 +1548,10 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                               </linearGradient>
                             </defs>
                             <Tooltip
-                              formatter={(value: any) => [`$${Number(value).toFixed(2)}`, '']}
+                              formatter={(value: any, name: string) => {
+                                if (name === 'projectedSpend') return [`$${Number(value).toFixed(2)}`, 'Projected'];
+                                return [`$${Number(value).toFixed(2)}`, ''];
+                              }}
                               labelFormatter={(label) => new Date(label).toLocaleDateString()}
                             />
                             {monthLabels.length > 1 && monthLabels.slice(1).map(ml => (
@@ -1456,8 +1579,20 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                               fill="url(#actualSpendGradient)"
                               fillOpacity={1}
                               name="Actual Spend"
-                              dot={{ r: visibleChartData.length > 35 ? 0 : 3 }}
+                              dot={{ r: chartDataWithProjection.length > 35 ? 0 : 3 }}
                             />
+                            {overspendForecast && (
+                              <Line
+                                type="monotone"
+                                dataKey="projectedSpend"
+                                stroke={overspendForecast.overspendPct > 10 ? '#dc2626' : overspendForecast.overspendPct > 0 ? '#f97316' : '#10b981'}
+                                strokeWidth={2}
+                                strokeDasharray="5 3"
+                                dot={false}
+                                name="projectedSpend"
+                                connectNulls={false}
+                              />
+                            )}
                           </ComposedChart>
                         </ResponsiveContainer>
                       </div>
@@ -1490,6 +1625,17 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                               <span className="w-3 h-3 rounded-sm bg-gray-200 border border-gray-400 inline-block" />
                               Planned Spend
                             </span>
+                            {overspendForecast && (
+                              <span className="flex items-center gap-1.5">
+                                <svg width="12" height="4" viewBox="0 0 12 4" aria-hidden="true">
+                                  <line x1="0" y1="2" x2="12" y2="2"
+                                    stroke={overspendForecast.overspendPct > 10 ? '#dc2626' : overspendForecast.overspendPct > 0 ? '#f97316' : '#10b981'}
+                                    strokeWidth="2" strokeDasharray="4 2"
+                                  />
+                                </svg>
+                                Projected
+                              </span>
+                            )}
                           </div>
                         </div>
                       )}

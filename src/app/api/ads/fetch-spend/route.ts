@@ -150,12 +150,29 @@ export async function POST(request: NextRequest) {
       try {
         console.log('=== GOOGLE ADS DATA FETCH ===');
         
-        // Step 1: Get Google Ads accounts from database
-        const { data: googleAdsAccountsData, error: accountsError } = await supabase
-          .from('google_ads_accounts')
-          .select('customer_id, account_name, manager_customer_id, is_active')
-          .eq('user_id', user.id)
-          .eq('is_active', true);
+        // Step 1: Get Google Ads accounts — prefer client-scoped, fall back to connection-scoped.
+        let { data: googleAdsAccountsData, error: accountsError } = clientId
+          ? await supabase
+              .from('google_ads_accounts')
+              .select('customer_id, account_name, manager_customer_id, is_active')
+              .eq('user_id', user.id)
+              .eq('client_id', clientId)
+              .eq('is_active', true)
+          : await supabase
+              .from('google_ads_accounts')
+              .select('customer_id, account_name, manager_customer_id, is_active')
+              .eq('user_id', user.id)
+              .eq('connection_id', connection.connection_id)
+              .eq('is_active', true);
+
+        if (clientId && (!googleAdsAccountsData || googleAdsAccountsData.length === 0)) {
+          ({ data: googleAdsAccountsData, error: accountsError } = await supabase
+            .from('google_ads_accounts')
+            .select('customer_id, account_name, manager_customer_id, is_active')
+            .eq('user_id', user.id)
+            .eq('connection_id', connection.connection_id)
+            .eq('is_active', true));
+        }
 
         const googleAdsAccounts = (googleAdsAccountsData || []) as any[];
 
@@ -293,21 +310,28 @@ export async function POST(request: NextRequest) {
               let errorJson = null;
               try {
                 errorText = await response.text();
-                // Try to parse as JSON for better error messages
                 try {
                   errorJson = JSON.parse(errorText);
                 } catch {
-                  // Not JSON, that's okay
+                  // Not JSON
                 }
               } catch (e) {
                 errorText = 'Could not read error response';
               }
-              
+
+              // Deactivate accounts that are not enabled — no point retrying them
+              const isNotEnabled = errorJson?.error?.details?.[0]?.errors?.[0]?.errorCode?.authorizationError === 'CUSTOMER_NOT_ENABLED';
+              if (isNotEnabled) {
+                console.log(`⚠ Customer ${customerId} not enabled — marking inactive`);
+                supabase.from('google_ads_accounts').update({ is_active: false })
+                  .eq('user_id', user.id).eq('customer_id', account.customer_id).then(() => {});
+                continue;
+              }
+
               console.error(`❌ Google Ads API error for customer ${customerId}:`, {
                 status: response.status,
                 statusText: response.statusText,
-                errorText: errorText.substring(0, 1000),
-                errorJson: errorJson,
+                errorText: errorText.substring(0, 500),
                 url: `https://googleads.googleapis.com/v21/customers/${cleanCustomerId}/googleAds:search`
               });
               

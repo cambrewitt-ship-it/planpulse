@@ -1,7 +1,7 @@
 // src/components/agency/ClientCardCompact.tsx
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import type { ClientCardData } from '@/app/api/agency/clients/route';
 import { PerformanceWidget, type PerfData } from './PerformanceWidget';
@@ -131,11 +131,25 @@ function apColor(count: number): string {
 
 function SparkLine({ clientId, perf }: { clientId: string; perf: PerfData | null }) {
   const [series, setSeries] = useState<Array<{ date: string; value: number }>>([]);
-  const [loading, setLoading] = useState(false);
   const [fetched, setFetched] = useState(false);
+
+  // Load cached series before the first browser paint so the graph never flashes blank.
+  // useLayoutEffect fires synchronously after React commits but before the browser paints,
+  // so the state update + re-render completes before any pixels are drawn.
+  useLayoutEffect(() => {
+    if (!perf?.metric) return;
+    try {
+      const raw = sessionStorage.getItem(`series_cache_${clientId}_${perf.metric}`);
+      if (raw) {
+        setSeries(JSON.parse(raw));
+        setFetched(true);
+      }
+    } catch {}
+  }, [clientId, perf?.metric]);
 
   useEffect(() => {
     if (!perf?.metric) return;
+    let cancelled = false;
     let config: { platform?: string; campaignIds?: string[]; metaActionType?: string } = {};
     try {
       const raw = localStorage.getItem(`perf_widget_${clientId}`);
@@ -148,23 +162,31 @@ function SparkLine({ clientId, perf }: { clientId: string; perf: PerfData | null
     if (config.campaignIds?.length) params.set('campaignIds', config.campaignIds.join(','));
     if (config.metaActionType) params.set('metaActionType', config.metaActionType);
 
-    setFetched(false);
-    setLoading(true);
     fetch(`/api/clients/${clientId}/perf-series?${params}`)
       .then(r => r.json())
-      .then(data => { if (Array.isArray(data.series)) setSeries(data.series); })
+      .then(data => {
+        if (cancelled) return;
+        if (Array.isArray(data.series)) {
+          setSeries(data.series);
+          try { sessionStorage.setItem(`series_cache_${clientId}_${perf.metric}`, JSON.stringify(data.series)); } catch {}
+        }
+      })
       .catch(() => {})
-      .finally(() => { setLoading(false); setFetched(true); });
+      .finally(() => { if (!cancelled) setFetched(true); });
+
+    return () => { cancelled = true; };
   }, [clientId, perf?.metric]);
 
-  // Show spinner while the series fetch is in flight
-  if (loading || (perf?.hasData && !fetched)) return <GraphSpinner />;
+  const cleanSeries = series.filter(s => s.value != null && isFinite(s.value) && !isNaN(s.value));
 
-  if (!perf?.hasData) return null;
+  // Only show spinner when there is truly no data to display yet
+  if (cleanSeries.length === 0 && !fetched) {
+    return perf?.hasData ? <GraphSpinner /> : null;
+  }
+
+  if (!perf?.hasData || cleanSeries.length === 0) return null;
 
   const metric = perf.metric;
-  const cleanSeries = series.filter(s => s.value != null && isFinite(s.value) && !isNaN(s.value));
-  if (cleanSeries.length < 1) return null;
 
   const target = (perf.targetValue != null && isFinite(perf.targetValue)) ? perf.targetValue : null;
   const mk = metric.toLowerCase();
@@ -354,7 +376,25 @@ export function ClientCardCompact({
 
   const [perf, setPerf] = useState<PerfData | null>(null);
   const [perfReady, setPerfReady] = useState(false);
-  const handleNeedle = useCallback((data: PerfData | null) => setPerf(data), []);
+
+  // Restore cached perf state before the first browser paint so the graph and
+  // speedometer appear immediately instead of showing a blank/spinner frame.
+  useLayoutEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(`perf_cache_${client.id}`);
+      if (raw) {
+        setPerf(JSON.parse(raw));
+        setPerfReady(true);
+      }
+    } catch {}
+  }, [client.id]);
+
+  const handleNeedle = useCallback((data: PerfData | null) => {
+    setPerf(data);
+    try {
+      if (data) sessionStorage.setItem(`perf_cache_${client.id}`, JSON.stringify(data));
+    } catch {}
+  }, [client.id]);
 
   const outstanding = Math.max(0, client.totalActionPoints - client.completedActionPoints);
   const hasSpend = client.plannedBudget > 0;

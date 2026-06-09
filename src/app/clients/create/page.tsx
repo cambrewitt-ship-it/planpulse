@@ -771,6 +771,7 @@ export default function CreateClientPage() {
             customerId: a.customerId,
             accountName: a.descriptiveName ?? undefined,
             managerCustomerId: a.managerCustomerId ?? undefined,
+            clientId: clientId ?? undefined,
           }),
         })
       ));
@@ -803,7 +804,7 @@ export default function CreateClientPage() {
       const res = await fetch('/api/ads/google-ads/save-account', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ customerId: gadsCustomerId, accountName: gadsAccountName.trim() || undefined }),
+        body: JSON.stringify({ customerId: gadsCustomerId, accountName: gadsAccountName.trim() || undefined, clientId: clientId ?? undefined }),
       });
       const data = await res.json();
       if (res.ok) {

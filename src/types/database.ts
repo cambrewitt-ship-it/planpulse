@@ -538,6 +538,7 @@ export interface Database {
             id: string;
             user_id: string;
             connection_id: string;
+            client_id: string | null;
             customer_id: string;
             account_name: string | null;
             manager_customer_id: string | null;
@@ -549,6 +550,7 @@ export interface Database {
             id?: string;
             user_id: string;
             connection_id: string;
+            client_id?: string | null;
             customer_id: string;
             account_name?: string | null;
             manager_customer_id?: string | null;
@@ -560,6 +562,7 @@ export interface Database {
             id?: string;
             user_id?: string;
             connection_id?: string;
+            client_id?: string | null;
             customer_id?: string;
             account_name?: string | null;
             manager_customer_id?: string | null;

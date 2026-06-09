@@ -53,9 +53,18 @@ function generateWeeksForYear(year: number, count: number): Week[] {
   return Array.from({ length: count }, (_, i) => {
     const d = new Date(firstMonday);
     d.setDate(firstMonday.getDate() + i * 7);
-    const thu = new Date(d.getTime() + 3 * 86400000); // Thursday determines the month
     const iso = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-    return { weekStart: iso, label: `${d.getDate()}-${short[d.getMonth()]}`, month: full[thu.getMonth()], year: thu.getFullYear() };
+    // Assign to the month that contains ≥4 of the 7 days (Mon–Sun)
+    const lastOfMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+    const daysInStartMonth = Math.min(7, lastOfMonth - d.getDate() + 1);
+    let wMonth: string, wYear: number;
+    if (daysInStartMonth >= 4) {
+      wMonth = full[d.getMonth()]; wYear = d.getFullYear();
+    } else {
+      const nextM = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+      wMonth = full[nextM.getMonth()]; wYear = nextM.getFullYear();
+    }
+    return { weekStart: iso, label: `${d.getDate()}-${short[d.getMonth()]}`, month: wMonth, year: wYear };
   });
 }
 
@@ -711,9 +720,8 @@ export function PlanGrid({ plan, onPlanChange, onUpload, outerStyle }: Props) {
   const [rows, setRows] = useState<PlanRow[]>(plan.rows);
   const [libraryChannels, setLibraryChannels] = useState<LibraryChannel[]>([]);
   const [weeks, setWeeks] = useState<Week[]>(() => {
-    if (plan.weeks.length >= 52) return plan.weeks;
     const year = plan.weeks[0]?.year ?? new Date().getFullYear();
-    return generateWeeksForYear(year, 52);
+    return generateWeeksForYear(year, Math.max(52, plan.weeks.length));
   });
   const [fees, setFees] = useState<FeeRow[]>(plan.fees ?? []);
   const [customColumns, setCustomColumns] = useState<CustomColumn[]>(plan.customColumns ?? []);
@@ -729,6 +737,8 @@ export function PlanGrid({ plan, onPlanChange, onUpload, outerStyle }: Props) {
   const flightAnchorRef = useRef<HTMLElement | null>(null);
   const resizeMoved = useRef(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const rowsRef = useRef(rows);
+  useEffect(() => { rowsRef.current = rows; }, [rows]);
 
   useEffect(() => {
     fetch('/api/media-channel-library')
@@ -924,8 +934,24 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
       if (!scrollRef.current) return;
       const rect = scrollRef.current.getBoundingClientRect();
       const weekX = e.clientX - rect.left - totalLeftColsWidth + scrollRef.current.scrollLeft;
-      const idx = Math.max(0, Math.min(weeks.length - 1, Math.floor(weekX / weekWidth)));
-      setDragState(prev => prev ? { ...prev, endIdx: idx } : null);
+      const rawIdx = Math.max(0, Math.min(weeks.length - 1, Math.floor(weekX / weekWidth)));
+      setDragState(prev => {
+        if (!prev) return null;
+        let idx = rawIdx;
+        const row = rowsRef.current.find(r => r.id === prev.rowId);
+        if (row) {
+          for (const f of row.flights) {
+            const startI = weeks.findIndex(w => w.weekStart === f.startWeek);
+            const endI = weeks.findIndex(w => w.weekStart === f.endWeek);
+            if (startI === -1 || endI === -1) continue;
+            // Dragging right: stop before this flight's start
+            if (idx >= startI && prev.startIdx < startI) idx = Math.min(idx, startI - 1);
+            // Dragging left: stop after this flight's end
+            if (idx <= endI && prev.startIdx > endI) idx = Math.max(idx, endI + 1);
+          }
+        }
+        return { ...prev, endIdx: idx };
+      });
     };
     window.addEventListener('mousemove', handleMove);
     return () => window.removeEventListener('mousemove', handleMove);

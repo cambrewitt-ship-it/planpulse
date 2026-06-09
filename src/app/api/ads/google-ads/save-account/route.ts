@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
 
     // Parse request body
     const body = await request.json();
-    const { customerId, accountName, currency, managerCustomerId } = body;
+    const { customerId, accountName, currency, managerCustomerId, clientId } = body;
 
     if (!customerId) {
       return NextResponse.json(
@@ -38,8 +38,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get user's Google Ads connection (get most recent active connection)
-    const { data: connections, error: connectionError } = await supabase
+    // Prefer the client-specific connection when clientId is provided
+    let connectionQuery = supabase
       .from('ad_platform_connections')
       .select('connection_id')
       .eq('user_id', user.id)
@@ -47,6 +47,19 @@ export async function POST(request: NextRequest) {
       .eq('connection_status', 'active')
       .order('created_at', { ascending: false })
       .limit(1);
+    if (clientId) connectionQuery = connectionQuery.eq('client_id', clientId);
+    let { data: connections, error: connectionError } = await connectionQuery;
+    // Fall back to any active connection when no client-specific one exists
+    if ((!connections || connections.length === 0) && clientId) {
+      ({ data: connections, error: connectionError } = await supabase
+        .from('ad_platform_connections')
+        .select('connection_id')
+        .eq('user_id', user.id)
+        .eq('platform', 'google-ads')
+        .eq('connection_status', 'active')
+        .order('created_at', { ascending: false })
+        .limit(1));
+    }
 
     if (connectionError || !connections || connections.length === 0) {
       console.error('Connection lookup error:', connectionError);
@@ -65,6 +78,7 @@ export async function POST(request: NextRequest) {
         {
           user_id: user.id,
           connection_id: connection.connection_id,
+          client_id: clientId || null,
           customer_id: cleanedCustomerId,
           account_name: accountName || null,
           manager_customer_id: managerCustomerId ? managerCustomerId.replace(/-/g, '') : null,

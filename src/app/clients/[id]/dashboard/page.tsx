@@ -764,7 +764,6 @@ export default function DashboardV2() {
       Promise.all([
         loadData(),
         loadMediaPlanBuilderData(),
-        loadAnalyticsData(selectedMetric, selectedMetric === 'eventCount' ? selectedEventName : null),
         loadFunnels(),
         loadNonDigitalActuals(),
       ]);
@@ -1946,7 +1945,14 @@ export default function DashboardV2() {
       }
 
       // Non-SET UP, or SET UP with no flight data: existing enrichment logic
-      if (ap.due_date) return [ap];
+      // For SET UP APs with a hardcoded past due date, suppress — the channel already launched.
+      if (ap.due_date) {
+        if (ap.category === 'SET UP') {
+          const dueDateMs = new Date(ap.due_date).setHours(0, 0, 0, 0);
+          if (dueDateMs < todayMs) return [];
+        }
+        return [ap];
+      }
       if (ap.category === 'SET UP' && ap.days_before_live_due != null) {
         const matchedChannel = ganttChannels.find(
           ch => ch.label.toLowerCase().trim() === (ap.channel_type ?? '').toLowerCase().trim() ||
@@ -1957,6 +1963,9 @@ export default function DashboardV2() {
           ? new Date(matchedChannel.start_date)
           : (campaignDates?.start ?? null);
         if (refDate) {
+          // Suppress if the channel has already launched — the setup window has passed.
+          const refMs = new Date(refDate).setHours(0, 0, 0, 0);
+          if (refMs < todayMs) return [];
           const d = new Date(refDate);
           d.setDate(d.getDate() - (ap.days_before_live_due as number));
           return [{ ...ap, due_date: d.toISOString().slice(0, 10) }];

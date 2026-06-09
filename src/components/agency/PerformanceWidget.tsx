@@ -49,12 +49,6 @@ const FONT = "'DM Sans', system-ui, sans-serif";
 
 const METRIC_OPTIONS = ['CPA', 'CPL', 'CPC', 'CPM', 'CTR', 'ROAS', 'Conversions', 'Clicks', 'Impressions', 'Reach'];
 
-const PLATFORM_OPTIONS = [
-  { id: '' as const, label: 'All' },
-  { id: 'meta-ads' as const, label: 'Meta' },
-  { id: 'google-ads' as const, label: 'Google' },
-];
-
 // Common Google Ads conversion action names
 const GOOGLE_ADS_DEFAULT_CONVERSIONS = [
   'Purchase',
@@ -220,13 +214,14 @@ interface ModalProps {
   campaigns: Campaign[];
   ga4Events: string[];
   metaEvents: Array<{ name: string; count: number }>;
+  googleAdsConversionActions: Array<{ id: string; name: string; count: number }>;
   hasData: boolean;
   onConnect?: () => void;
   onSave: (config: WidgetConfig) => void;
   onClose: () => void;
 }
 
-function ConfigModal({ clientId, initialConfig, goals, campaigns, ga4Events, metaEvents, hasData, onConnect, onSave, onClose }: ModalProps) {
+function ConfigModal({ clientId, initialConfig, goals, campaigns, ga4Events, metaEvents, googleAdsConversionActions, hasData, onConnect, onSave, onClose }: ModalProps) {
   const primaryGoal = goals.find(g => g.is_primary) ?? goals[0] ?? null;
   const [editMetric, setEditMetric] = useState(primaryGoal?.metric ?? 'CPA');
   const [editTarget, setEditTarget] = useState(primaryGoal?.target_value?.toString() ?? '');
@@ -244,8 +239,12 @@ function ConfigModal({ clientId, initialConfig, goals, campaigns, ga4Events, met
     ...GA4_DEFAULT_EVENTS.filter(d => !ga4Events.includes(d)),
   ];
 
-  const filteredCampaigns = editConfig.platform
-    ? campaigns.filter(c => c.platform === editConfig.platform)
+  const effectivePlatform =
+    editConfig.metricSource === 'meta' || editConfig.metricSource === 'ad' ? 'meta-ads'
+    : editConfig.metricSource === 'google-ads' ? 'google-ads'
+    : '';
+  const filteredCampaigns = effectivePlatform
+    ? campaigns.filter(c => c.platform === effectivePlatform)
     : campaigns;
 
   const showMetaEvents = editConfig.metricSource === 'meta' || editConfig.metricSource === 'ad';
@@ -353,11 +352,11 @@ function ConfigModal({ clientId, initialConfig, goals, campaigns, ga4Events, met
           <span style={sectionLabel}>Conversion Source</span>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' as const }}>
             {([
-              { id: 'meta' as const, label: 'Meta' },
-              { id: 'google-ads' as const, label: 'Google Ads' },
-              { id: 'ga4' as const, label: 'GA4' },
+              { id: 'meta' as const, label: 'Meta', platform: 'meta-ads' as const },
+              { id: 'google-ads' as const, label: 'Google Ads', platform: 'google-ads' as const },
+              { id: 'ga4' as const, label: 'GA4', platform: '' as const },
             ]).map(src => (
-              <button key={src.id} onClick={() => setEditConfig(c => ({ ...c, metricSource: src.id }))} style={pill(editConfig.metricSource === src.id)}>
+              <button key={src.id} onClick={() => setEditConfig(c => ({ ...c, metricSource: src.id, platform: src.platform, campaignIds: [] }))} style={pill(editConfig.metricSource === src.id)}>
                 {src.label}
               </button>
             ))}
@@ -388,20 +387,6 @@ function ConfigModal({ clientId, initialConfig, goals, campaigns, ga4Events, met
             </p>
           </div>
         )}
-
-        {/* ── Platform ── */}
-        <div style={{ marginBottom: 20 }}>
-          <span style={sectionLabel}>Platform</span>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {PLATFORM_OPTIONS.map(p => (
-              <button
-                key={p.id}
-                onClick={() => setEditConfig(c => ({ ...c, platform: p.id, campaignIds: [] }))}
-                style={pill(editConfig.platform === p.id)}
-              >{p.label}</button>
-            ))}
-          </div>
-        </div>
 
         {/* ── Conversion Event (Meta) ── */}
         {showMetaEvents && (
@@ -435,22 +420,19 @@ function ConfigModal({ clientId, initialConfig, goals, campaigns, ga4Events, met
               style={selectStyle}
             >
               <option value="">— All Conversions (default) —</option>
-              {GOOGLE_ADS_DEFAULT_CONVERSIONS.map(name => (
-                <option key={name} value={name}>{name}</option>
+              {(googleAdsConversionActions.length > 0
+                ? googleAdsConversionActions
+                : GOOGLE_ADS_DEFAULT_CONVERSIONS.map(name => ({ id: name, name, count: 0 }))
+              ).map(action => (
+                <option key={action.id} value={action.name}>
+                  {action.name}{action.count > 0 ? ` (${action.count.toLocaleString()})` : ''}
+                </option>
               ))}
-              <option value="__custom__">Custom…</option>
             </select>
-            {editConfig.googleAdsConversionAction === '__custom__' && (
-              <input
-                type="text"
-                placeholder="Conversion action name"
-                value={''}
-                onChange={e => setEditConfig(c => ({ ...c, googleAdsConversionAction: e.target.value }))}
-                style={{ ...selectStyle, marginTop: 6 }}
-              />
-            )}
             <p style={{ fontSize: 10, color: '#B5B0A5', marginTop: 4 }}>
-              Used as the conversion count for CPA / CPL. Matches the name in your Google Ads account.
+              {googleAdsConversionActions.length > 0
+                ? 'Conversion actions from your Google Ads account.'
+                : 'Used as the conversion count for CPA / CPL. Matches the name in your Google Ads account.'}
             </p>
           </div>
         )}
@@ -553,6 +535,7 @@ export function PerformanceWidget({
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [ga4Events, setGa4Events] = useState<string[]>([]);
   const [metaEvents, setMetaEvents] = useState<Array<{ name: string; count: number }>>([]);
+  const [googleAdsConversionActions, setGoogleAdsConversionActions] = useState<Array<{ id: string; name: string; count: number }>>([]);
   const [perfData, setPerfData] = useState<PerfData | null>(null);
   const [internalShowModal, setInternalShowModal] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -570,6 +553,16 @@ export function PerformanceWidget({
   onFetchedRef.current = onFetched;
 
   useEffect(() => { setMounted(true); }, []);
+
+  // Fetch real Google Ads conversion actions for the modal picker
+  useEffect(() => {
+    fetch(`/api/ads/google-ads/conversion-actions?clientId=${clientId}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.conversionActions?.length > 0) setGoogleAdsConversionActions(data.conversionActions);
+      })
+      .catch(() => {});
+  }, [clientId]);
 
   // Fetch data whenever config changes
   useEffect(() => {
@@ -788,6 +781,7 @@ export function PerformanceWidget({
           campaigns={campaigns}
           ga4Events={ga4Events}
           metaEvents={metaEvents}
+          googleAdsConversionActions={googleAdsConversionActions}
           hasData={perfData?.hasData ?? false}
           onConnect={onConnect}
           onSave={handleSave}
