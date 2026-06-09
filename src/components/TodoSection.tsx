@@ -2,7 +2,7 @@
 
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { MediaPlanChannel } from '@/components/media-plan-builder/media-plan-grid';
+import { MediaPlanChannel } from '@/components/legacy-plan-builder/media-plan-grid';
 import { getPlatformForChannel } from '@/lib/utils/channel-pacing';
 import { ListTodo, CheckCircle2, Circle, ChevronDown, ChevronUp, Trash2, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';

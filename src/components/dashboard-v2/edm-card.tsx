@@ -5,7 +5,7 @@ import { Mail, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { MediaPlanChannel } from '@/components/media-plan-builder/media-plan-grid';
+import { MediaPlanChannel } from '@/components/legacy-plan-builder/media-plan-grid';
 import type { EdmActual } from '@/types/database';
 import { format, subDays } from 'date-fns';
 import InlineActionPoints from './inline-action-points';

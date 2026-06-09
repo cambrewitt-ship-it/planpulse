@@ -1255,7 +1255,7 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
       {/* Grid */}
       <div ref={scrollRef} className="flex-1 overflow-auto bg-white">
         <table
-          className="border-collapse"
+          className="border-separate border-spacing-0"
           style={{ tableLayout: "fixed", minWidth: `${totalLeftColsWidth + weeks.length * weekWidth}px` }}
         >
           <colgroup>
@@ -1268,7 +1268,7 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
 
           <thead>
             <tr style={{ height: HEADER_H }}>
-              <th colSpan={2 + customColumns.length} className={stickyHeader}
+              <th colSpan={3 + customColumns.length} className={stickyHeader}
                 style={{ position: "sticky", left: 0, top: 0, zIndex: 30, textAlign: "left" }} />
               {monthGroups.map(mg => (
                 <th key={`${mg.month}-${mg.year}`} colSpan={mg.count}

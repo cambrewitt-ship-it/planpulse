@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { Monitor, ChevronDown, ChevronUp, StickyNote } from 'lucide-react';
 import ManualSpendSlider from './manual-spend-slider';
-import { MediaPlanChannel } from '@/components/media-plan-builder/media-plan-grid';
+import { MediaPlanChannel } from '@/components/legacy-plan-builder/media-plan-grid';
 import { format } from 'date-fns';
 import InlineActionPoints from './inline-action-points';
 

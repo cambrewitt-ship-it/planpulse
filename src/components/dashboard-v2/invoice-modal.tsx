@@ -16,7 +16,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { fetchSpendData, type SpendDataPoint } from '@/lib/api/analytics-data-integration';
 import { getChannelDisplayNameFromPlatform } from '@/lib/utils/channel-pacing';
-import type { MediaPlanChannel } from '@/components/media-plan-builder/media-plan-grid';
+import type { MediaPlanChannel } from '@/components/legacy-plan-builder/media-plan-grid';
 
 interface InvoiceModalProps {
   isOpen: boolean;

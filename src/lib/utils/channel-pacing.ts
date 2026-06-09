@@ -21,7 +21,7 @@ import {
   addWeeks,
   differenceInWeeks,
 } from 'date-fns';
-import type { MediaPlanChannel } from '@/components/media-plan-builder/media-plan-grid';
+import type { MediaPlanChannel } from '@/components/legacy-plan-builder/media-plan-grid';
 
 // ---------------------------------------------------------------------------
 // Channel-name helpers

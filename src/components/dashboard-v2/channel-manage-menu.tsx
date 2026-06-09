@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { MoreHorizontal, Trash2 } from 'lucide-react';
-import type { MediaPlanChannel } from '@/components/media-plan-builder/media-plan-grid';
+import type { MediaPlanChannel } from '@/components/legacy-plan-builder/media-plan-grid';
 
 const CHANNEL_TYPES: { value: NonNullable<MediaPlanChannel['channelCategory']>; label: string }[] = [
   { value: 'paid_digital',   label: 'Digital Ad Platform' },

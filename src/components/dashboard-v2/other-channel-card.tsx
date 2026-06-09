@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { getChannelLogo } from '@/lib/utils/channel-icons';
 import InlineActionPoints from './inline-action-points';
-import { MediaPlanChannel } from '@/components/media-plan-builder/media-plan-grid';
+import { MediaPlanChannel } from '@/components/legacy-plan-builder/media-plan-grid';
 import { supabase } from '@/lib/supabase/client';
 import ManualSpendSlider from './manual-spend-slider';
 

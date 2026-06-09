@@ -4,7 +4,7 @@ import MediaChannelCard from './MediaChannelCard';
 import { Facebook, Search, Linkedin, Music, Instagram } from 'lucide-react';
 import { format, eachDayOfInterval, startOfMonth, endOfMonth, parseISO, isWithinInterval, addDays, startOfWeek, addWeeks, differenceInWeeks } from 'date-fns';
 import { useState, useEffect } from 'react';
-import { MediaPlanChannel, MediaFlight } from '@/components/media-plan-builder/media-plan-grid';
+import { MediaPlanChannel, MediaFlight } from '@/components/legacy-plan-builder/media-plan-grid';
 import { getChannelLogo } from '@/lib/utils/channel-icons';
 
 interface ActivePlan {

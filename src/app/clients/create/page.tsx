@@ -28,7 +28,7 @@ import {
   Plus,
   Trash2,
 } from 'lucide-react';
-import { MediaPlanChannel, MediaFlight } from '@/components/media-plan-builder/media-plan-grid';
+import { MediaPlanChannel, MediaFlight } from '@/components/legacy-plan-builder/media-plan-grid';
 import { UploadWizard } from '@/components/sandbox/upload-wizard';
 import { PlanGrid } from '@/components/sandbox/plan-grid';
 import type { SandboxPlan } from '@/components/sandbox/types';

@@ -21,7 +21,7 @@
 'use client';
 
 import Link from 'next/link';
-import { MediaPlanChannel } from '@/components/media-plan-builder/media-plan-grid';
+import { MediaPlanChannel } from '@/components/legacy-plan-builder/media-plan-grid';
 import { UploadWizard } from '@/components/sandbox/upload-wizard';
 import { PlanGrid } from '@/components/sandbox/plan-grid';
 import type { SandboxPlan, Week, PlanRow, Flight } from '@/components/sandbox/types';

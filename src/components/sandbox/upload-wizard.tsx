@@ -364,7 +364,7 @@ export function UploadWizard({ onPlanLoaded }: Props) {
             onDragOver={e => { e.preventDefault(); setIsDraggingOver(true); }}
             onDragLeave={() => setIsDraggingOver(false)}
           >
-            <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleFileInput} />
+            <input type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" className="hidden" onChange={handleFileInput} />
             <FileSpreadsheet
               className={`w-12 h-12 mb-3 transition-colors ${isDraggingOver ? "text-blue-500" : "text-gray-400"}`}
             />

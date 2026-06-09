@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { Instagram, Facebook, Linkedin, RefreshCw, Link2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { MediaPlanChannel } from '@/components/media-plan-builder/media-plan-grid';
+import { MediaPlanChannel } from '@/components/legacy-plan-builder/media-plan-grid';
 import type { OrganicSocialActual } from '@/types/database';
 import { format, startOfMonth, endOfMonth, parseISO, eachWeekOfInterval } from 'date-fns';
 import Nango from '@nangohq/frontend';

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { MapPin, ChevronDown, ChevronUp, StickyNote } from 'lucide-react';
-import { MediaPlanChannel } from '@/components/media-plan-builder/media-plan-grid';
+import { MediaPlanChannel } from '@/components/legacy-plan-builder/media-plan-grid';
 import { format } from 'date-fns';
 import InlineActionPoints from './inline-action-points';
 import ManualSpendSlider from './manual-spend-slider';
