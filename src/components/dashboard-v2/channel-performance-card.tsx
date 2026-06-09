@@ -921,6 +921,9 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
     if (!spend || spend <= 0 || !planned || planned <= 0) return null;
 
     const now = new Date();
+    // Use midnight-normalized today so date comparisons don't flicker by time of day
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
     let periodStartStr: string;
     let periodEndStr: string;
 
@@ -940,12 +943,21 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
     const periodStart = parseISO(periodStartStr);
     const periodEnd = parseISO(periodEndStr);
 
-    if (now > periodEnd) return null;
+    // Period already finished
+    if (today > periodEnd) return null;
 
     const totalDays = Math.max(1, differenceInDays(periodEnd, periodStart) + 1);
-    const daysElapsed = Math.max(1, Math.min(totalDays, differenceInDays(now, periodStart) + 1));
-    const daysRemaining = Math.max(0, differenceInDays(periodEnd, now));
+    const daysElapsed = Math.max(1, Math.min(totalDays, differenceInDays(today, periodStart) + 1));
 
+    // When the analytics range ends today the natural daysRemaining is 0, which
+    // gives a useless forecast. Extend the horizon to end-of-current-month so
+    // the badge projects where spend will land by month end.
+    let forecastEnd = periodEnd;
+    if (differenceInDays(periodEnd, today) === 0) {
+      forecastEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    }
+
+    const daysRemaining = Math.max(0, differenceInDays(forecastEnd, today));
     if (daysRemaining === 0) return null;
 
     const dailyBurnRate = spend / daysElapsed;
@@ -953,7 +965,10 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
     const overspendAmount = projectedEndSpend - planned;
     const overspendPct = (overspendAmount / planned) * 100;
 
-    return { projectedEndSpend, overspendAmount, overspendPct, dailyBurnRate, daysRemaining };
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const forecastEndStr = `${forecastEnd.getFullYear()}-${pad(forecastEnd.getMonth() + 1)}-${pad(forecastEnd.getDate())}`;
+
+    return { projectedEndSpend, overspendAmount, overspendPct, dailyBurnRate, daysRemaining, forecastEndStr };
   }, [isNoneSelected, filteredMetrics.spend, channel.plannedSpend, dateRange, selectedMonth]);
 
   // Benchmark / preset derived values
@@ -1094,7 +1109,8 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
   }
 
   // Extend visibleChartData with projected spend points for future dates.
-  // The projected line continues from the last actual point to period-end.
+  // The projected line continues from the last actual point to the forecast horizon,
+  // generating synthetic daily points when the forecast extends beyond the chart data range.
   const chartDataWithProjection: Array<typeof visibleChartData[0] & { projectedSpend?: number | null }> = (() => {
     if (!overspendForecast || !visibleChartData.length) {
       return visibleChartData.map(p => ({ ...p, projectedSpend: null as number | null }));
@@ -1127,19 +1143,42 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
         : null as number | null,
     }));
 
-    // Append future (post-actual) points from the full period data
-    const futurePoints = fullChartData
+    // Existing chart data points beyond the last actual (within the analytics range)
+    const futureFromChart = fullChartData
       .filter(p => parseISO(p.date).getTime() > lastActualMs)
       .map(p => {
         const daysAfter = Math.round((parseISO(p.date).getTime() - lastActualMs) / msPerDay);
         return {
           ...p,
-          actualSpend: null,
+          actualSpend: null as number | null,
           projectedSpend: lastActualSpend! + overspendForecast.dailyBurnRate * daysAfter,
         };
       });
 
-    return [...withProjection, ...futurePoints];
+    // Synthetic daily points from after the chart data ends to the forecast horizon
+    // (needed when the analytics range ends today and we're projecting to month-end)
+    const lastChartDate = fullChartData.length > 0 ? fullChartData[fullChartData.length - 1].date : lastActualDate;
+    const lastPlannedSpend = fullChartData.length > 0 ? (fullChartData[fullChartData.length - 1].plannedSpend ?? 0) : 0;
+    const forecastEndMs = parseISO(overspendForecast.forecastEndStr).getTime();
+    const lastChartMs = parseISO(lastChartDate).getTime();
+
+    const syntheticPoints: Array<typeof visibleChartData[0] & { projectedSpend: number | null }> = [];
+    let cursor = lastChartMs + msPerDay;
+    while (cursor <= forecastEndMs) {
+      const daysAfter = Math.round((cursor - lastActualMs) / msPerDay);
+      const pad = (n: number) => String(n).padStart(2, '0');
+      const d = new Date(cursor);
+      const dateStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+      syntheticPoints.push({
+        date: dateStr,
+        actualSpend: null,
+        plannedSpend: lastPlannedSpend,
+        projectedSpend: lastActualSpend! + overspendForecast.dailyBurnRate * daysAfter,
+      });
+      cursor += msPerDay;
+    }
+
+    return [...withProjection, ...futureFromChart, ...syntheticPoints];
   })();
 
   // Build month labels for the visible range.
@@ -1337,7 +1376,11 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                       <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
                         <polyline points="1,8 3.5,5 5.5,6.5 9,2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                       </svg>
-                      Forecast · {overspendForecast.daysRemaining}d left
+                      {(() => {
+                        const d = parseISO(overspendForecast.forecastEndStr);
+                        const label = d.toLocaleString('en-US', { month: 'short', day: 'numeric' });
+                        return `By ${label} · ${overspendForecast.daysRemaining}d`;
+                      })()}
                     </span>
                     <div className="flex items-center gap-1.5 text-xs">
                       <span className="text-gray-600 font-medium">{fmt(overspendForecast.projectedEndSpend, 'currency', 0)} projected</span>
