@@ -573,6 +573,8 @@ export function PerformanceWidget({
     if (config.ga4EventName) params.set('ga4EventName', config.ga4EventName);
     if (config.metaActionType) params.set('metaActionType', config.metaActionType);
     if (config.googleAdsConversionAction) params.set('googleAdsConversionAction', config.googleAdsConversionAction);
+    const now = new Date();
+    params.set('clientDate', `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`);
 
     fetch(`/api/clients/${clientId}/goals?${params}`)
       .then(r => r.ok ? r.json() : null)

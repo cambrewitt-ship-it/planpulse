@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { startOfMonth, subDays, format } from 'date-fns';
+import { startOfMonth, subDays, format, parseISO } from 'date-fns';
 import { sendTeamsAlert } from '@/lib/teams';
 
 type Params = { params: Promise<{ id: string }> | { id: string } };
@@ -59,6 +59,12 @@ export async function GET(_req: NextRequest, { params }: Params) {
   const ga4EventName = url.searchParams.get('ga4EventName') ?? null;   // GA4 metric_name to use as conversion
   const metaActionType = url.searchParams.get('metaActionType') ?? null; // meta_actions action_type
 
+  // Use the client's local date if provided (avoids UTC vs local timezone mismatch on Vercel)
+  const clientDateParam = url.searchParams.get('clientDate');
+  const todayDate = (clientDateParam && /^\d{4}-\d{2}-\d{2}$/.test(clientDateParam))
+    ? parseISO(clientDateParam)
+    : new Date();
+
   // 1. Channels from media plan builder
   const { data: planData } = await supabase
     .from('client_media_plan_builder')
@@ -95,8 +101,8 @@ export async function GET(_req: NextRequest, { params }: Params) {
   }
 
   // 4. Actual performance for the current month
-  const monthStart = format(startOfMonth(new Date()), 'yyyy-MM-dd');
-  const today = format(new Date(), 'yyyy-MM-dd');
+  const monthStart = format(startOfMonth(todayDate), 'yyyy-MM-dd');
+  const today = format(todayDate, 'yyyy-MM-dd');
 
   // Use filter platforms if provided, else derive from media plan channels,
   // else fall back to both supported platforms so trend/series queries always run.
@@ -264,7 +270,6 @@ export async function GET(_req: NextRequest, { params }: Params) {
 
   // 6. 7-day trend: last 7 days vs prior 7 days
   // 6b. 24h trend: yesterday vs day before yesterday (avoids partial-day today)
-  const todayDate = new Date();
   const last7Start = format(subDays(todayDate, 6), 'yyyy-MM-dd');
   const last30Start = format(subDays(todayDate, 29), 'yyyy-MM-dd');
   const prev7Start = format(subDays(todayDate, 13), 'yyyy-MM-dd');
