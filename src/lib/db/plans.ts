@@ -74,7 +74,7 @@ export async function uploadClientLogo(clientId: string, file: File): Promise<st
   if (error) throw error;
 
   const { data } = supabase.storage.from('client-logos').getPublicUrl(path);
-  return data.publicUrl;
+  return `${data.publicUrl}?v=${Date.now()}`;
 }
 
 export async function updateClientLogoUrl(clientId: string, logoUrl: string): Promise<void> {

@@ -6,24 +6,42 @@ import { format, addDays, differenceInDays } from 'date-fns';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
-// Returns the next due date for a health check based on when it was last completed.
-// Used for display purposes — shows when the item is next due.
+// Returns the next due date for a health check.
+// If completed before, the next due is completedAt + interval.
+// If never completed, uses the flight start date to find the next upcoming occurrence.
 function getHealthCheckNextDueDate(
   frequency: string,
-  completedAt: string | null
+  completedAt: string | null,
+  flightStartDate?: Date | null
 ): Date | null {
-  if (!completedAt) return null;
   const intervalDays =
     frequency === 'daily' ? 1 :
     frequency === 'weekly' ? 7 :
     frequency === 'fortnightly' ? 14 :
     frequency === 'monthly' ? 30 : 0;
   if (!intervalDays) return null;
-  const completed = new Date(completedAt);
-  completed.setHours(0, 0, 0, 0);
-  const nextDue = new Date(completed);
-  nextDue.setDate(nextDue.getDate() + intervalDays);
-  return nextDue;
+
+  if (completedAt) {
+    const completed = new Date(completedAt);
+    completed.setHours(0, 0, 0, 0);
+    const nextDue = new Date(completed);
+    nextDue.setDate(nextDue.getDate() + intervalDays);
+    return nextDue;
+  }
+
+  if (!flightStartDate) return null;
+
+  const start = new Date(flightStartDate);
+  start.setHours(0, 0, 0, 0);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  for (let n = 1; n <= 730; n++) {
+    const occ = new Date(start);
+    occ.setDate(occ.getDate() + n * intervalDays);
+    if (occ.getTime() >= today.getTime()) return occ;
+  }
+  return today;
 }
 
 // Returns true if a health check completion is still valid (item should appear ticked).
@@ -486,6 +504,16 @@ export default function InlineActionPoints({
       .sort((a, b) => new Date(a.startWeek).getTime() - new Date(b.startWeek).getTime());
     return upcoming.length > 0 ? new Date(upcoming[0].startWeek) : null;
   })();
+  // Earliest flight start — anchor for recurring health check due dates
+  const healthCheckAnchorDate = (() => {
+    if (channelFlights?.length) {
+      const sorted = [...channelFlights].sort((a, b) =>
+        new Date(a.startWeek).getTime() - new Date(b.startWeek).getTime()
+      );
+      return new Date(sorted[0].startWeek);
+    }
+    return channelStartDate ?? null;
+  })();
 
   // Separate action points by category
   const setupItems = actionPoints.filter(ap => ap.category === 'SET UP');
@@ -680,7 +708,7 @@ export default function InlineActionPoints({
                       <>
                         <span className="text-xs text-gray-400">{ap.frequency}</span>
                         {(() => {
-                          const nextDue = getHealthCheckNextDueDate(ap.frequency, ap.completed_at ?? null);
+                          const nextDue = getHealthCheckNextDueDate(ap.frequency, ap.completed_at ?? null, healthCheckAnchorDate);
                           if (!nextDue) return null;
                           const dueDateText = formatDueDate(nextDue);
                           const isOverdue = differenceInDays(nextDue, new Date()) < 0;

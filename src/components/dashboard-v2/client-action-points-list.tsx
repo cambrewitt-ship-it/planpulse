@@ -94,7 +94,7 @@ type Column = { label: string; items: ActionPoint[] };
 
 export default function ClientActionPointsList({ actionPoints, onToggle }: Props) {
   const [filterMode, setFilterMode] = useState<'priority' | 'channel'>('priority');
-  const [viewMode, setViewMode] = useState<'kanban' | 'list' | 'gantt'>('gantt');
+  const [viewMode, setViewMode] = useState<'kanban' | 'list' | 'gantt'>('list');
   const [listCompletedOpen, setListCompletedOpen] = useState(false);
 
   const incomplete = useMemo(() => actionPoints.filter(ap => !ap.completed), [actionPoints]);

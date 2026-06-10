@@ -30,7 +30,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { getClientById, getMediaPlans, getPlanById, updateClient, updateClientLogoUrl } from '@/lib/db/plans';
 import { fetchAnalyticsData, calculateCostPerMetric, calculateCostPerPlatformMetric, extractPlatformEventOptions, SpendDataPoint, CostMetricPoint, MetricSource, PlatformEventOption } from '@/lib/api/analytics-data-integration';
-import { subDays, addDays, format, differenceInDays, parseISO, startOfMonth, endOfMonth } from 'date-fns';
+import { subDays, addDays, format, differenceInDays, parseISO, startOfMonth, endOfMonth, startOfYear } from 'date-fns';
 import { FunnelStage, MediaPlanFunnel, FunnelConfig } from '@/lib/types/funnel';
 import { calculateHealthScore, type HealthScoreResult } from '@/lib/utils/health-score';
 import { calculatePerformanceHealth, type PerformanceHealthResult } from '@/lib/calculate-performance-health';
@@ -270,6 +270,9 @@ export default function DashboardV2() {
   // Sandbox-style media plan (per-client, persisted in localStorage)
   const [clientSandboxPlan, setClientSandboxPlan] = useState<SandboxPlan | null>(null);
   const [sandboxPlanHydrated, setSandboxPlanHydrated] = useState(false);
+  // Tracks when the user explicitly cleared the plan via "Upload new" so the reverse
+  // sync from DB channels doesn't immediately re-populate it before they can upload.
+  const sandboxPlanExplicitlyClearedRef = useRef(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [allMetaCampaigns, setAllMetaCampaigns] = useState<Array<{ id: string; name: string }>>([]);
@@ -291,7 +294,7 @@ export default function DashboardV2() {
   const [analyticsDateRange, setAnalyticsDateRange] = useState(() => {
     const today = new Date();
     return {
-      startDate: format(subDays(today, 30), 'yyyy-MM-dd'),
+      startDate: format(startOfYear(today), 'yyyy-MM-dd'),
       endDate: format(today, 'yyyy-MM-dd'),
     };
   });
@@ -434,6 +437,7 @@ export default function DashboardV2() {
   }, [clientId]);
 
   const handleClientPlanChange = (updated: SandboxPlan) => {
+    sandboxPlanExplicitlyClearedRef.current = false;
     setClientSandboxPlan(updated);
     try { localStorage.setItem(`planpulse_sandbox_plan_${clientId}`, JSON.stringify(updated)); } catch {}
   };
@@ -443,6 +447,7 @@ export default function DashboardV2() {
   };
 
   const handleClientPlanUpload = () => {
+    sandboxPlanExplicitlyClearedRef.current = true;
     setClientSandboxPlan(null);
     try { localStorage.removeItem(`planpulse_sandbox_plan_${clientId}`); } catch {}
   };
@@ -521,6 +526,7 @@ export default function DashboardV2() {
   useEffect(() => {
     if (!sandboxPlanHydrated || isLoadingMediaPlanBuilder) return;
     if (clientSandboxPlan !== null) return;
+    if (sandboxPlanExplicitlyClearedRef.current) return;
 
     const channelsWithFlights = mediaPlanBuilderChannels.filter(
       ch => (ch.flights?.length ?? 0) > 0
@@ -1266,6 +1272,15 @@ export default function DashboardV2() {
     return result;
   }, [clientId, mediaPlanBuilderChannels]);
 
+  // Height for the notes/todo panel — grows with the Gantt but never shrinks below 240
+  const notesPanelHeight = useMemo(() => {
+    if (!ganttChannels.length) return 240;
+    const GANTT_HEADER_H = 46; // 18px month row + 28px day row
+    const GANTT_ROW_H = 42;    // per-channel row height in GanttCalendar
+    const GANTT_WRAPPER_PADDING_V = 16; // py-2 on the wrapper div
+    return Math.max(240, GANTT_HEADER_H + ganttChannels.length * GANTT_ROW_H + GANTT_WRAPPER_PADDING_V);
+  }, [ganttChannels.length]);
+
   // AP markers derived from allActionPoints for fullscreen Gantt
   const ganttAPMarkers = useMemo<GanttAPMarker[]>(() =>
     allActionPoints
@@ -1408,6 +1423,7 @@ export default function DashboardV2() {
         throw new Error(error || 'Upload failed');
       }
       const { url } = await res.json();
+      await updateClientLogoUrl(clientId, url).catch(() => {});
       if (client) setClient({ ...client, logo_url: url });
     } catch (err) {
       setLogoUploadError(err instanceof Error ? err.message : 'Upload failed');
@@ -1971,6 +1987,50 @@ export default function DashboardV2() {
           return [{ ...ap, due_date: d.toISOString().slice(0, 10) }];
         }
       }
+      if (ap.category === 'HEALTH CHECK' && ap.frequency) {
+        const intervalDays =
+          ap.frequency === 'daily' ? 1 :
+          ap.frequency === 'weekly' ? 7 :
+          ap.frequency === 'fortnightly' ? 14 :
+          ap.frequency === 'monthly' ? 30 : 0;
+        if (intervalDays > 0) {
+          // Use earliest flight start for the matching channel as the recurring anchor
+          const matchedMpCh = mediaPlanBuilderChannels.find((ch: any) =>
+            ch.channelName.toLowerCase().trim() === (ap.channel_type ?? '').toLowerCase().trim() ||
+            ch.channelName.toLowerCase().includes((ap.channel_type ?? '').toLowerCase()) ||
+            (ap.channel_type ?? '').toLowerCase().includes(ch.channelName.toLowerCase())
+          );
+          const flights: any[] = matchedMpCh?.flights ?? [];
+          let anchorDate: Date | null = null;
+          if (flights.length > 0) {
+            const sorted = [...flights].sort((a: any, b: any) =>
+              new Date(a.startWeek).getTime() - new Date(b.startWeek).getTime()
+            );
+            anchorDate = new Date(sorted[0].startWeek);
+          }
+          if (!anchorDate) {
+            const matchedGanttCh = ganttChannels.find(
+              ch => ch.label.toLowerCase().trim() === (ap.channel_type ?? '').toLowerCase().trim() ||
+                    ch.label.toLowerCase().includes((ap.channel_type ?? '').toLowerCase()) ||
+                    (ap.channel_type ?? '').toLowerCase().includes(ch.label.toLowerCase())
+            );
+            anchorDate = matchedGanttCh?.start_date ? new Date(matchedGanttCh.start_date) : null;
+          }
+          if (!anchorDate && campaignDates?.start) anchorDate = new Date(campaignDates.start);
+          if (anchorDate) {
+            anchorDate.setHours(0, 0, 0, 0);
+            const intervalMs = intervalDays * 86400000;
+            const startMs = anchorDate.getTime();
+            for (let n = 1; n <= 730; n++) {
+              const occMs = startMs + n * intervalMs;
+              if (occMs >= todayMs) {
+                return [{ ...ap, due_date: new Date(occMs).toISOString().slice(0, 10) }];
+              }
+            }
+            return [{ ...ap, due_date: today.toISOString().slice(0, 10) }];
+          }
+        }
+      }
       return [ap];
     });
   }, [allActionPoints, ganttChannels, campaignDates, mediaPlanBuilderChannels]);
@@ -2349,8 +2409,8 @@ export default function DashboardV2() {
                   <div style={{
                     flex: 1,
                     minWidth: 0,
-                    height: 240,
-                    maxHeight: 240,
+                    height: notesPanelHeight,
+                    minHeight: 240,
                     overflow: 'hidden',
                     display: 'flex',
                     borderRadius: 12,
@@ -2363,7 +2423,7 @@ export default function DashboardV2() {
                       <div
                         onClick={() => setNotesCollapsed(false)}
                         style={{
-                          height: 240, width: '100%',
+                          height: '100%', width: '100%',
                           background: '#1C1917',
                           borderRadius: 12,
                           cursor: 'pointer',
@@ -2381,7 +2441,7 @@ export default function DashboardV2() {
                         <span style={{ fontSize: 16, color: 'rgba(255,255,255,0.4)' }}>›</span>
                       </div>
                     ) : (
-                      <div style={{ display: 'flex', width: '100%', height: 240, position: 'relative', borderRadius: 12, overflow: 'hidden' }}>
+                      <div style={{ display: 'flex', width: '100%', height: '100%', position: 'relative', borderRadius: 12, overflow: 'hidden' }}>
                         {/* Spine wrapper — fixed 88px, both spines animate inside with peek strip between them */}
                         <div style={{ width: 88, flexShrink: 0, position: 'relative', height: '100%' }}>
                           {/* Notes spine */}

@@ -64,7 +64,7 @@ export async function POST(
     }
 
     const { data } = storageClient.storage.from(BUCKET_NAME).getPublicUrl(path);
-    const publicUrl = data.publicUrl;
+    const publicUrl = `${data.publicUrl}?v=${Date.now()}`;
 
     // Update logo_url — no user_id filter; RLS enforces access for authenticated users.
     // If this fails, the client will still save the URL via a separate DB call.

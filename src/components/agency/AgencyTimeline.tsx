@@ -491,7 +491,6 @@ function ClientTimelineRow({
                   padding: '2px 5px 2px 3px',
                   whiteSpace: 'nowrap',
                   boxShadow: '0 1px 4px rgba(0,0,0,0.18)',
-                  pointerEvents: 'none',
                   height: BUBBLE_H,
                 }}>
                   <span style={{

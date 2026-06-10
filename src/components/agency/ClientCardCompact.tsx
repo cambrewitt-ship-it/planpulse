@@ -127,6 +127,60 @@ function apColor(count: number): string {
   return '#B5B0A5';
 }
 
+// ── Split area paths: above-target segments vs below-target segments ──────────
+
+function buildSplitAreaPaths(
+  pts: { x: number; y: number }[],
+  targetY: number,
+  bottom: number
+): { redPath: string; greenPath: string } {
+  if (pts.length === 0) return { redPath: '', greenPath: '' };
+
+  const isAbove = (p: { x: number; y: number }) => p.y < targetY;
+
+  function crossX(p1: { x: number; y: number }, p2: { x: number; y: number }): number {
+    if (p2.y === p1.y) return p1.x;
+    return p1.x + ((targetY - p1.y) / (p2.y - p1.y)) * (p2.x - p1.x);
+  }
+
+  const aug: { x: number; y: number; above: boolean }[] = [];
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i];
+    if (i > 0) {
+      const prev = pts[i - 1];
+      if (isAbove(prev) !== isAbove(p)) {
+        const cx = crossX(prev, p);
+        aug.push({ x: cx, y: targetY, above: isAbove(prev) });
+        aug.push({ x: cx, y: targetY, above: isAbove(p) });
+      }
+    }
+    aug.push({ x: p.x, y: p.y, above: isAbove(p) });
+  }
+
+  function buildPath(wantAbove: boolean): string {
+    let d = '';
+    let seg: { x: number; y: number }[] = [];
+
+    const flush = () => {
+      if (seg.length < 1) return;
+      const f = seg[0], l = seg[seg.length - 1];
+      d += `M ${f.x.toFixed(1)} ${bottom.toFixed(1)} L ${f.x.toFixed(1)} ${f.y.toFixed(1)}`;
+      for (let i = 1; i < seg.length; i++) d += ` L ${seg[i].x.toFixed(1)} ${seg[i].y.toFixed(1)}`;
+      d += ` L ${l.x.toFixed(1)} ${bottom.toFixed(1)} Z `;
+      seg = [];
+    };
+
+    for (const p of aug) {
+      if (p.above === wantAbove) seg.push(p);
+      else flush();
+    }
+    flush();
+    return d.trim();
+  }
+
+  return { redPath: buildPath(true), greenPath: buildPath(false) };
+}
+
 // ── Sparkline: 30-day metric series fetched from API (matches hero card) ──────
 
 function SparkLine({ clientId, perf }: { clientId: string; perf: PerfData | null }) {
@@ -242,6 +296,11 @@ function SparkLine({ clientId, perf }: { clientId: string; perf: PerfData | null
     else lineColor = '#B07030';
   }
 
+  const lowerBetter = /cpa|cpc|cpm|cpl|cost/.test(mk);
+  const aboveColor = lowerBetter ? '#ef4444' : '#22c55e';
+  const belowColor = lowerBetter ? '#22c55e' : '#ef4444';
+  const hasSplit = targetY !== null;
+
   const gradId = `sg_${clientId}`;
   const clipId = `sc_${clientId}`;
 
@@ -259,13 +318,29 @@ function SparkLine({ clientId, perf }: { clientId: string; perf: PerfData | null
       </div>
       <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
         <defs>
-          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={lineColor} stopOpacity={0.2} />
-            <stop offset="100%" stopColor={lineColor} stopOpacity={0.01} />
-          </linearGradient>
-          <clipPath id={clipId}>
-            <rect x={PL} y={PT} width={pw} height={ph} />
-          </clipPath>
+          {hasSplit ? (
+            <>
+              <linearGradient id={`${gradId}_a`} x1="0" y1={PT} x2="0" y2={bottom} gradientUnits="userSpaceOnUse">
+                <stop offset="0%"   stopColor={aboveColor} stopOpacity={0.15} />
+                <stop offset="100%" stopColor={aboveColor} stopOpacity={0.03} />
+              </linearGradient>
+              <linearGradient id={`${gradId}_b`} x1="0" y1={PT} x2="0" y2={bottom} gradientUnits="userSpaceOnUse">
+                <stop offset="0%"   stopColor={belowColor} stopOpacity={0.03} />
+                <stop offset="100%" stopColor={belowColor} stopOpacity={0.15} />
+              </linearGradient>
+              <clipPath id={clipId}><rect x={PL} y={PT} width={pw} height={ph} /></clipPath>
+              <clipPath id={`${clipId}_a`}><rect x={PL} y={PT} width={pw} height={targetY! - PT} /></clipPath>
+              <clipPath id={`${clipId}_b`}><rect x={PL} y={targetY!} width={pw} height={bottom - targetY!} /></clipPath>
+            </>
+          ) : (
+            <>
+              <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={lineColor} stopOpacity={0.2} />
+                <stop offset="100%" stopColor={lineColor} stopOpacity={0.01} />
+              </linearGradient>
+              <clipPath id={clipId}><rect x={PL} y={PT} width={pw} height={ph} /></clipPath>
+            </>
+          )}
         </defs>
         <line x1={PL} y1={PT} x2={PL} y2={bottom} stroke="#E5E7EB" strokeWidth={0.75} />
         <line x1={PL} y1={bottom} x2={PL + pw} y2={bottom} stroke="#E5E7EB" strokeWidth={0.75} />
@@ -290,10 +365,37 @@ function SparkLine({ clientId, perf }: { clientId: string; perf: PerfData | null
             </g>
           );
         })}
-        <path d={areaPath} fill={`url(#${gradId})`} clipPath={`url(#${clipId})`} />
-        <polyline points={polyPts} fill="none" stroke={lineColor} strokeWidth={2}
-          strokeLinecap="round" strokeLinejoin="round" clipPath={`url(#${clipId})`} />
-        <circle cx={pts[pts.length - 1].x} cy={pts[pts.length - 1].y} r={3} fill={lineColor} />
+        {hasSplit ? (() => {
+          const { redPath, greenPath } = buildSplitAreaPaths(pts, targetY!, bottom);
+          return (
+            <>
+              {redPath && <path d={redPath} fill={`url(#${gradId}_a)`} clipPath={`url(#${clipId})`} />}
+              {greenPath && <path d={greenPath} fill={`url(#${gradId}_b)`} clipPath={`url(#${clipId})`} />}
+            </>
+          );
+        })() : (
+          <path d={areaPath} fill={`url(#${gradId})`} clipPath={`url(#${clipId})`} />
+        )}
+        {hasSplit ? (
+          <>
+            <polyline points={polyPts} fill="none" stroke={aboveColor}
+              strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
+              clipPath={`url(#${clipId}_a)`} />
+            <polyline points={polyPts} fill="none" stroke={belowColor}
+              strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
+              clipPath={`url(#${clipId}_b)`} />
+          </>
+        ) : (
+          <polyline points={polyPts} fill="none" stroke={lineColor} strokeWidth={2}
+            strokeLinecap="round" strokeLinejoin="round" clipPath={`url(#${clipId})`} />
+        )}
+        {(() => {
+          const lp = pts[pts.length - 1];
+          const dotColor = hasSplit && targetY !== null
+            ? (lp.y < targetY ? aboveColor : belowColor)
+            : lineColor;
+          return <circle cx={lp.x} cy={lp.y} r={3} fill={dotColor} />;
+        })()}
       </svg>
     </div>
   );
