@@ -50,26 +50,43 @@ export default function TopBar() {
               PlanPulse
             </Link>
             
-            <div className="flex items-center gap-4">
-              <Link href="/agency">
-                <Button variant={pathname === '/agency' ? 'default' : 'ghost'} size="sm">
-                  <LayoutDashboard className="h-4 w-4 mr-2" />
-                  Agency
-                </Button>
-              </Link>
-              <Link href="/dashboard">
-                <Button variant={pathname === '/dashboard' ? 'default' : 'ghost'} size="sm">
-                  <Users className="h-4 w-4 mr-2" />
-                  Clients
-                </Button>
-              </Link>
-              <Link href="/library">
-                <Button variant={pathname === '/library' ? 'default' : 'ghost'} size="sm">
-                  <Library className="h-4 w-4 mr-2" />
-                  Library
-                </Button>
-              </Link>
-            </div>
+            {mounted && !user && (
+              <div className="flex items-center gap-4">
+                <Link href="/features">
+                  <Button variant={pathname === '/features' ? 'default' : 'ghost'} size="sm">
+                    Features
+                  </Button>
+                </Link>
+                <Link href="/pricing">
+                  <Button variant={pathname === '/pricing' ? 'default' : 'ghost'} size="sm">
+                    Pricing
+                  </Button>
+                </Link>
+              </div>
+            )}
+
+            {mounted && user && (
+              <div className="flex items-center gap-4">
+                <Link href="/agency">
+                  <Button variant={pathname === '/agency' ? 'default' : 'ghost'} size="sm">
+                    <LayoutDashboard className="h-4 w-4 mr-2" />
+                    Agency
+                  </Button>
+                </Link>
+                <Link href="/dashboard">
+                  <Button variant={pathname === '/dashboard' ? 'default' : 'ghost'} size="sm">
+                    <Users className="h-4 w-4 mr-2" />
+                    Clients
+                  </Button>
+                </Link>
+                <Link href="/library">
+                  <Button variant={pathname === '/library' ? 'default' : 'ghost'} size="sm">
+                    <Library className="h-4 w-4 mr-2" />
+                    Library
+                  </Button>
+                </Link>
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-4">

@@ -6,12 +6,18 @@ import { createClient } from '@/lib/supabase/server';
 import type { Database, ClientWithHealth, HealthStatus } from '@/types/database';
 import { calculateClientHealth, getActionPointStatsForClient } from '@/lib/health/calculations';
 
+export interface ClientChannelFlight {
+  startDate: string;
+  endDate: string;
+}
+
 export interface ClientChannel {
   channelName: string;
   status: 'live' | 'upcoming' | 'ended';
   startDate: string | null; // ISO date of earliest flight start
   endDate: string | null;   // ISO date of latest flight end
   campaignIds: string[];    // metaCampaignIds linked in the media plan (for spend filtering)
+  flights: ClientChannelFlight[]; // individual flight periods (may have gaps between them)
 }
 
 export interface ClientCardData extends ClientWithHealth {
@@ -162,14 +168,21 @@ export async function GET(request: NextRequest) {
         const channels: ClientChannel[] = rawChannels
           .filter((ch: any) => ch.channelName)
           .map((ch: any) => {
-            const flights: any[] = ch.flights || [];
-            const starts = flights.map((f: any) => f.startWeek as string).filter(Boolean);
-            const ends = flights.map((f: any) => f.endWeek as string).filter(Boolean);
-
-            // Normalise to YYYY-MM-DD
+            const rawFlights: any[] = ch.flights || [];
             const toD = (s: string) => s.length > 10 ? s.split('T')[0] : s;
-            const startDates = starts.map(toD).sort();
-            const endDates = ends.map(toD).sort();
+
+            // Build individual flight periods (each flight has its own start + end)
+            const flightPeriods: ClientChannelFlight[] = rawFlights
+              .map((f: any) => ({
+                startDate: f.startWeek ? toD(f.startWeek as string) : null,
+                endDate:   f.endWeek   ? toD(f.endWeek   as string) : null,
+              }))
+              .filter(fp => fp.startDate && fp.endDate)
+              .map(fp => ({ startDate: fp.startDate!, endDate: fp.endDate! }))
+              .sort((a, b) => a.startDate.localeCompare(b.startDate));
+
+            const startDates = flightPeriods.map(fp => fp.startDate);
+            const endDates   = flightPeriods.map(fp => fp.endDate);
 
             const earliestStart = startDates[0] || null;
             const latestEnd = endDates[endDates.length - 1] || null;
@@ -185,6 +198,7 @@ export async function GET(request: NextRequest) {
               startDate: earliestStart,
               endDate: latestEnd,
               campaignIds,
+              flights: flightPeriods,
             };
           })
           // Only show live + upcoming (not ended)

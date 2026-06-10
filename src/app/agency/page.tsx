@@ -320,14 +320,29 @@ export default function AgencyDashboard() {
 
   const ganttChannels = useMemo(() =>
     filteredClients.flatMap(c =>
-      (c.channels ?? []).map((ch: { channelName: string; startDate: string | null; endDate: string | null }) => ({
-        id: `${c.id}:${ch.channelName}`,
-        client_id: c.id,
-        label: ch.channelName,
-        start_date: ch.startDate,
-        end_date: ch.endDate,
-        type: (/organic|social|seo|email|edm|content/.test(ch.channelName.toLowerCase()) ? 'organic' : 'paid') as 'paid' | 'organic',
-      }))
+      (c.channels ?? []).flatMap(ch => {
+        const type = (/organic|social|seo|email|edm|content/.test(ch.channelName.toLowerCase()) ? 'organic' : 'paid') as 'paid' | 'organic';
+        // Emit one entry per flight so gaps between flights are visible on the timeline
+        if (ch.flights && ch.flights.length > 0) {
+          return ch.flights.map((flight, fIdx) => ({
+            id: `${c.id}:${ch.channelName}:${fIdx}`,
+            client_id: c.id,
+            label: ch.channelName,
+            start_date: flight.startDate,
+            end_date: flight.endDate,
+            type,
+          }));
+        }
+        // Fallback for channels without flight detail
+        return [{
+          id: `${c.id}:${ch.channelName}`,
+          client_id: c.id,
+          label: ch.channelName,
+          start_date: ch.startDate,
+          end_date: ch.endDate,
+          type,
+        }];
+      })
     ),
     [filteredClients]
   );
@@ -363,8 +378,8 @@ export default function AgencyDashboard() {
     });
   }, [ganttClients, ganttChannels, timelineSort]);
 
-  const ganttAPMarkers = useMemo<GanttAPMarker[]>(() =>
-    filteredActionPointClients.flatMap(c =>
+  const ganttAPMarkers = useMemo<GanttAPMarker[]>(() => {
+    const markers: GanttAPMarker[] = filteredActionPointClients.flatMap(c =>
       c.channels.flatMap(ch =>
         ch.actionPoints.map(ap => ({
           client_id: c.clientId,
@@ -378,9 +393,33 @@ export default function AgencyDashboard() {
           id: ap.id,
         }))
       )
-    ),
-    [filteredActionPointClients]
-  );
+    );
+
+    // Add one Report marker per client at the end of the latest channel flight
+    const clientLatest = new Map<string, { label: string; endDate: string; clientName: string }>();
+    for (const ch of ganttChannels) {
+      if (!ch.end_date) continue;
+      const existing = clientLatest.get(ch.client_id);
+      if (!existing || ch.end_date > existing.endDate) {
+        const clientName = filteredClients.find(c => c.id === ch.client_id)?.name ?? '';
+        clientLatest.set(ch.client_id, { label: ch.label, endDate: ch.end_date, clientName });
+      }
+    }
+    for (const [clientId, { label, endDate, clientName }] of clientLatest.entries()) {
+      markers.push({
+        client_id: clientId,
+        client_name: clientName,
+        channel_label: label,
+        text: 'Report',
+        category: 'REPORT',
+        due_date: endDate,
+        frequency: null,
+        assigned_to: null,
+      });
+    }
+
+    return markers;
+  }, [filteredActionPointClients, ganttChannels, filteredClients]);
 
   const formatLastRefreshed = () => {
     if (!lastRefreshed) return 'Updated just now';

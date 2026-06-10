@@ -11,14 +11,26 @@ export default function Footer() {
             © {new Date().getFullYear()} OneOneThree Digital Ltd. All rights reserved.
           </div>
           <div className="flex items-center gap-6">
-            <Link 
-              href="/terms" 
+            <Link
+              href="/features"
+              className="text-sm text-gray-600 hover:text-gray-900 transition-colors"
+            >
+              Features
+            </Link>
+            <Link
+              href="/pricing"
+              className="text-sm text-gray-600 hover:text-gray-900 transition-colors"
+            >
+              Pricing
+            </Link>
+            <Link
+              href="/terms"
               className="text-sm text-gray-600 hover:text-gray-900 transition-colors"
             >
               Terms
             </Link>
-            <Link 
-              href="/privacy" 
+            <Link
+              href="/privacy"
               className="text-sm text-gray-600 hover:text-gray-900 transition-colors"
             >
               Privacy

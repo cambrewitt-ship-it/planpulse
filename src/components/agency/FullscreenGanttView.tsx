@@ -131,6 +131,7 @@ function barColor(label: string, type: 'paid' | 'organic') {
 function apColor(category: string): { text: string; bg: string; border: string } {
   if (category === 'HEALTH CHECK') return { text: '#92580F', bg: '#FEF3E2', border: '#F0C87A' };
   if (category === 'SET UP')       return { text: '#8C3518', bg: '#FDEAE4', border: '#E8A48E' };
+  if (category === 'REPORT')       return { text: '#1D4ED8', bg: '#EFF6FF', border: '#93C5FD' };
   return                                  { text: '#2F4F6E', bg: '#E8EFF6', border: '#8AAAC8' };
 }
 
@@ -377,7 +378,7 @@ export function FullscreenGanttView({
         <div style={{ width: '0.5px', height: 18, background: '#E8E4DC', flexShrink: 0 }} />
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, overflow: 'hidden' }}>
-          {[{ s: '◆', c: '#B07030', l: 'Health Check' }, { s: '●', c: '#A0442A', l: 'Set Up' }, { s: '●', c: '#4A6580', l: 'Ongoing' }, { s: '●', c: '#4A7C59', l: 'Go Live' }, { s: '●', c: '#A0442A', l: 'End' }].map(i => (
+          {[{ s: '◆', c: '#B07030', l: 'Health Check' }, { s: '●', c: '#A0442A', l: 'Set Up' }, { s: '●', c: '#4A6580', l: 'Ongoing' }, { s: '●', c: '#1D4ED8', l: 'Report' }, { s: '●', c: '#4A7C59', l: 'Go Live' }, { s: '●', c: '#A0442A', l: 'End' }].map(i => (
             <span key={i.l} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#8A8578', whiteSpace: 'nowrap' }}><span style={{ color: i.c }}>{i.s}</span>{i.l}</span>
           ))}
         </div>
@@ -580,7 +581,7 @@ export function FullscreenGanttView({
                                           fontSize: 7, fontWeight: 700, letterSpacing: '0.4px',
                                           color: chipCol.text, textTransform: 'uppercase',
                                         }}>
-                                          {item.category === 'HEALTH CHECK' ? 'Health Check' : item.category === 'SET UP' ? 'Set Up' : item.category}
+                                          {item.category === 'HEALTH CHECK' ? 'Health Check' : item.category === 'SET UP' ? 'Set Up' : item.category === 'REPORT' ? 'Report' : item.category}
                                         </span>
                                       </button>
                                       {/* Shape marker */}
@@ -685,7 +686,8 @@ function APModal({ ap, clients, todayStr, accountManagers, isInProgress, onAssig
 
   const categoryLabel =
     ap.category === 'HEALTH CHECK' ? 'Health Check' :
-    ap.category === 'SET UP'       ? 'Set Up' : 'Ongoing';
+    ap.category === 'SET UP'       ? 'Set Up' :
+    ap.category === 'REPORT'       ? 'Report' : 'Ongoing';
 
   // Compute popover position anchored to the click point, clamped to viewport
   const POP_W = 400, POP_H = 420, OFFSET = 14;

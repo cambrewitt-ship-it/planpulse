@@ -570,7 +570,7 @@ export function UploadWizard({ onPlanLoaded }: Props) {
           </div>
 
           {/* Summary cards */}
-          <div className="grid grid-cols-3 gap-3 mb-6">
+          <div className="grid grid-cols-3 gap-3 mb-4">
             {[
               { label: "Channels", value: channelSet.size },
               { label: "Rows", value: parsedPlan.rows.length },
@@ -582,6 +582,18 @@ export function UploadWizard({ onPlanLoaded }: Props) {
               </div>
             ))}
           </div>
+
+          {/* Custom columns detected */}
+          {parsedPlan.customColumns && parsedPlan.customColumns.length > 0 && (
+            <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 mb-4 flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-semibold text-blue-700 uppercase tracking-wide flex-shrink-0">Custom columns detected:</span>
+              {parsedPlan.customColumns.map(col => (
+                <span key={col.id} className="text-xs bg-blue-100 text-blue-800 rounded px-2 py-0.5 font-medium">
+                  {col.name}
+                </span>
+              ))}
+            </div>
+          )}
 
           {/* Row preview */}
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-6">

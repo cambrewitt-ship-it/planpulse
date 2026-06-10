@@ -38,6 +38,12 @@ export interface GanttSetupPoint {
   due_date: string; // YYYY-MM-DD
 }
 
+export interface GanttReportPoint {
+  client_id: string;
+  channel_label: string;
+  due_date: string; // YYYY-MM-DD — end of the last channel flight in the plan
+}
+
 export interface GanttPointEvent {
   client_id: string;
   day: number;
@@ -50,6 +56,7 @@ export interface GanttCalendarProps {
   channels?: GanttChannel[];
   healthChecks?: GanttHealthCheck[];
   setupPoints?: GanttSetupPoint[];
+  reportPoints?: GanttReportPoint[];
   pointEvents?: GanttPointEvent[];
   selectedDay: number | null;
   onDaySelect: (day: number | null) => void;
@@ -141,6 +148,7 @@ export function GanttCalendar({
   channels = [],
   healthChecks = [],
   setupPoints = [],
+  reportPoints = [],
   filteredClientIds,
   selectedDay,
   onDaySelect,
@@ -256,6 +264,16 @@ export function GanttCalendar({
     }
     return map;
   }, [setupPoints]);
+
+  const rpByClientChannel = useMemo(() => {
+    const map = new Map<string, GanttReportPoint[]>();
+    for (const rp of reportPoints) {
+      const key = `${rp.client_id}:${normalizeChannelLabel(rp.channel_label)}`;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(rp);
+    }
+    return map;
+  }, [reportPoints]);
 
   // Activity density per day (index into dayList)
   const densityByIdx = useMemo(() => {
@@ -446,6 +464,7 @@ export function GanttCalendar({
                 const hcKey        = `${client.id}:${normalizeChannelLabel(ch.label)}`;
                 const chHealthChecks = hcByClientChannel.get(hcKey) || [];
                 const chSetupPoints  = spByClientChannel.get(hcKey) || [];
+                const chReportPoints = rpByClientChannel.get(hcKey) || [];
 
                 const status     = getChannelStatus(ch, todayStr);
                 const barColor   = getChannelBarColor(ch.label, ch.type, status);
@@ -562,6 +581,37 @@ export function GanttCalendar({
                               zIndex: 6,
                             }}
                           />
+                        );
+                      })}
+
+                      {/* Report pills */}
+                      {chReportPoints.map((rp, rpIdx) => {
+                        const px = pxLeft(rp.due_date);
+                        if (px === null) return null;
+                        return (
+                          <div
+                            key={rpIdx}
+                            title={`Report: ${rp.due_date}`}
+                            style={{
+                              position: 'absolute',
+                              left: px + dayWidth / 2,
+                              top: '50%',
+                              transform: 'translate(-50%, calc(-50% - 13px))',
+                              background: '#2563EB',
+                              color: '#fff',
+                              fontSize: 7,
+                              fontWeight: 700,
+                              padding: '1px 5px',
+                              borderRadius: 3,
+                              whiteSpace: 'nowrap',
+                              zIndex: 7,
+                              lineHeight: 1.5,
+                              letterSpacing: '0.04em',
+                              pointerEvents: 'none',
+                            }}
+                          >
+                            Report
+                          </div>
                         );
                       })}
                     </div>

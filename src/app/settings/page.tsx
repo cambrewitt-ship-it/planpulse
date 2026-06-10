@@ -51,11 +51,24 @@ export default function SettingsPage() {
   const [integrationLoading, setIntegrationLoading] = useState(false);
   const [integrationSaving, setIntegrationSaving] = useState(false);
 
+  // Billing state
+  const [subscription, setSubscription] = useState<{
+    plan: string;
+    billing_period: string | null;
+    status: string;
+    current_period_end: string | null;
+    cancel_at_period_end: boolean;
+    stripe_customer_id: string | null;
+  } | null>(null);
+  const [billingLoading, setBillingLoading] = useState(false);
+  const [portalLoading, setPortalLoading] = useState(false);
+
   useEffect(() => {
     checkUser();
     fetchAccountManagers();
     fetchClients();
     fetchIntegration();
+    fetchSubscription();
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -70,6 +83,37 @@ export default function SettingsPage() {
   const checkUser = async () => {
     const { data: { session } } = await supabase.auth.getSession();
     setUser(session?.user ?? null);
+  };
+
+  const fetchSubscription = async () => {
+    setBillingLoading(true);
+    try {
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      if (!currentUser) return;
+      const { data } = await supabase
+        .from('subscriptions')
+        .select('plan,billing_period,status,current_period_end,cancel_at_period_end,stripe_customer_id')
+        .eq('user_id', currentUser.id)
+        .single();
+      setSubscription(data ?? null);
+    } catch {
+      // no subscription row = free plan
+    } finally {
+      setBillingLoading(false);
+    }
+  };
+
+  const handleOpenPortal = async () => {
+    setPortalLoading(true);
+    try {
+      const res = await fetch('/api/stripe/portal', { method: 'POST' });
+      const data = await res.json();
+      if (data.url) window.location.href = data.url;
+    } catch (err) {
+      console.error('Portal error', err);
+    } finally {
+      setPortalLoading(false);
+    }
   };
 
   const fetchAccountManagers = async () => {
@@ -307,6 +351,7 @@ export default function SettingsPage() {
             <TabsTrigger value="team">Team</TabsTrigger>
             <TabsTrigger value="clients">Clients</TabsTrigger>
             <TabsTrigger value="integrations">Integrations</TabsTrigger>
+            <TabsTrigger value="billing">Billing</TabsTrigger>
           </TabsList>
 
           <TabsContent value="account" className="mt-6">
@@ -576,6 +621,67 @@ export default function SettingsPage() {
                       <Save className="h-4 w-4 mr-2" />
                       {integrationSaving ? 'Saving...' : 'Save integration settings'}
                     </Button>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="billing" className="mt-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Billing &amp; Subscription</CardTitle>
+                <CardDescription>Manage your plan and payment details</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {billingLoading ? (
+                  <p className="text-sm text-muted-foreground">Loading…</p>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between rounded-lg border p-4">
+                      <div>
+                        <p className="text-sm font-medium capitalize">
+                          {subscription?.plan ?? 'Free'} plan
+                          {subscription?.billing_period && (
+                            <span className="ml-2 text-xs text-muted-foreground">
+                              · {subscription.billing_period}
+                            </span>
+                          )}
+                        </p>
+                        {subscription?.status && subscription.status !== 'active' && (
+                          <p className="text-xs text-destructive mt-0.5 capitalize">{subscription.status}</p>
+                        )}
+                        {subscription?.current_period_end && (
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            {subscription.cancel_at_period_end ? 'Cancels' : 'Renews'}{' '}
+                            {new Date(subscription.current_period_end).toLocaleDateString()}
+                          </p>
+                        )}
+                      </div>
+                      <a href="/pricing" className="text-sm font-medium underline underline-offset-4">
+                        {(!subscription || subscription.plan === 'free') ? 'Upgrade' : 'Change plan'}
+                      </a>
+                    </div>
+
+                    {subscription?.stripe_customer_id && (
+                      <Button
+                        variant="outline"
+                        onClick={handleOpenPortal}
+                        disabled={portalLoading}
+                      >
+                        {portalLoading ? 'Opening…' : 'Manage billing & invoices'}
+                      </Button>
+                    )}
+
+                    {(!subscription || subscription.plan === 'free') && (
+                      <p className="text-sm text-muted-foreground">
+                        You&apos;re on the free plan.{' '}
+                        <a href="/pricing" className="underline underline-offset-4">
+                          Upgrade
+                        </a>{' '}
+                        to unlock more clients, users, and features.
+                      </p>
+                    )}
                   </>
                 )}
               </CardContent>

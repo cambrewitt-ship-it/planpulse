@@ -64,6 +64,7 @@ const ReportBuilderModal = dynamic(() => import('@/components/dashboard-v2/repor
 import { GanttCalendar, type GanttClient, type GanttChannel } from '@/components/agency/GanttCalendar';
 import { FullscreenGanttView, type GanttAPMarker } from '@/components/agency/FullscreenGanttView';
 import { ClientIntelTab } from '@/components/dashboard-v2/client-intel-tab';
+import ClientAIChatBar from '@/components/dashboard-v2/client-ai-chat-bar';
 
 interface Client {
   id: string;
@@ -2134,6 +2135,14 @@ export default function DashboardV2() {
     );
   };
 
+  const handleAIActionComplete = useCallback((tool: string) => {
+    if (tool === 'complete_action_point') {
+      setActionPointsRefetchTrigger(prev => prev + 1);
+    } else if (['update_media_plan_budget', 'update_manual_spend', 'toggle_ooh_checklist'].includes(tool)) {
+      loadMediaPlanBuilderData();
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleDeleteChannel = (channelId: string) => {
     const filtered = mediaPlanBuilderChannels.filter(ch => ch.id !== channelId);
     setMediaPlanBuilderChannels(filtered);
@@ -2381,20 +2390,14 @@ export default function DashboardV2() {
                     Timeline
                   </button>
                 </div>
-                {/* Right: Date Controls */}
+                {/* Right: AI Chat Bar + Date Controls */}
                 <div className="flex items-center gap-4">
-                  {/* Month Selector for Channel Cards (overview only) */}
-                  {viewMode === 'overview' && (
-                    <div className="flex items-center gap-2">
-                      <label className="text-base text-gray-600">Channel View:</label>
-                      <input
-                        type="month"
-                        value={format(selectedMonth, 'yyyy-MM')}
-                        onChange={(e) => setSelectedMonth(new Date(e.target.value))}
-                        className="px-3 py-1.5 border border-gray-300 rounded-lg text-base"
-                      />
-                    </div>
-                  )}
+                  <ClientAIChatBar
+                    clientId={clientId ?? ''}
+                    clientName={client?.name ?? ''}
+                    onActionComplete={handleAIActionComplete}
+                  />
+
 
                 </div>
               </div>

@@ -115,17 +115,18 @@ const RULER_H   = 48;
 
 const MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-// Each zoom level: pixels per day + window span. Label shown in the % chip.
+// Each zoom level: pixels per day. Label shown in the % chip.
 const ZOOM_LEVELS = [
-  { dayW: 2,  windowDays: 730, label: '25%'  },  // 0 — 2 years
-  { dayW: 3,  windowDays: 548, label: '33%'  },  // 1 — 18 months
-  { dayW: 4,  windowDays: 365, label: '50%'  },  // 2 — 1 year
-  { dayW: 7,  windowDays: 180, label: '75%'  },  // 3 — 6 months
-  { dayW: 14, windowDays: 90,  label: '100%' },  // 4 — 3 months (default)
-  { dayW: 22, windowDays: 56,  label: '150%' },  // 5 — 8 weeks
-  { dayW: 36, windowDays: 35,  label: '200%' },  // 6 — 5 weeks
+  { dayW: 2,  label: '25%'  },  // 0
+  { dayW: 3,  label: '33%'  },  // 1
+  { dayW: 4,  label: '50%'  },  // 2
+  { dayW: 7,  label: '75%'  },  // 3
+  { dayW: 14, label: '100%' },  // 4 — default
+  { dayW: 22, label: '150%' },  // 5
+  { dayW: 36, label: '200%' },  // 6
 ];
 const DEFAULT_ZOOM = 4;
+const RANGE_DAYS = 365; // always show 1 year of scrollable content
 
 // Fallback stripe pairs: alternating light/dark grey + mid-tone accent
 const FALLBACK_STRIPE_PAIRS: [string, string][] = [
@@ -173,6 +174,7 @@ function apDotColor(category: string, overdue: boolean): { fill: string; border:
   if (overdue)                     return { fill: '#7A3A2E', border: '#5C2B22' };
   if (category === 'SET UP')       return { fill: '#9B5E4E', border: '#7A4438' };
   if (category === 'HEALTH CHECK') return { fill: '#9B8A3E', border: '#7A6C30' };
+  if (category === 'REPORT')       return { fill: '#1D4ED8', border: '#1E40AF' };
   return                                  { fill: '#5B7A8A', border: '#3E5C6B' };
 }
 
@@ -253,15 +255,27 @@ function ClientTimelineRow({
   const activeColors = logoColors ?? fallbackStripe;
   const barBackground = stripeBackground(activeColors[0], activeColors[1]);
 
-  // Visible channels: only those with at least one date in window
-  const visibleChannels = clientChannels.filter(ch => {
-    const s = ch.start_date ? dateToMs(ch.start_date) : null;
-    const e = ch.end_date   ? dateToMs(ch.end_date)   : null;
-    if (s === null && e === null) return false;
-    const lo = s ?? e!;
-    const hi = e ?? s!;
-    return hi >= windowStart && lo <= windowEnd;
-  });
+  // Deduplicate by label — merge ALL flights first, then filter channels to only those
+  // whose overall span overlaps the visible window.
+  const visibleChannels = useMemo(() => {
+    const byLabel = new Map<string, { label: string; type: 'paid' | 'organic'; startMs: number; endMs: number }>();
+    for (const ch of clientChannels) {
+      const sMs = ch.start_date ? dateToMs(ch.start_date) : null;
+      const eMs = ch.end_date   ? dateToMs(ch.end_date)   : null;
+      if (sMs === null && eMs === null) continue;
+      const lo = sMs ?? eMs!;
+      const hi = eMs ?? sMs!;
+      const existing = byLabel.get(ch.label);
+      if (!existing) {
+        byLabel.set(ch.label, { label: ch.label, type: ch.type, startMs: lo, endMs: hi });
+      } else {
+        existing.startMs = Math.min(existing.startMs, lo);
+        existing.endMs   = Math.max(existing.endMs,   hi);
+      }
+    }
+    // Show the channel only if its merged span (any flight) overlaps the window
+    return [...byLabel.values()].filter(ch => ch.endMs >= windowStart && ch.startMs <= windowEnd);
+  }, [clientChannels, windowStart, windowEnd]);
 
   const chCount = visibleChannels.length;
   // Allocate vertical space per channel when hovered
@@ -358,17 +372,18 @@ function ClientTimelineRow({
           padding: '4px 0',
         }}>
           {visibleChannels.map((ch) => {
-            const sMs = ch.start_date ? Math.max(dateToMs(ch.start_date), windowStart) : windowStart;
-            const eMs = ch.end_date   ? Math.min(dateToMs(ch.end_date),   windowEnd)   : windowEnd;
+            const sMs = Math.max(ch.startMs, windowStart);
+            const eMs = Math.min(ch.endMs,   windowEnd);
             const chX = xForMs(sMs);
             const chW = Math.max(xForMs(eMs) - chX, 4);
             const color = channelBarColor(ch.label, ch.type);
-            const isFuture  = ch.start_date ? ch.start_date > todayStr : false;
-            const isPast    = ch.end_date   ? ch.end_date   < todayStr : false;
+            const todayMs = dateToMs(todayStr);
+            const isFuture  = ch.startMs > todayMs;
+            const isPast    = ch.endMs   < todayMs;
             const barOpacity = isFuture ? 0.55 : isPast ? 0.65 : 1;
             const isOrganic  = ch.type === 'organic';
             return (
-              <div key={ch.id} style={{ position: 'relative', height: CH_BAR_H, flexShrink: 0 }}>
+              <div key={ch.label} style={{ position: 'relative', height: CH_BAR_H, flexShrink: 0 }}>
                 {/* Bar */}
                 <div style={{
                   position: 'absolute',
@@ -444,7 +459,7 @@ function ClientTimelineRow({
             .map((ap, i) => ({
               ap, i,
               cx: xForMs(dateToMs(ap.due_date!)) + dayW / 2,
-              bw: estimateBubbleW(ap.category === 'SET UP' ? 'Set Up' : 'Check'),
+              bw: estimateBubbleW(ap.category === 'SET UP' ? 'Set Up' : ap.category === 'REPORT' ? 'Report' : 'Check'),
             }))
             .sort((a, b) => a.cx - b.cx);
 
@@ -464,8 +479,9 @@ function ClientTimelineRow({
             const isOverdue  = ap.due_date! < todayStr;
             const dot        = apDotColor(ap.category, isOverdue);
             const isSetUp    = ap.category === 'SET UP';
-            const bubbleBg   = isSetUp ? '#C0392B' : '#D4860A';
-            const bubbleText = isSetUp ? 'Set Up' : 'Check';
+            const isReport   = ap.category === 'REPORT';
+            const bubbleBg   = isSetUp ? '#C0392B' : isReport ? '#1D4ED8' : '#D4860A';
+            const bubbleText = isSetUp ? 'Set Up' : isReport ? 'Report' : 'Check';
             const isOrganic  = /organic|social|seo|email|edm|content/i.test(ap.channel_label);
 
             const dotTop    = dotCenterY - DOT_H / 2;
@@ -548,7 +564,7 @@ export function AgencyTimeline({ clients, channels, actionPointMarkers, zoomIdx:
   const [tooltip, setTooltip]       = useState<TooltipState | null>(null);
   const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(null);
 
-  const { dayW, windowDays } = ZOOM_LEVELS[zoomIdx];
+  const { dayW } = ZOOM_LEVELS[zoomIdx];
 
   const todayMs = useMemo(() => {
     const now = new Date();
@@ -560,12 +576,23 @@ export function AgencyTimeline({ clients, channels, actionPointMarkers, zoomIdx:
     return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
   }, [todayMs]);
 
-  // Window: centre on today, extend by half the window on each side
-  const halfDays   = Math.floor(windowDays / 2);
-  const windowStart = todayMs - halfDays * DAY_MS;
-  const windowEnd   = todayMs + (windowDays - halfDays) * DAY_MS;
-  const totalDays   = windowDays;
+  // Navigable window: 1-year scrollable range centred on windowCenterMs
+  const [windowCenterMs, setWindowCenterMs] = useState(() => todayMs);
+  const windowStart = windowCenterMs - Math.floor(RANGE_DAYS / 2) * DAY_MS;
+  const windowEnd   = windowCenterMs + Math.ceil(RANGE_DAYS / 2) * DAY_MS;
+  const totalDays   = RANGE_DAYS;
   const totalW      = totalDays * dayW;
+
+  const windowStartYear = new Date(windowStart).getUTCFullYear();
+  const windowEndYear   = new Date(windowEnd).getUTCFullYear();
+  const yearRangeLabel  = windowStartYear === windowEndYear
+    ? `${windowStartYear}`
+    : `${windowStartYear}–${windowEndYear}`;
+  const isAtToday = windowCenterMs === todayMs;
+
+  const goToPrevYear = useCallback(() => setWindowCenterMs(ms => ms - 365 * DAY_MS), []);
+  const goToNextYear = useCallback(() => setWindowCenterMs(ms => ms + 365 * DAY_MS), []);
+  const goToToday    = useCallback(() => setWindowCenterMs(todayMs), [todayMs]);
 
   const xForMs = useCallback(
     (ms: number) => ((ms - windowStart) / DAY_MS) * dayW,
@@ -573,14 +600,18 @@ export function AgencyTimeline({ clients, channels, actionPointMarkers, zoomIdx:
   );
   const todayX = xForMs(todayMs);
 
-  // Scroll to keep today visible after zoom changes
+  // Scroll when zoom or window changes: put today at ~25% if in view, else start of window
   useEffect(() => {
     if (!scrollRef.current) return;
-    // Position today ~¼ of the way from the left of the scroll container
     const containerW = scrollRef.current.clientWidth - LABEL_W;
-    const scrollTo = Math.max(0, todayX - containerW * 0.25);
-    scrollRef.current.scrollLeft = scrollTo;
-  }, [todayX, zoomIdx]);
+    const tx = xForMs(todayMs);
+    if (tx >= 0 && tx <= totalW) {
+      scrollRef.current.scrollLeft = Math.max(0, tx - containerW * 0.25);
+    } else {
+      scrollRef.current.scrollLeft = 0;
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [xForMs, todayMs, totalW, zoomIdx]);
 
   // Group channels and APs per client
   const clientRows = useMemo(() =>
@@ -661,16 +692,55 @@ export function AgencyTimeline({ clients, channels, actionPointMarkers, zoomIdx:
             display: 'flex', height: RULER_H,
             background: '#F7F5F0', borderBottom: '1px solid #E8E4DC',
           }}>
-            {/* Corner — client label only */}
+            {/* Corner — year navigation */}
             <div style={{
               width: LABEL_W, flexShrink: 0,
               borderRight: '1px solid #E8E4DC',
-              display: 'flex', alignItems: 'center',
-              padding: '0 8px',
+              display: 'flex', flexDirection: 'column', justifyContent: 'center',
+              padding: '0 8px', gap: 4,
             }}>
-              <span style={{ fontSize: 9, fontWeight: 700, color: '#B5B0A5', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                Client
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                <button
+                  onClick={goToPrevYear}
+                  title="Previous year"
+                  style={{
+                    width: 18, height: 18, borderRadius: 3, flexShrink: 0,
+                    border: '0.5px solid #D8D4CC', background: '#F0EDE8',
+                    cursor: 'pointer', color: '#6B6560', fontSize: 13,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    lineHeight: 1, padding: 0, fontFamily: 'inherit',
+                  }}
+                >‹</button>
+                <span style={{
+                  fontSize: 11, fontWeight: 600, color: '#4C4840',
+                  flex: 1, textAlign: 'center',
+                  fontFamily: "'DM Sans', system-ui, sans-serif",
+                }}>{yearRangeLabel}</span>
+                <button
+                  onClick={goToNextYear}
+                  title="Next year"
+                  style={{
+                    width: 18, height: 18, borderRadius: 3, flexShrink: 0,
+                    border: '0.5px solid #D8D4CC', background: '#F0EDE8',
+                    cursor: 'pointer', color: '#6B6560', fontSize: 13,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    lineHeight: 1, padding: 0, fontFamily: 'inherit',
+                  }}
+                >›</button>
+              </div>
+              {!isAtToday && (
+                <button
+                  onClick={goToToday}
+                  style={{
+                    fontSize: 8, fontWeight: 600, color: '#4A6580',
+                    background: 'rgba(74,101,128,0.08)',
+                    border: '0.5px solid rgba(74,101,128,0.3)',
+                    borderRadius: 4, padding: '2px 0',
+                    cursor: 'pointer', width: '100%',
+                    fontFamily: "'DM Sans', system-ui, sans-serif",
+                  }}
+                >Today</button>
+              )}
             </div>
 
             {/* Date ruler */}

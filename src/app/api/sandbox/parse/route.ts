@@ -114,6 +114,7 @@ interface ColumnMap {
   budget: number | null;
   year: number;
   asAtLabel: string;
+  customColumns: Array<{ col: number; name: string }>;
 }
 
 async function detectColumns(ws: ExcelJS.Worksheet, anthropic: Anthropic): Promise<ColumnMap> {
@@ -149,18 +150,22 @@ Identify the structure. Return ONLY a JSON object (no prose):
   "audience": <column number with audience descriptions, or null>,
   "budget": <column number with total investment/budget dollar amounts, or null>,
   "year": <year for the dates, e.g. 2025>,
-  "asAtLabel": <"As At ..." label if present, else "">
-}`;
+  "asAtLabel": <"As At ..." label if present, else "">,
+  "customColumns": [{"col": <column number>, "name": "<header label>"}]
+}
+
+For "customColumns": include any descriptor columns that appear before the date columns and are NOT already identified as funnel/channel/detail/audience/budget. Examples: Creative, CPM, Est Imps, Format, Placement, Ad Type, Objective, etc. Return an empty array [] if none found.`;
 
   try {
     const res = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 400,
+      max_tokens: 500,
       messages: [{ role: 'user', content: prompt }],
     });
     const text = res.content.find(b => b.type === 'text')?.text ?? '';
     const clean = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
     const obj = JSON.parse(clean);
+    const rawCustom = Array.isArray(obj.customColumns) ? obj.customColumns : [];
     return {
       dateHeaderRow: obj.dateHeaderRow ?? 2,
       funnel: obj.funnel ?? null,
@@ -170,6 +175,7 @@ Identify the structure. Return ONLY a JSON object (no prose):
       budget: obj.budget ?? null,
       year: obj.year ?? new Date().getFullYear(),
       asAtLabel: obj.asAtLabel ?? '',
+      customColumns: rawCustom.filter((c: any) => c.col && c.name).map((c: any) => ({ col: Number(c.col), name: String(c.name) })),
     };
   } catch {
     // Fallback: assume standard layout
@@ -177,6 +183,7 @@ Identify the structure. Return ONLY a JSON object (no prose):
       dateHeaderRow: 2,
       funnel: 1, channel: 2, detail: 3, audience: 4, budget: 5,
       year: new Date().getFullYear(), asAtLabel: '',
+      customColumns: [],
     };
   }
 }
@@ -500,7 +507,13 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    rows.push({ id: id(), funnel, channel, detail, audience, flights });
+    const customFields: Record<string, string> = {};
+    for (const cc of colMap.customColumns) {
+      const val = masterValue(rowNum, cc.col);
+      if (val) customFields[cc.name.toLowerCase().replace(/\s+/g, '_')] = val;
+    }
+
+    rows.push({ id: id(), funnel, channel, detail, audience, flights, customFields: Object.keys(customFields).length > 0 ? customFields : undefined });
     rowNums.push(rowNum);
   }
 
@@ -538,6 +551,12 @@ export async function POST(request: NextRequest) {
     asAtLabel: colMap.asAtLabel,
     weeks,
     rows,
+    customColumns: colMap.customColumns.length > 0
+      ? colMap.customColumns.map(cc => ({
+          id: cc.name.toLowerCase().replace(/\s+/g, '_'),
+          name: cc.name,
+        }))
+      : undefined,
     updatedAt: new Date().toISOString(),
   };
 

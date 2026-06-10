@@ -11,6 +11,7 @@ import {
   type GanttChannel,
   type GanttHealthCheck,
   type GanttSetupPoint,
+  type GanttReportPoint,
   type GanttPointEvent,
 } from './GanttCalendar';
 import { AgencyCalendar } from './AgencyCalendar';
@@ -85,18 +86,33 @@ export function CalendarPanel({
   );
 
   // ── Derive GanttChannel[] from ClientCardData[].channels ───────────────────
+  // Emit one entry per flight so gaps between flights are visible on the timeline.
   const ganttChannels = useMemo<GanttChannel[]>(() => {
     const result: GanttChannel[] = [];
     for (const client of clients) {
       for (const ch of client.channels ?? []) {
-        result.push({
-          id: `${client.id}:${ch.channelName}`,
-          client_id: client.id,
-          label: ch.channelName,
-          start_date: ch.startDate,
-          end_date: ch.endDate,
-          type: inferChannelType(ch.channelName),
-        });
+        const type = inferChannelType(ch.channelName);
+        if (ch.flights && ch.flights.length > 0) {
+          ch.flights.forEach((flight, fIdx) => {
+            result.push({
+              id: `${client.id}:${ch.channelName}:${fIdx}`,
+              client_id: client.id,
+              label: ch.channelName,
+              start_date: flight.startDate,
+              end_date: flight.endDate,
+              type,
+            });
+          });
+        } else {
+          result.push({
+            id: `${client.id}:${ch.channelName}`,
+            client_id: client.id,
+            label: ch.channelName,
+            start_date: ch.startDate,
+            end_date: ch.endDate,
+            type,
+          });
+        }
       }
     }
     return result;
@@ -212,6 +228,23 @@ export function CalendarPanel({
     return result;
   }, [actionPointClients]);
 
+  // ── Report points — one per client at the end of the latest channel flight ─
+  const ganttReportPoints = useMemo<GanttReportPoint[]>(() => {
+    const result: GanttReportPoint[] = [];
+    const clientLatest = new Map<string, { label: string; endDate: string }>();
+    for (const ch of ganttChannels) {
+      if (!ch.end_date) continue;
+      const existing = clientLatest.get(ch.client_id);
+      if (!existing || ch.end_date > existing.endDate) {
+        clientLatest.set(ch.client_id, { label: ch.label, endDate: ch.end_date });
+      }
+    }
+    for (const [clientId, { label, endDate }] of clientLatest.entries()) {
+      result.push({ client_id: clientId, channel_label: label, due_date: endDate });
+    }
+    return result;
+  }, [ganttChannels]);
+
   return (
     <div style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
       {/* Header */}
@@ -278,6 +311,7 @@ export function CalendarPanel({
           channels={ganttChannels}
           healthChecks={ganttHealthChecks}
           setupPoints={ganttSetupPoints}
+          reportPoints={ganttReportPoints}
           pointEvents={ganttPointEvents}
           filteredClientIds={filteredClientIds}
           selectedDay={selectedDay}
