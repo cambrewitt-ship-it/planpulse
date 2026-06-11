@@ -2,10 +2,12 @@ import { createClient } from '@supabase/supabase-js';
 import { stripe } from '@/lib/stripe';
 import type Stripe from 'stripe';
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+function getSupabaseAdmin() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+}
 
 function planFromPriceId(priceId: string): string {
   const env = process.env;
@@ -38,7 +40,7 @@ async function upsertSubscription(subscription: Stripe.Subscription) {
     ? new Date((item.current_period_end as number) * 1000).toISOString()
     : null;
 
-  const { error } = await supabaseAdmin.from('subscriptions').upsert(
+  const { error } = await getSupabaseAdmin().from('subscriptions').upsert(
     {
       user_id: userId,
       stripe_customer_id: subscription.customer as string,
@@ -60,7 +62,7 @@ async function cancelSubscription(subscription: Stripe.Subscription) {
   const userId = subscription.metadata?.supabase_user_id;
   if (!userId) return;
 
-  const { error } = await supabaseAdmin.from('subscriptions').upsert(
+  const { error } = await getSupabaseAdmin().from('subscriptions').upsert(
     {
       user_id: userId,
       stripe_customer_id: subscription.customer as string,

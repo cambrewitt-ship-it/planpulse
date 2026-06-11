@@ -1032,7 +1032,7 @@ export default function HeroHealthSection({
             <div className="absolute top-2 right-2" style={{ zIndex: 20 }}>
               <InfoButton showInfo={showChartInfo} setShowInfo={setShowChartInfo} infoRef={chartInfoRef} />
             </div>
-            <div className="absolute top-4 right-4 pointer-events-none flex flex-row items-center gap-2">
+            <div className="absolute top-4 right-16 pointer-events-none flex flex-row items-center gap-2">
               {/* 24h change badge — shown to the left of the speedometer */}
               {perfData?.hasData && perfData?.trend24h && (() => {
                 const { pctChange, improving } = perfData.trend24h;

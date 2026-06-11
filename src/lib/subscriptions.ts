@@ -1,10 +1,12 @@
 import { createClient } from '@supabase/supabase-js';
 import { PlanId, PLANS } from './stripe';
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+function getSupabaseAdmin() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+}
 
 export interface Subscription {
   id: string;
@@ -21,7 +23,7 @@ export interface Subscription {
 }
 
 export async function getUserSubscription(userId: string): Promise<Subscription | null> {
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await getSupabaseAdmin()
     .from('subscriptions')
     .select('*')
     .eq('user_id', userId)
