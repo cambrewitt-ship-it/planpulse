@@ -2274,8 +2274,8 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                     className={`relative ${channelColors.bg}`}
                   >
                     {/* Channel Name */}
-                    <td className="border border-gray-300 px-3 py-2 sticky left-0 mr-[-1px] z-20 bg-gray-50 w-[200px] min-w-[200px] border-r-2 border-gray-400 shadow-[2px_0_4px_rgba(0,0,0,0.1)]">
-                      <div className="flex items-center gap-1">
+                    <td className="border border-gray-300 px-3 py-2 sticky left-0 mr-[-1px] z-20 bg-gray-50 w-[200px] min-w-[200px] border-r-2 border-gray-400 shadow-[2px_0_4px_rgba(0,0,0,0.1)] overflow-hidden" style={{ maxWidth: '200px' }}>
+                      <div className="flex items-center gap-1 overflow-hidden">
                         <button
                           className="flex-shrink-0 p-0.5 rounded hover:bg-gray-200"
                           style={{ lineHeight: 0 }}
@@ -2343,7 +2343,7 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                           handleUpdateChannel(channel.id, updates);
                         }}
                       >
-                        <SelectTrigger className={`w-full border-none outline-none bg-transparent h-auto p-0 shadow-none focus:ring-0 ${channelColors.text}`}>
+                        <SelectTrigger className={`w-full border-none outline-none bg-transparent h-auto p-0 shadow-none focus:ring-0 text-left overflow-hidden ${channelColors.text}`}>
                           <SelectValue placeholder="Select Channel" className="uppercase font-semibold">
                             {channel.channelName
                               ? ((channel.channelCategory === 'other' || channel.channelName.toLowerCase() === 'other') && channel.customChannelName
@@ -2375,7 +2375,7 @@ const handleBudgetChange = (channelIndex: number, value: number) => {
                     </td>
 
                     {/* Format/Detail */}
-                    <td className="border border-gray-300 px-3 py-2 sticky left-[200px] mr-[-1px] z-20 bg-gray-50 w-[150px] min-w-[150px] border-r-2 border-gray-400 shadow-[2px_0_4px_rgba(0,0,0,0.1)]">
+                    <td className="border border-gray-300 px-3 py-2 sticky left-[200px] mr-[-1px] z-20 bg-gray-50 w-[150px] min-w-[150px] border-r-2 border-gray-400 shadow-[2px_0_4px_rgba(0,0,0,0.1)] overflow-hidden" style={{ maxWidth: '150px' }}>
                       {(() => {
                         const category = channel.channelCategory || getChannelCategory(channel.channelName);
                         
