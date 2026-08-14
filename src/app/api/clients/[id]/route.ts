@@ -3,6 +3,27 @@ import { createClient } from "@/lib/supabase/server";
 import { Nango } from "@nangohq/node";
 import { toNangoPlatform } from "@/lib/platform-mapping";
 
+export async function GET(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id: clientId } = await params;
+  const supabase = await createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const { data, error } = await supabase
+    .from('clients')
+    .select('id, name, logo_url, billing_address')
+    .eq('id', clientId)
+    .eq('user_id', session.user.id)
+    .maybeSingle();
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (!data) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  return NextResponse.json(data);
+}
+
 export async function DELETE(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }

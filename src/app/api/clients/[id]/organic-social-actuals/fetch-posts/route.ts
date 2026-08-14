@@ -121,7 +121,7 @@ export async function POST(
         // First, get user's pages/accounts
         console.log('Fetching Facebook pages...');
         const meResponse = await fetch(
-          `https://graph.facebook.com/v18.0/me/accounts?fields=id,name,access_token&access_token=${accessToken}`
+          `https://graph.facebook.com/v26.0/me/accounts?fields=id,name,access_token&access_token=${accessToken}`
         );
 
         if (!meResponse.ok) {
@@ -159,7 +159,7 @@ export async function POST(
         if (pages.length === 0) {
           // Try to get user info and check permissions
           const userInfoResponse = await fetch(
-            `https://graph.facebook.com/v18.0/me?fields=id,name&access_token=${accessToken}`
+            `https://graph.facebook.com/v26.0/me?fields=id,name&access_token=${accessToken}`
           );
           
           let userInfo = null;
@@ -169,7 +169,7 @@ export async function POST(
           
           // Check what permissions the token has
           const permissionsResponse = await fetch(
-            `https://graph.facebook.com/v18.0/me/permissions?access_token=${accessToken}`
+            `https://graph.facebook.com/v26.0/me/permissions?access_token=${accessToken}`
           );
           
           let permissions: string[] = [];
@@ -217,7 +217,7 @@ export async function POST(
           }
           
           const instagramResponse = await fetch(
-            `https://graph.facebook.com/v18.0/${pageId}?fields=instagram_business_account&access_token=${pageAccessToken}`
+            `https://graph.facebook.com/v26.0/${pageId}?fields=instagram_business_account&access_token=${pageAccessToken}`
           );
 
           if (instagramResponse.ok) {
@@ -254,7 +254,7 @@ export async function POST(
           : 'id,timestamp,media_type';
         
         const postsResponse = await fetch(
-          `https://graph.facebook.com/v18.0/${accountId}/${endpoint}?` +
+          `https://graph.facebook.com/v26.0/${accountId}/${endpoint}?` +
           `fields=${fields}&` +
           `since=${sinceTimestamp}&` +
           `until=${untilTimestamp}&` +

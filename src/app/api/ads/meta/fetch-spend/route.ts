@@ -222,7 +222,7 @@ export async function POST(request: NextRequest) {
             access_token: accessToken
           });
 
-          const url = `https://graph.facebook.com/v18.0/${accountId}/insights?${params.toString()}`;
+          const url = `https://graph.facebook.com/v26.0/${accountId}/insights?${params.toString()}`;
 
           const response = await fetch(url, {
             method: 'GET',
@@ -246,12 +246,16 @@ export async function POST(request: NextRequest) {
               if (errorData.error) {
                 const metaError = errorData.error;
                 
-                // Check for expired token (error code 463)
-                if (metaError.error_subcode === 463 || 
+                // Check for expired/invalidated token (codes 460, 463)
+                // 460 = session invalidated (password change or Facebook security reset)
+                // 463 = session expired
+                if (metaError.code === 460 || metaError.error_subcode === 460 ||
+                    metaError.error_subcode === 463 ||
                     (metaError.message && metaError.message.includes('Session has expired')) ||
-                    (metaError.message && metaError.message.includes('expired'))) {
+                    (metaError.message && metaError.message.includes('expired')) ||
+                    (metaError.message && metaError.message.includes('invalidated'))) {
                   isExpiredToken = true;
-                  errorMessage = 'Your Meta Ads connection has expired. Please reconnect your Meta Ads account in the platform settings.';
+                  errorMessage = 'Your Meta Ads connection has been invalidated. Please reconnect your Meta Ads account in the platform settings.';
                 } else {
                   errorMessage = `Meta Marketing API error: ${metaError.message || metaError.type || response.status}`;
                   if (metaError.error_subcode) {
@@ -263,20 +267,22 @@ export async function POST(request: NextRequest) {
               // If parsing fails, use the raw error text (truncated)
               if (errorText) {
                 // Check for expired token in raw text
-                if (errorText.includes('Session has expired') || errorText.includes('expired')) {
+                if (errorText.includes('Session has expired') || errorText.includes('expired') || errorText.includes('invalidated')) {
                   isExpiredToken = true;
-                  errorMessage = 'Your Meta Ads connection has expired. Please reconnect your Meta Ads account in the platform settings.';
+                  errorMessage = 'Your Meta Ads connection has been invalidated. Please reconnect your Meta Ads account in the platform settings.';
                 } else {
                   errorMessage += `: ${errorText.substring(0, 200)}`;
                 }
               }
             }
             
-            // If it's an expired token, try to refresh via Nango first
+            // If it's an expired/invalidated token, try to refresh via Nango first.
+            // Note: Meta does NOT support standard OAuth refresh tokens — long-lived user
+            // tokens expire after ~60 days. Nango may have a newer token if the user
+            // re-authenticated, but if not this will also fail and we mark the connection expired.
             if (isExpiredToken) {
               try {
                 console.log('Attempting to refresh Meta Ads token via Nango...');
-                // Nango should handle token refresh automatically, but we can try to get a fresh connection
                 const refreshedConnection = await nango.getConnection(toNangoPlatform('meta-ads'), connection.connection_id);
                 const refreshedToken = (refreshedConnection.credentials as any)?.access_token;
                 
@@ -295,7 +301,7 @@ export async function POST(request: NextRequest) {
                     access_token: refreshedToken
                   });
                   
-                  const retryUrl = `https://graph.facebook.com/v18.0/${accountId}/insights?${retryParams.toString()}`;
+                  const retryUrl = `https://graph.facebook.com/v26.0/${accountId}/insights?${retryParams.toString()}`;
                   const retryResponse = await fetch(retryUrl, {
                     method: 'GET',
                     headers: {
@@ -344,10 +350,21 @@ export async function POST(request: NextRequest) {
                 }
               } catch (refreshError) {
                 console.error('Token refresh failed:', refreshError);
-                // Continue with the expired token error message
               }
+
+              // Mark this connection as expired in the DB so the UI shows the
+              // correct state (orange reconnect prompt) on the next page load.
+              void supabase
+                .from('ad_platform_connections')
+                .update({ connection_status: 'expired', updated_at: new Date().toISOString() })
+                .eq('user_id', user.id)
+                .eq('connection_id', connection.connection_id)
+                .then(({ error: e }) => {
+                  if (e) console.error('Failed to mark connection expired:', e);
+                  else console.log('Marked Meta connection as expired');
+                });
             }
-            
+
             throw new Error(errorMessage);
           }
 

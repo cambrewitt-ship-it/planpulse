@@ -14,12 +14,14 @@ import {
   DialogTitle,
 } from './ui/dialog';
 
+type PlatformConnectionStatus = 'active' | 'expired' | false;
+
 interface ConnectionStatus {
-  'google-ads': boolean;
-  'facebook': boolean;
-  'google-analytics': boolean;
-  'linkedin': boolean;
-  'tiktok': boolean;
+  'google-ads': PlatformConnectionStatus;
+  'facebook': PlatformConnectionStatus;
+  'google-analytics': PlatformConnectionStatus;
+  'linkedin': PlatformConnectionStatus;
+  'tiktok': PlatformConnectionStatus;
 }
 
 interface Platform {
@@ -130,7 +132,7 @@ export default function AdPlatformConnector({ clientId, onConfigNeeded }: AdPlat
     'google-analytics': false,
     'linkedin': false,
     'tiktok': false,
-  });
+  } as ConnectionStatus);
   const [loadingStates, setLoadingStates] = useState<Record<string, boolean>>({});
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [openModal, setOpenModal] = useState<'google-ads' | 'facebook' | 'google-analytics' | 'linkedin' | 'tiktok' | null>(null);
@@ -190,15 +192,22 @@ export default function AdPlatformConnector({ clientId, onConfigNeeded }: AdPlat
           'google-analytics': false,
           'linkedin': false,
           'tiktok': false,
-        };
-        
+        } as ConnectionStatus;
+
         if (data.connections && Array.isArray(data.connections)) {
           data.connections.forEach((conn: { platform: string; status: string }) => {
             console.log('Processing connection:', conn);
             // Normalize 'meta-ads' to 'facebook' for UI consistency
             const uiPlatform = conn.platform === 'meta-ads' ? 'facebook' : conn.platform;
             if (uiPlatform === 'google-ads' || uiPlatform === 'facebook' || uiPlatform === 'google-analytics') {
-              statusMap[uiPlatform] = conn.status === 'active';
+              const mapped: PlatformConnectionStatus =
+                conn.status === 'active' ? 'active' :
+                conn.status === 'expired' ? 'expired' :
+                false;
+              // Prefer 'active' over 'expired' if multiple rows exist for same platform
+              if (statusMap[uiPlatform as keyof ConnectionStatus] !== 'active') {
+                statusMap[uiPlatform as keyof ConnectionStatus] = mapped;
+              }
             }
           });
         }
@@ -266,7 +275,7 @@ export default function AdPlatformConnector({ clientId, onConfigNeeded }: AdPlat
             // Update connection status in UI
             setConnectionStatus((prev) => ({
               ...prev,
-              [platformId]: true,
+              [platformId]: 'active',
             }));
             setLoadingStates((prev) => ({ ...prev, [platformId]: false }));
           }
@@ -857,7 +866,9 @@ export default function AdPlatformConnector({ clientId, onConfigNeeded }: AdPlat
 
       <div className="grid grid-cols-3 md:grid-cols-5 gap-4">
         {platforms.map((platform) => {
-          const isConnected = connectionStatus[platform.id];
+          const connStatus = connectionStatus[platform.id];
+          const isConnected = !!connStatus;
+          const isExpired = connStatus === 'expired';
           const isLoading = loadingStates[platform.id];
 
           const noSavedAccounts = platformHasNoSavedAccounts(platform.id);
@@ -872,7 +883,9 @@ export default function AdPlatformConnector({ clientId, onConfigNeeded }: AdPlat
                 flex flex-col items-center justify-center
                 bg-white border-2 rounded-lg
                 transition-all duration-200
-                ${isConnected && !noSavedAccounts
+                ${isExpired
+                  ? 'border-orange-400 hover:border-orange-500 hover:shadow-md'
+                  : isConnected && !noSavedAccounts
                   ? 'border-green-500 hover:border-green-600 hover:shadow-md'
                   : isConnected && noSavedAccounts
                   ? 'border-amber-400 hover:border-amber-500 hover:shadow-md'
@@ -885,9 +898,14 @@ export default function AdPlatformConnector({ clientId, onConfigNeeded }: AdPlat
             >
               <PlatformLogo platformId={platform.id} />
               {isConnected && (
-                <div className={`absolute top-2 right-2 w-3 h-3 ${noSavedAccounts ? 'bg-amber-400' : 'bg-green-500'} rounded-full border-2 border-white`} />
+                <div className={`absolute top-2 right-2 w-3 h-3 ${isExpired ? 'bg-orange-400' : noSavedAccounts ? 'bg-amber-400' : 'bg-green-500'} rounded-full border-2 border-white`} />
               )}
-              {isConnected && noSavedAccounts && (
+              {isExpired && (
+                <span className="absolute bottom-2 text-[9px] font-semibold text-orange-600 text-center leading-tight px-1">
+                  Reconnect<br />Required
+                </span>
+              )}
+              {!isExpired && isConnected && noSavedAccounts && (
                 <span className="absolute bottom-2 text-[9px] font-semibold text-amber-600 text-center leading-tight px-1">
                   No Saved Account<br />Configure Now
                 </span>

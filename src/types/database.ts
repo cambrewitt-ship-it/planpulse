@@ -45,6 +45,7 @@ export interface Database {
             name: string;
             logo_url: string | null;
             user_id: string | null;
+            billing_address: string | null;
             created_at: string;
             updated_at: string;
           };
@@ -53,12 +54,14 @@ export interface Database {
             name: string;
             logo_url?: string | null;
             user_id?: string | null;
+            billing_address?: string | null;
           };
           Update: {
             id?: string;
             name?: string;
             logo_url?: string | null;
             user_id?: string | null;
+            billing_address?: string | null;
           };
           Relationships: [];
         };
@@ -1175,6 +1178,135 @@ export interface Database {
           };
           Relationships: [];
         };
+        user_agents: {
+          Row: {
+            id: string;
+            user_id: string;
+            name: string;
+            description: string | null;
+            system_prompt: string;
+            enabled_tools: string[];
+            is_enabled: boolean;
+            is_template: boolean;
+            template_slug: string | null;
+            icon: string | null;
+            color: string | null;
+            created_at: string;
+            updated_at: string;
+          };
+          Insert: {
+            id?: string;
+            user_id: string;
+            name: string;
+            description?: string | null;
+            system_prompt?: string;
+            enabled_tools?: string[];
+            is_enabled?: boolean;
+            is_template?: boolean;
+            template_slug?: string | null;
+            icon?: string | null;
+            color?: string | null;
+            created_at?: string;
+            updated_at?: string;
+          };
+          Update: {
+            name?: string;
+            description?: string | null;
+            system_prompt?: string;
+            enabled_tools?: string[];
+            is_enabled?: boolean;
+            is_template?: boolean;
+            template_slug?: string | null;
+            icon?: string | null;
+            color?: string | null;
+            updated_at?: string;
+          };
+          Relationships: [];
+        };
+        agent_runs: {
+          Row: {
+            id: string;
+            user_id: string;
+            agent_id: string | null;
+            agent_name: string;
+            user_message: string;
+            audit_trail: AgentAuditStep[];
+            final_output: string | null;
+            output_links: AgentOutputLink[];
+            started_at: string;
+            completed_at: string | null;
+            status: string;
+          };
+          Insert: {
+            id?: string;
+            user_id: string;
+            agent_id?: string | null;
+            agent_name: string;
+            user_message: string;
+            audit_trail?: AgentAuditStep[];
+            final_output?: string | null;
+            output_links?: AgentOutputLink[];
+            started_at?: string;
+            completed_at?: string | null;
+            status?: string;
+          };
+          Update: {
+            audit_trail?: AgentAuditStep[];
+            final_output?: string | null;
+            output_links?: AgentOutputLink[];
+            completed_at?: string | null;
+            status?: string;
+          };
+          Relationships: [];
+        };
+        agency_settings: {
+          Row: {
+            id: string;
+            user_id: string;
+            agency_name: string;
+            agency_address: string;
+            agency_email: string;
+            agency_phone: string;
+            logo_url: string | null;
+            bank_name: string;
+            bank_account_name: string;
+            bank_account_number: string;
+            invoice_notes: string;
+            invoice_due_days: number;
+            created_at: string;
+            updated_at: string;
+          };
+          Insert: {
+            id?: string;
+            user_id: string;
+            agency_name?: string;
+            agency_address?: string;
+            agency_email?: string;
+            agency_phone?: string;
+            logo_url?: string | null;
+            bank_name?: string;
+            bank_account_name?: string;
+            bank_account_number?: string;
+            invoice_notes?: string;
+            invoice_due_days?: number;
+            created_at?: string;
+            updated_at?: string;
+          };
+          Update: {
+            agency_name?: string;
+            agency_address?: string;
+            agency_email?: string;
+            agency_phone?: string;
+            logo_url?: string | null;
+            bank_name?: string;
+            bank_account_name?: string;
+            bank_account_number?: string;
+            invoice_notes?: string;
+            invoice_due_days?: number;
+            updated_at?: string;
+          };
+          Relationships: [];
+        };
       };
       Views: { [_ in never]: never };
       Functions: { [_ in never]: never };
@@ -1224,3 +1356,90 @@ export type ChannelBenchmarkUpdate = Database['public']['Tables']['channel_bench
 export type ClientChannelPreset = Database['public']['Tables']['client_channel_presets']['Row'];
 export type ClientChannelPresetInsert = Database['public']['Tables']['client_channel_presets']['Insert'];
 export type ClientChannelPresetUpdate = Database['public']['Tables']['client_channel_presets']['Update'];
+
+// Agent types
+export interface UserAgent {
+  id: string;
+  user_id: string;
+  name: string;
+  description: string | null;
+  system_prompt: string;
+  enabled_tools: string[];
+  is_enabled: boolean;
+  is_template: boolean;
+  template_slug: string | null;
+  icon: string | null;
+  color: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UserAgentInsert {
+  id?: string;
+  user_id: string;
+  name: string;
+  description?: string | null;
+  system_prompt: string;
+  enabled_tools?: string[];
+  is_enabled?: boolean;
+  is_template?: boolean;
+  template_slug?: string | null;
+  icon?: string | null;
+  color?: string | null;
+}
+
+export interface UserAgentUpdate {
+  name?: string;
+  description?: string | null;
+  system_prompt?: string;
+  enabled_tools?: string[];
+  is_enabled?: boolean;
+  icon?: string | null;
+  color?: string | null;
+  updated_at?: string;
+}
+
+export interface AgentRun {
+  id: string;
+  user_id: string;
+  agent_id: string | null;
+  agent_name: string;
+  user_message: string;
+  audit_trail: AgentAuditStep[];
+  final_output: string | null;
+  output_links: AgentOutputLink[];
+  started_at: string;
+  completed_at: string | null;
+  status: 'running' | 'completed' | 'error';
+}
+
+export interface AgentAuditStep {
+  tool: string;
+  label: string;
+  summary: string;
+  timestamp: string;
+  is_write: boolean;
+}
+
+export interface AgentOutputLink {
+  label: string;
+  href: string;
+  target?: string;
+}
+
+export interface AgencySettings {
+  id: string;
+  user_id: string;
+  agency_name: string;
+  agency_address: string;
+  agency_email: string;
+  agency_phone: string;
+  logo_url: string | null;
+  bank_name: string;
+  bank_account_name: string;
+  bank_account_number: string;
+  invoice_notes: string;
+  invoice_due_days: number;
+  created_at: string;
+  updated_at: string;
+}

@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Plus, Trash2, Upload, Save } from 'lucide-react';
 import type { User as SupabaseUser } from '@supabase/supabase-js';
+import type { AgencySettings } from '@/types/database';
 
 interface AccountManager {
   id: string;
@@ -51,6 +52,13 @@ export default function SettingsPage() {
   const [integrationLoading, setIntegrationLoading] = useState(false);
   const [integrationSaving, setIntegrationSaving] = useState(false);
 
+  // Agency settings state
+  const [agency, setAgency] = useState<Partial<AgencySettings>>({});
+  const [agencyLoading, setAgencyLoading] = useState(false);
+  const [agencySaving, setAgencySaving] = useState(false);
+  const [agencyLogoUploading, setAgencyLogoUploading] = useState(false);
+  const agencyLogoInputRef = useRef<HTMLInputElement>(null);
+
   // Billing state
   const [subscription, setSubscription] = useState<{
     plan: string;
@@ -69,6 +77,7 @@ export default function SettingsPage() {
     fetchClients();
     fetchIntegration();
     fetchSubscription();
+    fetchAgency();
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -266,6 +275,80 @@ export default function SettingsPage() {
     }
   };
 
+  const fetchAgency = async () => {
+    try {
+      setAgencyLoading(true);
+      const res = await fetch('/api/settings/agency');
+      if (res.ok) {
+        const data = await res.json();
+        setAgency(data ?? {});
+      }
+    } catch (e) {
+      console.error('Error fetching agency settings:', e);
+    } finally {
+      setAgencyLoading(false);
+    }
+  };
+
+  const handleSaveAgency = async () => {
+    try {
+      setAgencySaving(true);
+      setError(null);
+      const res = await fetch('/api/settings/agency', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(agency),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        setError(data.error ?? 'Failed to save agency settings');
+        return;
+      }
+      const data = await res.json();
+      setAgency(data);
+      setSuccess('Agency settings saved');
+      setTimeout(() => setSuccess(null), 3000);
+    } catch {
+      setError('Failed to save agency settings');
+    } finally {
+      setAgencySaving(false);
+    }
+  };
+
+  const handleAgencyLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setAgencyLogoUploading(true);
+    try {
+      const ext = file.name.split('.').pop() || 'png';
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve((reader.result as string).split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const res = await fetch('/api/settings/agency/logo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data: base64, contentType: file.type || 'image/png', ext }),
+      });
+      if (res.ok) {
+        const { url } = await res.json();
+        setAgency(prev => ({ ...prev, logo_url: url }));
+        setSuccess('Agency logo updated');
+        setTimeout(() => setSuccess(null), 3000);
+      } else {
+        const { error: err } = await res.json();
+        setError(err || 'Logo upload failed');
+      }
+    } catch {
+      setError('Logo upload failed');
+    } finally {
+      setAgencyLogoUploading(false);
+      if (agencyLogoInputRef.current) agencyLogoInputRef.current.value = '';
+    }
+  };
+
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !logoUploadClientId) return;
@@ -336,7 +419,7 @@ export default function SettingsPage() {
           </div>
         )}
 
-        {/* Hidden file input for logo upload */}
+        {/* Hidden file inputs */}
         <input
           ref={logoInputRef}
           type="file"
@@ -344,10 +427,18 @@ export default function SettingsPage() {
           className="hidden"
           onChange={handleLogoUpload}
         />
+        <input
+          ref={agencyLogoInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={handleAgencyLogoUpload}
+        />
 
         <Tabs defaultValue="account" className="w-full">
           <TabsList>
             <TabsTrigger value="account">Account</TabsTrigger>
+            <TabsTrigger value="agency">Agency</TabsTrigger>
             <TabsTrigger value="team">Team</TabsTrigger>
             <TabsTrigger value="clients">Clients</TabsTrigger>
             <TabsTrigger value="integrations">Integrations</TabsTrigger>
@@ -388,6 +479,115 @@ export default function SettingsPage() {
                 </div>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          <TabsContent value="agency" className="mt-6">
+            <div className="space-y-6">
+              {agencyLoading ? (
+                <div className="text-sm text-muted-foreground py-4">Loading…</div>
+              ) : (
+                <>
+                  {/* Branding */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Agency Branding</CardTitle>
+                      <CardDescription>Your agency name, logo, and contact details — shown on invoices</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-6">
+                      {/* Logo */}
+                      <div className="flex items-center gap-4">
+                        <div className="w-16 h-16 rounded-xl border border-gray-200 bg-gray-50 flex items-center justify-center overflow-hidden flex-shrink-0">
+                          {agency.logo_url ? (
+                            <img src={agency.logo_url} alt="Agency logo" className="w-full h-full object-cover" />
+                          ) : (
+                            <span className="text-2xl font-bold text-gray-300 select-none">
+                              {(agency.agency_name || 'A').charAt(0).toUpperCase()}
+                            </span>
+                          )}
+                        </div>
+                        <div>
+                          <Button variant="outline" size="sm" onClick={() => agencyLogoInputRef.current?.click()} disabled={agencyLogoUploading}>
+                            <Upload className="h-3 w-3 mr-2" />
+                            {agencyLogoUploading ? 'Uploading…' : agency.logo_url ? 'Replace logo' : 'Upload logo'}
+                          </Button>
+                          <p className="text-xs text-muted-foreground mt-1">PNG or JPG, max 5 MB, shown at 52×52px</p>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label>Agency name</Label>
+                          <Input value={agency.agency_name ?? ''} onChange={e => setAgency(p => ({ ...p, agency_name: e.target.value }))} placeholder="OneOneThree Digital" />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Email</Label>
+                          <Input type="email" value={agency.agency_email ?? ''} onChange={e => setAgency(p => ({ ...p, agency_email: e.target.value }))} placeholder="billing@agency.com" />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Phone</Label>
+                          <Input value={agency.agency_phone ?? ''} onChange={e => setAgency(p => ({ ...p, agency_phone: e.target.value }))} placeholder="09-123-4567" />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Address</Label>
+                          <Input value={agency.agency_address ?? ''} onChange={e => setAgency(p => ({ ...p, agency_address: e.target.value }))} placeholder="104 Oriental Parade, Wellington" />
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Payment details */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Payment Details</CardTitle>
+                      <CardDescription>Bank details printed in the invoice footer</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label>Bank name</Label>
+                          <Input value={agency.bank_name ?? ''} onChange={e => setAgency(p => ({ ...p, bank_name: e.target.value }))} placeholder="ANZ Bank New Zealand" />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Account name</Label>
+                          <Input value={agency.bank_account_name ?? ''} onChange={e => setAgency(p => ({ ...p, bank_account_name: e.target.value }))} placeholder="Agency Ltd" />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Account number</Label>
+                          <Input value={agency.bank_account_number ?? ''} onChange={e => setAgency(p => ({ ...p, bank_account_number: e.target.value }))} placeholder="06-0123-0123456-00" />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Invoice due days</Label>
+                          <Input type="number" min={0} max={365} value={agency.invoice_due_days ?? 14} onChange={e => setAgency(p => ({ ...p, invoice_due_days: parseInt(e.target.value) || 14 }))} />
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Notes */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Invoice Notes</CardTitle>
+                      <CardDescription>Payment terms or any notes printed on every invoice</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <textarea
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 min-h-[80px]"
+                        value={agency.invoice_notes ?? ''}
+                        onChange={e => setAgency(p => ({ ...p, invoice_notes: e.target.value }))}
+                        placeholder="Payment due within 14 days. Late payments may incur a 2% monthly fee."
+                      />
+                    </CardContent>
+                  </Card>
+
+                  <div className="flex justify-end">
+                    <Button onClick={handleSaveAgency} disabled={agencySaving}>
+                      <Save className="h-4 w-4 mr-2" />
+                      {agencySaving ? 'Saving…' : 'Save agency settings'}
+                    </Button>
+                  </div>
+                </>
+              )}
+            </div>
           </TabsContent>
 
           <TabsContent value="team" className="mt-6">

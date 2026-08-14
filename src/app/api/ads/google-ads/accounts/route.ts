@@ -51,7 +51,7 @@ export async function GET() {
     }
 
     // List all accessible customers for the authenticated user
-    const listResponse = await fetch('https://googleads.googleapis.com/v21/customers:listAccessibleCustomers', {
+    const listResponse = await fetch('https://googleads.googleapis.com/v25/customers:listAccessibleCustomers', {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
@@ -84,7 +84,7 @@ export async function GET() {
     for (const customerId of customerIds) {
       try {
         const searchResponse = await fetch(
-          `https://googleads.googleapis.com/v21/customers/${customerId}/googleAds:search`,
+          `https://googleads.googleapis.com/v25/customers/${customerId}/googleAds:search`,
           {
             method: 'POST',
             headers: {
@@ -127,7 +127,7 @@ export async function GET() {
     for (const managerId of managerIds) {
       try {
         const clientsResponse = await fetch(
-          `https://googleads.googleapis.com/v21/customers/${managerId}/googleAds:search`,
+          `https://googleads.googleapis.com/v25/customers/${managerId}/googleAds:search`,
           {
             method: 'POST',
             headers: {

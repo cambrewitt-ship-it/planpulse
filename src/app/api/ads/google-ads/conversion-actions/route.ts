@@ -126,7 +126,7 @@ export async function GET(request: NextRequest) {
 
       try {
         const response = await fetch(
-          `https://googleads.googleapis.com/v21/customers/${cleanCustomerId}/googleAds:search`,
+          `https://googleads.googleapis.com/v25/customers/${cleanCustomerId}/googleAds:search`,
           { method: 'POST', headers, body: JSON.stringify({ query: gaqlQuery }) }
         );
 

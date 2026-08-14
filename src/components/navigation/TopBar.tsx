@@ -5,7 +5,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/supabase/client';
-import { LayoutDashboard, Users, LogOut, Library, Settings } from 'lucide-react';
+import { LayoutDashboard, Users, LogOut, Library, Settings, Bot } from 'lucide-react';
 import type { User as SupabaseUser } from '@supabase/supabase-js';
 
 export default function TopBar() {
@@ -83,6 +83,12 @@ export default function TopBar() {
                   <Button variant={pathname === '/library' ? 'default' : 'ghost'} size="sm">
                     <Library className="h-4 w-4 mr-2" />
                     Library
+                  </Button>
+                </Link>
+                <Link href="/agents">
+                  <Button variant={pathname === '/agents' ? 'default' : 'ghost'} size="sm">
+                    <Bot className="h-4 w-4 mr-2" />
+                    Agents
                   </Button>
                 </Link>
               </div>

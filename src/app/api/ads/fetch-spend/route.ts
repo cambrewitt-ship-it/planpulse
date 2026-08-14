@@ -212,14 +212,18 @@ export async function POST(request: NextRequest) {
             response: nangoError.response
           });
           
-          // Check if connection exists in Nango
-          try {
-            const allConnections = await nango.listConnections();
-            console.log('All Nango connections:', JSON.stringify(allConnections, null, 2));
-          } catch (listError) {
-            console.error('Could not list connections:', listError);
-          }
-          
+          // Mark this connection as expired in the DB so the UI shows the
+          // correct state (orange reconnect prompt) on the next page load.
+          void supabase
+            .from('ad_platform_connections')
+            .update({ connection_status: 'expired', updated_at: new Date().toISOString() })
+            .eq('user_id', user.id)
+            .eq('connection_id', accountConnectionId)
+            .then(({ error: e }) => {
+              if (e) console.error('Failed to mark connection expired:', e);
+              else console.log('Marked Google Ads connection as expired');
+            });
+
           return Response.json({
             success: false,
             error: 'Google Ads connection not found or expired. Please reconnect your Google Ads account.',
@@ -278,7 +282,7 @@ export async function POST(request: NextRequest) {
               throw new Error(`Invalid customer ID format: ${customerId} (cleaned: ${cleanCustomerId}). Customer IDs must be 10 digits.`);
             }
             
-            const apiUrl = `https://googleads.googleapis.com/v21/customers/${cleanCustomerId}/googleAds:search`;
+            const apiUrl = `https://googleads.googleapis.com/v25/customers/${cleanCustomerId}/googleAds:search`;
             console.log(`  API URL: ${apiUrl}`);
 
             // Use the stored manager_customer_id for sub-accounts under an MCC.
@@ -332,7 +336,7 @@ export async function POST(request: NextRequest) {
                 status: response.status,
                 statusText: response.statusText,
                 errorText: errorText.substring(0, 500),
-                url: `https://googleads.googleapis.com/v21/customers/${cleanCustomerId}/googleAds:search`
+                url: `https://googleads.googleapis.com/v25/customers/${cleanCustomerId}/googleAds:search`
               });
               
               // Provide more helpful error messages

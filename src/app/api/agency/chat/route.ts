@@ -2,6 +2,8 @@ import { NextRequest } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { createClient } from '@/lib/supabase/server';
 import { TOOL_DEFINITIONS } from '@/lib/agent-tools';
+import { buildAuditSummary, buildOutputLinks, TOOL_LABELS, WRITE_TOOLS } from '@/lib/agent-audit';
+import type { AgentAuditStep, AgentOutputLink } from '@/lib/agent-audit';
 
 export const maxDuration = 60;
 
@@ -658,6 +660,7 @@ async function toolUpdateMediaPlanBudget(
     success: true,
     message: `Updated ${channel.channelName} budget for ${input.month}: $${Number(oldBudget).toLocaleString()} → $${Number(input.new_budget).toLocaleString()} for ${client.name}`,
     client: client.name,
+    client_id: client.id,
     channel: channel.channelName,
     month: input.month,
     previous_budget: oldBudget,
@@ -737,7 +740,8 @@ async function toolGenerateInvoice(
   });
 
   if (!res.ok) return { error: `Invoice generation failed: ${res.status}` };
-  return res.json();
+  const invoiceData = await res.json();
+  return { ...invoiceData, client_id: client.id };
 }
 
 async function toolGenerateReport(
@@ -773,6 +777,7 @@ async function toolGenerateReport(
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? origin;
   return {
     ...data,
+    client_id: client.id,
     download_url: `${appUrl}/api/clients/${client.id}/report?start_date=${input.start_date}&end_date=${input.end_date}`,
   };
 }
@@ -887,6 +892,7 @@ async function toolSetMediaPlanChannels(
     success: true,
     message: `Loaded ${mediaChannels.length} channel${mediaChannels.length !== 1 ? 's' : ''} into ${client.name}'s media plan`,
     client: client.name,
+    client_id: client.id,
     channels_added: mediaChannels.map(c => ({ name: c.channelName, budget: c.totalBudget, flights: c.flights.length })),
     total_budget: grandTotal,
     note: 'Open the media plan builder to review, adjust flights, and add monthly budget breakdowns.',
@@ -1154,6 +1160,52 @@ export async function POST(request: NextRequest) {
     return new Response(JSON.stringify({ error: 'No messages provided' }), { status: 400 });
   }
 
+  const { agentId, runId } = body as { agentId?: string; runId?: string };
+
+  // Load agent config if agentId provided
+  let effectiveSystemPrompt = SYSTEM_PROMPT;
+  let effectiveTools = TOOLS;
+  let agentRunId: string | null = runId ?? null;
+  let agentName: string | null = null;
+
+  if (agentId) {
+    const { data: agent } = await supabase
+      .from('user_agents')
+      .select('*')
+      .eq('id', agentId)
+      .eq('user_id', session.user.id)
+      .single();
+
+    if (agent) {
+      agentName = agent.name;
+      effectiveSystemPrompt = agent.system_prompt + '\n\n---\nPlatform Context:\n' + SYSTEM_PROMPT;
+      effectiveTools = TOOLS.filter(t => agent.enabled_tools.includes(t.name));
+
+      if (!agentRunId) {
+        const lastUserMsg = userMessages.filter(m => m.role === 'user').pop();
+        const msgText = typeof lastUserMsg?.content === 'string'
+          ? lastUserMsg.content
+          : Array.isArray(lastUserMsg?.content)
+            ? lastUserMsg.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join(' ')
+            : '';
+
+        const { data: run } = await supabase
+          .from('agent_runs')
+          .insert({
+            user_id: session.user.id,
+            agent_id: agent.id,
+            agent_name: agent.name,
+            user_message: msgText,
+            status: 'running',
+          })
+          .select()
+          .single();
+
+        agentRunId = run?.id ?? null;
+      }
+    }
+  }
+
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
@@ -1161,20 +1213,26 @@ export async function POST(request: NextRequest) {
       const send = (data: object) =>
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
 
+      const auditSteps: AgentAuditStep[] = [];
+      const outputLinks: AgentOutputLink[] = [];
+      let contextClientId: string | null = null;
+      let finalTextBuffer = '';
+
       try {
         let messages = [...userMessages];
 
         while (true) {
           const anthropicStream = anthropic.messages.stream({
             model: 'claude-opus-4-7',
-            system: SYSTEM_PROMPT,
-            tools: TOOLS,
+            system: effectiveSystemPrompt,
+            tools: effectiveTools,
             messages,
             max_tokens: 2048,
           });
 
           for await (const event of anthropicStream) {
             if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+              finalTextBuffer += event.delta.text;
               send({ type: 'text', text: event.delta.text });
             }
           }
@@ -1232,6 +1290,28 @@ export async function POST(request: NextRequest) {
               result = { error: `Unknown tool: ${block.name}` };
             }
 
+            // Track client context for output links
+            if (result?.client_id) contextClientId = result.client_id;
+
+            // Emit audit step
+            const auditStep: AgentAuditStep = {
+              tool: block.name,
+              label: TOOL_LABELS[block.name] ?? block.name,
+              summary: buildAuditSummary(block.name, input, result),
+              timestamp: new Date().toISOString(),
+              is_write: WRITE_TOOLS.includes(block.name),
+            };
+            auditSteps.push(auditStep);
+            send({ type: 'audit_step', step: auditStep });
+
+            // Collect output links for write tools that produce navigable outputs
+            const links = buildOutputLinks(block.name, input, result, contextClientId);
+            for (const link of links) {
+              if (!outputLinks.some(l => l.href === link.href)) {
+                outputLinks.push(link);
+              }
+            }
+
             // Emit structured action event so the UI can trigger animations
             const writableTools = ['complete_action_point', 'create_action_point', 'create_client', 'update_media_plan_budget', 'set_media_plan_channels'];
             if (writableTools.includes(block.name) && result?.success) {
@@ -1248,9 +1328,34 @@ export async function POST(request: NextRequest) {
         }
       } catch (err: any) {
         send({ type: 'error', message: err.message ?? 'Something went wrong' });
+
+        if (agentRunId) {
+          await supabase
+            .from('agent_runs')
+            .update({ status: 'error', completed_at: new Date().toISOString(), audit_trail: auditSteps })
+            .eq('id', agentRunId);
+        }
+      }
+
+      if (outputLinks.length > 0) {
+        send({ type: 'output_links', links: outputLinks });
       }
 
       send({ type: 'done' });
+
+      if (agentRunId) {
+        await supabase
+          .from('agent_runs')
+          .update({
+            audit_trail: auditSteps,
+            final_output: finalTextBuffer || null,
+            output_links: outputLinks,
+            completed_at: new Date().toISOString(),
+            status: 'completed',
+          })
+          .eq('id', agentRunId);
+      }
+
       controller.close();
     },
   });

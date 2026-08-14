@@ -64,7 +64,7 @@ export async function GET() {
 
     // 4. Call Meta API to get ad accounts
     const response = await fetch(
-      'https://graph.facebook.com/v18.0/me/adaccounts?fields=id,name,account_status',
+      'https://graph.facebook.com/v26.0/me/adaccounts?fields=id,name,account_status',
       {
         headers: {
           'Authorization': `Bearer ${accessToken}`

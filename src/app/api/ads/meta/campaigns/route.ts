@@ -126,7 +126,7 @@ export async function GET(request: NextRequest) {
         try {
           const allCampaigns: any[] = [];
           let url: string | null =
-            `https://graph.facebook.com/v18.0/act_${account.account_id.replace(/^act_/, '')}/campaigns?fields=id,name,status,effective_status&limit=100`;
+            `https://graph.facebook.com/v26.0/act_${account.account_id.replace(/^act_/, '')}/campaigns?fields=id,name,status,effective_status&limit=100`;
 
           while (url) {
             const res = await fetch(url, { headers: authHeaders });

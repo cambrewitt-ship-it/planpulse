@@ -1,8 +1,24 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
-import { Send, RefreshCw } from 'lucide-react';
+import { RefreshCw, ChevronDown, ChevronRight, ExternalLink, Bot, X, ReceiptText, BarChart2, CalendarRange, ListChecks, ClipboardList, TrendingUp, FileText, PenLine, Users, Zap, Target } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
+import type { AgentAuditStep, AgentOutputLink, UserAgent } from '@/types/database';
+
+const AGENT_ICONS: Record<string, LucideIcon> = {
+  ReceiptText, BarChart2, CalendarRange, ListChecks, ClipboardList,
+  Bot, TrendingUp, FileText, PenLine, Users, Zap, Target,
+};
+const EMOJI_ICON_FALLBACK: Record<string, string> = {
+  '🧾': 'ReceiptText', '📊': 'BarChart2', '📅': 'CalendarRange',
+  '✅': 'ListChecks', '📋': 'ClipboardList',
+};
+function AgentIcon({ name, size = 16 }: { name?: string | null; size?: number }) {
+  const resolved = (name && EMOJI_ICON_FALLBACK[name]) ? EMOJI_ICON_FALLBACK[name] : name;
+  const Icon = (resolved && AGENT_ICONS[resolved]) ? AGENT_ICONS[resolved] : Bot;
+  return <Icon size={size} style={{ color: '#7B1F2C', flexShrink: 0 }} />;
+}
 
 interface ParsedChannel {
   channelName: string;
@@ -23,6 +39,120 @@ interface Message {
   imagePreview?: string;
   planChannels?: ParsedChannel[];
   planError?: string;
+  auditSteps?: AgentAuditStep[];
+  outputLinks?: AgentOutputLink[];
+  // wizard-step fields — renders chips inline in chat, no API call
+  isWizard?: boolean;
+  wizardStep?: WizardStepId;
+  wizardChips?: Array<{ value: string; label: string }>;
+}
+
+function AuditTrail({ steps }: { steps: AgentAuditStep[] }) {
+  const [expanded, setExpanded] = useState(true);
+  if (!steps.length) return null;
+  return (
+    <div style={{ marginTop: 8, borderTop: '0.5px solid rgba(0,0,0,0.08)', paddingTop: 6 }}>
+      <button
+        onClick={() => setExpanded(v => !v)}
+        style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', cursor: 'pointer', padding: '2px 0', color: '#8A8578' }}
+      >
+        {expanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+        <span style={{ fontSize: 11, fontWeight: 500 }}>{steps.length} step{steps.length !== 1 ? 's' : ''}</span>
+      </button>
+      {expanded && (
+        <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {steps.map((step, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 6, paddingLeft: 2 }}>
+              <div style={{ width: 6, height: 6, borderRadius: '50%', background: step.is_write ? '#CC785C' : '#A0998F', flexShrink: 0, marginTop: 4 }} />
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 600, color: '#3C3732' }}>{step.label}</div>
+                <div style={{ fontSize: 10.5, color: '#8A8578', lineHeight: 1.4 }}>{step.summary}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OutputLinks({ links }: { links: AgentOutputLink[] }) {
+  if (!links.length) return null;
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+      {links.map((link, i) => (
+        <a
+          key={i}
+          href={link.href}
+          target={link.target}
+          rel={link.target === '_blank' ? 'noopener noreferrer' : undefined}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 10px', borderRadius: 20, border: '0.5px solid #D5D0C5', background: '#F7F5F2', color: '#4A6580', fontSize: 11.5, fontWeight: 500, textDecoration: 'none' }}
+        >
+          <ExternalLink size={10} />
+          {link.label}
+        </a>
+      ))}
+    </div>
+  );
+}
+
+function AgentPickerInline({ agents, activeAgent, onSelect, onClear }: {
+  agents: UserAgent[];
+  activeAgent: UserAgent | null;
+  onSelect: (a: UserAgent) => void;
+  onClear: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const handler = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+  if (!agents.length) return null;
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button
+        onClick={() => setOpen(v => !v)}
+        style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', borderRadius: 10, border: '0.5px solid #D5D0C5', background: activeAgent ? '#EDE9E1' : '#F7F5F2', color: '#5C564F', fontSize: 11, fontWeight: 500, cursor: 'pointer' }}
+      >
+        {activeAgent ? (
+          <>
+            <AgentIcon name={activeAgent.icon} size={12} />
+            <span style={{ maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeAgent.name}</span>
+            <span onClick={e => { e.stopPropagation(); onClear(); setOpen(false); }} style={{ marginLeft: 2, color: '#A0998F', cursor: 'pointer', display: 'flex' }}>
+              <X size={10} />
+            </span>
+          </>
+        ) : (
+          <>
+            <Bot size={11} />
+            <span>Use agent</span>
+            <ChevronDown size={10} />
+          </>
+        )}
+      </button>
+      {open && (
+        <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: 4, minWidth: 220, background: '#FDFCF8', border: '0.5px solid #E0DCD4', borderRadius: 12, boxShadow: '0 4px 16px rgba(0,0,0,0.1)', zIndex: 20, overflow: 'hidden' }}>
+          {agents.map(agent => (
+            <button
+              key={agent.id}
+              onClick={() => { onSelect(agent); setOpen(false); }}
+              style={{ display: 'flex', alignItems: 'flex-start', gap: 8, width: '100%', padding: '8px 12px', border: 'none', background: activeAgent?.id === agent.id ? '#F0EDE8' : 'transparent', cursor: 'pointer', textAlign: 'left' }}
+              onMouseEnter={e => { if (activeAgent?.id !== agent.id) e.currentTarget.style.background = '#F7F5F2'; }}
+              onMouseLeave={e => { if (activeAgent?.id !== agent.id) e.currentTarget.style.background = 'transparent'; }}
+            >
+              <AgentIcon name={agent.icon} size={16} />
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: '#1C1917' }}>{agent.name}</div>
+                {agent.description && <div style={{ fontSize: 11, color: '#8A8578', marginTop: 1, lineHeight: 1.3 }}>{agent.description}</div>}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 const CHANNEL_COLORS: Record<string, string> = {
@@ -35,14 +165,108 @@ function channelColor(name: string): string {
   return CHANNEL_COLORS[name.toLowerCase()] ?? '#8A8578';
 }
 
-const QUICK_ACTIONS = [
-  { label: 'Daily briefing', prompt: 'Give me a daily briefing — how are all our clients doing today?', icon: '☀' },
-  { label: 'Topline results', prompt: 'Give me a topline results check across all clients — for each client summarise their actual spend vs planned spend, key performance highlights, and flag any significant variances or issues I should be aware of.', icon: '▲' },
-  { label: 'Channel health', prompt: 'Do a channel health check — for each client show me channel pacing, spend vs plan, and flag any channels that are over or under pacing.', icon: '⬡' },
-  { label: 'Overdue tasks', prompt: 'What action points are overdue right now?', icon: '⚑' },
-  { label: 'Red clients', prompt: 'Which clients have red health status and why?', icon: '◉' },
-  { label: 'Channel specs', prompt: 'What channel specs and notes do we have in our library?', icon: '≡' },
-];
+// ── Agent wizard ───────────────────────────────────────────────────────────────
+
+type WizardStepId = 'pick_client' | 'pick_month' | 'pick_channel' | 'pick_spend_type';
+interface WizardParams { clientId?: string; clientName?: string; channel?: string; month?: string; spendType?: string; }
+interface WizardClient { id: string; name: string; channels: string[]; }
+interface WizardState { agent: UserAgent; steps: WizardStepId[]; stepIndex: number; params: WizardParams; }
+
+const AGENT_FLOWS: Record<string, {
+  startMessage: string;
+  steps: WizardStepId[];
+  buildPrompt: (p: WizardParams) => string;
+  stepLabel: (step: WizardStepId) => string;
+}> = {
+  invoice_generator: {
+    startMessage: 'Generate Invoice',
+    steps: ['pick_client', 'pick_month', 'pick_spend_type'],
+    buildPrompt: p => `Generate an invoice for ${p.clientName} for ${p.month} using ${p.spendType} spend`,
+    stepLabel: s => s === 'pick_client' ? 'Which client?' : s === 'pick_month' ? 'Which month?' : 'Actual or planned spend?',
+  },
+  performance_analyst: {
+    startMessage: 'Run Performance Analysis',
+    steps: ['pick_client', 'pick_channel'],
+    buildPrompt: p => p.channel === 'All channels'
+      ? `Analyse performance across all channels for ${p.clientName}`
+      : `Analyse ${p.channel} performance for ${p.clientName}`,
+    stepLabel: s => s === 'pick_client' ? 'Which client?' : 'Which channel?',
+  },
+  media_plan_editor: {
+    startMessage: 'Edit Media Plan',
+    steps: ['pick_client', 'pick_channel'],
+    buildPrompt: p => p.channel === 'All channels'
+      ? `Show me the full media plan for ${p.clientName} so I can review and update it`
+      : `Show me the ${p.channel} budget for ${p.clientName} so I can update it`,
+    stepLabel: s => s === 'pick_client' ? 'Which client?' : 'Which channel?',
+  },
+  action_points_manager: {
+    startMessage: 'Review Action Points',
+    steps: ['pick_client'],
+    buildPrompt: p => p.clientId === '__all__'
+      ? 'Show me all action points — overdue first, then due soon'
+      : `Show me action points for ${p.clientName} — overdue first`,
+    stepLabel: () => 'Which client?',
+  },
+  report_creator: {
+    startMessage: 'Create Report',
+    steps: ['pick_client', 'pick_month'],
+    buildPrompt: p => `Create a comprehensive performance report for ${p.clientName} for ${p.month}`,
+    stepLabel: s => s === 'pick_client' ? 'Which client?' : 'Which month?',
+  },
+};
+
+// Match an agent to a flow — try template_slug first, then fall back to name matching
+// so the wizard works even if template_slug is null in the database
+function getFlowForAgent(agent: UserAgent) {
+  if (agent.template_slug && AGENT_FLOWS[agent.template_slug]) {
+    return AGENT_FLOWS[agent.template_slug];
+  }
+  const n = (agent.name ?? '').toLowerCase();
+  if (n.includes('invoice'))                                    return AGENT_FLOWS.invoice_generator;
+  if (n.includes('performance') || n.includes('analyst'))      return AGENT_FLOWS.performance_analyst;
+  if (n.includes('media') || n.includes('editor'))             return AGENT_FLOWS.media_plan_editor;
+  if (n.includes('action') || n.includes('points') || n.includes('task')) return AGENT_FLOWS.action_points_manager;
+  if (n.includes('report'))                                    return AGENT_FLOWS.report_creator;
+  return null;
+}
+
+function getRecentMonths(count = 6): string[] {
+  const months: string[] = [];
+  const now = new Date();
+  for (let i = 0; i < count; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    months.push(d.toLocaleString('en-GB', { month: 'long', year: 'numeric' }));
+  }
+  return months;
+}
+
+function buildChipsForStep(
+  step: WizardStepId,
+  params: WizardParams,
+  clients: WizardClient[],
+  agentSlug: string,
+): Array<{ value: string; label: string }> {
+  if (step === 'pick_client') {
+    const opts: Array<{ value: string; label: string }> = [];
+    if (agentSlug === 'action_points_manager') opts.push({ value: '__all__', label: 'All clients' });
+    opts.push(...clients.map(c => ({ value: c.id, label: c.name })));
+    return opts;
+  }
+  if (step === 'pick_month') return getRecentMonths(6).map(m => ({ value: m, label: m }));
+  if (step === 'pick_channel') {
+    const client = clients.find(c => c.id === params.clientId);
+    return [
+      { value: 'All channels', label: 'All channels' },
+      ...(client?.channels || []).map(ch => ({ value: ch, label: ch })),
+    ];
+  }
+  if (step === 'pick_spend_type') return [
+    { value: 'actual', label: 'Actual spend' },
+    { value: 'planned', label: 'Planned spend' },
+  ];
+  return [];
+}
 
 // Height of the chat card when idle / notes visible
 const CHAT_CARD_H = 360;
@@ -78,13 +302,14 @@ function renderMarkdown(text: string): React.ReactNode[] {
     }
 
     if (/^[-*•]\s/.test(line)) {
+      const listStart = i;
       const items: string[] = [];
       while (i < lines.length && /^[-*•]\s/.test(lines[i])) {
         items.push(lines[i].replace(/^[-*•]\s/, ''));
         i++;
       }
       nodes.push(
-        <ul key={i} style={{ margin: '3px 0', paddingLeft: 14, listStyle: 'none' }}>
+        <ul key={`ul-${listStart}`} style={{ margin: '3px 0', paddingLeft: 14, listStyle: 'none' }}>
           {items.map((item, j) => (
             <li key={j} style={{ display: 'flex', gap: 5, marginBottom: 2, fontSize: 12.5, lineHeight: 1.5, color: '#3C3732' }}>
               <span style={{ color: '#8A8578', flexShrink: 0, marginTop: 1 }}>•</span>
@@ -97,6 +322,7 @@ function renderMarkdown(text: string): React.ReactNode[] {
     }
 
     if (/^\d+\.\s/.test(line)) {
+      const listStart = i;
       const items: Array<{ num: string; text: string }> = [];
       while (i < lines.length && /^\d+\.\s/.test(lines[i])) {
         const m = lines[i].match(/^(\d+)\.\s(.*)/);
@@ -104,7 +330,7 @@ function renderMarkdown(text: string): React.ReactNode[] {
         i++;
       }
       nodes.push(
-        <ol key={i} style={{ margin: '3px 0', paddingLeft: 0, listStyle: 'none' }}>
+        <ol key={`ol-${listStart}`} style={{ margin: '3px 0', paddingLeft: 0, listStyle: 'none' }}>
           {items.map((item, j) => (
             <li key={j} style={{ display: 'flex', gap: 7, marginBottom: 2, fontSize: 12.5, lineHeight: 1.5, color: '#3C3732' }}>
               <span style={{ color: '#8A8578', flexShrink: 0, minWidth: 13 }}>{item.num}.</span>
@@ -184,7 +410,33 @@ export const AgencyChat = forwardRef<AgencyChatHandle, AgencyChatProps>(function
   const [importSaving, setImportSaving] = useState(false);
   const [importSuccess, setImportSuccess] = useState<string | null>(null);
 
+  // Agent state
+  const [agents, setAgents] = useState<UserAgent[]>([]);
+  const [activeAgent, setActiveAgent] = useState<UserAgent | null>(null);
+  const [agentRunId, setAgentRunId] = useState<string | null>(null);
+
+  // Wizard state
+  const [wizardState, setWizardState] = useState<WizardState | null>(null);
+  const [wizardClients, setWizardClients] = useState<WizardClient[] | null>(null);
+  const [wizardClientsLoading, setWizardClientsLoading] = useState(false);
+
   const isEmpty = messages.length === 0;
+
+  // Load agents + pre-fetch clients on mount so wizard launches are instant
+  useEffect(() => {
+    fetch('/api/agents').then(r => r.ok ? r.json() : null).then(d => { if (d?.agents) setAgents(d.agents); }).catch(() => {});
+    fetch('/api/agency/clients')
+      .then(r => r.json())
+      .then((d: any) => {
+        const list: WizardClient[] = (Array.isArray(d) ? d : d.clients || []).map((c: any) => ({
+          id: c.id,
+          name: c.name,
+          channels: (c.channels || []).map((ch: any) => typeof ch === 'string' ? ch : ch.channelName).filter(Boolean),
+        }));
+        setWizardClients(list);
+      })
+      .catch(() => setWizardClients([]));
+  }, []);
 
   // Measure container height so we can animate chat card to exact full height
   useEffect(() => {
@@ -383,13 +635,15 @@ export const AgencyChat = forwardRef<AgencyChatHandle, AgencyChatProps>(function
     }
   }, [importModal, importClientId]);
 
-  const send = useCallback(async (text: string) => {
+  const send = useCallback(async (text: string, agentOverride?: UserAgent | null) => {
     if (attachedImage) { sendWithImage(attachedImage, text); return; }
     const trimmed = text.trim();
     if (!trimmed || isLoading) return;
 
+    const agentForRequest = agentOverride !== undefined ? agentOverride : activeAgent;
+
     const userMsg: Message = { role: 'user', content: trimmed };
-    const assistantMsg: Message = { role: 'assistant', content: '', isStreaming: true };
+    const assistantMsg: Message = { role: 'assistant', content: '', isStreaming: true, auditSteps: [], outputLinks: [] };
 
     setMessages(prev => [...prev, userMsg, assistantMsg]);
     setInput('');
@@ -407,7 +661,11 @@ export const AgencyChat = forwardRef<AgencyChatHandle, AgencyChatProps>(function
       const res = await fetch('/api/agency/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: history }),
+        body: JSON.stringify({
+          messages: history,
+          agentId: agentForRequest?.id ?? undefined,
+          runId: agentRunId ?? undefined,
+        }),
       });
 
       if (!res.ok) throw new Error('Request failed');
@@ -453,6 +711,20 @@ export const AgencyChat = forwardRef<AgencyChatHandle, AgencyChatProps>(function
                 get_live_meta_campaigns: 'Fetching live Meta campaigns…',
               };
               setToolInProgress(labels[event.tool] ?? 'Working on it…');
+            } else if (event.type === 'audit_step') {
+              setMessages(prev => {
+                const next = [...prev];
+                const last = next[next.length - 1];
+                if (last?.role === 'assistant') next[next.length - 1] = { ...last, auditSteps: [...(last.auditSteps ?? []), event.step] };
+                return next;
+              });
+            } else if (event.type === 'output_links') {
+              setMessages(prev => {
+                const next = [...prev];
+                const last = next[next.length - 1];
+                if (last?.role === 'assistant') next[next.length - 1] = { ...last, outputLinks: event.links };
+                return next;
+              });
             } else if (event.type === 'action') {
               window.dispatchEvent(new CustomEvent('planpulse:ai-action', { detail: { tool: event.tool, data: event.data } }));
             } else if (event.type === 'done') {
@@ -494,11 +766,153 @@ export const AgencyChat = forwardRef<AgencyChatHandle, AgencyChatProps>(function
       setIsLoading(false);
       setToolInProgress(null);
     }
-  }, [messages, isLoading]);
+  }, [messages, isLoading, activeAgent, agentRunId, attachedImage, sendWithImage]);
 
   useImperativeHandle(ref, () => ({
     sendMessage: (text: string) => { send(text); },
   }), [send]);
+
+  // ── Wizard handlers ────────────────────────────────────────────────────────
+
+  // appendAndStream — used by wizard final step. Appends assistant msg and streams API response.
+  // Only the built prompt is sent as history (wizard messages are local-only).
+  const appendAndStream = useCallback(async (prompt: string, agent: UserAgent) => {
+    const assistantMsg: Message = { role: 'assistant', content: '', isStreaming: true, auditSteps: [], outputLinks: [] };
+    setMessages(prev => [...prev, assistantMsg]);
+    setIsLoading(true);
+    setToolInProgress(null);
+
+    const TOOL_LABELS: Record<string, string> = {
+      get_daily_briefing: 'Fetching daily briefing…',
+      get_client_status: 'Looking up client data…',
+      get_action_points: 'Checking action points…',
+      get_channel_library: 'Searching channel library…',
+      get_channel_performance: 'Pulling channel performance data…',
+      complete_action_point: 'Marking task as complete…',
+      create_action_point: 'Adding new action point…',
+      create_client: 'Creating new client…',
+      update_media_plan_budget: 'Updating media plan budget…',
+      get_live_meta_campaigns: 'Fetching live Meta campaigns…',
+      generate_invoice: 'Generating invoice…',
+      generate_report: 'Generating report…',
+    };
+
+    try {
+      const res = await fetch('/api/agency/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: [{ role: 'user', content: prompt }], agentId: agent.id }),
+      });
+      if (!res.ok) throw new Error('Request failed');
+
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop() ?? '';
+        for (const part of parts) {
+          if (!part.startsWith('data: ')) continue;
+          try {
+            const event = JSON.parse(part.slice(6));
+            if (event.type === 'text') {
+              setMessages(prev => { const next = [...prev]; const last = next[next.length - 1]; if (last?.role === 'assistant') next[next.length - 1] = { ...last, content: last.content + event.text }; return next; });
+              setToolInProgress(null);
+            } else if (event.type === 'tool_call') {
+              setToolInProgress(TOOL_LABELS[event.tool] ?? 'Working on it…');
+            } else if (event.type === 'audit_step') {
+              setMessages(prev => { const next = [...prev]; const last = next[next.length - 1]; if (last?.role === 'assistant') next[next.length - 1] = { ...last, auditSteps: [...(last.auditSteps ?? []), event.step] }; return next; });
+            } else if (event.type === 'output_links') {
+              setMessages(prev => { const next = [...prev]; const last = next[next.length - 1]; if (last?.role === 'assistant') next[next.length - 1] = { ...last, outputLinks: event.links }; return next; });
+            } else if (event.type === 'done') {
+              setMessages(prev => { const next = [...prev]; const last = next[next.length - 1]; if (last?.role === 'assistant') next[next.length - 1] = { ...last, isStreaming: false }; return next; });
+              setToolInProgress(null);
+            } else if (event.type === 'error') {
+              setMessages(prev => { const next = [...prev]; const last = next[next.length - 1]; if (last?.role === 'assistant') next[next.length - 1] = { ...last, content: 'Sorry, something went wrong. Please try again.', isStreaming: false }; return next; });
+              setToolInProgress(null);
+            } else if (event.type === 'action') {
+              window.dispatchEvent(new CustomEvent('planpulse:ai-action', { detail: { tool: event.tool, data: event.data } }));
+            }
+          } catch { /* ignore parse errors */ }
+        }
+      }
+    } catch {
+      setMessages(prev => { const next = [...prev]; const last = next[next.length - 1]; if (last?.role === 'assistant') next[next.length - 1] = { ...last, content: 'Sorry, something went wrong. Please try again.', isStreaming: false }; return next; });
+    } finally {
+      setIsLoading(false);
+      setToolInProgress(null);
+    }
+  }, []);
+
+  // startWizard — clicking an agent button immediately opens the chat with the first wizard step
+  // startWizard — synchronous: clients are pre-loaded on mount, so this is instant
+  const startWizard = useCallback((agent: UserAgent) => {
+    const flow = getFlowForAgent(agent); // uses name fallback if template_slug is null
+    setActiveAgent(agent);
+    setAgentRunId(null);
+    setInput('');
+    setNotesOpen(false);
+
+    if (!flow) return; // truly custom agent with no recognised pattern
+
+    const clients = wizardClients || [];
+    const agentSlug = agent.template_slug ?? agent.name.toLowerCase().replace(/\s+/g, '_');
+    const firstStep = flow.steps[0];
+    const chips = buildChipsForStep(firstStep, {}, clients, agentSlug);
+
+    // Automatic user message + first wizard question — opens active chat immediately
+    const autoUserMsg: Message = { role: 'user', content: flow.startMessage };
+    const wizardMsg: Message = {
+      role: 'assistant',
+      content: flow.stepLabel(firstStep),
+      isWizard: true,
+      wizardStep: firstStep,
+      wizardChips: chips,
+    };
+    setMessages([autoUserMsg, wizardMsg]);
+    setWizardState({ agent, steps: flow.steps, stepIndex: 0, params: {} });
+  }, [wizardClients]);
+
+  // handleWizardChip — clicking a chip inside a wizard chat message
+  const handleWizardChip = useCallback(async (chip: { value: string; label: string }, stepId: WizardStepId) => {
+    if (!wizardState) return;
+    const { steps, stepIndex, params, agent } = wizardState;
+
+    const newParams: WizardParams = { ...params };
+    if (stepId === 'pick_client') { newParams.clientId = chip.value; newParams.clientName = chip.label; }
+    else if (stepId === 'pick_month') { newParams.month = chip.label; }
+    else if (stepId === 'pick_channel') { newParams.channel = chip.label; }
+    else if (stepId === 'pick_spend_type') { newParams.spendType = chip.label; }
+
+    const userMsg: Message = { role: 'user', content: chip.label };
+    const nextIndex = stepIndex + 1;
+    const flow = getFlowForAgent(agent);
+    const agentSlug = agent.template_slug ?? agent.name.toLowerCase().replace(/\s+/g, '_');
+
+    if (nextIndex >= steps.length) {
+      // Last step — build full prompt and fire the real API call
+      const prompt = flow?.buildPrompt(newParams) ?? chip.label;
+      setWizardState(null);
+      setMessages(prev => [...prev, userMsg]);
+      await appendAndStream(prompt, agent);
+    } else {
+      // Advance to next wizard step — add chips for it
+      const nextStep = steps[nextIndex];
+      const chips = buildChipsForStep(nextStep, newParams, wizardClients || [], agentSlug);
+      const nextMsg: Message = {
+        role: 'assistant',
+        content: flow?.stepLabel(nextStep) ?? 'Select an option',
+        isWizard: true,
+        wizardStep: nextStep,
+        wizardChips: chips,
+      };
+      setMessages(prev => [...prev, userMsg, nextMsg]);
+      setWizardState({ ...wizardState, stepIndex: nextIndex, params: newParams });
+    }
+  }, [wizardState, wizardClients, appendAndStream]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -572,31 +986,42 @@ export const AgencyChat = forwardRef<AgencyChatHandle, AgencyChatProps>(function
         {isEmpty ? (
           /* ── Idle: Gemini-style prompt ── */
           <div style={{ padding: '18px 16px 14px', display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-            {/* Top half — label at top, spacer fills remainder */}
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+            {/* Top section — briefing */}
+            <div style={{ flex: 2, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
               <div style={{ marginBottom: 14 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
                   <div style={{ width: 28, height: 28, borderRadius: 8, border: '2px solid #1C1917', overflow: 'hidden', flexShrink: 0 }}>
                     <img src="/favicon.ico" alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                   </div>
                   <span style={{ fontSize: 19, color: '#8A8578', fontWeight: 700 }}>AI Agent</span>
-                  <span style={{ fontSize: 14, color: '#B5B0A5', fontWeight: 400 }}>·</span>
-                  <span style={{ fontSize: 14, color: '#B5B0A5', fontWeight: 500 }}>Daily Briefing</span>
-                  <button
-                    onClick={() => setBriefingTick(t => t + 1)}
-                    disabled={briefingLoading}
-                    title="Refresh briefing"
-                    style={{
-                      marginLeft: 'auto', background: 'none', border: 'none',
-                      cursor: briefingLoading ? 'default' : 'pointer',
-                      color: '#C4BDB5', padding: 2, display: 'flex', alignItems: 'center',
-                      transition: 'color 0.15s',
-                    }}
-                    onMouseEnter={e => { if (!briefingLoading) e.currentTarget.style.color = '#8A8578'; }}
-                    onMouseLeave={e => { e.currentTarget.style.color = '#C4BDB5'; }}
-                  >
-                    <RefreshCw size={13} style={{ animation: briefingLoading ? 'spin 1s linear infinite' : 'none' }} />
-                  </button>
+                  {activeAgent ? (
+                    <>
+                      <span style={{ fontSize: 14, color: '#B5B0A5', fontWeight: 400 }}>·</span>
+                      <span style={{ fontSize: 14, color: '#4A6580', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}><AgentIcon name={activeAgent.icon} size={13} /> {activeAgent.name}</span>
+                    </>
+                  ) : (
+                    <>
+                      <span style={{ fontSize: 14, color: '#B5B0A5', fontWeight: 400 }}>·</span>
+                      <span style={{ fontSize: 14, color: '#B5B0A5', fontWeight: 500 }}>Daily Briefing</span>
+                    </>
+                  )}
+                  <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <button
+                      onClick={() => setBriefingTick(t => t + 1)}
+                      disabled={briefingLoading}
+                      title="Refresh briefing"
+                      style={{
+                        background: 'none', border: 'none',
+                        cursor: briefingLoading ? 'default' : 'pointer',
+                        color: '#C4BDB5', padding: 2, display: 'flex', alignItems: 'center',
+                        transition: 'color 0.15s',
+                      }}
+                      onMouseEnter={e => { if (!briefingLoading) e.currentTarget.style.color = '#8A8578'; }}
+                      onMouseLeave={e => { e.currentTarget.style.color = '#C4BDB5'; }}
+                    >
+                      <RefreshCw size={13} style={{ animation: briefingLoading ? 'spin 1s linear infinite' : 'none' }} />
+                    </button>
+                  </div>
                 </div>
                 {/* Daily briefing */}
                 {briefingLoading ? (
@@ -640,118 +1065,125 @@ export const AgencyChat = forwardRef<AgencyChatHandle, AgencyChatProps>(function
               </div>
             </div>
 
-            <div style={{ marginBottom: 10, marginTop: 16, flexShrink: 0 }}>
-              <div style={{ fontSize: 21, fontWeight: 600, color: '#1C1917', lineHeight: 1.25 }}>
-                Where should we start?
-              </div>
-            </div>
-
-            <div style={{
-              marginBottom: 12, flexShrink: 0,
-              borderRadius: 20,
-              boxShadow: '0 2px 16px rgba(0,0,0,0.09)',
-            }}>
-            <div style={{
-              position: 'relative', borderRadius: 20, padding: 1.5,
-              overflow: 'hidden', background: 'rgba(224,220,212,0.7)',
-            }}>
-              {!input && <div className="chat-glow-spin" />}
-              <div style={{
-                background: '#FFFFFF', borderRadius: 18.5,
-                padding: '13px 13px 10px',
-                position: 'relative', zIndex: 1,
-              }}>
-                {/* Image preview strip */}
-                {attachedImage && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                    <div style={{ position: 'relative', display: 'inline-flex' }}>
-                      <img src={attachedImage.preview} alt="attachment" style={{ height: 48, width: 72, objectFit: 'cover', borderRadius: 6, border: '0.5px solid #E0DCD4' }} />
-                      <button
-                        onClick={() => setAttachedImage(null)}
-                        style={{ position: 'absolute', top: -5, right: -5, width: 16, height: 16, borderRadius: '50%', background: '#6B7280', border: 'none', color: '#fff', fontSize: 9, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', lineHeight: 1 }}
-                      >✕</button>
-                    </div>
-                    <span style={{ fontSize: 11, color: '#8A8578' }}>Media plan screenshot attached</span>
-                  </div>
-                )}
-                <textarea
-                  ref={textareaRef}
-                  value={input}
-                  onChange={handleInput}
-                  onKeyDown={handleKeyDown}
-                  placeholder={attachedImage ? 'Add a note (optional)…' : 'Ask about clients, tasks, or specs…'}
-                  rows={2}
-                  style={{
-                    width: '100%', resize: 'none', border: 'none',
-                    background: 'transparent', fontSize: 13, lineHeight: 1.5,
-                    color: '#1C1917', outline: 'none', ...font,
-                    minHeight: 44, maxHeight: 120, overflow: 'auto',
-                    display: 'block', boxSizing: 'border-box',
-                  }}
-                />
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
-                  <button
-                    onClick={() => imageInputRef.current?.click()}
-                    title="Attach a media plan screenshot"
-                    style={{
-                      width: 30, height: 30, borderRadius: '50%', border: '1.5px solid #D1D5DB',
-                      background: attachedImage ? '#EEF2FF' : 'transparent', color: '#6B7280',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      cursor: 'pointer', fontSize: 18, lineHeight: 1, padding: 0,
-                    }}
-                  >+</button>
-                  <button
-                    onClick={() => send(input)}
-                    disabled={!input.trim() && !attachedImage}
-                    style={{
-                      width: 36, height: 36, borderRadius: '50%', border: 'none',
-                      background: (input.trim() || attachedImage) ? '#3B82F6' : '#D1D5DB',
-                      color: '#FFFFFF',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      cursor: (input.trim() || attachedImage) ? 'pointer' : 'default',
-                      transition: 'background 0.15s',
-                    }}
-                  >
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                      <path d="M8 13V3M8 3L4 7M8 3l4 4" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg>
-                  </button>
+            {/* Bottom section — text box + agents */}
+            <div style={{ flex: 3, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+              <div style={{ marginBottom: 10, flexShrink: 0 }}>
+                <div style={{ fontSize: 18, fontWeight: 600, color: '#1C1917', lineHeight: 1.25 }}>
+                  Where should we start?
                 </div>
               </div>
-            </div>
-            </div>
 
-            {/* Bottom half — quick action cards */}
-            <div style={{ flex: 1, paddingTop: 14, overflow: 'hidden', display: 'flex', alignItems: 'flex-start', justifyContent: 'center' }}>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
-                {QUICK_ACTIONS.map(action => (
-                  <button
-                    key={action.label}
-                    onClick={() => send(action.prompt)}
+              <div style={{
+                marginBottom: 10, flexShrink: 0,
+                borderRadius: 20,
+                boxShadow: '0 2px 16px rgba(0,0,0,0.09)',
+              }}>
+              <div style={{
+                position: 'relative', borderRadius: 20, padding: 1.5,
+                overflow: 'hidden', background: 'rgba(224,220,212,0.7)',
+              }}>
+                {!input && <div className="chat-glow-spin" />}
+                <div style={{
+                  background: '#FFFFFF', borderRadius: 18.5,
+                  padding: '13px 13px 10px',
+                  position: 'relative', zIndex: 1,
+                }}>
+                  {/* Image preview strip */}
+                  {attachedImage && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                      <div style={{ position: 'relative', display: 'inline-flex' }}>
+                        <img src={attachedImage.preview} alt="attachment" style={{ height: 48, width: 72, objectFit: 'cover', borderRadius: 6, border: '0.5px solid #E0DCD4' }} />
+                        <button
+                          onClick={() => setAttachedImage(null)}
+                          style={{ position: 'absolute', top: -5, right: -5, width: 16, height: 16, borderRadius: '50%', background: '#6B7280', border: 'none', color: '#fff', fontSize: 9, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', lineHeight: 1 }}
+                        >✕</button>
+                      </div>
+                      <span style={{ fontSize: 11, color: '#8A8578' }}>Media plan screenshot attached</span>
+                    </div>
+                  )}
+                  <textarea
+                    ref={textareaRef}
+                    value={input}
+                    onChange={handleInput}
+                    onKeyDown={handleKeyDown}
+                    placeholder={attachedImage ? 'Add a note (optional)…' : 'Ask about clients, tasks, or specs…'}
+                    rows={2}
                     style={{
-                      padding: '10px 18px',
-                      borderRadius: 999,
-                      border: '1px solid #4A5568',
-                      background: '#3D4A5C',
-                      color: '#FFFFFF',
-                      fontSize: 15,
-                      fontWeight: 500,
-                      cursor: 'pointer',
-                      ...font,
-                      transition: 'opacity 0.15s, transform 0.1s',
-                      whiteSpace: 'nowrap',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 7,
+                      width: '100%', resize: 'none', border: 'none',
+                      background: 'transparent', fontSize: 13, lineHeight: 1.5,
+                      color: '#1C1917', outline: 'none', ...font,
+                      minHeight: 44, maxHeight: 120, overflow: 'auto',
+                      display: 'block', boxSizing: 'border-box',
                     }}
-                    onMouseEnter={e => { e.currentTarget.style.opacity = '0.8'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
-                    onMouseLeave={e => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.transform = 'translateY(0)'; }}
-                  >
-                    {action.label}
-                  </button>
-                ))}
+                  />
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
+                    <button
+                      onClick={() => imageInputRef.current?.click()}
+                      title="Attach a media plan screenshot"
+                      style={{
+                        width: 30, height: 30, borderRadius: '50%', border: '1.5px solid #D1D5DB',
+                        background: attachedImage ? '#EEF2FF' : 'transparent', color: '#6B7280',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        cursor: 'pointer', fontSize: 18, lineHeight: 1, padding: 0,
+                      }}
+                    >+</button>
+                    <button
+                      onClick={() => send(input)}
+                      disabled={!input.trim() && !attachedImage}
+                      style={{
+                        width: 36, height: 36, borderRadius: '50%', border: 'none',
+                        background: (input.trim() || attachedImage) ? '#3B82F6' : '#D1D5DB',
+                        color: '#FFFFFF',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        cursor: (input.trim() || attachedImage) ? 'pointer' : 'default',
+                        transition: 'background 0.15s',
+                      }}
+                    >
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                        <path d="M8 13V3M8 3L4 7M8 3l4 4" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+              </div>
+
+              {/* Agent launch buttons — all visible, wrapping below text box */}
+              <div style={{ flexShrink: 0 }}>
+                {agents.length === 0 ? (
+                  <div style={{ fontSize: 11, color: '#C4BDB5' }}>No agents configured — visit /agents to set up your first agent.</div>
+                ) : (
+                  <>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: '#C4BDB5', textTransform: 'uppercase', letterSpacing: '0.09em', marginBottom: 7 }}>
+                      Launch an agent
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center' }}>
+                      {agents.map(agent => (
+                        <button
+                          key={agent.id}
+                          onClick={() => startWizard(agent)}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 5,
+                            padding: '6px 12px', borderRadius: 99,
+                            border: '0.5px solid #D5D0C5', background: '#F7F5F2',
+                            color: '#1C1917', fontSize: 14, fontWeight: 500,
+                            cursor: 'pointer', whiteSpace: 'nowrap',
+                            transition: 'background 0.12s, border-color 0.12s, transform 0.1s',
+                            ...font,
+                          }}
+                          onMouseEnter={e => { e.currentTarget.style.background = '#EDE9E1'; e.currentTarget.style.borderColor = '#B5B0A5'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
+                          onMouseLeave={e => { e.currentTarget.style.background = '#F7F5F2'; e.currentTarget.style.borderColor = '#D5D0C5'; e.currentTarget.style.transform = 'translateY(0)'; }}
+                        >
+                          <AgentIcon name={agent.icon} size={14} />
+                          <span>{agent.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
             </div>
+
           </div>
         ) : (
           /* ── Active chat ── */
@@ -771,11 +1203,13 @@ export const AgencyChat = forwardRef<AgencyChatHandle, AgencyChatProps>(function
                 <img src="/favicon.ico" alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: '#1C1917', lineHeight: 1.2 }}>Agency Assistant</div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: '#1C1917', lineHeight: 1.2 }}>
+                  {activeAgent ? <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><AgentIcon name={activeAgent.icon} size={13} /> {activeAgent.name}</span> : 'Agency Assistant'}
+                </div>
               </div>
               {/* New chat button */}
               <button
-                onClick={() => { setMessages([]); setInput(''); setIsLoading(false); setToolInProgress(null); setNotesOpen(false); }}
+                onClick={() => { setMessages([]); setInput(''); setIsLoading(false); setToolInProgress(null); setNotesOpen(false); setAgentRunId(null); setWizardState(null); }}
                 title="New chat"
                 style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -856,8 +1290,48 @@ export const AgencyChat = forwardRef<AgencyChatHandle, AgencyChatProps>(function
                                 </div>
                               </div>
                             </div>
+                          ) : msg.isWizard && msg.wizardChips ? (
+                            // Wizard step — question text + clickable chips
+                            <div>
+                              <div style={{ fontSize: 12.5, lineHeight: 1.5, color: '#3C3732', marginBottom: 8, fontWeight: 500 }}>
+                                {msg.content}
+                              </div>
+                              {wizardClientsLoading && msg.wizardStep === 'pick_client' ? (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                                  <span style={{ fontSize: 11, color: '#B5B0A5' }}>Loading clients…</span>
+                                  {[0,1,2].map(i => <span key={i} style={{ width: 3, height: 3, borderRadius: '50%', background: '#C4BDB5', animation: `chatBounce 1.2s ease-in-out ${i*0.2}s infinite`, display: 'inline-block' }} />)}
+                                </div>
+                              ) : (
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                                  {msg.wizardChips.map(chip => (
+                                    <button
+                                      key={chip.value}
+                                      disabled={!!wizardState && wizardState.stepIndex !== (msg.wizardStep ? wizardState.steps.indexOf(msg.wizardStep) : -1)}
+                                      onClick={() => msg.wizardStep && handleWizardChip(chip, msg.wizardStep)}
+                                      style={{
+                                        padding: '5px 11px', borderRadius: 99, flexShrink: 0,
+                                        border: '0.5px solid #D5D0C5', background: '#FDFCF8',
+                                        color: '#1C1917', fontSize: 11.5, fontWeight: 500,
+                                        cursor: 'pointer', whiteSpace: 'nowrap',
+                                        transition: 'background 0.12s, border-color 0.12s',
+                                        fontFamily: "'DM Sans', system-ui, sans-serif",
+                                        opacity: (!!wizardState && wizardState.stepIndex !== (msg.wizardStep ? wizardState.steps.indexOf(msg.wizardStep) : -1)) ? 0.45 : 1,
+                                      }}
+                                      onMouseEnter={e => { if (!e.currentTarget.disabled) { e.currentTarget.style.background = '#EDE9E1'; e.currentTarget.style.borderColor = '#B5B0A5'; } }}
+                                      onMouseLeave={e => { e.currentTarget.style.background = '#FDFCF8'; e.currentTarget.style.borderColor = '#D5D0C5'; }}
+                                    >
+                                      {chip.label}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
                           ) : msg.content ? (
-                            renderMarkdown(msg.content)
+                            <>
+                              {renderMarkdown(msg.content)}
+                              {msg.auditSteps && msg.auditSteps.length > 0 && <AuditTrail steps={msg.auditSteps} />}
+                              {msg.outputLinks && msg.outputLinks.length > 0 && <OutputLinks links={msg.outputLinks} />}
+                            </>
                           ) : msg.isStreaming ? (
                             <span style={{ display: 'inline-flex', gap: 3, alignItems: 'center', height: 16 }}>
                               {[0, 1, 2].map(j => (

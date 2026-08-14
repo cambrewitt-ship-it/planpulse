@@ -142,13 +142,22 @@ export async function GET() {
 
     const authHeaders = { 'Authorization': `Bearer ${accessToken}` };
 
-    // Helper to fetch all pages of a Meta API endpoint
-    const fetchAllPages = async (url: string): Promise<any[]> => {
+    // Helper to fetch all pages of a Meta API endpoint.
+    // throwOnError: if true, throws when Meta returns a non-2xx response (use for
+    // primary calls where failure means no credentials). If false, logs and returns
+    // whatever was collected so far (use for optional business-level calls).
+    const fetchAllPages = async (url: string, throwOnError = false): Promise<any[]> => {
       const results: any[] = [];
       let nextUrl: string | null = url;
       while (nextUrl) {
         const res = await fetch(nextUrl, { headers: authHeaders });
-        if (!res.ok) break;
+        if (!res.ok) {
+          const errorText = await res.text();
+          const message = `Meta API error ${res.status}: ${errorText.substring(0, 300)}`;
+          if (throwOnError) throw new Error(message);
+          console.warn('fetchAllPages non-fatal error:', message);
+          break;
+        }
         const json = await res.json();
         if (json.data) results.push(...json.data);
         nextUrl = json.paging?.next ?? null;
@@ -156,15 +165,16 @@ export async function GET() {
       return results;
     };
 
-    // 4a. Fetch personal ad accounts
+    // 4a. Fetch personal ad accounts — throw if this fails so the caller gets a real error
     const personalAccounts = await fetchAllPages(
-      'https://graph.facebook.com/v18.0/me/adaccounts?fields=id,name,account_status,currency&limit=200'
+      'https://graph.facebook.com/v26.0/me/adaccounts?fields=id,name,account_status,currency&limit=200',
+      true
     );
     console.log('Step 6: Personal ad accounts:', personalAccounts.length);
 
     // 4b. Fetch businesses (portfolios) the user belongs to
     const businesses = await fetchAllPages(
-      'https://graph.facebook.com/v18.0/me/businesses?fields=id,name&limit=200'
+      'https://graph.facebook.com/v26.0/me/businesses?fields=id,name&limit=200'
     );
     console.log('Step 7: Business portfolios:', businesses.length);
 
@@ -172,10 +182,10 @@ export async function GET() {
     const businessAccountArrays = await Promise.all(
       businesses.flatMap((biz: any) => [
         fetchAllPages(
-          `https://graph.facebook.com/v18.0/${biz.id}/owned_ad_accounts?fields=id,name,account_status,currency&limit=200`
+          `https://graph.facebook.com/v26.0/${biz.id}/owned_ad_accounts?fields=id,name,account_status,currency&limit=200`
         ),
         fetchAllPages(
-          `https://graph.facebook.com/v18.0/${biz.id}/client_ad_accounts?fields=id,name,account_status,currency&limit=200`
+          `https://graph.facebook.com/v26.0/${biz.id}/client_ad_accounts?fields=id,name,account_status,currency&limit=200`
         ),
       ])
     );
@@ -212,12 +222,28 @@ export async function GET() {
     console.error('Error type:', error?.constructor?.name);
     console.error('Error message:', error?.message);
     console.error('Error stack:', error?.stack);
-    
+
+    // Parse Meta API error details from the thrown message for better UX
+    const rawMsg: string = error?.message || '';
+    let userFacingError = 'Failed to load Meta ad accounts.';
+    if (rawMsg.includes('190') || rawMsg.includes('Invalid OAuth') || rawMsg.includes('OAuthException')) {
+      userFacingError = 'Your Meta connection has expired or been revoked. Please disconnect and reconnect your Meta account.';
+    } else if (rawMsg.includes('460') || rawMsg.includes('invalidated')) {
+      userFacingError = 'Your Meta session was invalidated (e.g. password changed). Please reconnect your Meta account.';
+    } else if (rawMsg.includes('463') || rawMsg.includes('Session has expired')) {
+      userFacingError = 'Your Meta session has expired. Please reconnect your Meta account.';
+    } else if (rawMsg.includes('100') || rawMsg.includes('permissions')) {
+      userFacingError = 'Missing Meta permissions. Please reconnect and grant ads_read / ads_management access.';
+    } else if (rawMsg.includes('Could not retrieve Meta Ads credentials')) {
+      userFacingError = 'Could not retrieve Meta credentials. Please disconnect and reconnect your Meta account.';
+    } else if (rawMsg) {
+      userFacingError = `Failed to load Meta ad accounts: ${rawMsg.substring(0, 200)}`;
+    }
+
     return NextResponse.json(
-      { 
-        error: 'Failed to fetch Meta Ads accounts',
-        details: error?.message || 'Unknown error',
-        type: error?.constructor?.name
+      {
+        error: userFacingError,
+        details: rawMsg || 'Unknown error',
       },
       { status: 500 }
     );
