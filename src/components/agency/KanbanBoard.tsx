@@ -1,25 +1,11 @@
 // src/components/agency/KanbanBoard.tsx
 'use client';
 
-import { useState, useRef, useEffect, forwardRef, useImperativeHandle, type ForwardedRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Facebook, Search, Linkedin, Music, Radio, Plus, X, Check, Clock } from 'lucide-react';
 import type { AgencyClientActionPoints } from '@/app/api/agency/action-points/route';
 import { getChannelLogo } from '@/lib/utils/channel-icons';
-
-const COMMON_CHANNELS = [
-  'Meta Ads',
-  'Google Ads',
-  'LinkedIn Ads',
-  'TikTok Ads',
-  'Email',
-  'OOH',
-  'Radio',
-  'Linear TV',
-  'SVOD',
-  'BVOD',
-  'Other',
-];
 
 interface AccountManager {
   id: string;
@@ -421,10 +407,6 @@ function DelayChannelModal({ clientId, clientName, channelType, overdueCount, on
   ) : null;
 }
 
-export interface KanbanBoardHandle {
-  startAdding: () => void;
-}
-
 interface ClientOption {
   id: string;
   name: string;
@@ -435,16 +417,14 @@ interface KanbanBoardProps {
   amFilter: string;
   onActionPointCompleted?: () => void;
   accountManagers?: AccountManager[];
-  availableChannels?: string[];
   view?: 'kanban' | 'list' | 'gantt';
   onAskAI?: (prompt: string) => void;
   clients?: ClientOption[];
   onAccountManagerCreated?: () => void;
 }
 
-export const KanbanBoard = forwardRef(function KanbanBoard(
-  { actionPointClients, amFilter, onActionPointCompleted, accountManagers = [], availableChannels, view = 'kanban', onAskAI, clients = [], onAccountManagerCreated }: KanbanBoardProps,
-  ref: ForwardedRef<KanbanBoardHandle>
+export function KanbanBoard(
+  { actionPointClients, amFilter, onActionPointCompleted, accountManagers = [], view = 'kanban', onAskAI, clients = [], onAccountManagerCreated }: KanbanBoardProps
 ) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -545,33 +525,24 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
     return () => document.removeEventListener('mousedown', handleClick);
   }, [ganttPopup]);
 
-  // Add action point form state
-  const [isAdding, setIsAdding] = useState(false);
+  // Quick-add to-do bar state
   const [addText, setAddText] = useState('');
-  const [addChannel, setAddChannel] = useState('');
-  const [addCategory, setAddCategory] = useState<'SET UP' | 'HEALTH CHECK' | 'TODO'>('SET UP');
-  const [addDaysBefore, setAddDaysBefore] = useState<string>('');
-  const [addFrequency, setAddFrequency] = useState<'weekly' | 'fortnightly' | 'monthly'>('weekly');
   const [addDueDate, setAddDueDate] = useState<string>('');
   const [addClientId, setAddClientId] = useState<string>('');
   const [isSaving, setIsSaving] = useState(false);
+  const [activePopover, setActivePopover] = useState<'client' | 'due' | null>(null);
+  const quickAddRef = useRef<HTMLDivElement>(null);
 
-  const channelOptions = availableChannels && availableChannels.length > 0
-    ? availableChannels
-    : COMMON_CHANNELS;
-
-  useImperativeHandle(ref, () => ({
-    startAdding() {
-      setIsAdding(true);
-      setAddChannel(channelOptions[0] || '');
-      setAddText('');
-      setAddDaysBefore('');
-      setAddCategory('SET UP');
-      setAddFrequency('weekly');
-      setAddDueDate('');
-      setAddClientId('');
-    },
-  }));
+  useEffect(() => {
+    if (!activePopover) return;
+    function handleClick(e: MouseEvent) {
+      if (quickAddRef.current && !quickAddRef.current.contains(e.target as Node)) {
+        setActivePopover(null);
+      }
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [activePopover]);
 
   // Flatten all outstanding action points into kanban cards
   const cards: KanbanCard[] = [];
@@ -751,24 +722,12 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
   }
 
   async function handleSaveAdd() {
-    if (!addText.trim()) return;
-    if (addCategory !== 'TODO' && !addChannel) return;
+    if (!addText.trim() || isSaving) return;
     setIsSaving(true);
     try {
-      const body: any = {
-        text: addText.trim(),
-        category: addCategory,
-      };
-      if (addCategory === 'TODO') {
-        if (addDueDate) body.due_date = addDueDate;
-        if (addClientId) body.client_id = addClientId;
-      } else if (addCategory === 'SET UP') {
-        body.channel_type = addChannel;
-        body.days_before_live_due = addDaysBefore !== '' ? Number(addDaysBefore) : null;
-      } else {
-        body.channel_type = addChannel;
-        body.frequency = addFrequency;
-      }
+      const body: any = { text: addText.trim(), category: 'TODO' };
+      if (addDueDate) body.due_date = addDueDate;
+      if (addClientId) body.client_id = addClientId;
       const res = await fetch('/api/action-points', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -779,12 +738,10 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
         console.error('Failed to add action point:', err);
         return;
       }
-      setIsAdding(false);
       setAddText('');
-      setAddChannel('');
-      setAddDaysBefore('');
       setAddDueDate('');
       setAddClientId('');
+      setActivePopover(null);
       onActionPointCompleted?.();
     } catch (err) {
       console.error('Error adding action point:', err);
@@ -863,200 +820,167 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
     `}</style>
     <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 10 }}>
 
-      {/* Inline add form — shown when isAdding */}
-      {isAdding && (
+      {/* Quick-add to-do bar — always visible, pinned at the top */}
+      <div ref={quickAddRef} style={{ display: 'flex', flexDirection: 'column', gap: 6, flexShrink: 0 }}>
         <div style={{
-          background: '#FDFCF8',
-          border: '0.5px solid #D5D0C5',
-          borderRadius: 6,
-          padding: '10px 12px',
           display: 'flex',
-          flexDirection: 'column',
-          gap: 8,
+          alignItems: 'center',
+          gap: 7,
+          background: '#fff',
+          border: '1.5px solid #1C1917',
+          borderRadius: 10,
+          padding: '7px 10px',
+          boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
         }}>
-          {/* Row 1: text input */}
+          <Plus size={13} color="#8A8578" style={{ flexShrink: 0 }} />
           <input
-            autoFocus
             value={addText}
             onChange={e => setAddText(e.target.value)}
-            placeholder="Action point text…"
+            placeholder="Type an action point, press Enter to add…"
             style={{
-              width: '100%',
-              fontSize: 12,
-              padding: '5px 8px',
-              border: '0.5px solid #D5D0C5',
-              borderRadius: 4,
-              background: '#fff',
-              fontFamily: "'DM Sans', system-ui, sans-serif",
+              flex: 1,
+              minWidth: 0,
+              border: 'none',
               outline: 'none',
+              background: 'transparent',
+              fontSize: 12.5,
+              fontFamily: "'DM Sans', system-ui, sans-serif",
               color: '#1C1917',
             }}
-            onKeyDown={e => { if (e.key === 'Enter') void handleSaveAdd(); if (e.key === 'Escape') setIsAdding(false); }}
+            onKeyDown={e => { if (e.key === 'Enter') void handleSaveAdd(); }}
           />
-          {/* Row 2: category + conditional fields */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            <select
-              value={addCategory}
-              onChange={e => setAddCategory(e.target.value as 'SET UP' | 'HEALTH CHECK' | 'TODO')}
+          <span style={{
+            flexShrink: 0,
+            fontSize: 9,
+            fontWeight: 600,
+            letterSpacing: '0.02em',
+            color: '#8A8578',
+            background: '#F5F3EF',
+            border: '0.5px solid #E8E4DC',
+            borderRadius: 6,
+            padding: '2px 6px',
+            whiteSpace: 'nowrap',
+          }}>
+            ↵ ADD
+          </span>
+        </div>
+
+        {/* Optional chips: client / due date */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {clients.length > 0 && (
+            <div style={{ position: 'relative' }}>
+              <button
+                onClick={() => setActivePopover(p => p === 'client' ? null : 'client')}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 4,
+                  fontSize: 10.5, padding: '3px 8px',
+                  borderRadius: 8,
+                  border: addClientId ? '0.5px solid rgba(74,101,128,0.35)' : '0.5px dashed #D5D0C5',
+                  background: addClientId ? 'rgba(74,101,128,0.08)' : 'transparent',
+                  color: addClientId ? '#4A6580' : '#8A8578',
+                  cursor: 'pointer',
+                  fontFamily: "'DM Sans', system-ui, sans-serif",
+                }}
+              >
+                + Client
+                {addClientId
+                  ? <span style={{ fontWeight: 600 }}>· {clients.find(c => c.id === addClientId)?.name ?? ''}</span>
+                  : <span style={{ opacity: 0.7 }}>(optional)</span>}
+              </button>
+              {activePopover === 'client' && (
+                <div style={{
+                  position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 20,
+                  background: '#FDFCF8', border: '0.5px solid #E8E4DC', borderRadius: 6,
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.08)', minWidth: 160,
+                  maxHeight: 220, overflowY: 'auto', padding: '4px 0',
+                }}>
+                  <button
+                    onClick={() => { setAddClientId(''); setActivePopover(null); }}
+                    style={{
+                      display: 'block', width: '100%', textAlign: 'left', padding: '6px 10px',
+                      fontSize: 11, color: addClientId ? '#8A8578' : '#4A6580',
+                      fontWeight: addClientId ? 400 : 600,
+                      background: 'transparent', border: 'none', cursor: 'pointer',
+                      fontFamily: "'DM Sans', system-ui, sans-serif",
+                    }}
+                  >No client</button>
+                  {clients.map(c => (
+                    <button
+                      key={c.id}
+                      onClick={() => { setAddClientId(c.id); setActivePopover(null); }}
+                      style={{
+                        display: 'block', width: '100%', textAlign: 'left', padding: '6px 10px',
+                        fontSize: 11, color: addClientId === c.id ? '#4A6580' : '#1C1917',
+                        fontWeight: addClientId === c.id ? 600 : 400,
+                        background: addClientId === c.id ? 'rgba(74,101,128,0.06)' : 'transparent',
+                        border: 'none', cursor: 'pointer',
+                        fontFamily: "'DM Sans', system-ui, sans-serif",
+                      }}
+                    >{c.name}</button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div style={{ position: 'relative' }}>
+            <button
+              onClick={() => setActivePopover(p => p === 'due' ? null : 'due')}
               style={{
-                fontSize: 11,
-                padding: '3px 6px',
-                border: '0.5px solid #D5D0C5',
+                display: 'flex', alignItems: 'center', gap: 4,
+                fontSize: 10.5, padding: '3px 8px',
                 borderRadius: 8,
-                background: '#fff',
-                fontFamily: "'DM Sans', system-ui, sans-serif",
-                color: '#1C1917',
+                border: addDueDate ? '0.5px solid rgba(74,101,128,0.35)' : '0.5px dashed #D5D0C5',
+                background: addDueDate ? 'rgba(74,101,128,0.08)' : 'transparent',
+                color: addDueDate ? '#4A6580' : '#8A8578',
                 cursor: 'pointer',
+                fontFamily: "'DM Sans', system-ui, sans-serif",
               }}
             >
-              <option value="TODO">TO DO</option>
-              <option value="SET UP">SET UP</option>
-              <option value="HEALTH CHECK">HEALTH CHECK</option>
-            </select>
-
-            {/* Channel picker — only for SET UP / HEALTH CHECK */}
-            {addCategory !== 'TODO' && (
-              <select
-                value={addChannel}
-                onChange={e => setAddChannel(e.target.value)}
-                style={{
-                  fontSize: 11,
-                  padding: '3px 6px',
-                  border: '0.5px solid #D5D0C5',
-                  borderRadius: 8,
-                  background: '#fff',
-                  fontFamily: "'DM Sans', system-ui, sans-serif",
-                  color: '#1C1917',
-                  cursor: 'pointer',
-                }}
-              >
-                {channelOptions.map(c => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
-            )}
-
-            {addCategory === 'SET UP' && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                <span style={{ fontSize: 11, color: '#8A8578', whiteSpace: 'nowrap' }}>days before:</span>
+              + Due date
+              {addDueDate
+                ? <span style={{ fontWeight: 600 }}>· {addDueDate}</span>
+                : <span style={{ opacity: 0.7 }}>(optional)</span>}
+            </button>
+            {activePopover === 'due' && (
+              <div style={{
+                position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 20,
+                background: '#FDFCF8', border: '0.5px solid #E8E4DC', borderRadius: 6,
+                boxShadow: '0 4px 12px rgba(0,0,0,0.08)', padding: 8,
+                display: 'flex', flexDirection: 'column', gap: 6,
+              }}>
                 <input
-                  type="number"
-                  min="0"
-                  value={addDaysBefore}
-                  onChange={e => setAddDaysBefore(e.target.value)}
-                  placeholder="0"
-                  style={{
-                    width: 52,
-                    fontSize: 11,
-                    padding: '3px 6px',
-                    border: '0.5px solid #D5D0C5',
-                    borderRadius: 4,
-                    background: '#fff',
-                    fontFamily: "'DM Sans', system-ui, sans-serif",
-                    color: '#1C1917',
-                    outline: 'none',
-                  }}
-                />
-              </div>
-            )}
-            {addCategory === 'HEALTH CHECK' && (
-              <select
-                value={addFrequency}
-                onChange={e => setAddFrequency(e.target.value as 'weekly' | 'fortnightly' | 'monthly')}
-                style={{
-                  fontSize: 11,
-                  padding: '3px 6px',
-                  border: '0.5px solid #D5D0C5',
-                  borderRadius: 4,
-                  background: '#fff',
-                  fontFamily: "'DM Sans', system-ui, sans-serif",
-                  color: '#1C1917',
-                  cursor: 'pointer',
-                }}
-              >
-                <option value="weekly">weekly</option>
-                <option value="fortnightly">fortnightly</option>
-                <option value="monthly">monthly</option>
-              </select>
-            )}
-
-            {/* TODO-specific fields: due date + optional client */}
-            {addCategory === 'TODO' && (
-              <>
-                <input
+                  autoFocus
                   type="date"
                   value={addDueDate}
                   onChange={e => setAddDueDate(e.target.value)}
                   style={{
-                    fontSize: 11,
-                    padding: '3px 6px',
-                    border: '0.5px solid #D5D0C5',
-                    borderRadius: 4,
-                    background: '#fff',
+                    fontSize: 11, padding: '4px 6px',
+                    border: '0.5px solid #D5D0C5', borderRadius: 4,
+                    background: '#fff', outline: 'none', color: '#1C1917',
                     fontFamily: "'DM Sans', system-ui, sans-serif",
-                    color: addDueDate ? '#1C1917' : '#8A8578',
-                    outline: 'none',
-                    cursor: 'pointer',
                   }}
                 />
-                {clients.length > 0 && (
-                  <select
-                    value={addClientId}
-                    onChange={e => setAddClientId(e.target.value)}
+                {addDueDate && (
+                  <button
+                    onClick={() => { setAddDueDate(''); setActivePopover(null); }}
                     style={{
-                      fontSize: 11,
-                      padding: '3px 6px',
-                      border: '0.5px solid #D5D0C5',
-                      borderRadius: 8,
-                      background: '#fff',
+                      fontSize: 10, padding: '3px 0',
+                      border: 'none', background: 'transparent',
+                      color: '#8A8578', cursor: 'pointer', textAlign: 'left',
                       fontFamily: "'DM Sans', system-ui, sans-serif",
-                      color: '#1C1917',
-                      cursor: 'pointer',
                     }}
-                  >
-                    <option value="">All clients</option>
-                    {clients.map(c => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                  </select>
+                  >Clear</button>
                 )}
-              </>
+              </div>
             )}
           </div>
-          {/* Row 3: save / cancel */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <button
-              onClick={() => void handleSaveAdd()}
-              disabled={isSaving || !addText.trim() || (addCategory !== 'TODO' && !addChannel)}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 3,
-                fontSize: 11, padding: '3px 10px',
-                borderRadius: 8, border: 'none',
-                background: isSaving || !addText.trim() || (addCategory !== 'TODO' && !addChannel) ? '#D5D0C5' : '#4A6580',
-                color: '#fff', cursor: isSaving || !addText.trim() || (addCategory !== 'TODO' && !addChannel) ? 'default' : 'pointer',
-                fontFamily: "'DM Sans', system-ui, sans-serif",
-              }}
-            >
-              <Check size={10} />
-              Save
-            </button>
-            <button
-              onClick={() => setIsAdding(false)}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 3,
-                fontSize: 11, padding: '3px 8px',
-                borderRadius: 8, border: '0.5px solid #D5D0C5',
-                background: 'transparent', color: '#8A8578',
-                cursor: 'pointer',
-                fontFamily: "'DM Sans', system-ui, sans-serif",
-              }}
-            >
-              <X size={10} />
-              Cancel
-            </button>
-          </div>
         </div>
-      )}
+
+        <div style={{ fontSize: 10, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+          Just type and hit enter to add instantly — tap a chip above only if you want to set a client or due date.
+        </div>
+      </div>
 
     {view === 'gantt' ? (
       /* ── Gantt view: items positioned at their due date ── */
@@ -1745,4 +1669,4 @@ export const KanbanBoard = forwardRef(function KanbanBoard(
     )}
     </>
   );
-});
+}

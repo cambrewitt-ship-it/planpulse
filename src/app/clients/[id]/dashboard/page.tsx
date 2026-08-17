@@ -61,10 +61,10 @@ import { ChannelManageMenu } from '@/components/dashboard-v2/channel-manage-menu
 import dynamic from 'next/dynamic';
 const InvoiceModal = dynamic(() => import('@/components/dashboard-v2/invoice-modal').then(m => m.InvoiceModal), { ssr: false });
 const ReportBuilderModal = dynamic(() => import('@/components/dashboard-v2/report-builder-modal').then(m => m.ReportBuilderModal), { ssr: false });
-import { GanttCalendar, type GanttClient, type GanttChannel } from '@/components/agency/GanttCalendar';
+import { type GanttClient, type GanttChannel } from '@/components/agency/GanttCalendar';
 import { FullscreenGanttView, type GanttAPMarker } from '@/components/agency/FullscreenGanttView';
 import { ClientIntelTab } from '@/components/dashboard-v2/client-intel-tab';
-import ClientAIChatBar from '@/components/dashboard-v2/client-ai-chat-bar';
+import ClientChatPanel from '@/components/dashboard-v2/client-chat-panel';
 
 interface Client {
   id: string;
@@ -95,6 +95,14 @@ const METRIC_OPTIONS: any = [
 ];
 
 const GANTT_COLORS = ['#6366f1', '#f59e0b', '#10b981', '#ef4444', '#3b82f6', '#8b5cf6', '#ec4899', '#14b8a6'];
+
+const VIEW_MODE_ORDER = ['overview', 'funnels', 'media-plan', 'client-hub'] as const;
+const VIEW_MODE_COLORS: Record<typeof VIEW_MODE_ORDER[number], string> = {
+  overview: '#2f3a56',
+  funnels: '#2a5fa5',
+  'media-plan': '#35586b',
+  'client-hub': '#7A5C8A',
+};
 
 function ganttClientColor(id: string): string {
   let hash = 0;
@@ -1273,13 +1281,13 @@ export default function DashboardV2() {
     return result;
   }, [clientId, mediaPlanBuilderChannels]);
 
-  // Height for the notes/todo panel — grows with the Gantt but never shrinks below 240
+  // Height for the notes/todo panel (and the matching Ask AI card) — grows with the Gantt but never shrinks below 360
   const notesPanelHeight = useMemo(() => {
-    if (!ganttChannels.length) return 240;
+    if (!ganttChannels.length) return 360;
     const GANTT_HEADER_H = 46; // 18px month row + 28px day row
     const GANTT_ROW_H = 42;    // per-channel row height in GanttCalendar
     const GANTT_WRAPPER_PADDING_V = 16; // py-2 on the wrapper div
-    return Math.max(240, GANTT_HEADER_H + ganttChannels.length * GANTT_ROW_H + GANTT_WRAPPER_PADDING_V);
+    return Math.max(360, GANTT_HEADER_H + ganttChannels.length * GANTT_ROW_H + GANTT_WRAPPER_PADDING_V);
   }, [ganttChannels.length]);
 
   // AP markers derived from allActionPoints for fullscreen Gantt
@@ -2320,88 +2328,78 @@ export default function DashboardV2() {
               )
             )}
 
-            {/* ── Global View Mode & Date Controls (under hero) ── */}
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
-              <div className="flex items-center justify-between">
-                {/* Left: View Mode Tabs */}
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setViewMode('overview')}
-                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                      viewMode === 'overview'
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
-                    Overview
-                  </button>
-                  <button
-                    onClick={() => setViewMode('funnels')}
-                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                      viewMode === 'funnels'
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
-                    Results
-                  </button>
-                  <button
-                    onClick={() => setViewMode('media-plan')}
-                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                      viewMode === 'media-plan'
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
-                    Media Plan
-                  </button>
-                  <button
-                    onClick={() => setViewMode('client-hub')}
-                    className={`relative flex items-center gap-1.5 px-4 py-2 rounded-lg font-medium transition-colors ${
-                      viewMode === 'client-hub'
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.46 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3.12A2.5 2.5 0 0 1 9.5 2Z"/>
-                      <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.46 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3.12A2.5 2.5 0 0 0 14.5 2Z"/>
-                    </svg>
-                    Client Hub
-                    {adminNeedsConfig && (
-                      <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-orange-500 text-white text-[9px] font-bold leading-none">!</span>
-                    )}
-                  </button>
-                  <div style={{ width: '0.5px', height: 20, background: '#E8E4DC', margin: '0 4px' }} />
-                  <button
-                    onClick={() => setShowFullscreenGantt(true)}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 6,
-                      padding: '8px 14px', borderRadius: 12, border: '0.5px solid #D5D0C5',
-                      background: '#FDFCF8', color: '#4A6580',
-                      fontSize: 16, fontWeight: 500, cursor: 'pointer',
-                      fontFamily: "'DM Sans', system-ui, sans-serif",
-                    }}
-                  >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/>
-                      <line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
-                    </svg>
-                    Timeline
-                  </button>
-                </div>
-                {/* Right: AI Chat Bar + Date Controls */}
-                <div className="flex items-center gap-4">
-                  <ClientAIChatBar
-                    clientId={clientId ?? ''}
-                    clientName={client?.name ?? ''}
-                    onActionComplete={handleAIActionComplete}
-                  />
-
-
-                </div>
+            {/* ── Global View Mode & Date Controls (same card as the content below) ── */}
+            <div className="mb-6">
+              {/* Tab row — sits above the card (not inside it), so the tab tops rise above the card's top edge like folder tabs */}
+              <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', padding: '0 16px' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+                {VIEW_MODE_ORDER.map((tab, idx) => {
+                  const isActive = viewMode === tab;
+                  const label = tab === 'overview' ? 'Overview' : tab === 'funnels' ? 'Results' : tab === 'media-plan' ? 'Media Plan' : 'Client Hub';
+                  return (
+                    <button
+                      key={tab}
+                      onClick={() => setViewMode(tab)}
+                      style={{
+                        position: 'relative',
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        padding: isActive ? '18px 32px 20px' : '13px 26px 15px',
+                        fontSize: isActive ? 20 : 16,
+                        fontWeight: isActive ? 700 : 600,
+                        color: isActive ? '#FFFFFF' : 'rgba(255,255,255,0.65)',
+                        background: VIEW_MODE_COLORS[tab],
+                        border: 'none',
+                        borderRadius: isActive ? '16px 16px 0 0' : '13px 13px 0 0',
+                        // Each tab's right edge overlaps the next tab's left edge — consistent
+                        // left-to-right shingle, independent of which tab is active.
+                        marginLeft: idx > 0 ? -14 : 0,
+                        cursor: 'pointer',
+                        fontFamily: "'DM Sans', system-ui, sans-serif",
+                        transition: 'all 0.15s',
+                        letterSpacing: isActive ? '-0.01em' : 0,
+                        // Active tab jumps above both neighbors so its overlapped edges read as "in front".
+                        zIndex: isActive ? VIEW_MODE_ORDER.length + 1 : VIEW_MODE_ORDER.length - idx,
+                        boxShadow: isActive ? '0 -4px 12px rgba(0,0,0,.15)' : 'none',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {tab === 'client-hub' && (
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.46 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3.12A2.5 2.5 0 0 1 9.5 2Z"/>
+                          <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.46 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3.12A2.5 2.5 0 0 0 14.5 2Z"/>
+                        </svg>
+                      )}
+                      {label}
+                      {tab === 'client-hub' && adminNeedsConfig && (
+                        <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-orange-500 text-white text-[9px] font-bold leading-none">!</span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
-            </div>
+              {/* Timeline shortcut — right-aligned on the same row as the view-mode tabs */}
+              <button
+                onClick={() => setShowFullscreenGantt(true)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '8px 14px', marginBottom: 8, borderRadius: 12, border: '0.5px solid #D5D0C5',
+                  background: '#FDFCF8', color: '#4A6580',
+                  fontSize: 16, fontWeight: 500, cursor: 'pointer',
+                  fontFamily: "'DM Sans', system-ui, sans-serif",
+                }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/>
+                  <line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
+                </svg>
+                Timeline
+              </button>
+              </div>
+              {/* Card — begins right at the tabs' bottom edge; the strip's own top corners are rounded to match so nothing needs clipping */}
+              <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+                {/* Connecting strip — ties the tabs to the panel below in the active tab's color */}
+                <div style={{ height: 8, background: VIEW_MODE_COLORS[viewMode], borderRadius: '7px 7px 0 0' }} />
+                <div className="p-4">
 
             {/* ── Overview: Notes + Action Points + Channels ── */}
             {viewMode === 'overview' && (
@@ -2649,37 +2647,34 @@ export default function DashboardV2() {
                     )}
                   </div>{/* end combined card */}
 
-                  {/* Right: Gantt timeline */}
-                  {ganttClients.length > 0 && ganttChannels.length > 0 && (
-                    <div style={{ flex: '0 0 60%', minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-                      <div className="border border-gray-100 rounded-lg bg-gray-50/80 px-3 py-2" style={{ flex: 1, overflow: 'hidden' }}>
-                        <GanttCalendar
-                          clients={ganttClients}
-                          channels={ganttChannels}
-                          healthChecks={allActionPoints
-                            .filter((ap: any) => ap.category === 'HEALTH CHECK' && ap.channel_type && !ap.completed)
-                            .map((ap: any) => {
-                              const due = computeGanttDueDate(ap);
-                              return due ? { client_id: clientId, channel_label: ap.channel_type, due_date: due } : null;
-                            })
-                            .filter(Boolean) as any[]}
-                          setupPoints={allActionPoints
-                            .filter((ap: any) => ap.category === 'SET UP' && ap.channel_type && !ap.completed)
-                            .map((ap: any) => {
-                              const due = computeGanttDueDate(ap);
-                              return due ? { client_id: clientId, channel_label: ap.channel_type, due_date: due } : null;
-                            })
-                            .filter(Boolean) as any[]}
-                          pointEvents={[]}
-                          selectedDay={ganttSelectedDay}
-                          onDaySelect={setGanttSelectedDay}
-                          filteredClientIds={clientId ? [clientId] : []}
-                          currentMonth={selectedMonth}
-                        />
-                      </div>
-                    </div>
-                  )}
+                  {/* Right: Ask AI card — height locked to the Notes/To Do card's height */}
+                  <div style={{ flex: '0 0 60%', minWidth: 0, height: notesPanelHeight, display: 'flex', flexDirection: 'column' }}>
+                    <ClientChatPanel
+                      height={notesPanelHeight}
+                      clientId={clientId ?? ''}
+                      clientName={client?.name ?? ''}
+                      onActionComplete={handleAIActionComplete}
+                    />
+                  </div>
                 </div>{/* end top row */}
+
+                {adminNeedsConfig && (
+                  <div className="flex items-start gap-3 rounded-xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-800">
+                    <span className="mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full bg-orange-500 text-white text-[9px] font-bold leading-none">!</span>
+                    <div>
+                      <span className="font-medium">A connected ad platform is missing an account selection.</span>{' '}
+                      Channel Performance data may be incomplete until this is finished. Go to{' '}
+                      <button
+                        type="button"
+                        onClick={() => setViewMode('client-hub')}
+                        className="font-medium underline underline-offset-2 hover:text-orange-900"
+                      >
+                        Client Hub → Platform Connections
+                      </button>{' '}
+                      to select the account.
+                    </div>
+                  </div>
+                )}
 
                 {loadingAnalytics ? (
                   <div className="bg-white rounded-xl border border-gray-200 p-6 animate-pulse">
@@ -3220,6 +3215,10 @@ export default function DashboardV2() {
                 </div>
               </div>
             )}
+
+                </div>
+              </div>
+            </div>
 
           </>
         )}

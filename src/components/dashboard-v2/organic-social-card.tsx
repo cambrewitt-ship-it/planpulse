@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Instagram, Facebook, Linkedin, RefreshCw, Link2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -147,7 +147,10 @@ export default function OrganicSocialCard({ channel, clientId, weekCommencing, a
     }
   };
 
-  // Check if Facebook page is connected (only for Meta platforms)
+  // Check if Facebook page is connected (only for Meta platforms), and
+  // auto-fetch this week's post count once so newly-connected accounts
+  // don't sit blank until the user manually clicks "Refresh".
+  const autoFetchAttempted = useRef(false);
   useEffect(() => {
     const channelLower = channel.channelName.toLowerCase();
     if (!channelLower.includes('facebook') && !channelLower.includes('instagram')) {
@@ -155,9 +158,13 @@ export default function OrganicSocialCard({ channel, clientId, weekCommencing, a
       return;
     }
 
-    // Don't check immediately - wait for user to try refresh first
-    // The check will happen when refresh is attempted
     setHasPageConnection(null);
+
+    if (!autoFetchAttempted.current && currentWeekActual === undefined) {
+      autoFetchAttempted.current = true;
+      handleRefresh(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [channel.channelName]);
 
   // Convenience wrapper for the current week (used in "This week" view)
@@ -231,7 +238,7 @@ export default function OrganicSocialCard({ channel, clientId, weekCommencing, a
     }
   };
 
-  const handleRefresh = async () => {
+  const handleRefresh = async (silent: boolean = false) => {
     setIsRefreshing(true);
     try {
       // Calculate date range for the current week
@@ -290,7 +297,9 @@ export default function OrganicSocialCard({ channel, clientId, weekCommencing, a
       }
     } catch (error: any) {
       console.error('Error fetching posts:', error);
-      alert(error.message || 'Failed to fetch posts from social media platform');
+      if (!silent) {
+        alert(error.message || 'Failed to fetch posts from social media platform');
+      }
     } finally {
       setIsRefreshing(false);
     }
@@ -529,7 +538,7 @@ export default function OrganicSocialCard({ channel, clientId, weekCommencing, a
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={handleRefresh}
+                  onClick={() => handleRefresh()}
                   disabled={isRefreshing || isSaving || isConnecting}
                   className="h-7 text-[11px] px-2"
                 >

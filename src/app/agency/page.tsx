@@ -2,7 +2,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { RefreshCw, Plus, Maximize2 } from 'lucide-react';
+import { RefreshCw, Maximize2 } from 'lucide-react';
 import { format, startOfYear } from 'date-fns';
 import type { ClientCardData } from '@/app/api/agency/clients/route';
 import { fetchSpendData } from '@/lib/api/analytics-data-integration';
@@ -10,7 +10,7 @@ import type { AgencyClientActionPoints } from '@/app/api/agency/action-points/ro
 import { ClientCardCompact } from '@/components/agency/ClientCardCompact';
 import { TodayCard } from '@/components/agency/TodayCard';
 import { AgencyChat, type AgencyChatHandle } from '@/components/agency/AgencyChat';
-import { KanbanBoard, type KanbanBoardHandle } from '@/components/agency/KanbanBoard';
+import { KanbanBoard } from '@/components/agency/KanbanBoard';
 import { NotesChecklist } from '@/components/agency/NotesChecklist';
 import { DateRangePicker } from '@/components/ui/date-range-picker';
 import { FullscreenGanttView, type GanttAPMarker } from '@/components/agency/FullscreenGanttView';
@@ -26,6 +26,13 @@ const AM_TAB_COLORS = [
   { active: '#A0442A', light: 'rgba(160,68,42,0.12)', text: '#fff', inactiveText: '#A0442A' },
   { active: '#7A5C8A', light: 'rgba(122,92,138,0.12)', text: '#fff', inactiveText: '#7A5C8A' },
 ];
+
+const DASHBOARD_TAB_ORDER = ['clients', 'todo', 'timeline'] as const;
+const DASHBOARD_TAB_COLORS: Record<typeof DASHBOARD_TAB_ORDER[number], string> = {
+  clients: '#2f3a56',
+  todo: '#2a5fa5',
+  timeline: '#35586b',
+};
 
 interface AccountManager {
   id: string;
@@ -144,7 +151,6 @@ export default function AgencyDashboard() {
     if (activeFileId === id) setActiveFileId(next[0].id);
   };
 
-  const kanbanRef = useRef<KanbanBoardHandle>(null);
   const chatRef = useRef<AgencyChatHandle>(null);
   const [kanbanView, setKanbanView] = useState<'kanban' | 'list' | 'gantt'>('kanban');
   const [activeCardTab, setActiveCardTab] = useState<'clients' | 'todo' | 'timeline'>('timeline');
@@ -719,9 +725,10 @@ export default function AgencyDashboard() {
             flex: 1,
           }}>
             {/* ── Tab bar ── */}
-            <div style={{ display: 'flex', flexShrink: 0, borderBottom: '1.5px solid #E8E4DC', position: 'relative' }}>
-              {(['clients', 'todo', 'timeline'] as const).map(tab => {
+            <div style={{ display: 'flex', flexShrink: 0, position: 'relative', alignItems: 'flex-end' }}>
+              {DASHBOARD_TAB_ORDER.map((tab, idx) => {
                 const isActive = activeCardTab === tab;
+                const activeIdx = DASHBOARD_TAB_ORDER.indexOf(activeCardTab);
                 const label = tab === 'clients' ? 'Clients' : tab === 'todo' ? 'To Do' : 'Timeline';
                 return (
                   <button
@@ -729,20 +736,22 @@ export default function AgencyDashboard() {
                     onClick={() => setActiveCardTab(tab)}
                     style={{
                       flex: 1,
-                      padding: isActive ? '12px 0 13.5px' : '14px 0 10px',
-                      fontSize: 18,
-                      fontWeight: isActive ? 700 : 500,
-                      color: isActive ? '#1C1917' : '#FFFFFF',
-                      background: isActive ? '#FDFCF8' : '#3D3A36',
+                      padding: isActive ? '18px 0 20px' : '12px 0 14px',
+                      fontSize: isActive ? 20 : 15,
+                      fontWeight: isActive ? 700 : 600,
+                      color: isActive ? '#FFFFFF' : 'rgba(255,255,255,0.6)',
+                      background: DASHBOARD_TAB_COLORS[tab],
                       border: 'none',
-                      borderBottom: isActive ? '1.5px solid #FDFCF8' : '1.5px solid transparent',
-                      marginBottom: isActive ? -1.5 : 0,
+                      borderRadius: isActive ? '16px 16px 0 0' : '14px 14px 0 0',
+                      marginLeft: !isActive && idx > activeIdx ? -14 : 0,
+                      marginRight: !isActive && idx < activeIdx ? -14 : 0,
                       cursor: 'pointer',
                       fontFamily: "'DM Sans', system-ui, sans-serif",
                       transition: 'all 0.15s',
                       letterSpacing: isActive ? '-0.01em' : 0,
                       position: 'relative',
                       zIndex: isActive ? 2 : 1,
+                      boxShadow: isActive ? '0 -4px 12px rgba(0,0,0,.15)' : 'none',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -799,6 +808,9 @@ export default function AgencyDashboard() {
                 );
               })}
             </div>
+
+            {/* ── Strip connecting the active tab to its panel ── */}
+            <div style={{ height: 14, flexShrink: 0, background: DASHBOARD_TAB_COLORS[activeCardTab] }} />
 
             {/* ── Timeline sort bar (shown only when timeline tab active) ── */}
             {activeCardTab === 'timeline' && (
@@ -874,20 +886,7 @@ export default function AgencyDashboard() {
             {activeCardTab === 'todo' && (
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
                 <div style={{ display: 'flex', alignItems: 'center', padding: '10px 17px 0', marginBottom: 10, flexShrink: 0 }}>
-                  <button
-                    onClick={() => kanbanRef.current?.startAdding()}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 3,
-                      fontSize: 10, color: '#FFFFFF',
-                      background: '#1C1917', border: 'none',
-                      borderRadius: 12, padding: '3px 8px', cursor: 'pointer',
-                      fontFamily: "'DM Sans', system-ui, sans-serif",
-                    }}
-                  >
-                    <Plus size={9} />
-                    Add action point
-                  </button>
-                  <div style={{ marginLeft: 8, display: 'flex', border: '0.5px solid #E8E4DC', borderRadius: 10, overflow: 'hidden' }}>
+                  <div style={{ display: 'flex', border: '0.5px solid #E8E4DC', borderRadius: 10, overflow: 'hidden' }}>
                     {(['kanban', 'list', 'gantt'] as const).map(v => (
                       <button
                         key={v}
@@ -910,7 +909,6 @@ export default function AgencyDashboard() {
                 <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: '0 17px 12px' }}>
                   <KanbanBoard
                     key={kanbanView}
-                    ref={kanbanRef}
                     actionPointClients={filteredActionPointClients}
                     amFilter={amFilter}
                     onActionPointCompleted={() => fetchData(true)}

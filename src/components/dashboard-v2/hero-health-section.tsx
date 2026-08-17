@@ -860,12 +860,10 @@ export default function HeroHealthSection({
 
   const urgentTotal = actionItemsCount.urgent + actionItemsCount.thisWeek;
 
-  const hasLiveChannels = !!(liveChannels && liveChannels.length > 0);
-
   return (
     <div className="space-y-5">
-      {/* ── Top row: [client identity + spend + speedometer] | Live Channels ── */}
-      <div className="bg-white rounded-xl border border-gray-200 px-7 py-6 grid grid-cols-1 xl:grid-cols-[5fr_5fr_2fr] gap-6 xl:items-stretch">
+      {/* ── Top row: client identity + spend | CPA/CTR sparkline ── */}
+      <div className="bg-white rounded-xl border border-gray-200 px-7 py-6 grid grid-cols-1 xl:grid-cols-[1fr_1fr] gap-6 xl:items-stretch">
         {/* Col 1: avatar + name/notes + spend row (spend text + speedometer inline) */}
         <div className="flex items-start gap-4 min-w-0">
           <div className="flex flex-col items-center gap-3 flex-shrink-0">
@@ -1063,36 +1061,6 @@ export default function HeroHealthSection({
             </div>
           </div>
         </div>
-
-        {/* Col 3: Live Channels — absolutely positioned so it never contributes to row height */}
-        {hasLiveChannels && (
-          <div className="min-w-0 relative">
-            <div className="absolute inset-0 border border-gray-100 rounded-lg bg-gray-50/80 px-4 pt-4 pb-0 flex flex-col overflow-hidden">
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3 flex-shrink-0">Live Channels</p>
-              <div className="relative flex-1 min-h-0">
-                <div className="flex flex-col gap-2 overflow-y-auto h-full pr-0.5">
-                  {liveChannels!.map(ch => (
-                    <button
-                      key={ch.id}
-                      onClick={() => onChannelClick?.(ch.id)}
-                      className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-white hover:bg-blue-50 hover:border-blue-200 transition-all text-sm font-medium text-gray-700 cursor-pointer flex-shrink-0"
-                    >
-                      <span className="flex-shrink-0">
-                        <ChannelIcon type={ch.type} platform={ch.platform} />
-                      </span>
-                      <span className="flex-1 text-left truncate">{ch.name}</span>
-                      <span
-                        className="flex-shrink-0 w-2 h-2 rounded-full"
-                        style={{ backgroundColor: ch.hasSpend ? '#10b981' : '#ef4444' }}
-                        title={ch.hasSpend ? 'Spend registered' : 'No spend registered'}
-                      />
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
 
       </div>
     </div>
