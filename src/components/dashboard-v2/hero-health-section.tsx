@@ -54,6 +54,8 @@ export interface HeroHealthSectionProps {
   };
   planStart?: string;
   planEnd?: string;
+  heroDateRange: { startDate: string; endDate: string };
+  onHeroDateRangeChange: (range: { startDate: string; endDate: string }) => void;
   isLoadingScore?: boolean;
   liveChannels?: LiveChannel[];
   onChannelClick?: (channelId: string) => void;
@@ -793,6 +795,8 @@ export default function HeroHealthSection({
   performanceStatus,
   planStart,
   planEnd,
+  heroDateRange,
+  onHeroDateRangeChange,
   isLoadingScore = false,
   liveChannels,
   onChannelClick,
@@ -969,6 +973,11 @@ export default function HeroHealthSection({
             <div className="mt-3 space-y-1.5" style={{ display: completionPercentage <= 0 ? 'none' : 'block' }}>
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Spend</span>
+                  <span className="text-xs text-gray-400">
+                    {new Date(heroDateRange.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                    {' – '}
+                    {new Date(heroDateRange.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  </span>
                 </div>
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-2xl font-bold text-gray-900">{formatCurrency(currentSpend)}</span>
@@ -1023,7 +1032,7 @@ export default function HeroHealthSection({
         {/* Col 2: CPA/CTR Sparkline + metric widget + speedometer */}
         <div className="min-w-0">
           <div className="relative w-full border border-gray-100 rounded-lg bg-gray-50/80 px-4 py-4">
-            <PerformanceWidget clientId={clientId} onNeedle={setPerfData} onFetched={() => setPerfReady(true)} floatingGear modalOpen={showPerfConfig} onModalOpenChange={setShowPerfConfig} onConnect={onConnect} />
+            <PerformanceWidget clientId={clientId} onNeedle={setPerfData} onFetched={() => setPerfReady(true)} floatingGear modalOpen={showPerfConfig} onModalOpenChange={setShowPerfConfig} onConnect={onConnect} dateRange={heroDateRange} onDateRangeChange={onHeroDateRangeChange} />
             <div className="mt-3">
               <PerfSparkline clientId={clientId} perf={perfData} perfLoading={!perfReady} onConnect={() => setShowPerfConfig(true)} />
             </div>

@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { differenceInDays, parseISO } from 'date-fns';
-import { AlertTriangle, ChevronDown, ExternalLink, FileText } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ExternalLink } from 'lucide-react';
 import InlineActionPoints from './inline-action-points';
 import type { ChannelBenchmark, MetricPreset, ClientChannelPreset } from '@/types/database';
 import { getChannelLogo } from '@/lib/utils/channel-icons';
@@ -603,11 +603,11 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
     try {
       const saved = localStorage.getItem(`channel-campaigns-${clientId}-${channel.id ?? channel.name}`);
       if (saved) return new Set(JSON.parse(saved) as string[]);
-      // No saved selection — pre-select onboarding campaigns if configured, otherwise "Not set up yet"
+      // No saved selection — pre-select onboarding campaigns if configured, otherwise default to All Campaigns
       if (channel.metaCampaignIds?.length) {
         return new Set(channel.metaCampaignIds);
       }
-      return new Set([NONE_SENTINEL]);
+      return new Set();
     } catch { return new Set(); }
   });
 
@@ -972,8 +972,10 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
   }, [isNoneSelected, filteredMetrics.spend, channel.plannedSpend, dateRange, selectedMonth]);
 
   // Benchmark / preset derived values
+  // Only show benchmark comparisons for rate/cost-per metrics (CTR, CPC, CPM, CPA, ROAS, etc.) —
+  // raw volume counts (impressions, clicks, reach, conversions) aren't meaningful to benchmark.
   const benchmarkChannelName = inferBenchmarkChannelName(channel.platform, channel.name);
-  const channelBenchmarks = (benchmarks ?? []).filter(b => b.channel_name === benchmarkChannelName);
+  const channelBenchmarks = (benchmarks ?? []).filter(b => b.channel_name === benchmarkChannelName && b.unit !== '');
   const channelPresets = (presets ?? []).filter(p => p.channel_name === benchmarkChannelName);
   const savedPreset = (clientChannelPresets ?? []).find(p => p.channel_name === channel.name);
   const activePresetName = savedPreset?.preset_name ?? (channelPresets[0]?.name ?? null);
@@ -1214,7 +1216,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
   }
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden hover:shadow-md transition-shadow duration-200">
+    <div className="bg-white rounded-xl overflow-hidden hover:shadow-md transition-shadow duration-200">
       {/* ── Main layout: Left (Spend/Metrics) + Right (Action Points) ── */}
       <div className="flex">
         {/* ── Left Section: Spend & Metrics ── */}
@@ -1335,14 +1337,14 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                     const displayPlanned = hasCommission && planView === 'gross' ? channel.grossPlannedSpend! : channel.plannedSpend;
                     const label = hasCommission ? (planView === 'gross' ? ' gross' : ' net') : '';
                     return (
-                      <>
-                        <p className="text-base font-bold text-gray-900">
+                      <p className="flex items-baseline justify-end gap-1">
+                        <span className="text-base font-bold text-gray-900">
                           {fmt(filteredMetrics.spend ?? channel.currentSpend, 'currency', 0)}
-                        </p>
-                        <p className="text-base text-gray-400">
+                        </span>
+                        <span className="text-base text-gray-400">
                           of {fmt(displayPlanned, 'currency', 0)}{label}
-                        </p>
-                      </>
+                        </span>
+                      </p>
                     );
                   })()}
                 </div>
@@ -1368,35 +1370,6 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                 })()}
               </div>
 
-              {/* ── Overspend forecast badge ── */}
-              {overspendForecast && !isNoneSelected && (
-                <div className="row-start-3 col-start-1 col-end-4 pt-1">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-gray-400 flex items-center gap-1">
-                      <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
-                        <polyline points="1,8 3.5,5 5.5,6.5 9,2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                      </svg>
-                      {(() => {
-                        const d = parseISO(overspendForecast.forecastEndStr);
-                        const label = d.toLocaleString('en-US', { month: 'short', day: 'numeric' });
-                        return `By ${label} · ${overspendForecast.daysRemaining}d`;
-                      })()}
-                    </span>
-                    <div className="flex items-center gap-1.5 text-xs">
-                      <span className="text-gray-600 font-medium">{fmt(overspendForecast.projectedEndSpend, 'currency', 0)} projected</span>
-                      <span className={`font-semibold ${
-                        overspendForecast.overspendPct > 10 ? 'text-red-600'
-                        : overspendForecast.overspendPct > 0 ? 'text-amber-600'
-                        : overspendForecast.overspendPct >= -10 ? 'text-emerald-600'
-                        : 'text-amber-600'
-                      }`}>
-                        {overspendForecast.overspendAmount >= 0 ? '+' : ''}{fmt(Math.abs(overspendForecast.overspendAmount), 'currency', 0)}{' '}
-                        ({overspendForecast.overspendPct >= 0 ? '+' : ''}{Math.round(overspendForecast.overspendPct)}%)
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
           </div>
 
@@ -1495,10 +1468,20 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
             </div>
           )}
 
-          {/* ── Action bar: Spend/Metrics centred + Adjust/Report right ── */}
+          {/* ── Action bar: Open left + Spend/Metrics centred + projected forecast right ── */}
           <div className="flex items-center px-4 py-2 border-t border-gray-50 gap-2">
-            {/* Left spacer */}
-            <div className="flex-1" />
+            {/* Left: Open */}
+            <div className="flex-1 flex items-center">
+              {onAdjust && (
+                <button
+                  onClick={onAdjust}
+                  className="flex items-center gap-1 px-3 py-1.5 text-base font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  Open
+                </button>
+              )}
+            </div>
 
             {/* Spend / Metrics toggle — centred */}
             {canExpand && (
@@ -1526,25 +1509,31 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
               </div>
             )}
 
-            {/* Right: Adjust + Report */}
-            <div className="flex-1 flex items-center justify-end gap-2">
-              {onAdjust && (
-                <button
-                  onClick={onAdjust}
-                  className="flex items-center gap-1 px-3 py-1.5 text-base font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
-                >
-                  <ExternalLink className="w-3 h-3" />
-                  Open
-                </button>
-              )}
-              {onViewReport && (
-                <button
-                  onClick={onViewReport}
-                  className="flex items-center gap-1 px-3 py-1.5 text-base font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
-                >
-                  <FileText className="w-3 h-3" />
-                  Report
-                </button>
+            {/* Right: projected forecast */}
+            <div className="flex-1 flex items-center justify-end">
+              {overspendForecast && !isNoneSelected && (
+                <div className="flex items-center gap-1.5 text-xs">
+                  <span className="text-gray-600 font-medium">{fmt(overspendForecast.projectedEndSpend, 'currency', 0)} projected</span>
+                  <span className={`font-semibold ${
+                    overspendForecast.overspendPct > 10 ? 'text-red-600'
+                    : overspendForecast.overspendPct > 0 ? 'text-amber-600'
+                    : overspendForecast.overspendPct >= -10 ? 'text-emerald-600'
+                    : 'text-amber-600'
+                  }`}>
+                    {overspendForecast.overspendAmount >= 0 ? '+' : ''}{fmt(Math.abs(overspendForecast.overspendAmount), 'currency', 0)}{' '}
+                    ({overspendForecast.overspendPct >= 0 ? '+' : ''}{Math.round(overspendForecast.overspendPct)}%)
+                  </span>
+                  <span className="text-gray-400 flex items-center gap-1 pl-1 border-l border-gray-200 ml-1">
+                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
+                      <polyline points="1,8 3.5,5 5.5,6.5 9,2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                    {(() => {
+                      const d = parseISO(overspendForecast.forecastEndStr);
+                      const label = d.toLocaleString('en-US', { month: 'short', day: 'numeric' });
+                      return `By ${label} · ${overspendForecast.daysRemaining}d`;
+                    })()}
+                  </span>
+                </div>
               )}
             </div>
           </div>

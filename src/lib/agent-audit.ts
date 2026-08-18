@@ -5,7 +5,6 @@ export type { AgentAuditStep, AgentOutputLink };
 export const TOOL_LABELS: Record<string, string> = {
   get_daily_briefing: 'Read daily briefing',
   get_action_points: 'Read action points',
-  get_client_status: 'Read client status',
   get_channel_library: 'Read channel library',
   get_agency_playbooks: 'Read agency playbooks',
   get_channel_performance: 'Read channel performance',
@@ -43,13 +42,6 @@ export function buildAuditSummary(toolName: string, input: any, result: any): st
         const dueSoon = result?.due_soon?.length ?? 0;
         const client = input?.client_name ? ` for ${input.client_name}` : '';
         return `Found ${overdue} overdue and ${dueSoon} due-soon tasks${client}`;
-      }
-      case 'get_client_status': {
-        const clients = result?.clients ?? result ?? [];
-        const count = Array.isArray(clients) ? clients.length : 1;
-        const filter = input?.client_name ? ` matching "${input.client_name}"` : '';
-        const statusFilter = input?.status_filter ? ` (${input.status_filter})` : '';
-        return `Read status for ${count} client${count !== 1 ? 's' : ''}${filter}${statusFilter}`;
       }
       case 'get_channel_library': {
         const entries = result?.channels ?? result ?? [];

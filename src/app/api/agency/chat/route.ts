@@ -1256,8 +1256,6 @@ export async function POST(request: NextRequest) {
               result = await toolGetDailyBriefing(request);
             } else if (block.name === 'get_action_points') {
               result = await toolGetActionPoints(request, input.client_name);
-            } else if (block.name === 'get_client_status') {
-              result = await toolGetClientStatus(request, input);
             } else if (block.name === 'get_channel_library') {
               result = await toolGetChannelLibrary(request, input);
             } else if (block.name === 'get_agency_playbooks') {

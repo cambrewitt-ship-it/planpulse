@@ -117,7 +117,6 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
 const TOOL_DESCRIPTIONS: Record<string, string> = {
   get_daily_briefing: 'Full briefing across all clients with health and overdue tasks',
   get_action_points: 'Outstanding action points grouped by client and due date',
-  get_client_status: 'Health status and spend variance for all or specific clients',
   get_channel_library: 'Channel specs and best practices from the agency library',
   get_agency_playbooks: 'Internal SOPs, processes, and strategy documents',
   get_channel_performance: 'Per-channel spend pacing, KPIs, and performance metrics',
@@ -401,7 +400,6 @@ function getDefaultPrompt(agent: UserAgent): string {
     case 'performance_analyst': return 'Analyse channel performance for [client name] this month';
     case 'media_plan_editor': return 'Review and update the media plan for [client name]';
     case 'action_points_manager': return 'Show me all overdue action points and mark any completed ones as done';
-    case 'report_creator': return 'Create a performance report for [client name] this month';
     default: return `Run ${agent.name} on the specified client`;
   }
 }

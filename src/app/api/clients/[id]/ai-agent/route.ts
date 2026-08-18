@@ -4,6 +4,10 @@ import { createClient } from '@/lib/supabase/server';
 
 export const maxDuration = 60;
 
+// Marks the boundary between the internal summary and the client-facing update
+// in an AI-generated overview. Kept in sync with the frontend split in ai-shared.tsx.
+const CLIENT_FACING_DELIMITER = '===CLIENT-FACING===';
+
 const CLIENT_AGENT_TOOLS: Anthropic.Tool[] = [
   {
     name: 'get_client_intelligence',
@@ -12,7 +16,7 @@ const CLIENT_AGENT_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'get_channel_performance',
-    description: 'Get channel-level performance and spend pacing for this client. Returns planned vs actual spend, variance %, and KPIs per channel.',
+    description: 'Get channel-level performance and spend pacing for this client. Returns, per channel: planned vs actual spend, variance %, pacing status, impressions, clicks, CTR, CPC, CPA, conversions, reach, and frequency. Always call this for an overview — it is the source of the real numbers to cite.',
     input_schema: {
       type: 'object',
       properties: {
@@ -170,26 +174,110 @@ async function toolGetClientIntelligence(clientId: string, req: NextRequest) {
   return { context: lines.join('\n'), summary: { has_brief: !!brief, goal_count: goals.length, note_count: notes.length, doc_count: documents.length } };
 }
 
-async function toolGetChannelPerformance(clientId: string, req: NextRequest, input: { start_date?: string; end_date?: string }) {
-  const data = await callInternal(`/api/agency/clients`, req);
-  if (data.error) return data;
+function getMonthsInRange(startDate: string, endDate: string): string[] {
+  const months: string[] = [];
+  const [sy, sm] = startDate.split('-').map(Number);
+  const [ey, em] = endDate.split('-').map(Number);
+  let y = sy; let m = sm;
+  while (y < ey || (y === ey && m <= em)) {
+    months.push(`${y}-${String(m).padStart(2, '0')}`);
+    m++; if (m > 12) { m = 1; y++; }
+  }
+  return months;
+}
 
-  const clients: any[] = Array.isArray(data) ? data : (data.clients ?? []);
-  const client = clients.find((c: any) => c.id === clientId || c.clientId === clientId);
-  if (!client) return { error: 'Client not found in performance data' };
+const PLATFORM_LABELS: Record<string, string> = {
+  'meta-ads': 'Meta Ads', 'google-ads': 'Google Ads',
+  'linkedin-ads': 'LinkedIn Ads', 'tiktok-ads': 'TikTok Ads',
+};
+
+async function toolGetChannelPerformance(clientId: string, input: { start_date?: string; end_date?: string }) {
+  const supabase = await createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.user) return { error: 'Unauthorized' };
+
+  const now = new Date();
+  const start_date = input.start_date ?? new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+  const end_date = input.end_date ?? now.toISOString().split('T')[0];
+
+  const [metricsRes, mediaPlanRes] = await Promise.all([
+    supabase.from('ad_performance_metrics')
+      .select('platform, spend, impressions, clicks, conversions, reach, frequency')
+      .eq('client_id', clientId)
+      .gte('date', start_date)
+      .lte('date', end_date)
+      .not('campaign_id', 'like', 'manual-override-%'),
+    supabase.from('client_media_plan_builder')
+      .select('channels')
+      .eq('client_id', clientId)
+      .maybeSingle(),
+  ]);
+
+  const metrics = metricsRes.data ?? [];
+  const rawChannels: any[] = ((mediaPlanRes.data as any)?.channels as any[]) ?? [];
+
+  const actualByPlatform = new Map<string, { spend: number; impressions: number; clicks: number; conversions: number; reach: number; freqSum: number; freqCount: number }>();
+  for (const m of metrics as any[]) {
+    const existing = actualByPlatform.get(m.platform) ?? { spend: 0, impressions: 0, clicks: 0, conversions: 0, reach: 0, freqSum: 0, freqCount: 0 };
+    existing.spend += Number(m.spend || 0);
+    existing.impressions += Number(m.impressions || 0);
+    existing.clicks += Number(m.clicks || 0);
+    existing.conversions += Number(m.conversions || 0);
+    existing.reach += Number(m.reach || 0);
+    if (m.frequency != null) { existing.freqSum += Number(m.frequency); existing.freqCount += 1; }
+    actualByPlatform.set(m.platform, existing);
+  }
+
+  const monthsInRange = getMonthsInRange(start_date, end_date);
+  const plannedByChannel = new Map<string, number>();
+  for (const ch of rawChannels) {
+    let total = 0;
+    for (const f of ch.flights ?? []) {
+      if (f.monthlySpend) {
+        for (const m of monthsInRange) total += Number(f.monthlySpend[m] ?? 0);
+      }
+    }
+    if (total > 0) plannedByChannel.set(ch.channelName, total);
+  }
+
+  const channelNames = new Set([
+    ...Array.from(actualByPlatform.keys()).map(p => PLATFORM_LABELS[p] ?? p),
+    ...Array.from(plannedByChannel.keys()),
+  ]);
+
+  const channels = Array.from(channelNames).map(name => {
+    const platformKey = Object.entries(PLATFORM_LABELS).find(([, v]) => v === name)?.[0];
+    const perf = platformKey ? actualByPlatform.get(platformKey) : null;
+    const actual_spend = perf?.spend ?? 0;
+    const planned_budget = plannedByChannel.get(name) ?? null;
+    const variance_pct = planned_budget && planned_budget > 0
+      ? Math.round(((actual_spend - planned_budget) / planned_budget) * 1000) / 10 : null;
+    const impressions = perf?.impressions || null;
+    const clicks = perf?.clicks || null;
+    const conversions = perf?.conversions || null;
+    const reach = perf?.reach || null;
+    const frequency = perf && perf.freqCount > 0 ? Math.round((perf.freqSum / perf.freqCount) * 100) / 100 : null;
+    const ctr = impressions && clicks ? Math.round((clicks / impressions) * 10000) / 100 : null;
+    const cpc = clicks ? Math.round((actual_spend / clicks) * 100) / 100 : null;
+    const cpa = conversions && conversions > 0 ? Math.round((actual_spend / conversions) * 100) / 100 : null;
+    const pacing_status = variance_pct === null ? 'no plan'
+      : variance_pct > 15 ? 'overpacing'
+      : variance_pct < -15 ? 'underpacing'
+      : 'on track';
+    return { name, planned_budget, actual_spend, variance_pct, pacing_status, impressions, clicks, ctr, cpc, cpa, conversions, reach, frequency };
+  });
+
+  const total_planned_budget = channels.reduce((s, c) => s + (c.planned_budget ?? 0), 0) || null;
+  const total_actual_spend = channels.reduce((s, c) => s + c.actual_spend, 0);
+  const total_spend_variance_pct = total_planned_budget && total_planned_budget > 0
+    ? Math.round(((total_actual_spend - total_planned_budget) / total_planned_budget) * 1000) / 10 : null;
 
   return {
-    client: client.name,
-    health: client.health?.status ?? 'green',
-    spend_variance_pct: client.spendVariancePct,
-    planned_budget: client.plannedBudget,
-    actual_spend: client.actualSpend,
-    channels: (client.channels ?? []).map((ch: any) => ({
-      name: ch.channelName,
-      status: ch.status,
-      start: ch.startDate,
-      end: ch.endDate,
-    })),
+    date_range: { start: start_date, end: end_date },
+    total_planned_budget,
+    total_actual_spend,
+    total_spend_variance_pct,
+    channels,
   };
 }
 
@@ -443,7 +531,18 @@ You are focused exclusively on this client. You have access to their intelligenc
 - update_manual_spend — update the actual spend figure on a non-digital channel (OOH, Organic Social, EDM, etc.)
 - toggle_ooh_checklist — tick/untick OOH production milestones
 
-**When generating an overview**, always call get_client_intelligence AND get_action_points first to get fresh data. Then call get_channel_performance for spend context. Synthesise into a concise briefing covering: campaign context, health status, spend pacing, outstanding action points, and any urgent concerns.
+**Never output narration, preamble, or commentary before or between tool calls** (e.g. never say things like "I'll pull the latest data first" or "Let me check that"). The interface already shows the user a loading indicator while tools run. Call whatever tools you need with no text output at all, and only write prose once you're producing your actual answer.
+
+**When generating an overview** (the user asks for a general status, summary, or overview of the account), always call get_client_intelligence AND get_action_points first to get fresh data. Then call get_channel_performance for real spend and KPI numbers — you MUST use it, not the request text, as the source of every metric you cite. Produce your reply as exactly two sections and nothing else — no preamble, no closing remarks — in this order, separated by a line containing only \`${CLIENT_FACING_DELIMITER}\`:
+
+1. **Internal summary** — for our team only, never seen by the client. ALL bullet points, nothing else — no introductory sentence, no heading, the reply starts directly on the first bullet. One blank line between each bullet, no bold text. Each bullet is a complete, matter-of-fact statement grounded in the real numbers get_channel_performance returned — pacing vs. budget (cite the actual $ figures and % variance), CPA/CTR/CPC movement vs. target, overdue or at-risk action points, anything needing attention. Be direct about problems. Match this style exactly:
+   - Feijoa is pacing 127% over its $49,000 budget with the flight plan at 100% complete — spend is $62,090.
+   - CPA improved to $10.31, well under the $15 target, though it ticked up 12.3% in the last 24 hours.
+   - Two action points are overdue: verify the Meta Pixel is firing on key conversion events, and refresh creatives with frequency above 3.0. LinkedIn reach is under 50,000 and worth a look.
+2. **Client-facing update** — everything after the delimiter. One flowing paragraph, no bullets, no headers, no bold — ready to paste straight into an email. It MUST reference at least 2-3 specific numbers pulled from get_channel_performance (spend, reach, frequency, CPA, CTR, conversions, impressions, etc.) — a vague update with no figures is a failed answer. Lead with a genuine win backed by the data, state it plainly with the number attached, then a brief note on overall progress, closing with a forward-looking note. Never mention internal risks, overdue tasks, or anything not appropriate to share externally, and never fabricate a number or win the data doesn't support — if a metric isn't available from the tools, don't invent one, just leave it out. Match this style exactly:
+   Feijoa's campaign is tracking well. In the last 30 days we've reached 82,000 people with an average frequency of 2.4. Cost per acquisition is down to $10.31, well inside the $15 target. We're tightening frequency on a few Meta ad sets and expanding LinkedIn targeting to keep reach strong heading into the next phase.
+
+For any other question that isn't a full account overview, just answer normally in a single response — do not use the delimiter.
 
 Be concise, professional, and action-oriented. Use bullet points and bold text. Lead with what needs immediate attention.`;
 
@@ -474,16 +573,24 @@ Be concise, professional, and action-oriented. Use bullet points and bold text. 
             max_tokens: 2048,
           });
 
+          // Buffer this turn's text rather than streaming it live — a turn that
+          // ends in tool_use may carry narration ("I'll pull the latest data…")
+          // ahead of the tool call, which we never want to surface to the user.
+          // Only the final, tool-free turn's text is actually sent.
+          let turnText = '';
           for await (const event of anthropicStream) {
             if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-              send({ type: 'text', text: event.delta.text });
+              turnText += event.delta.text;
             }
           }
 
           const finalMsg = await anthropicStream.finalMessage();
           messages.push({ role: 'assistant', content: finalMsg.content });
 
-          if (finalMsg.stop_reason !== 'tool_use') break;
+          if (finalMsg.stop_reason !== 'tool_use') {
+            if (turnText) send({ type: 'text', text: turnText });
+            break;
+          }
 
           const toolResults: Anthropic.ToolResultBlockParam[] = [];
 
@@ -498,7 +605,7 @@ Be concise, professional, and action-oriented. Use bullet points and bold text. 
             if (block.name === 'get_client_intelligence') {
               result = await toolGetClientIntelligence(clientId, request);
             } else if (block.name === 'get_channel_performance') {
-              result = await toolGetChannelPerformance(clientId, request, input);
+              result = await toolGetChannelPerformance(clientId, input);
             } else if (block.name === 'get_action_points') {
               result = await toolGetActionPoints(clientId, request);
             } else if (block.name === 'complete_action_point') {

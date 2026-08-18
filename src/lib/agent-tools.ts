@@ -22,25 +22,6 @@ export const TOOL_DEFINITIONS: Anthropic.Tool[] = [
     },
   },
   {
-    name: 'get_client_status',
-    description: 'Get health status, spend variance, and channel information for all clients or a specific client.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        client_name: {
-          type: 'string',
-          description: 'Filter by partial client name. Omit for all clients.',
-        },
-        status_filter: {
-          type: 'string',
-          enum: ['red', 'amber', 'green'],
-          description: 'Filter by health status. Omit for all.',
-        },
-      },
-      required: [],
-    },
-  },
-  {
     name: 'get_channel_library',
     description: 'Look up media channel specifications, best practices, and notes from the agency library.',
     input_schema: {

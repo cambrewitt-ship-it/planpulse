@@ -12,7 +12,7 @@ function fireConfetti(originX: number, originY: number) {
     canvas.height = window.innerHeight;
     const ctx = canvas.getContext('2d');
     if (!ctx) { canvas.remove(); return; }
-    const COLORS = ['#4A7C59', '#4A6580', '#B07030', '#A0442A', '#F5F0E8', '#D5D0C5'];
+    const COLORS = ['#7A2E22', '#5C5450', '#8A8578', '#F5F0E8', '#D5D0C5', '#A0442A'];
     const pieces = Array.from({ length: 60 }, () => ({
       x: originX, y: originY,
       vx: (Math.random() - 0.5) * 10,
@@ -80,120 +80,106 @@ function formatDueDate(dateStr: string | null | undefined): string {
   return new Date(y, m - 1, d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
 }
 
+// Single accent (Moleskine red) reserved for urgency; everything else steps through graphite neutrals.
 function dueDateColor(dateStr: string | null | undefined): string {
-  if (!dateStr) return '#B5B0A5';
+  if (!dateStr) return FAINT;
   const diff = daysFromToday(dateStr);
-  if (diff <= 2) return '#A0442A';
-  if (diff <= 6) return '#B07030';
-  return '#8A8578';
+  if (diff <= 2) return RED;
+  if (diff <= 6) return GRAPHITE;
+  return MUTED;
 }
 
-const sansFont = "'DM Sans', system-ui, sans-serif";
+// ---------------------------------------------------------------------------
+// Apple × Moleskine design tokens
+// ---------------------------------------------------------------------------
+const RED = 'oklch(42% 0.16 25)';
+const CARD_BG = 'oklch(98% 0.006 75)';
+const PAPER_BG = 'oklch(96% 0.009 75)';
+const INK = '#1C1917';
+const GRAPHITE = '#5C5450';
+const MUTED = '#8A8578';
+const FAINT = '#B5B0A5';
+const BORDER = 'oklch(89% 0.011 75)';
+const BORDER_SOFT = 'oklch(92% 0.009 75)';
+const WEEKEND = 'oklch(86% 0.011 75)';
 
-type Column = { label: string; items: ActionPoint[] };
+const serifFont = "'Source Serif 4', Georgia, serif";
+const sansFont = "-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif";
+const monoFont = "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace";
+
+const dotGrid: React.CSSProperties = {
+  backgroundImage: 'radial-gradient(circle, oklch(55% 0.02 75 / 0.14) 1px, transparent 1px)',
+  backgroundSize: '22px 22px',
+};
+
+function Tag({ children, accent }: { children: React.ReactNode; accent?: boolean }) {
+  return (
+    <span style={{
+      fontSize: 10.5,
+      padding: '1px 6px',
+      borderRadius: 99,
+      border: `1px solid ${accent ? RED : BORDER}`,
+      color: accent ? RED : GRAPHITE,
+      background: 'transparent',
+      fontFamily: monoFont,
+      textTransform: 'uppercase',
+      letterSpacing: '0.04em',
+      whiteSpace: 'nowrap',
+    }}>
+      {children}
+    </span>
+  );
+}
+
+function CountBadge({ n, accent }: { n: number; accent?: boolean }) {
+  return (
+    <span style={{
+      marginLeft: 5,
+      background: accent ? RED : BORDER_SOFT,
+      color: accent ? CARD_BG : GRAPHITE,
+      borderRadius: 99,
+      padding: '1px 6px',
+      fontSize: 10.5,
+      fontFamily: monoFont,
+    }}>
+      {n}
+    </span>
+  );
+}
 
 export default function ClientActionPointsList({ actionPoints, onToggle }: Props) {
-  const [filterMode, setFilterMode] = useState<'priority' | 'channel'>('priority');
-  const [viewMode, setViewMode] = useState<'kanban' | 'list' | 'gantt'>('list');
+  const [viewMode, setViewMode] = useState<'list' | 'gantt'>('list');
   const [listCompletedOpen, setListCompletedOpen] = useState(false);
 
   const incomplete = useMemo(() => actionPoints.filter(ap => !ap.completed), [actionPoints]);
-
-  const columns: Column[] = useMemo(() => {
-    const sortByDue = (a: ActionPoint, b: ActionPoint) =>
-      daysFromToday(a.due_date) - daysFromToday(b.due_date);
-
-    if (filterMode === 'priority') {
-      const buckets: ActionPoint[][] = [[], [], [], []];
-      [...actionPoints].sort(sortByDue).forEach(ap => {
-        const days = daysFromToday(ap.due_date);
-        if (days < 0 && !ap.completed) buckets[0].push(ap);
-        else if (days <= 2) buckets[1].push(ap);
-        else if (days <= 4) buckets[2].push(ap);
-        else buckets[3].push(ap);
-      });
-      const cols: Column[] = [];
-      if (buckets[0].length > 0) cols.push({ label: 'Overdue', items: buckets[0] });
-      cols.push(
-        { label: '1–2 Days', items: buckets[1] },
-        { label: '2–4 Days', items: buckets[2] },
-        { label: '5+ Days', items: buckets[3] },
-      );
-      return cols;
-    } else {
-      const channels = Array.from(
-        new Set(actionPoints.map(ap => ap.channel_type).filter((c): c is string => !!c))
-      ).sort();
-      const noChannel = actionPoints.filter(ap => !ap.channel_type);
-      const cols: Column[] = channels.map(ch => ({
-        label: ch,
-        items: [
-          ...actionPoints.filter(ap => ap.channel_type === ch && !ap.completed).sort(sortByDue),
-          ...actionPoints.filter(ap => ap.channel_type === ch && ap.completed),
-        ],
-      }));
-      if (noChannel.length > 0) {
-        cols.push({
-          label: 'General',
-          items: [
-            ...noChannel.filter(ap => !ap.completed).sort(sortByDue),
-            ...noChannel.filter(ap => ap.completed),
-          ],
-        });
-      }
-      return cols;
-    }
-  }, [actionPoints, filterMode]);
 
   return (
     <div style={{
       display: 'flex',
       flexDirection: 'column',
-      background: '#FDFCF8',
-      borderRadius: '0 6px 6px 0',
-      border: '0.5px solid #E8E4DC',
+      background: CARD_BG,
+      ...dotGrid,
+      borderRadius: '0 22px 22px 0',
+      border: `1px solid ${BORDER}`,
+      boxShadow: '0 10px 26px -14px oklch(45% 0.03 75 / 0.4)',
       overflow: 'hidden',
       fontFamily: sansFont,
       height: '100%',
+      position: 'relative',
     }}>
+      {/* Margin rule — thin red notebook-page margin, inset from the left edge */}
+      <div style={{ position: 'absolute', left: 27, top: 0, bottom: 0, width: 1.5, background: RED, opacity: 0.5, zIndex: 1, pointerEvents: 'none' }} />
+
       {/* Header */}
-      <div style={{ padding: '10px 13px 8px', borderBottom: '0.5px solid #E8E4DC', flexShrink: 0 }}>
+      <div style={{ padding: '13px 16px 10px 40px', borderBottom: `1px solid ${BORDER_SOFT}`, flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
-          <div style={{ fontSize: 12, fontWeight: 400, color: '#B5B0A5', textTransform: 'uppercase', letterSpacing: '0.1em', minWidth: 0 }}>
+          <div style={{ fontSize: 15, fontWeight: 600, color: INK, fontFamily: serifFont, minWidth: 0, display: 'flex', alignItems: 'baseline' }}>
             Action Points
-            {incomplete.length > 0 && (
-              <span style={{ marginLeft: 5, background: '#A0442A', color: '#fff', borderRadius: 99, padding: '1px 5px', fontSize: 11 }}>
-                {incomplete.length}
-              </span>
-            )}
+            {incomplete.length > 0 && <CountBadge n={incomplete.length} accent />}
           </div>
           <div style={{ display: 'flex', gap: 3, alignItems: 'center', flexWrap: 'wrap', minWidth: 0, flex: 1, justifyContent: 'flex-end', overflowX: 'auto' }}>
-            <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', minWidth: 0, overflow: 'hidden' }}>
-              {(['priority', 'channel'] as const).map(mode => (
-                <button
-                  key={mode}
-                  onClick={() => setFilterMode(mode)}
-                  style={{
-                    fontSize: 12,
-                    padding: '2px 7px',
-                    borderRadius: 99,
-                    border: '0.5px solid',
-                    borderColor: filterMode === mode ? '#1C1917' : '#D5D0C5',
-                    background: filterMode === mode ? '#1C1917' : 'transparent',
-                    color: filterMode === mode ? '#fff' : '#8A8578',
-                    cursor: 'pointer',
-                    fontFamily: sansFont,
-                    lineHeight: 1.5,
-                    whiteSpace: 'nowrap',
-                    flexShrink: 0,
-                  }}
-                >
-                  {mode === 'priority' ? 'Priority' : 'Channel'}
-                </button>
-              ))}
-            </div>
-            <div style={{ display: 'flex', gap: 3, marginLeft: 6, paddingLeft: 6, borderLeft: '0.5px solid #E8E4DC', flexWrap: 'wrap', minWidth: 0, flexShrink: 0 }}>
-              {(['kanban', 'list', 'gantt'] as const).map(mode => (
+            <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', minWidth: 0, flexShrink: 0 }}>
+              {(['list', 'gantt'] as const).map(mode => (
                 <button
                   key={mode}
                   onClick={() => setViewMode(mode)}
@@ -201,10 +187,10 @@ export default function ClientActionPointsList({ actionPoints, onToggle }: Props
                     fontSize: 12,
                     padding: '2px 7px',
                     borderRadius: 99,
-                    border: '0.5px solid',
-                    borderColor: viewMode === mode ? '#1C1917' : '#D5D0C5',
-                    background: viewMode === mode ? '#1C1917' : 'transparent',
-                    color: viewMode === mode ? '#fff' : '#8A8578',
+                    border: '1px solid',
+                    borderColor: viewMode === mode ? INK : BORDER,
+                    background: viewMode === mode ? INK : 'transparent',
+                    color: viewMode === mode ? CARD_BG : MUTED,
                     cursor: 'pointer',
                     fontFamily: sansFont,
                     lineHeight: 1.5,
@@ -212,7 +198,7 @@ export default function ClientActionPointsList({ actionPoints, onToggle }: Props
                     flexShrink: 0,
                   }}
                 >
-                  {mode === 'kanban' ? 'Kanban' : mode === 'list' ? 'List' : 'Gantt'}
+                  {mode === 'list' ? 'List' : 'Gantt'}
                 </button>
               ))}
             </div>
@@ -220,116 +206,11 @@ export default function ClientActionPointsList({ actionPoints, onToggle }: Props
         </div>
       </div>
 
-      {/* Horizontally scrollable kanban */}
-      {viewMode === 'kanban' ? (
-      <div style={{
-        flex: 1,
-        overflowX: 'auto',
-        overflowY: 'hidden',
-        display: 'flex',
-        alignItems: 'stretch',
-        padding: '8px',
-        gap: 6,
-        scrollbarWidth: 'none',
-      }}>
-        {columns.map(col => {
-          const colIncomplete = col.items.filter(i => !i.completed);
-          const colCompleted = col.items.filter(i => i.completed);
-          return (
-            <div
-              key={col.label}
-              style={{
-                // ~32% width so more columns are visible, hinting scroll
-                flexShrink: 0,
-                width: '32%',
-                display: 'flex',
-                flexDirection: 'column',
-                background: '#F5F2EB',
-                borderRadius: 5,
-                border: '0.5px solid #E8E4DC',
-                overflow: 'hidden',
-              }}
-            >
-              {/* Column header */}
-              <div style={{
-                padding: '6px 10px',
-                borderBottom: '0.5px solid #E8E4DC',
-                fontSize: 12,
-                fontWeight: 600,
-                color: col.label === 'Overdue' ? '#fff' : '#8A8578',
-                background: col.label === 'Overdue' ? '#7F1D1D' : 'transparent',
-                textTransform: 'uppercase',
-                letterSpacing: '0.1em',
-                flexShrink: 0,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 5,
-              }}>
-                {col.label}
-                {colIncomplete.length > 0 && (
-                  <span style={{
-                    background: col.label === 'Overdue' ? 'rgba(255,255,255,0.25)' : '#E8E4DC',
-                    color: col.label === 'Overdue' ? '#fff' : '#8A8578',
-                    borderRadius: 99,
-                    padding: '0px 5px',
-                    fontSize: 11,
-                  }}>
-                    {colIncomplete.length}
-                  </span>
-                )}
-              </div>
-
-              {/* Column items — vertically scrollable */}
-              <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
-                {col.items.length === 0 ? (
-                  <div style={{ padding: '12px 10px', fontSize: 13, color: '#C5C0B8', fontStyle: 'italic', textAlign: 'center' }}>
-                    Nothing here
-                  </div>
-                ) : (
-                  <>
-                    {colIncomplete.map((item, idx) => (
-                      <KanbanCard
-                        key={item.id}
-                        item={item}
-                        onToggle={onToggle}
-                        isLast={idx === colIncomplete.length - 1 && colCompleted.length === 0}
-                      />
-                    ))}
-                    {colCompleted.length > 0 && (
-                      <>
-                        <div style={{
-                          padding: '4px 10px 3px',
-                          fontSize: 11,
-                          color: '#C5C0B8',
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.1em',
-                          borderTop: colIncomplete.length > 0 ? '0.5px solid #E8E4DC' : 'none',
-                          marginTop: colIncomplete.length > 0 ? 4 : 0,
-                        }}>
-                          Done
-                        </div>
-                        {colCompleted.map((item, idx) => (
-                          <KanbanCard
-                            key={item.id}
-                            item={item}
-                            onToggle={onToggle}
-                            isLast={idx === colCompleted.length - 1}
-                          />
-                        ))}
-                      </>
-                    )}
-                  </>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      ) : viewMode === 'list' ? (
+      {viewMode === 'list' ? (
         /* List View */
-        <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '8px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '4px 16px 8px 40px', display: 'flex', flexDirection: 'column' }}>
           {actionPoints.length === 0 ? (
-            <div style={{ padding: '12px 10px', fontSize: 13, color: '#C5C0B8', fontStyle: 'italic', textAlign: 'center' }}>
+            <div style={{ padding: '12px 10px', fontSize: 13, color: FAINT, fontFamily: serifFont, fontStyle: 'italic', textAlign: 'center' }}>
               No action points
             </div>
           ) : (() => {
@@ -339,20 +220,20 @@ export default function ClientActionPointsList({ actionPoints, onToggle }: Props
             return (
               <>
                 {listIncomplete.length === 0 && (
-                  <div style={{ padding: '12px 10px', fontSize: 13, color: '#C5C0B8', fontStyle: 'italic', textAlign: 'center' }}>
+                  <div style={{ padding: '12px 10px', fontSize: 13, color: FAINT, fontFamily: serifFont, fontStyle: 'italic', textAlign: 'center' }}>
                     All done!
                   </div>
                 )}
-                {listIncomplete.map((item) => (
-                  <ListActionPointRow key={item.id} item={item} onToggle={onToggle} />
+                {listIncomplete.map((item, idx) => (
+                  <ListActionPointRow key={item.id} item={item} onToggle={onToggle} isLast={idx === listIncomplete.length - 1 && listCompleted.length === 0} />
                 ))}
                 {listCompleted.length > 0 && (
-                  <div style={{ marginTop: 4, flexShrink: 0 }}>
+                  <div style={{ marginTop: 6, flexShrink: 0 }}>
                     <button
                       onClick={() => setListCompletedOpen(v => !v)}
                       style={{
                         display: 'flex', alignItems: 'center', gap: 5,
-                        fontSize: 12, color: '#B5B0A5', background: 'none', border: 'none',
+                        fontSize: 12, color: FAINT, background: 'none', border: 'none',
                         cursor: 'pointer', padding: '4px 2px', width: '100%', textAlign: 'left',
                         textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: sansFont,
                       }}
@@ -362,10 +243,8 @@ export default function ClientActionPointsList({ actionPoints, onToggle }: Props
                       </svg>
                       Completed ({listCompleted.length})
                     </button>
-                    {listCompletedOpen && listCompleted.map((item) => (
-                      <div key={item.id} style={{ marginTop: 4 }}>
-                        <ListActionPointRow item={item} onToggle={onToggle} />
-                      </div>
+                    {listCompletedOpen && listCompleted.map((item, idx) => (
+                      <ListActionPointRow key={item.id} item={item} onToggle={onToggle} isLast={idx === listCompleted.length - 1} />
                     ))}
                   </div>
                 )}
@@ -381,7 +260,7 @@ export default function ClientActionPointsList({ actionPoints, onToggle }: Props
   );
 }
 
-function ListActionPointRow({ item, onToggle }: { item: ActionPoint; onToggle: (id: string, c: boolean) => void }) {
+function ListActionPointRow({ item, onToggle, isLast }: { item: ActionPoint; onToggle: (id: string, c: boolean) => void; isLast?: boolean }) {
   const [isCompleting, setIsCompleting] = useState(false);
   const [localCompleted, setLocalCompleted] = useState(false);
   const effectiveCompleted = item.completed || localCompleted;
@@ -403,38 +282,36 @@ function ListActionPointRow({ item, onToggle }: { item: ActionPoint; onToggle: (
 
   return (
     <div style={{
-      background: '#F5F2EB',
-      border: '0.5px solid #E8E4DC',
-      borderRadius: 5,
-      overflow: 'hidden',
       display: 'flex',
       alignItems: 'flex-start',
-      gap: 8,
-      padding: '8px 10px',
+      gap: 10,
+      padding: '11px 2px',
+      borderBottom: isLast ? 'none' : `1px solid ${BORDER_SOFT}`,
       opacity: effectiveCompleted || isCompleting ? 0.5 : 1,
       transition: 'opacity 0.4s',
       flexShrink: 0,
     }}>
-      {/* Circle checkbox */}
+      {/* Ring checkbox — fills red with white check when complete */}
       <div
         onClick={handleClick}
         style={{
           marginTop: 3,
-          width: 13,
-          height: 13,
+          width: 14,
+          height: 14,
           borderRadius: '50%',
           flexShrink: 0,
-          border: effectiveCompleted || isCompleting ? '0.5px solid #4A7C59' : '0.5px solid #D5D0C5',
-          background: effectiveCompleted || isCompleting ? '#4A7C59' : 'transparent',
+          border: `1.5px solid ${effectiveCompleted || isCompleting ? RED : BORDER}`,
+          background: effectiveCompleted || isCompleting ? RED : 'transparent',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           cursor: 'pointer',
+          transition: 'background 0.15s, border-color 0.15s',
         }}
       >
         {(effectiveCompleted || isCompleting) && (
           <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
-            <path d="M1.5 4L3 5.5L6.5 2" stroke="#fff" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M1.5 4L3 5.5L6.5 2" stroke={CARD_BG} strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         )}
       </div>
@@ -444,32 +321,22 @@ function ListActionPointRow({ item, onToggle }: { item: ActionPoint; onToggle: (
         <div style={{
           fontSize: 14,
           lineHeight: 1.4,
-          color: effectiveCompleted || isCompleting ? '#B5B0A5' : '#1C1917',
+          color: effectiveCompleted || isCompleting ? FAINT : INK,
           textDecoration: effectiveCompleted ? 'line-through' : 'none',
           wordBreak: 'break-word',
+          fontFamily: sansFont,
         }}>
           {item.text}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 3, flexWrap: 'wrap' }}>
-          {item.channel_type && (
-            <span style={{
-              fontSize: 11, padding: '1px 5px', borderRadius: 99,
-              background: '#EDE9E0', color: '#8A8578', fontWeight: 500,
-            }}>
-              {item.channel_type}
-            </span>
-          )}
-          <span style={{
-            fontSize: 11, padding: '1px 5px', borderRadius: 99,
-            background: '#EDE9E0', color: '#8A8578',
-          }}>
-            {item.category}
-          </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 4, flexWrap: 'wrap' }}>
+          {item.channel_type && <Tag>{item.channel_type}</Tag>}
+          <Tag accent={item.category === 'HEALTH CHECK'}>{item.category}</Tag>
           {item.due_date && (
             <span style={{
               fontSize: 11,
               color: dueDateColor(item.due_date),
               fontWeight: 500,
+              fontFamily: monoFont,
             }}>
               {formatDueDate(item.due_date)}
             </span>
@@ -534,18 +401,18 @@ function GanttViewActionPoints({ actionPoints, onToggle }: { actionPoints: Actio
   }, [dayCount, startDay]);
 
   return (
-    <div style={{ flex: 1, overflow: 'hidden', fontFamily: sansFont, display: 'flex', flexDirection: 'column' }}>
+    <div style={{ flex: 1, overflow: 'hidden', fontFamily: sansFont, display: 'flex', flexDirection: 'column', paddingLeft: 32 }}>
       <div style={{ overflowX: 'auto', overflowY: 'auto', flex: 1 }}>
         <div style={{ minWidth: totalW }}>
           {/* Month row */}
-          <div style={{ display: 'flex', position: 'sticky', top: 0, zIndex: 3, background: '#FDFCF8' }}>
+          <div style={{ display: 'flex', position: 'sticky', top: 0, zIndex: 3, background: CARD_BG }}>
             {monthSpans.map((span, i) => (
               <div key={i} style={{
                 width: span.count * DAY_W, flexShrink: 0,
                 padding: '4px 6px', fontSize: 11, fontWeight: 600,
-                color: '#8A8578', textTransform: 'uppercase', letterSpacing: '0.08em',
-                borderLeft: i === 0 ? 'none' : '0.5px solid #E8E4DC',
-                borderBottom: '0.5px solid #E8E4DC',
+                color: MUTED, textTransform: 'uppercase', letterSpacing: '0.08em',
+                borderLeft: i === 0 ? 'none' : `1px solid ${BORDER_SOFT}`,
+                borderBottom: `1px solid ${BORDER_SOFT}`,
                 whiteSpace: 'nowrap', overflow: 'hidden',
               }}>
                 {span.label}
@@ -554,7 +421,7 @@ function GanttViewActionPoints({ actionPoints, onToggle }: { actionPoints: Actio
           </div>
 
           {/* Day labels row */}
-          <div style={{ display: 'flex', position: 'sticky', top: 20, zIndex: 2, background: '#FDFCF8', borderBottom: '0.5px solid #E8E4DC' }}>
+          <div style={{ display: 'flex', position: 'sticky', top: 20, zIndex: 2, background: CARD_BG, borderBottom: `1px solid ${BORDER_SOFT}` }}>
             {Array.from({ length: dayCount }, (_, i) => {
               const offset = startDay + i;
               const d = new Date(todayMs + offset * 86400000);
@@ -564,9 +431,10 @@ function GanttViewActionPoints({ actionPoints, onToggle }: { actionPoints: Actio
                 <div key={i} style={{
                   width: DAY_W, flexShrink: 0, textAlign: 'center', padding: '3px 0',
                   fontSize: 11, fontWeight: isToday ? 600 : 400,
-                  color: isToday ? '#A0442A' : isWeekend ? '#D5D0C5' : '#8A8578',
-                  background: isToday ? 'rgba(160,68,42,0.05)' : 'transparent',
-                  borderLeft: isToday ? '0.5px solid rgba(160,68,42,0.3)' : '0.5px solid #F0EDE8',
+                  color: isToday ? RED : isWeekend ? WEEKEND : MUTED,
+                  background: isToday ? 'oklch(42% 0.16 25 / 0.06)' : 'transparent',
+                  borderLeft: isToday ? '1px solid oklch(42% 0.16 25 / 0.3)' : `1px solid ${BORDER_SOFT}`,
+                  fontFamily: monoFont,
                 }}>
                   {isToday ? '▼' : `${d.getDate()}`}
                 </div>
@@ -577,10 +445,10 @@ function GanttViewActionPoints({ actionPoints, onToggle }: { actionPoints: Actio
           {/* Items with due dates */}
           {withDue.map(card => {
             const dotX = (card.daysUntil - startDay) * DAY_W;
-            const dotColor = card.due_date ? (daysFromToday(card.due_date) < 0 ? '#A0442A' : daysFromToday(card.due_date) <= 2 ? '#A0442A' : daysFromToday(card.due_date) <= 4 ? '#B07030' : '#4A6580') : '#B5B0A5';
-            
+            const dotColor = card.due_date ? dueDateColor(card.due_date) : FAINT;
+
             return (
-              <div key={card.id} style={{ position: 'relative', height: ROW_H, borderBottom: '0.5px solid #F0EDE8' }}>
+              <div key={card.id} style={{ position: 'relative', height: ROW_H, borderBottom: `1px solid ${BORDER_SOFT}` }}>
                 {/* Grid columns */}
                 <div style={{ position: 'absolute', inset: 0, display: 'flex', pointerEvents: 'none' }}>
                   {Array.from({ length: dayCount }, (_, i) => {
@@ -591,8 +459,8 @@ function GanttViewActionPoints({ actionPoints, onToggle }: { actionPoints: Actio
                     return (
                       <div key={i} style={{
                         width: DAY_W, height: '100%', flexShrink: 0,
-                        background: isToday ? 'rgba(160,68,42,0.04)' : isWeekend ? 'rgba(0,0,0,0.01)' : 'transparent',
-                        borderLeft: isToday ? '0.5px solid rgba(160,68,42,0.2)' : '0.5px solid #F5F3EF',
+                        background: isToday ? 'oklch(42% 0.16 25 / 0.05)' : isWeekend ? 'oklch(50% 0.01 75 / 0.03)' : 'transparent',
+                        borderLeft: isToday ? '1px solid oklch(42% 0.16 25 / 0.2)' : `1px solid ${BORDER_SOFT}`,
                       }} />
                     );
                   })}
@@ -612,11 +480,11 @@ function GanttViewActionPoints({ actionPoints, onToggle }: { actionPoints: Actio
                       background: dotColor, boxShadow: `0 0 0 3px ${dotColor}22`,
                     }} />
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 14, lineHeight: 1.3, color: '#1C1917', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: 500 }}>
+                      <div style={{ fontSize: 14, lineHeight: 1.3, color: INK, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: 500 }}>
                         {card.text}
                       </div>
                       {card.channel_type && (
-                        <div style={{ fontSize: 12, color: '#B5B0A5', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 2 }}>
+                        <div style={{ fontSize: 12, color: FAINT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 2 }}>
                           {card.channel_type}
                         </div>
                       )}
@@ -626,37 +494,36 @@ function GanttViewActionPoints({ actionPoints, onToggle }: { actionPoints: Actio
               </div>
             );
           })}
-
-          {/* No-due-date items */}
-          {noDue.length > 0 && (
-            <>
-              <div style={{ padding: '6px 8px', borderTop: '0.5px solid #E8E4DC', background: '#F5F2EB' }}>
-                <div style={{ fontSize: 11, color: '#B5B0A5', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600 }}>
-                  No due date
-                </div>
-              </div>
-              {noDue.map(card => (
-                <div key={card.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 6, padding: '6px 8px', borderBottom: '0.5px solid #F0EDE8', background: '#F5F2EB' }}>
-                  <GanttItemCheckbox item={card} onToggle={onToggle} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12, lineHeight: 1.3, color: '#1C1917', fontWeight: 500 }}>
-                      {card.text}
-                    </div>
-                    {card.channel_type && (
-                      <span style={{ fontSize: 11, padding: '1px 4px', borderRadius: 99, background: '#EDE9E0', color: '#8A8578', fontWeight: 500, display: 'inline-block', marginTop: 2 }}>
-                        {card.channel_type}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </>
-          )}
         </div>
       </div>
 
+      {/* No-due-date items — rendered outside the horizontally-scrolling day-grid so
+          text isn't clamped to the (often much narrower) date-range width. */}
+      {noDue.length > 0 && (
+        <div style={{ flexShrink: 0, maxHeight: '40%', overflowY: 'auto' }}>
+          <div style={{ padding: '6px 8px', borderTop: `1px solid ${BORDER_SOFT}`, background: PAPER_BG }}>
+            <div style={{ fontSize: 11, color: FAINT, textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600 }}>
+              No due date
+            </div>
+          </div>
+          {noDue.map(card => (
+            <div key={card.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 6, padding: '6px 8px', borderBottom: `1px solid ${BORDER_SOFT}`, background: PAPER_BG }}>
+              <GanttItemCheckbox item={card} onToggle={onToggle} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, lineHeight: 1.3, color: INK, fontWeight: 500, wordBreak: 'break-word' }}>
+                  {card.text}
+                </div>
+                {card.channel_type && (
+                  <span style={{ marginTop: 2, display: 'inline-block' }}><Tag>{card.channel_type}</Tag></span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {actionPoints.length === 0 && (
-        <div style={{ padding: '12px', fontSize: 13, color: '#C5C0B8', fontStyle: 'italic', textAlign: 'center' }}>
+        <div style={{ padding: '12px', fontSize: 13, color: FAINT, fontFamily: serifFont, fontStyle: 'italic', textAlign: 'center' }}>
           No action points
         </div>
       )}
@@ -689,135 +556,24 @@ function GanttItemCheckbox({ item, onToggle }: { item: ActionPoint; onToggle: (i
       onClick={handleClick}
       style={{
         marginTop: 1,
-        width: 12,
-        height: 12,
+        width: 13,
+        height: 13,
         borderRadius: '50%',
         flexShrink: 0,
-        border: effectiveCompleted || isCompleting ? '0.5px solid #4A7C59' : '0.5px solid #D5D0C5',
-        background: effectiveCompleted || isCompleting ? '#4A7C59' : 'transparent',
+        border: `1.5px solid ${effectiveCompleted || isCompleting ? RED : BORDER}`,
+        background: effectiveCompleted || isCompleting ? RED : 'transparent',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         cursor: 'pointer',
+        transition: 'background 0.15s, border-color 0.15s',
       }}
     >
       {(effectiveCompleted || isCompleting) && (
         <svg width="7" height="7" viewBox="0 0 8 8" fill="none">
-          <path d="M1.5 4L3 5.5L6.5 2" stroke="#fff" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M1.5 4L3 5.5L6.5 2" stroke={CARD_BG} strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       )}
     </div>
-  );
-}
-
-function KanbanCard({
-  item,
-  onToggle,
-  isLast,
-}: {
-  item: ActionPoint;
-  onToggle: (id: string, c: boolean) => void;
-  isLast: boolean;
-}) {
-  const [isCompleting, setIsCompleting] = useState(false);
-  const [localCompleted, setLocalCompleted] = useState(false);
-
-  const effectiveCompleted = item.completed || localCompleted;
-
-  const handleClick = (e: React.MouseEvent) => {
-    if (!effectiveCompleted && !isCompleting) {
-      fireConfetti(e.clientX, e.clientY);
-      setIsCompleting(true);
-      setTimeout(() => {
-        setIsCompleting(false);
-        setLocalCompleted(true);
-        onToggle(item.id, true);
-      }, 400);
-    } else if (effectiveCompleted) {
-      setLocalCompleted(false);
-      onToggle(item.id, false);
-    }
-  };
-
-  return (
-    <>
-      <style>{`@keyframes strike { from { width: 0% } to { width: 100% } }`}</style>
-      <div style={{
-        display: 'flex',
-        alignItems: 'flex-start',
-        gap: 7,
-        padding: '7px 10px',
-        borderBottom: isLast ? 'none' : '0.5px solid #E8E4DC',
-        opacity: effectiveCompleted || isCompleting ? 0.5 : 1,
-        transition: 'opacity 0.4s',
-      }}>
-      {/* Circle checkbox */}
-      <div
-        onClick={handleClick}
-        style={{
-          marginTop: 2,
-          width: 13,
-          height: 13,
-          borderRadius: '50%',
-          flexShrink: 0,
-          border: effectiveCompleted || isCompleting ? '0.5px solid #4A7C59' : '0.5px solid #D5D0C5',
-          background: effectiveCompleted || isCompleting ? '#4A7C59' : 'transparent',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          cursor: 'pointer',
-        }}
-      >
-        {(effectiveCompleted || isCompleting) && (
-          <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
-            <path d="M1.5 4L3 5.5L6.5 2" stroke="#fff" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        )}
-      </div>
-
-      {/* Text + meta */}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{
-          fontSize: 14,
-          lineHeight: 1.4,
-          color: effectiveCompleted || isCompleting ? '#B5B0A5' : '#1C1917',
-          textDecoration: effectiveCompleted ? 'line-through' : 'none',
-          wordBreak: 'break-word',
-          position: 'relative',
-          transition: 'color 0.2s',
-        }}>
-          {item.text}
-          {isCompleting && (
-            <span style={{ position: 'absolute', left: 0, top: '50%', height: '1.5px', background: '#6B7280', width: 0, animation: 'strike 0.35s ease forwards' }} />
-          )}
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 3, flexWrap: 'wrap' }}>
-          {item.channel_type && (
-            <span style={{
-              fontSize: 11, padding: '1px 5px', borderRadius: 99,
-              background: '#EDE9E0', color: '#8A8578', fontWeight: 500,
-            }}>
-              {item.channel_type}
-            </span>
-          )}
-          <span style={{
-            fontSize: 11, padding: '1px 5px', borderRadius: 99,
-            background: '#EDE9E0', color: '#8A8578',
-          }}>
-            {item.category}
-          </span>
-          {item.due_date && (
-            <span style={{
-              fontSize: 11,
-              color: dueDateColor(item.due_date),
-              fontWeight: 500,
-            }}>
-              {formatDueDate(item.due_date)}
-            </span>
-          )}
-        </div>
-      </div>
-    </div>
-    </>
   );
 }
