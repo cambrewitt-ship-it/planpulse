@@ -208,12 +208,6 @@ const AGENT_FLOWS: Record<string, {
       : `Show me action points for ${p.clientName} — overdue first`,
     stepLabel: () => 'Which client?',
   },
-  report_creator: {
-    startMessage: 'Create Report',
-    steps: ['pick_client', 'pick_month'],
-    buildPrompt: p => `Create a comprehensive performance report for ${p.clientName} for ${p.month}`,
-    stepLabel: s => s === 'pick_client' ? 'Which client?' : 'Which month?',
-  },
 };
 
 // Match an agent to a flow — try template_slug first, then fall back to name matching
@@ -227,7 +221,6 @@ function getFlowForAgent(agent: UserAgent) {
   if (n.includes('performance') || n.includes('analyst'))      return AGENT_FLOWS.performance_analyst;
   if (n.includes('media') || n.includes('editor'))             return AGENT_FLOWS.media_plan_editor;
   if (n.includes('action') || n.includes('points') || n.includes('task')) return AGENT_FLOWS.action_points_manager;
-  if (n.includes('report'))                                    return AGENT_FLOWS.report_creator;
   return null;
 }
 
@@ -700,7 +693,6 @@ export const AgencyChat = forwardRef<AgencyChatHandle, AgencyChatProps>(function
             } else if (event.type === 'tool_call') {
               const labels: Record<string, string> = {
                 get_daily_briefing: 'Fetching daily briefing…',
-                get_client_status: 'Looking up client data…',
                 get_action_points: 'Checking action points…',
                 get_channel_library: 'Searching channel library…',
                 get_channel_performance: 'Pulling channel performance data…',
@@ -784,7 +776,6 @@ export const AgencyChat = forwardRef<AgencyChatHandle, AgencyChatProps>(function
 
     const TOOL_LABELS: Record<string, string> = {
       get_daily_briefing: 'Fetching daily briefing…',
-      get_client_status: 'Looking up client data…',
       get_action_points: 'Checking action points…',
       get_channel_library: 'Searching channel library…',
       get_channel_performance: 'Pulling channel performance data…',

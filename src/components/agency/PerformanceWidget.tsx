@@ -2,9 +2,14 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { format, subDays } from 'date-fns';
+import { format, subDays, startOfMonth, endOfMonth, subMonths, startOfYear } from 'date-fns';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
+
+export interface DateRange {
+  startDate: string;
+  endDate: string;
+}
 
 export interface PerfData {
   needle: number;       // 0..1 — 0=bad, 0.5=on target, 1=great
@@ -196,6 +201,30 @@ function GearIcon({ size = 12 }: { size?: number }) {
   );
 }
 
+// ── Timeframe presets (Spend / Plan Timeline) ──────────────────────────────────
+
+const TIMEFRAME_PRESETS: Array<{ label: string; getValue: () => DateRange }> = [
+  {
+    label: '30 days',
+    getValue: () => ({ startDate: format(subDays(new Date(), 30), 'yyyy-MM-dd'), endDate: format(new Date(), 'yyyy-MM-dd') }),
+  },
+  {
+    label: 'This month',
+    getValue: () => ({ startDate: format(startOfMonth(new Date()), 'yyyy-MM-dd'), endDate: format(new Date(), 'yyyy-MM-dd') }),
+  },
+  {
+    label: 'Last month',
+    getValue: () => {
+      const lastMonth = subMonths(new Date(), 1);
+      return { startDate: format(startOfMonth(lastMonth), 'yyyy-MM-dd'), endDate: format(endOfMonth(lastMonth), 'yyyy-MM-dd') };
+    },
+  },
+  {
+    label: 'YTD',
+    getValue: () => ({ startDate: format(startOfYear(new Date()), 'yyyy-MM-dd'), endDate: format(new Date(), 'yyyy-MM-dd') }),
+  },
+];
+
 // ── Small shared select style ─────────────────────────────────────────────────
 
 const selectStyle: React.CSSProperties = {
@@ -219,14 +248,17 @@ interface ModalProps {
   onConnect?: () => void;
   onSave: (config: WidgetConfig) => void;
   onClose: () => void;
+  dateRange?: DateRange;
+  onDateRangeChange?: (range: DateRange) => void;
 }
 
-function ConfigModal({ clientId, initialConfig, goals, campaigns, ga4Events, metaEvents, googleAdsConversionActions, hasData, onConnect, onSave, onClose }: ModalProps) {
+function ConfigModal({ clientId, initialConfig, goals, campaigns, ga4Events, metaEvents, googleAdsConversionActions, hasData, onConnect, onSave, onClose, dateRange, onDateRangeChange }: ModalProps) {
   const primaryGoal = goals.find(g => g.is_primary) ?? goals[0] ?? null;
   const [editMetric, setEditMetric] = useState(primaryGoal?.metric ?? 'CPA');
   const [editTarget, setEditTarget] = useState(primaryGoal?.target_value?.toString() ?? '');
   const [editGoalId] = useState(primaryGoal?.id ?? null);
   const [editConfig, setEditConfig] = useState<WidgetConfig>({ ...initialConfig });
+  const [editDateRange, setEditDateRange] = useState<DateRange>(dateRange ?? { startDate: '', endDate: '' });
   const [saving, setSaving] = useState(false);
 
   // Merge fetched events with defaults — fetched events come first (have real counts), defaults fill gaps
@@ -272,6 +304,7 @@ function ConfigModal({ clientId, initialConfig, goals, campaigns, ga4Events, met
           }),
         });
       }
+      onDateRangeChange?.(editDateRange);
       onSave(editConfig);
     } finally {
       setSaving(false);
@@ -321,6 +354,47 @@ function ConfigModal({ clientId, initialConfig, goals, campaigns, ga4Events, met
         {needsConversionEvent && (
           <div style={{ background: 'rgba(176,112,48,0.08)', border: '1px solid rgba(176,112,48,0.25)', borderRadius: 8, padding: '8px 12px', marginBottom: 16, fontSize: 12, color: '#8A5C10' }}>
             ⚠ Select a conversion event below so actuals can be calculated.
+          </div>
+        )}
+
+        {/* ── Timeframe (Spend / Plan Timeline) ── */}
+        {onDateRangeChange && (
+          <div style={{ marginBottom: 20 }}>
+            <span style={sectionLabel}>Timeframe</span>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' as const, marginBottom: 8 }}>
+              {TIMEFRAME_PRESETS.map(preset => {
+                const presetValue = preset.getValue();
+                const isActive = presetValue.startDate === editDateRange.startDate && presetValue.endDate === editDateRange.endDate;
+                return (
+                  <button key={preset.label} onClick={() => setEditDateRange(presetValue)} style={pill(isActive)}>
+                    {preset.label}
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ flex: 1 }}>
+                <div style={fieldLabel}>Start</div>
+                <input
+                  type="date"
+                  value={editDateRange.startDate}
+                  onChange={e => setEditDateRange(r => ({ ...r, startDate: e.target.value }))}
+                  style={{ ...selectStyle, boxSizing: 'border-box' }}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={fieldLabel}>End</div>
+                <input
+                  type="date"
+                  value={editDateRange.endDate}
+                  onChange={e => setEditDateRange(r => ({ ...r, endDate: e.target.value }))}
+                  style={{ ...selectStyle, boxSizing: 'border-box' }}
+                />
+              </div>
+            </div>
+            <p style={{ fontSize: 10, color: '#B5B0A5', marginTop: 5 }}>
+              Controls the Spend and Plan Timeline figures shown above.
+            </p>
           </div>
         )}
 
@@ -510,6 +584,8 @@ export function PerformanceWidget({
   modalOpen,
   onModalOpenChange,
   onConnect,
+  dateRange,
+  onDateRangeChange,
 }: {
   clientId: string;
   onNeedle?: (data: PerfData | null) => void;
@@ -522,6 +598,9 @@ export function PerformanceWidget({
   modalOpen?: boolean;
   onModalOpenChange?: (open: boolean) => void;
   onConnect?: () => void;
+  /** When provided, the config modal shows a Timeframe section controlling this range. */
+  dateRange?: DateRange;
+  onDateRangeChange?: (range: DateRange) => void;
 }) {
   const [config, setConfig] = useState<WidgetConfig>(() => loadConfig(clientId));
   const [goals, setGoals] = useState<Goal[]>([]);
@@ -788,6 +867,8 @@ export function PerformanceWidget({
           onConnect={onConnect}
           onSave={handleSave}
           onClose={() => setShowModal(false)}
+          dateRange={dateRange}
+          onDateRangeChange={onDateRangeChange}
         />,
         document.body
       )}

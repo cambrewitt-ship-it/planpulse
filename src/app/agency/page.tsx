@@ -299,13 +299,6 @@ export default function AgencyDashboard() {
       }));
   }, [actionPointClients, amFilter]);
 
-  // Health dot counts
-  const dotCounts = useMemo(() => ({
-    red: filteredClients.filter(c => c.health?.status === 'red').length,
-    amber: filteredClients.filter(c => c.health?.status === 'amber').length,
-    green: filteredClients.filter(c => !c.health || c.health.status === 'green').length,
-  }), [filteredClients]);
-
   const briefingItems = useMemo(() => computeBriefing(filteredClients, filteredActionPointClients), [filteredClients, filteredActionPointClients]);
 
   // Fullscreen Gantt data derivation
