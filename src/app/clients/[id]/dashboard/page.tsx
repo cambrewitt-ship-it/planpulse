@@ -276,9 +276,12 @@ export default function DashboardV2() {
   const [edmActuals, setEdmActuals] = useState<EdmActual[]>([]);
   const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
-  // Sandbox-style media plan (per-client, persisted in localStorage)
+  // Sandbox-style media plan (per-client). Persisted to Supabase so it syncs
+  // across every logged-in device; localStorage is kept only as an instant-paint
+  // cache for the initial render and an offline fallback.
   const [clientSandboxPlan, setClientSandboxPlan] = useState<SandboxPlan | null>(null);
   const [sandboxPlanHydrated, setSandboxPlanHydrated] = useState(false);
+  const [sandboxPlanSaveError, setSandboxPlanSaveError] = useState<string | null>(null);
   // Tracks when the user explicitly cleared the plan via "Upload new" so the reverse
   // sync from DB channels doesn't immediately re-populate it before they can upload.
   const sandboxPlanExplicitlyClearedRef = useRef(false);
@@ -307,6 +310,15 @@ export default function DashboardV2() {
       endDate: format(today, 'yyyy-MM-dd'),
     };
   });
+  // Timeframe for the hero Spend / Plan Timeline cards — set via the settings
+  // wheel on the CPA graph, independent of the Channel Performance / Results timeframe.
+  const [heroDateRange, setHeroDateRange] = useState(() => {
+    const today = new Date();
+    return {
+      startDate: format(startOfYear(today), 'yyyy-MM-dd'),
+      endDate: format(today, 'yyyy-MM-dd'),
+    };
+  });
   const [allBenchmarks, setAllBenchmarks] = useState<ChannelBenchmark[]>([]);
   const [allPresets, setAllPresets] = useState<MetricPreset[]>([]);
   const [clientChannelPresets, setClientChannelPresets] = useState<ClientChannelPreset[]>([]);
@@ -317,9 +329,9 @@ export default function DashboardV2() {
   // the currently selected analytics period.
   // ── Total actual spend: respects per-channel campaign filters ────────────
   const totalActualSpend = useMemo(() => {
-    if (!channelMonthSpendData.length || !analyticsDateRange?.startDate || !analyticsDateRange?.endDate) return 0;
-    const rangeStart = analyticsDateRange.startDate;
-    const rangeEnd   = analyticsDateRange.endDate;
+    if (!channelMonthSpendData.length || !heroDateRange?.startDate || !heroDateRange?.endDate) return 0;
+    const rangeStart = heroDateRange.startDate;
+    const rangeEnd   = heroDateRange.endDate;
 
     const paidChannels = mediaPlanBuilderChannels.filter(ch => {
       const cat = (ch as any).channelCategory || getChannelCategory(ch.channelName);
@@ -362,7 +374,7 @@ export default function DashboardV2() {
       .reduce((sum, ch) => sum + ((ch as any).manualActualSpend ?? 0), 0);
 
     return total + nonDigitalTotal;
-  }, [channelMonthSpendData, analyticsDateRange.startDate, analyticsDateRange.endDate, mediaPlanBuilderChannels, channelCampaignSelections]);
+  }, [channelMonthSpendData, heroDateRange.startDate, heroDateRange.endDate, mediaPlanBuilderChannels, channelCampaignSelections]);
 
   // Fetch account managers
   useEffect(() => {
@@ -427,7 +439,7 @@ export default function DashboardV2() {
       fetch(`/api/clients/${clientId}/actual-spend`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ actualSpend: totalActualSpend, dateRange: analyticsDateRange }),
+        body: JSON.stringify({ actualSpend: totalActualSpend, dateRange: heroDateRange }),
       }).catch(() => {/* fire-and-forget */});
     }, 2000);
     return () => clearTimeout(timer);
@@ -435,7 +447,9 @@ export default function DashboardV2() {
 
   // Note: analyticsDateRange defaults to YTD (Jan 1 – today) on each load
 
-  // Load sandbox media plan from localStorage (per-client)
+  // Optimistically hydrate from the local cache first so the grid paints
+  // instantly; loadMediaPlanBuilderData() below overwrites this with the
+  // server copy once it arrives, which is the source of truth across devices.
   useEffect(() => {
     if (!clientId) return;
     try {
@@ -894,6 +908,18 @@ export default function DashboardV2() {
         setMediaPlanBuilderChannels(processedChannels);
         setCommission(result.data.commission || 0);
 
+        // Server copy of the full media-plan grid wins over whatever's cached
+        // locally — this is what makes edits made on one computer show up on
+        // another. If the server has never seen a sandbox plan yet (e.g. this
+        // client's plan predates server-side sync), keep the local cache.
+        if (result.data.sandboxPlan) {
+          sandboxPlanExplicitlyClearedRef.current = false;
+          setClientSandboxPlan(result.data.sandboxPlan);
+          try {
+            localStorage.setItem(`planpulse_sandbox_plan_${clientId}`, JSON.stringify(result.data.sandboxPlan));
+          } catch {}
+        }
+
         // Pre-populate localStorage with campaign selections from onboarding so
         // channel cards initialize with the right campaigns on first load.
         if (typeof window !== 'undefined' && clientId) {
@@ -917,7 +943,7 @@ export default function DashboardV2() {
     }
   };
 
-  const saveMediaPlanBuilderData = async (channels: MediaPlanChannel[], commission: number) => {
+  const saveMediaPlanBuilderData = async (channels: MediaPlanChannel[], commission: number, sandboxPlan?: SandboxPlan | null) => {
     if (!clientId || isInitialLoadRef.current) return;
 
     try {
@@ -937,27 +963,35 @@ export default function DashboardV2() {
       const response = await fetch(`/api/clients/${clientId}/media-plan-builder`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ channels: serializedChannels, commission }),
+        body: JSON.stringify({ channels: serializedChannels, commission, sandboxPlan }),
       });
 
       if (!response.ok) {
         console.error('Failed to save media plan builder data:', response.status);
+        if (sandboxPlan !== undefined) {
+          setSandboxPlanSaveError('Could not sync this plan to your other devices — check your connection.');
+        }
+      } else if (sandboxPlan !== undefined) {
+        setSandboxPlanSaveError(null);
       }
     } catch (error) {
       console.error('Error saving media plan builder data:', error);
+      if (sandboxPlan !== undefined) {
+        setSandboxPlanSaveError('Could not sync this plan to your other devices — check your connection.');
+      }
     }
   };
 
-  // Auto-save media plan builder data with debouncing
+  // Auto-save media plan builder data (channels + sandbox grid) with debouncing
   useEffect(() => {
-    if (isInitialLoadRef.current || isLoadingMediaPlanBuilder) return;
+    if (isInitialLoadRef.current || isLoadingMediaPlanBuilder || !sandboxPlanHydrated) return;
 
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
     }
 
     saveTimeoutRef.current = setTimeout(() => {
-      saveMediaPlanBuilderData(mediaPlanBuilderChannels, commission);
+      saveMediaPlanBuilderData(mediaPlanBuilderChannels, commission, clientSandboxPlan);
     }, 1000);
 
     return () => {
@@ -965,7 +999,7 @@ export default function DashboardV2() {
         clearTimeout(saveTimeoutRef.current);
       }
     };
-  }, [mediaPlanBuilderChannels, commission, clientId, isLoadingMediaPlanBuilder]);
+  }, [mediaPlanBuilderChannels, commission, clientSandboxPlan, clientId, isLoadingMediaPlanBuilder, sandboxPlanHydrated]);
 
   const loadEventNames = async () => {
     if (!clientId) return;
@@ -1529,8 +1563,10 @@ export default function DashboardV2() {
       onAccountManagerChange: handleAccountManagerChange,
       isSavingAccountManager,
       accountManagers,
+      heroDateRange,
+      onHeroDateRangeChange: setHeroDateRange,
     };
-  }, [client, clientId, adjustedHealthScore, campaignDates, totalActualSpend, plannedBudget, actionPointsStats, handleAccountManagerChange, isSavingAccountManager, accountManagers, perfHealthResult]);
+  }, [client, clientId, adjustedHealthScore, campaignDates, totalActualSpend, plannedBudget, actionPointsStats, handleAccountManagerChange, isSavingAccountManager, accountManagers, perfHealthResult, heroDateRange]);
 
   // Calculate current week commencing (Monday of current week)
   const currentWeekCommencing = useMemo(() => {
@@ -2124,7 +2160,7 @@ export default function DashboardV2() {
           const ids: string[] = (ch as any)?.metaCampaignIds?.length
             ? (ch as any).metaCampaignIds
             : (ch as any)?.metaCampaignId ? [(ch as any).metaCampaignId] : [];
-          initial[key] = ids.length > 0 ? ids : ['__none__'];
+          initial[key] = ids.length > 0 ? ids : [];
         }
       } catch { initial[key] = []; }
     });
@@ -2225,14 +2261,6 @@ export default function DashboardV2() {
             ← Back
           </Link>
           <span className="text-base font-medium" style={{ color: '#1C1917' }}>{client?.name ?? 'Loading…'}</span>
-          <div className="ml-auto flex items-center gap-2">
-            <span className="text-sm text-gray-500">Analytics Period:</span>
-            <DateRangePicker
-              value={analyticsDateRange}
-              onChange={setAnalyticsDateRange}
-              disabled={loadingAnalytics}
-            />
-          </div>
         </div>
       </header>
 
@@ -2443,16 +2471,18 @@ export default function DashboardV2() {
                       </div>
                     ) : (
                       <div style={{ display: 'flex', width: '100%', height: '100%', position: 'relative', borderRadius: 12, overflow: 'hidden' }}>
-                        {/* Spine wrapper — fixed 88px, both spines animate inside with peek strip between them */}
-                        <div style={{ width: 88, flexShrink: 0, position: 'relative', height: '100%' }}>
+                        {/* Spine wrapper — fixed 88px, both spines animate inside with peek strip between them.
+                            zIndex raised above the content area so the active spine can extend past its own
+                            88px column and sit flush against the (now offset) active content panel. */}
+                        <div style={{ width: 44, flexShrink: 0, position: 'relative', height: '100%', zIndex: 3 }}>
                           {/* Notes spine */}
                           <div
                             onClick={() => { setNotesActiveTab('notes'); setShowFilesMenu(false); setShowTodoMenu(false); }}
                             style={{
                               position: 'absolute',
-                              top: notesActiveTab === 'notes' ? 0 : 5,
-                              bottom: notesActiveTab === 'notes' ? 0 : 5,
-                              left: notesActiveTab === 'notes' ? 46 : 0,
+                              top: notesActiveTab === 'notes' ? 0 : 18,
+                              bottom: notesActiveTab === 'notes' ? 16 : 0,
+                              left: notesActiveTab === 'notes' ? 52 : 8,
                               transition: 'left 0.28s cubic-bezier(0.4, 0, 0.2, 1), top 0.28s cubic-bezier(0.4, 0, 0.2, 1), bottom 0.28s cubic-bezier(0.4, 0, 0.2, 1), background 0.15s, opacity 0.28s',
                               filter: notesActiveTab === 'notes' ? 'none' : 'brightness(0.55)',
                               width: 36,
@@ -2486,9 +2516,9 @@ export default function DashboardV2() {
                             onClick={() => { setNotesActiveTab('todo'); setShowFilesMenu(false); setShowTodoMenu(false); }}
                             style={{
                               position: 'absolute',
-                              top: notesActiveTab === 'todo' ? 0 : 5,
-                              bottom: notesActiveTab === 'todo' ? 0 : 5,
-                              left: notesActiveTab === 'todo' ? 46 : 0,
+                              top: notesActiveTab === 'todo' ? 0 : 18,
+                              bottom: notesActiveTab === 'todo' ? 16 : 0,
+                              left: notesActiveTab === 'todo' ? 52 : 8,
                               transition: 'left 0.28s cubic-bezier(0.4, 0, 0.2, 1), top 0.28s cubic-bezier(0.4, 0, 0.2, 1), bottom 0.28s cubic-bezier(0.4, 0, 0.2, 1), background 0.15s, opacity 0.28s',
                               filter: notesActiveTab === 'todo' ? 'none' : 'brightness(0.55)',
                               width: 36,
@@ -2516,36 +2546,12 @@ export default function DashboardV2() {
                               <button onClick={e => { e.stopPropagation(); setNotesCollapsed(true); }} title="Collapse" style={{ marginTop: 'auto', marginBottom: 8, background: 'transparent', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.5)', fontSize: 18, lineHeight: 1, padding: 2 }}>‹</button>
                             )}
                           </div>
-
-                          {/* Peek strip — sits in the gap between inactive spine (0–36) and active spine (52–88).
-                              Shows a sliver of the inactive panel's content so it looks like a sheet peeking behind. */}
-                          <div
-                            onClick={() => { setNotesActiveTab(notesActiveTab === 'notes' ? 'todo' : 'notes'); setShowFilesMenu(false); setShowTodoMenu(false); }}
-                            style={{
-                              position: 'absolute', top: 5, bottom: 5,
-                              left: 36, width: 16,
-                              zIndex: 1,
-                              filter: 'brightness(0.55)',
-                              cursor: 'pointer',
-                              transition: 'background 0.28s, background-image 0.28s',
-                              ...(notesActiveTab === 'todo'
-                                ? {
-                                    background: '#FFFFFF',
-                                    backgroundImage: 'repeating-linear-gradient(transparent, transparent 27px, rgba(160,200,240,0.55) 27px, rgba(160,200,240,0.55) 28px)',
-                                    backgroundPositionY: '4px',
-                                  }
-                                : {
-                                    background: '#FFFFFF',
-                                  }
-                              ),
-                            }}
-                          />
                         </div>{/* end spine wrapper */}
 
                         {/* Files slide-out panel — only when Notes tab active */}
                         {notesActiveTab === 'notes' && showFilesMenu && (
                           <div style={{
-                            position: 'absolute', top: 0, left: 92, width: 160, height: '100%',
+                            position: 'absolute', top: 0, left: 48, width: 160, height: '100%',
                             background: '#2C2925', zIndex: 10,
                             display: 'flex', flexDirection: 'column',
                             boxShadow: '2px 0 8px rgba(0,0,0,0.25)',
@@ -2614,7 +2620,7 @@ export default function DashboardV2() {
                         {/* To Do slide-out menu */}
                         {notesActiveTab === 'todo' && showTodoMenu && (
                           <div style={{
-                            position: 'absolute', top: 0, left: 92, width: 160, height: '100%',
+                            position: 'absolute', top: 0, left: 48, width: 160, height: '100%',
                             background: '#2C1715', zIndex: 10,
                             display: 'flex', flexDirection: 'column',
                             boxShadow: '2px 0 8px rgba(0,0,0,0.25)',
@@ -2632,16 +2638,34 @@ export default function DashboardV2() {
                           </div>
                         )}
 
-                        {/* Content area — switches between Notes and To Do */}
-                        <div style={{ flex: 1, position: 'relative', minWidth: 0, overflow: 'hidden', borderRadius: '0 12px 12px 0', height: '100%' }}>
-                          {notesActiveTab === 'notes' ? (
-                            <NotesChecklist activeClientId={`${clientId}:${activeFileId}`} />
-                          ) : (
-                            <ClientActionPointsList
-                              actionPoints={enrichedActionPoints}
-                              onToggle={handleToggleActionPoint}
-                            />
-                          )}
+                        {/* Content area — two equal-sized panels offset diagonally: selected sits up-and-right,
+                            deselected sits down-and-left, mirroring the spine's own offset. */}
+                        <div style={{ flex: 1, position: 'relative', minWidth: 0, height: '100%' }}>
+                          {/* Back (deselected) panel — inset from top + right, muted, non-interactive peek */}
+                          <div style={{ position: 'absolute', top: 18, right: 32, bottom: 0, left: 0, overflow: 'hidden', borderRadius: '0 12px 12px 0', filter: 'brightness(0.88) saturate(0.9)', pointerEvents: 'none', zIndex: 0 }}>
+                            {notesActiveTab === 'notes' ? (
+                              <ClientActionPointsList
+                                actionPoints={enrichedActionPoints}
+                                onToggle={handleToggleActionPoint}
+                              />
+                            ) : (
+                              <NotesChecklist activeClientId={`${clientId}:${activeFileId}`} />
+                            )}
+                          </div>
+
+                          {/* Front (selected) panel — inset from bottom + left, flush to top + right.
+                              32px reveals the deselected panel's own red margin rule in the peek, so it
+                              reads as a second card rather than blank padding. */}
+                          <div style={{ position: 'absolute', top: 0, right: 0, bottom: 16, left: 32, overflow: 'hidden', borderRadius: 12, boxShadow: '0 10px 22px -8px rgba(0,0,0,0.28)', zIndex: 1 }}>
+                            {notesActiveTab === 'notes' ? (
+                              <NotesChecklist activeClientId={`${clientId}:${activeFileId}`} />
+                            ) : (
+                              <ClientActionPointsList
+                                actionPoints={enrichedActionPoints}
+                                onToggle={handleToggleActionPoint}
+                              />
+                            )}
+                          </div>
                         </div>
                       </div>
                     )}
@@ -2675,6 +2699,16 @@ export default function DashboardV2() {
                     </div>
                   </div>
                 )}
+
+                {/* Timeframe — applies to Channel Performance below */}
+                <div className="flex items-center justify-end gap-2 mt-6">
+                  <span className="text-sm text-gray-500">Timeframe:</span>
+                  <DateRangePicker
+                    value={analyticsDateRange}
+                    onChange={setAnalyticsDateRange}
+                    disabled={loadingAnalytics}
+                  />
+                </div>
 
                 {loadingAnalytics ? (
                   <div className="bg-white rounded-xl border border-gray-200 p-6 animate-pulse">
@@ -2885,6 +2919,16 @@ export default function DashboardV2() {
             {/* ── Funnels view ── */}
             {viewMode === 'funnels' && (
               <>
+                {/* Timeframe — applies to Results below */}
+                <div className="flex items-center justify-end gap-2" style={{ marginBottom: 14 }}>
+                  <span className="text-sm text-gray-500">Timeframe:</span>
+                  <DateRangePicker
+                    value={analyticsDateRange}
+                    onChange={setAnalyticsDateRange}
+                    disabled={loadingAnalytics}
+                  />
+                </div>
+
                 {/* Funnel selector */}
                 <div style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', padding: '20px 24px', marginBottom: 14 }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
@@ -3010,13 +3054,24 @@ export default function DashboardV2() {
               clientSandboxPlan ? (
                 // PlanGrid: container height drives the grid — outerStyle overrides h-screen
                 // so the inner scroll area reaches exactly the container bottom (totals visible)
-                <div style={{ height: 'calc(100vh - 180px)', borderRadius: 12, border: '1px solid rgba(232,228,220,0.7)', boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', overflow: 'hidden' }}>
-                  <PlanGrid
-                    plan={clientSandboxPlan}
-                    onPlanChange={handleClientPlanChange}
-                    onUpload={handleClientPlanUpload}
-                    outerStyle={{ height: '100%' }}
-                  />
+                <div style={{ height: 'calc(100vh - 180px)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {sandboxPlanSaveError && (
+                    <div style={{
+                      flexShrink: 0, padding: '8px 14px', borderRadius: 10,
+                      background: '#FEF2F2', border: '1px solid #FCA5A5', color: '#B91C1C',
+                      fontSize: 13, fontFamily: "'DM Sans', system-ui, sans-serif",
+                    }}>
+                      {sandboxPlanSaveError}
+                    </div>
+                  )}
+                  <div style={{ flex: 1, minHeight: 0, borderRadius: 12, border: '1px solid rgba(232,228,220,0.7)', boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', overflow: 'hidden' }}>
+                    <PlanGrid
+                      plan={clientSandboxPlan}
+                      onPlanChange={handleClientPlanChange}
+                      onUpload={handleClientPlanUpload}
+                      outerStyle={{ height: '100%' }}
+                    />
+                  </div>
                 </div>
               ) : (
                 // UploadWizard: no height cap so all steps/buttons are reachable

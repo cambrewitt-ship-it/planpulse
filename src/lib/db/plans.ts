@@ -1,7 +1,7 @@
 // src/lib/db/plans.ts
 import { supabase } from '@/lib/supabase/client';
 import { MediaChannel } from '@/types/media-plan';
-import { MediaPlan, Channel } from '@/types/database';
+import { MediaPlan, Channel, Database } from '@/types/database';
 import { addWeeks, format, parseISO } from 'date-fns';
 
 export async function getClients() {
@@ -533,6 +533,9 @@ export async function deleteMediaPlan(planId: string) {
 export interface MediaPlanBuilderData {
   channels: any[];
   commission: number;
+  // Full media-plan-grid state (funnel, audience, custom columns, fee rows).
+  // Optional so channels-only saves don't clobber it; undefined = leave as-is.
+  sandboxPlan?: any;
 }
 
 // Helper to normalise channel names into the same format used by action_points.channel_type
@@ -672,18 +675,22 @@ export async function saveClientMediaPlanBuilder(
     });
 
     // 2) Upsert the media plan builder snapshot
+    const upsertPayload: Database['public']['Tables']['client_media_plan_builder']['Insert'] = {
+      client_id: clientId,
+      channels: serializedData.channels,
+      commission: serializedData.commission,
+    };
+    // Only touch sandbox_plan when explicitly provided, so channels-only
+    // saves (e.g. from the media-plan-builder wizard) don't wipe it out.
+    if (data.sandboxPlan !== undefined) {
+      upsertPayload.sandbox_plan = data.sandboxPlan;
+    }
+
     const { data: result, error } = await dbClient
       .from('client_media_plan_builder')
-      .upsert(
-        {
-          client_id: clientId,
-          channels: serializedData.channels,
-          commission: serializedData.commission,
-        },
-        {
-          onConflict: 'client_id',
-        }
-      )
+      .upsert(upsertPayload, {
+        onConflict: 'client_id',
+      })
       .select()
       .single();
 
@@ -789,8 +796,11 @@ export async function getClientMediaPlanBuilder(
 
   if (!data) return null;
 
-  return deserializeMediaPlanBuilderData({
-    channels: data.channels,
-    commission: data.commission,
-  });
+  return {
+    ...deserializeMediaPlanBuilderData({
+      channels: data.channels,
+      commission: data.commission,
+    }),
+    sandboxPlan: data.sandbox_plan ?? null,
+  };
 }

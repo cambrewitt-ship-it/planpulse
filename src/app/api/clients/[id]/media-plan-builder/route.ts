@@ -75,8 +75,8 @@ export async function POST(
       );
     }
     
-    const { channels, commission } = body;
-    console.log('Request body:', { channelsCount: channels?.length, commission });
+    const { channels, commission, sandboxPlan } = body;
+    console.log('Request body:', { channelsCount: channels?.length, commission, hasSandboxPlan: sandboxPlan !== undefined });
 
     if (!clientId) {
       return NextResponse.json(
@@ -138,6 +138,7 @@ export async function POST(
       const result = await saveClientMediaPlanBuilder(clientId, {
         channels: channels || [],
         commission: commission || 0,
+        ...(sandboxPlan !== undefined ? { sandboxPlan } : {}),
       }, supabase);
 
       console.log('Successfully saved media plan builder data');

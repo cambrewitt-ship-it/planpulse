@@ -725,6 +725,7 @@ export interface Database {
             client_id: string;
             channels: unknown;
             commission: number | null;
+            sandbox_plan: unknown;
             created_at: string;
             updated_at: string;
           };
@@ -733,6 +734,7 @@ export interface Database {
             client_id: string;
             channels?: unknown;
             commission?: number | null;
+            sandbox_plan?: unknown;
             created_at?: string;
             updated_at?: string;
           };
@@ -741,6 +743,7 @@ export interface Database {
             client_id?: string;
             channels?: unknown;
             commission?: number | null;
+            sandbox_plan?: unknown;
             updated_at?: string;
           };
           Relationships: [];
