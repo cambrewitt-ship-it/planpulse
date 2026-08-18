@@ -8,7 +8,7 @@ import { getChannelLogo, PRESET_CHANNELS } from "@/lib/utils/channel-icons";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const COL_WIDTHS = { del: 32, channel: 140, total: 110 };
+const COL_WIDTHS = { del: 32, channel: 230, total: 110 };
 const CUSTOM_COL_W = 140;
 const WEEK_W = 72;
 const WEEK_W_MIN = 28;
@@ -412,20 +412,20 @@ function ChannelSelectCell({ value, onChange, libraryChannels, className = "", s
     <td
       ref={cellRef}
       className={`group cursor-pointer ${className}`}
-      style={{ ...style, position: style?.position as React.CSSProperties["position"], overflow: "visible", zIndex: open ? 40 : (style?.zIndex ?? 10) }}
+      style={{ ...style, position: style?.position as React.CSSProperties["position"], overflow: open ? "visible" : "hidden", zIndex: open ? 40 : (style?.zIndex ?? 10) }}
       rowSpan={rowSpan}
       onClick={() => setOpen(o => !o)}
     >
-      <div className="relative flex items-center gap-1.5 justify-center w-full">
+      <div className="relative flex items-center gap-1.5 justify-center w-full min-w-0">
         {value ? (
           <>
             {icon}
-            <span className="font-semibold text-xs truncate">{value}</span>
+            <span className="font-semibold text-xs truncate min-w-0" title={value}>{value}</span>
           </>
         ) : (
           <span className="text-gray-300 text-xs">— select channel —</span>
         )}
-        <ChevronDown className="w-3 h-3 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+        <ChevronDown className="w-3 h-3 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none" />
 
         {open && (
           <div
@@ -928,10 +928,16 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
   }, [isResizing, isDragging]);
 
   // Global mousemove tracks the drag across week columns (avoids closure-over-i bugs)
+  // rAF-batched so rapid native mousemove events collapse to at most one state update per frame
   useEffect(() => {
     if (!isDragging) return;
-    const handleMove = (e: MouseEvent) => {
-      if (!scrollRef.current) return;
+    let frame: number | null = null;
+    let lastEvent: MouseEvent | null = null;
+
+    const process = () => {
+      frame = null;
+      const e = lastEvent;
+      if (!e || !scrollRef.current) return;
       const rect = scrollRef.current.getBoundingClientRect();
       const weekX = e.clientX - rect.left - totalLeftColsWidth + scrollRef.current.scrollLeft;
       const rawIdx = Math.max(0, Math.min(weeks.length - 1, Math.floor(weekX / weekWidth)));
@@ -953,15 +959,28 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
         return { ...prev, endIdx: idx };
       });
     };
+
+    const handleMove = (e: MouseEvent) => {
+      lastEvent = e;
+      if (frame == null) frame = requestAnimationFrame(process);
+    };
     window.addEventListener('mousemove', handleMove);
-    return () => window.removeEventListener('mousemove', handleMove);
+    return () => {
+      window.removeEventListener('mousemove', handleMove);
+      if (frame != null) cancelAnimationFrame(frame);
+    };
   }, [isDragging, weeks.length, weekWidth]);
 
   useEffect(() => {
     if (!isResizing || !resizeState) return;
 
-    const handleMove = (e: MouseEvent) => {
-      if (!scrollRef.current) return;
+    let frame: number | null = null;
+    let lastEvent: MouseEvent | null = null;
+
+    const process = () => {
+      frame = null;
+      const e = lastEvent;
+      if (!e || !scrollRef.current) return;
       resizeMoved.current = true;
       const rect = scrollRef.current.getBoundingClientRect();
       const scrollLeft = scrollRef.current.scrollLeft;
@@ -986,6 +1005,11 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
       }));
     };
 
+    const handleMove = (e: MouseEvent) => {
+      lastEvent = e;
+      if (frame == null) frame = requestAnimationFrame(process);
+    };
+
     const handleUp = () => {
       setResizeState(null);
       // Delay reset so the click handler on the flight cell can read it
@@ -997,6 +1021,7 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
     return () => {
       window.removeEventListener('mousemove', handleMove);
       window.removeEventListener('mouseup', handleUp);
+      if (frame != null) cancelAnimationFrame(frame);
     };
   }, [isResizing, resizeState, weeks, weekWidth]);
 
@@ -1019,7 +1044,7 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
           cells.push(
             <td
               key={week.weekStart}
-              className="border border-gray-100 bg-white hover:bg-blue-50/60 cursor-crosshair select-none transition-colors"
+              className="border border-gray-100 bg-white hover:bg-blue-50/60 cursor-crosshair select-none"
               onMouseDown={e => {
                 if (isResizing) return;
                 e.preventDefault();
@@ -1051,6 +1076,7 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
     while (i < weeks.length) {
       const week = weeks[i];
       const flight = flightAtWeek(row, week.weekStart);
+      const prevFlight = i > 0 ? flightAtWeek(row, weeks[i - 1].weekStart) : null;
 
       if (activeHighlight && i >= dragLo && i <= dragHi && !flight) {
         cells.push(
@@ -1064,7 +1090,7 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
         continue;
       }
 
-      if (flight && flight.startWeek === week.weekStart) {
+      if (flight && flight !== prevFlight) {
         const span = weekSpanForFlight(flight, weeks);
         const isEditing = editingFlight?.rowId === row.id && editingFlight?.flightId === flight.id;
         const isBeingResized = resizeState?.rowId === row.id && resizeState?.flightId === flight.id;
@@ -1158,7 +1184,7 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
       cells.push(
         <td
           key={week.weekStart}
-          className="border border-gray-100 bg-white hover:bg-blue-50/60 cursor-crosshair select-none transition-colors"
+          className="border border-gray-100 bg-white hover:bg-blue-50/60 cursor-crosshair select-none"
           onMouseDown={e => {
             if (isResizing) return;
             e.preventDefault();
