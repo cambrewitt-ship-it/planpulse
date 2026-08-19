@@ -216,9 +216,12 @@ export default function SettingsPage() {
   const fetchClients = async () => {
     try {
       setClientsLoading(true);
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      if (!currentUser) return;
       const { data, error: err } = await supabase
         .from('clients')
         .select('id, name, logo_url')
+        .eq('user_id', currentUser.id)
         .order('name', { ascending: true });
       if (!err) setClients((data as Client[]) || []);
     } catch (e) {
