@@ -397,12 +397,17 @@ export default function SettingsPage() {
 
   const pageFont: React.CSSProperties = { fontFamily: "'DM Sans', system-ui, sans-serif" };
   const serifFont: React.CSSProperties = { fontFamily: "'DM Serif Display', Georgia, serif" };
+  const sleekFont: React.CSSProperties = {
+    fontFamily:
+      "-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', system-ui, sans-serif",
+    letterSpacing: '-0.02em',
+  };
 
   return (
     <div style={{ minHeight: '100vh', background: '#F5F3EF', ...pageFont }}>
       <div className="container mx-auto p-8">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold mb-2" style={{ color: '#1C1917', ...serifFont }}>
+          <h1 className="text-3xl font-semibold mb-2" style={{ color: '#1C1917', ...sleekFont }}>
             Settings
           </h1>
           <p className="text-sm" style={{ color: '#8A8578' }}>
@@ -438,17 +443,19 @@ export default function SettingsPage() {
           onChange={handleAgencyLogoUpload}
         />
 
-        <Tabs defaultValue="account" className="w-full">
-          <TabsList>
-            <TabsTrigger value="account">Account</TabsTrigger>
-            <TabsTrigger value="agency">Agency</TabsTrigger>
-            <TabsTrigger value="team">Team</TabsTrigger>
-            <TabsTrigger value="clients">Clients</TabsTrigger>
-            <TabsTrigger value="integrations">Integrations</TabsTrigger>
-            <TabsTrigger value="billing">Billing</TabsTrigger>
+        <Tabs defaultValue="account" orientation="vertical" className="w-full flex-row items-start gap-6">
+          <TabsList className="flex-col h-auto w-48 flex-shrink-0 items-stretch justify-start gap-1 bg-transparent p-0">
+            <TabsTrigger value="account" className="justify-start data-[state=active]:bg-white data-[state=active]:shadow-sm">Account</TabsTrigger>
+            <TabsTrigger value="agency" className="justify-start data-[state=active]:bg-white data-[state=active]:shadow-sm">Agency</TabsTrigger>
+            <TabsTrigger value="team" className="justify-start data-[state=active]:bg-white data-[state=active]:shadow-sm">Team</TabsTrigger>
+            <TabsTrigger value="clients" className="justify-start data-[state=active]:bg-white data-[state=active]:shadow-sm">Clients</TabsTrigger>
+            <TabsTrigger value="integrations" className="justify-start data-[state=active]:bg-white data-[state=active]:shadow-sm">Integrations</TabsTrigger>
+            <TabsTrigger value="billing" className="justify-start data-[state=active]:bg-white data-[state=active]:shadow-sm">Billing</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="account" className="mt-6">
+          <div className="flex-1 min-w-0">
+
+          <TabsContent value="account">
             <Card>
               <CardHeader>
                 <CardTitle>Account Details</CardTitle>
@@ -484,7 +491,7 @@ export default function SettingsPage() {
             </Card>
           </TabsContent>
 
-          <TabsContent value="agency" className="mt-6">
+          <TabsContent value="agency">
             <div className="space-y-6">
               {agencyLoading ? (
                 <div className="text-sm text-muted-foreground py-4">Loading…</div>
@@ -593,7 +600,7 @@ export default function SettingsPage() {
             </div>
           </TabsContent>
 
-          <TabsContent value="team" className="mt-6">
+          <TabsContent value="team">
             <Card>
               <CardHeader>
                 <CardTitle>Account Managers</CardTitle>
@@ -683,7 +690,7 @@ export default function SettingsPage() {
               </CardContent>
             </Card>
           </TabsContent>
-          <TabsContent value="clients" className="mt-6">
+          <TabsContent value="clients">
             <Card>
               <CardHeader>
                 <CardTitle>Client Logos</CardTitle>
@@ -715,6 +722,7 @@ export default function SettingsPage() {
                           <div className="text-xs text-muted-foreground mt-0.5">
                             {client.logo_url ? 'Logo uploaded' : 'No logo'}
                           </div>
+                          <div className="text-xs text-red-600 mt-0.5">Only 1:1 (square) images are accepted.</div>
                         </div>
                         <Button
                           variant="outline"
@@ -733,7 +741,7 @@ export default function SettingsPage() {
             </Card>
           </TabsContent>
 
-          <TabsContent value="integrations" className="mt-6">
+          <TabsContent value="integrations">
             <Card>
               <CardHeader>
                 <CardTitle>Microsoft Teams</CardTitle>
@@ -830,7 +838,7 @@ export default function SettingsPage() {
             </Card>
           </TabsContent>
 
-          <TabsContent value="billing" className="mt-6">
+          <TabsContent value="billing">
             <Card>
               <CardHeader>
                 <CardTitle>Billing &amp; Subscription</CardTitle>
@@ -890,6 +898,7 @@ export default function SettingsPage() {
               </CardContent>
             </Card>
           </TabsContent>
+          </div>
         </Tabs>
       </div>
     </div>

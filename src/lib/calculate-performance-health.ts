@@ -23,7 +23,7 @@ export interface PerformanceHealthResult {
  * Maps a platform/channel name to the channel_name value used in channel_benchmarks.
  * Must stay in sync with inferBenchmarkChannelName in channel-performance-card.tsx.
  */
-function toBenchmarkChannelName(platform: string, channelName: string): string {
+export function toBenchmarkChannelName(platform: string, channelName: string): string {
   const lower = (platform + ' ' + channelName).toLowerCase();
   if (lower.includes('meta') || lower.includes('facebook')) return 'Meta Ads';
   if (lower.includes('display')) return 'Google Display';

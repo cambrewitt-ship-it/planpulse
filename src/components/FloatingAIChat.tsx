@@ -585,6 +585,6 @@ function FloatingAIChatInner() {
 
 export function FloatingAIChat() {
   const pathname = usePathname();
-  if (pathname === '/agency') return null;
+  if (pathname === '/agency' || pathname?.startsWith('/hub/')) return null;
   return <FloatingAIChatInner />;
 }

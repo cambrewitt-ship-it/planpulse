@@ -373,10 +373,11 @@ interface ChannelSelectCellProps {
   className?: string;
   style?: React.CSSProperties;
   rowSpan?: number;
+  autoOpen?: boolean;
 }
 
-function ChannelSelectCell({ value, onChange, libraryChannels, className = "", style, rowSpan }: ChannelSelectCellProps) {
-  const [open, setOpen] = useState(false);
+function ChannelSelectCell({ value, onChange, libraryChannels, className = "", style, rowSpan, autoOpen }: ChannelSelectCellProps) {
+  const [open, setOpen] = useState(!!autoOpen);
   const [custom, setCustom] = useState(false);
   const [draft, setDraft] = useState(value);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -423,7 +424,7 @@ function ChannelSelectCell({ value, onChange, libraryChannels, className = "", s
             <span className="font-semibold text-xs truncate min-w-0" title={value}>{value}</span>
           </>
         ) : (
-          <span className="text-gray-300 text-xs">— select channel —</span>
+          <span className="text-gray-300 text-xs">Select a Channel</span>
         )}
         <ChevronDown className="w-3 h-3 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none" />
 
@@ -1377,6 +1378,7 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
                       value={row.channel}
                       libraryChannels={libraryChannels}
                       rowSpan={span.channelSpan}
+                      autoOpen={rows.length === 1 && !row.channel}
                       onChange={val => {
                         setRows(prev => {
                           const last = rowIdx + span.channelSpan;

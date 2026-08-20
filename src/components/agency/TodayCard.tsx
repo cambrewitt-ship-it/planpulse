@@ -38,7 +38,6 @@ export function TodayCard({ clients, today }: TodayCardProps) {
   }, []);
   const timeStr = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
-  const serifFont = "'DM Serif Display', Georgia, serif";
   const sansFont = "'DM Sans', system-ui, sans-serif";
 
   return (
@@ -58,7 +57,7 @@ export function TodayCard({ clients, today }: TodayCardProps) {
       </span>
 
       {/* Date */}
-      <span style={{ fontSize: 34, color: '#ffffff', lineHeight: 1.1, marginTop: 4, fontFamily: serifFont }}>
+      <span style={{ fontSize: 34, color: '#ffffff', lineHeight: 1.1, marginTop: 4, fontFamily: sansFont }}>
         {month} {day}
       </span>
 

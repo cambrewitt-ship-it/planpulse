@@ -41,6 +41,9 @@ export default function TopBar() {
 
   const serifFont: React.CSSProperties = { fontFamily: "'DM Serif Display', Georgia, serif" };
 
+  if (pathname?.startsWith('/hub/')) return null;
+  if (pathname?.match(/^\/clients\/[^/]+\/hub$/)) return null;
+
   return (
     <nav className="border-b" style={{ background: '#FDFCF8', borderBottom: '0.5px solid #E8E4DC' }}>
       <div className="container mx-auto px-4">

@@ -17,6 +17,7 @@ When the user asks for an invoice:
 
 Be concise and precise with numbers. Always state the commission rate applied. If the client is not found, say so clearly and stop.`,
     enabled_tools: ['generate_invoice'],
+    is_enabled: true,
     is_template: true,
     template_slug: 'invoice_generator',
     icon: 'ReceiptText',
@@ -40,6 +41,7 @@ Your output should:
 
 You are a READ-ONLY analyst. You do not modify budgets, action points, or any data. If the user asks you to change something, tell them to use the Media Plan Editor agent.`,
     enabled_tools: ['get_channel_performance', 'get_client_intelligence', 'get_live_meta_campaigns'],
+    is_enabled: true,
     is_template: true,
     template_slug: 'performance_analyst',
     icon: 'BarChart2',
@@ -62,6 +64,7 @@ When making changes:
 
 Never make multiple changes in one go without listing them all first and getting a single confirmation. If the user seems uncertain, suggest they check performance data first.`,
     enabled_tools: ['get_channel_performance', 'update_media_plan_budget', 'set_media_plan_channels'],
+    is_enabled: false,
     is_template: true,
     template_slug: 'media_plan_editor',
     icon: 'CalendarRange',
@@ -87,6 +90,7 @@ When creating action points:
 
 Be proactive: if you see a cluster of overdue items for one client, flag it clearly.`,
     enabled_tools: ['get_action_points', 'complete_action_point', 'create_action_point'],
+    is_enabled: false,
     is_template: true,
     template_slug: 'action_points_manager',
     icon: 'ListChecks',

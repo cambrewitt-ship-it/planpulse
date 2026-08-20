@@ -9,6 +9,7 @@ import { fetchSpendData } from '@/lib/api/analytics-data-integration';
 import type { AgencyClientActionPoints } from '@/app/api/agency/action-points/route';
 import { ClientCardCompact } from '@/components/agency/ClientCardCompact';
 import { TodayCard } from '@/components/agency/TodayCard';
+import { AgentsSummaryCard } from '@/components/agency/AgentsSummaryCard';
 import { AgencyChat, type AgencyChatHandle } from '@/components/agency/AgencyChat';
 import { KanbanBoard } from '@/components/agency/KanbanBoard';
 import { NotesChecklist } from '@/components/agency/NotesChecklist';
@@ -39,62 +40,6 @@ interface AccountManager {
   name: string;
   email: string | null;
 }
-
-// ── Briefing helpers ─────────────────────────────────────────────────────────
-interface BriefingItem {
-  label: string;
-  color: 'red' | 'amber' | 'blue' | 'green';
-}
-
-function computeBriefing(clients: ClientCardData[], actionPointClients: AgencyClientActionPoints[]): BriefingItem[] {
-  const result: BriefingItem[] = [];
-  const today = new Date().toISOString().split('T')[0];
-  const in7Days = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-
-  // Overdue action points
-  let overdueCount = 0;
-  for (const c of actionPointClients) {
-    for (const ch of c.channels) {
-      for (const ap of ch.actionPoints) {
-        if (ap.due_date && ap.due_date < today) overdueCount++;
-      }
-    }
-  }
-  if (overdueCount > 0) {
-    result.push({ label: `${overdueCount} action point${overdueCount > 1 ? 's' : ''} overdue`, color: 'red' });
-  }
-
-  // Pacing
-  for (const c of clients) {
-    if (c.spendVariancePct !== null && c.spendVariancePct > 15) {
-      result.push({ label: `${c.name} overpacing`, color: 'amber' });
-    } else if (c.spendVariancePct !== null && c.spendVariancePct < -15) {
-      result.push({ label: `${c.name} underpacing`, color: 'amber' });
-    }
-  }
-
-  // Channel launches within 7 days
-  for (const c of clients) {
-    for (const ch of c.channels) {
-      if (ch.status === 'upcoming' && ch.startDate && ch.startDate >= today && ch.startDate <= in7Days) {
-        result.push({ label: `${c.name} – ${ch.channelName} launching soon`, color: 'blue' });
-      }
-    }
-  }
-
-  if (result.length === 0) {
-    result.push({ label: 'All clients healthy', color: 'green' });
-  }
-
-  return result;
-}
-
-const CHIP_STYLES: Record<string, React.CSSProperties> = {
-  red: { background: '#F5EDE9', color: '#A0442A', border: '0.5px solid rgba(160,68,42,0.25)', borderRadius: 8 },
-  amber: { background: '#F5EDE0', color: '#B07030', border: '0.5px solid rgba(176,112,48,0.25)', borderRadius: 8 },
-  blue: { background: '#E8EDF2', color: '#4A6580', border: '0.5px solid rgba(74,101,128,0.25)', borderRadius: 8 },
-  green: { background: '#EAF0EB', color: '#4A7C59', border: '0.5px solid rgba(74,124,89,0.25)', borderRadius: 8 },
-};
 
 // ── Main page ────────────────────────────────────────────────────────────────
 export default function AgencyDashboard() {
@@ -152,7 +97,7 @@ export default function AgencyDashboard() {
   };
 
   const chatRef = useRef<AgencyChatHandle>(null);
-  const [kanbanView, setKanbanView] = useState<'kanban' | 'list' | 'gantt'>('kanban');
+  const [kanbanView, setKanbanView] = useState<'kanban' | 'list' | 'gantt'>('list');
   const [activeCardTab, setActiveCardTab] = useState<'clients' | 'todo' | 'timeline'>('timeline');
   const [timelineZoom, setTimelineZoom] = useState(DEFAULT_TIMELINE_ZOOM);
   const [timelineSort, setTimelineSort] = useState<'default' | 'ending-soon' | 'starting-soon'>('ending-soon');
@@ -299,7 +244,6 @@ export default function AgencyDashboard() {
       }));
   }, [actionPointClients, amFilter]);
 
-  const briefingItems = useMemo(() => computeBriefing(filteredClients, filteredActionPointClients), [filteredClients, filteredActionPointClients]);
 
   // Fullscreen Gantt data derivation
   const ganttClients = useMemo(() =>
@@ -463,30 +407,7 @@ export default function AgencyDashboard() {
           <RefreshCw size={13} color="#8A8578" style={{ animation: refreshing ? 'spin 1s linear infinite' : 'none' }} />
         </button>
         <span style={{ fontSize: 13, color: '#8A8578', flexShrink: 0 }}>{monthLabel}</span>
-        <div style={{ width: '0.5px', height: 16, background: '#F5F3EF', flexShrink: 0 }} />
-        {/* Briefing chips — scrollable with right fade */}
-        <div style={{ position: 'relative', flex: 1, overflow: 'hidden', minWidth: 0 }}>
-          <div style={{ display: 'flex', gap: 6, overflowX: 'auto', scrollbarWidth: 'none' }}>
-            {briefingItems.map((item, i) => (
-              <span key={i} style={{
-                fontSize: 12, fontWeight: 400, padding: '3px 12px',
-                whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6,
-                ...CHIP_STYLES[item.color],
-              }}>
-                <span style={{
-                  width: 6, height: 6, borderRadius: '50%', flexShrink: 0, display: 'inline-block',
-                  background: item.color === 'red' ? '#A0442A' : item.color === 'amber' ? '#B07030' : item.color === 'green' ? '#4A7C59' : '#4A6580',
-                }} />
-                {item.label}
-              </span>
-            ))}
-          </div>
-          {/* Fade out on the right */}
-          <div style={{
-            position: 'absolute', top: 0, right: 0, bottom: 0, width: 40, pointerEvents: 'none',
-            background: 'linear-gradient(to right, transparent, #FDFCF8)',
-          }} />
-        </div>
+        <div style={{ flex: 1 }} />
         {/* Date Range Picker */}
         <div style={{ flexShrink: 0 }}>
           <DateRangePicker value={dateRange} onChange={setDateRange} />
@@ -577,6 +498,8 @@ export default function AgencyDashboard() {
         {/* ── Column 1: Today + Notes ──────────────────── */}
         <div style={{ width: 240, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 12, minHeight: 0 }}>
           <TodayCard clients={filteredClients} today={today} />
+
+          <AgentsSummaryCard />
 
           {/* Notes — dark spine + files panel + content */}
           <div
@@ -877,36 +800,15 @@ export default function AgencyDashboard() {
 
             {/* ── Tab: To Do (Action Points) ── */}
             {activeCardTab === 'todo' && (
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
-                <div style={{ display: 'flex', alignItems: 'center', padding: '10px 17px 0', marginBottom: 10, flexShrink: 0 }}>
-                  <div style={{ display: 'flex', border: '0.5px solid #E8E4DC', borderRadius: 10, overflow: 'hidden' }}>
-                    {(['kanban', 'list', 'gantt'] as const).map(v => (
-                      <button
-                        key={v}
-                        onClick={() => setKanbanView(v)}
-                        style={{
-                          fontSize: 10, padding: '3px 8px', cursor: 'pointer',
-                          fontFamily: "'DM Sans', system-ui, sans-serif", fontWeight: 500,
-                          color: kanbanView === v ? '#4A6580' : '#B5B0A5',
-                          background: kanbanView === v ? 'rgba(74,101,128,0.08)' : 'transparent',
-                          border: 'none', borderLeft: v === 'kanban' ? 'none' : '0.5px solid #E8E4DC',
-                          textTransform: 'capitalize',
-                        }}
-                      >{v}</button>
-                    ))}
-                  </div>
-                  <span style={{ marginLeft: 'auto', fontSize: 11, color: '#B5B0A5' }}>
-                    {filteredActionPointClients.reduce((sum, c) => sum + c.totalOutstanding, 0)} total
-                  </span>
-                </div>
-                <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: '0 17px 12px' }}>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden', position: 'relative' }}>
+                <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', padding: '14px 17px 12px', display: 'flex', flexDirection: 'column' }}>
                   <KanbanBoard
-                    key={kanbanView}
                     actionPointClients={filteredActionPointClients}
                     amFilter={amFilter}
                     onActionPointCompleted={() => fetchData(true)}
                     accountManagers={accountManagers}
                     view={kanbanView}
+                    onViewChange={setKanbanView}
                     onAskAI={(prompt) => chatRef.current?.sendMessage(prompt)}
                     clients={clients.map(c => ({ id: c.id, name: c.name }))}
                     onAccountManagerCreated={fetchAccountManagers}

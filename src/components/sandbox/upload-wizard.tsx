@@ -331,7 +331,7 @@ export function UploadWizard({ onPlanLoaded }: Props) {
         rows: [{
           id: Math.random().toString(36).slice(2),
           funnel: "AWARENESS",
-          channel: "Channel 1",
+          channel: "",
           detail: "",
           audience: "",
           flights: [],

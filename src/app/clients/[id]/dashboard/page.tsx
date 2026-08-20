@@ -2405,23 +2405,42 @@ export default function DashboardV2() {
                   );
                 })}
               </div>
-              {/* Timeline shortcut — right-aligned on the same row as the view-mode tabs */}
-              <button
-                onClick={() => setShowFullscreenGantt(true)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 6,
-                  padding: '8px 14px', marginBottom: 8, borderRadius: 12, border: '0.5px solid #D5D0C5',
-                  background: '#FDFCF8', color: '#4A6580',
-                  fontSize: 16, fontWeight: 500, cursor: 'pointer',
-                  fontFamily: "'DM Sans', system-ui, sans-serif",
-                }}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/>
-                  <line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
-                </svg>
-                Timeline
-              </button>
+              {/* Right-aligned shortcuts — same row as the view-mode tabs */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <Link
+                  href={`/clients/${clientId}/hub`}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    padding: '8px 14px', borderRadius: 12, border: '0.5px solid #1E3A8A',
+                    background: '#1E3A8A', color: '#FFFFFF',
+                    fontSize: 16, fontWeight: 500, cursor: 'pointer',
+                    fontFamily: "'DM Sans', system-ui, sans-serif",
+                    textDecoration: 'none',
+                  }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                    <polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
+                  </svg>
+                  Client Portal
+                </Link>
+                <button
+                  onClick={() => setShowFullscreenGantt(true)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    padding: '8px 14px', borderRadius: 12, border: '0.5px solid #D5D0C5',
+                    background: '#FDFCF8', color: '#4A6580',
+                    fontSize: 16, fontWeight: 500, cursor: 'pointer',
+                    fontFamily: "'DM Sans', system-ui, sans-serif",
+                  }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/>
+                    <line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
+                  </svg>
+                  Timeline
+                </button>
+              </div>
               </div>
               {/* Card — begins right at the tabs' bottom edge; the strip's own top corners are rounded to match so nothing needs clipping */}
               <div className="bg-white rounded-lg shadow-sm border border-gray-200">
@@ -3178,6 +3197,7 @@ export default function DashboardV2() {
                       {client?.logo_url && (
                         <span style={{ fontSize: 14, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Logo uploaded</span>
                       )}
+                      <span style={{ fontSize: 13, color: '#DC2626', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Only 1:1 (square) images are accepted.</span>
                       {logoUploadError && (
                         <span style={{ fontSize: 14, color: '#A0442A', fontFamily: "'DM Sans', system-ui, sans-serif" }}>{logoUploadError}</span>
                       )}

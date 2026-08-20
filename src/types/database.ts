@@ -1181,6 +1181,60 @@ export interface Database {
           };
           Relationships: [];
         };
+        client_hub_config: {
+          Row: {
+            id: string;
+            client_id: string;
+            sections: Record<string, boolean>;
+            conversion_action_type: string | null;
+            conversion_label: string;
+            updated_at: string;
+          };
+          Insert: {
+            id?: string;
+            client_id: string;
+            sections?: Record<string, boolean>;
+            conversion_action_type?: string | null;
+            conversion_label?: string;
+            updated_at?: string;
+          };
+          Update: {
+            id?: string;
+            client_id?: string;
+            sections?: Record<string, boolean>;
+            conversion_action_type?: string | null;
+            conversion_label?: string;
+            updated_at?: string;
+          };
+          Relationships: [];
+        };
+        client_hub_share_links: {
+          Row: {
+            id: string;
+            client_id: string;
+            token: string;
+            is_enabled: boolean;
+            created_at: string;
+            created_by: string | null;
+          };
+          Insert: {
+            id?: string;
+            client_id: string;
+            token: string;
+            is_enabled?: boolean;
+            created_at?: string;
+            created_by?: string | null;
+          };
+          Update: {
+            id?: string;
+            client_id?: string;
+            token?: string;
+            is_enabled?: boolean;
+            created_at?: string;
+            created_by?: string | null;
+          };
+          Relationships: [];
+        };
         user_agents: {
           Row: {
             id: string;

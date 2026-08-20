@@ -121,11 +121,11 @@ const ZOOM_LEVELS = [
   { dayW: 3,  label: '33%'  },  // 1
   { dayW: 4,  label: '50%'  },  // 2
   { dayW: 7,  label: '75%'  },  // 3
-  { dayW: 14, label: '100%' },  // 4 — default
+  { dayW: 14, label: '100%' },  // 4
   { dayW: 22, label: '150%' },  // 5
   { dayW: 36, label: '200%' },  // 6
 ];
-const DEFAULT_ZOOM = 4;
+const DEFAULT_ZOOM = 1; // 33%
 const RANGE_DAYS = 365; // always show 1 year of scrollable content
 
 // Fallback stripe pairs: alternating light/dark grey + mid-tone accent
@@ -441,52 +441,20 @@ function ClientTimelineRow({
           )}
         </div>
 
-        {/* Action point dots + always-visible bubble labels (non-overlapping) */}
+        {/* Action point dots */}
         {(() => {
-          // Layout: compute a stacking level for each visible AP so bubbles never overlap.
-          const BUBBLE_H   = 18; // px — approximate bubble height
-          const BUBBLE_GAP = 4;  // px gap between stacked bubbles
-          const DOT_H      = 16;
-          const DOT_GAP    = 3;  // gap between bubble bottom and dot top
+          const DOT_H = 16;
           // Dot centre Y within the row (the timeline lane has no explicit height, row is ROW_H)
           const dotCenterY = ROW_H / 2;
-          // Estimate bubble width: icon(13) + padding(8) + ~5px/char
-          const estimateBubbleW = (text: string) => 13 + 8 + text.length * 5.2;
+          const dotTop = dotCenterY - DOT_H / 2;
 
-          // Collect visible APs with cx
           const visible = clientAPs
             .filter(ap => ap.due_date && dateToMs(ap.due_date) >= windowStart && dateToMs(ap.due_date) <= windowEnd)
-            .map((ap, i) => ({
-              ap, i,
-              cx: xForMs(dateToMs(ap.due_date!)) + dayW / 2,
-              bw: estimateBubbleW(ap.category === 'SET UP' ? 'Set Up' : ap.category === 'REPORT' ? 'Report' : 'Check'),
-            }))
-            .sort((a, b) => a.cx - b.cx);
+            .map((ap, i) => ({ ap, i, cx: xForMs(dateToMs(ap.due_date!)) + dayW / 2 }));
 
-          // Horizontal sweep: place each bubble as close to its natural cx as possible,
-          // pushing right to clear any overlap with the previous bubble.
-          const BUBBLE_SEP = 4; // min gap between adjacent bubbles
-          const bubbleLefts: number[] = [];
-          let prevRight = -Infinity;
-          for (const { cx, bw } of visible) {
-            const natural = cx - bw / 2;
-            const left = Math.max(natural, prevRight + BUBBLE_SEP);
-            bubbleLefts.push(left);
-            prevRight = left + bw;
-          }
-
-          return visible.map(({ ap, i, cx, bw }, idx) => {
-            const isOverdue  = ap.due_date! < todayStr;
-            const dot        = apDotColor(ap.category, isOverdue);
-            const isSetUp    = ap.category === 'SET UP';
-            const isReport   = ap.category === 'REPORT';
-            const bubbleBg   = isSetUp ? '#C0392B' : isReport ? '#1D4ED8' : '#D4860A';
-            const bubbleText = isSetUp ? 'Set Up' : isReport ? 'Report' : 'Check';
-            const isOrganic  = /organic|social|seo|email|edm|content/i.test(ap.channel_label);
-
-            const dotTop    = dotCenterY - DOT_H / 2;
-            const bubbleTop = dotTop - DOT_GAP - BUBBLE_H;
-            const bubbleLeft = bubbleLefts[idx];
+          return visible.map(({ ap, i, cx }) => {
+            const isOverdue = ap.due_date! < todayStr;
+            const dot       = apDotColor(ap.category, isOverdue);
 
             return (
               <div
@@ -496,37 +464,6 @@ function ClientTimelineRow({
                 onMouseMove={(e)  => setTooltip({ clientX: e.clientX, clientY: e.clientY, marker: ap })}
                 onMouseLeave={() => setTooltip(null)}
               >
-                {/* Bubble */}
-                <div style={{
-                  position: 'absolute',
-                  left: bubbleLeft,
-                  top: bubbleTop,
-                  display: 'flex', alignItems: 'center', gap: 3,
-                  background: bubbleBg,
-                  borderRadius: 5,
-                  padding: '2px 5px 2px 3px',
-                  whiteSpace: 'nowrap',
-                  boxShadow: '0 1px 4px rgba(0,0,0,0.18)',
-                  height: BUBBLE_H,
-                }}>
-                  <span style={{
-                    width: 11, height: 11, flexShrink: 0,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    filter: 'brightness(0) invert(1)',
-                  }}>
-                    {isOrganic
-                      ? <Radio size={9} strokeWidth={2} color="#fff" />
-                      : getChannelLogo(ap.channel_label, 'w-[9px] h-[9px]')
-                    }
-                  </span>
-                  <span style={{
-                    fontSize: 8, fontWeight: 700, color: '#fff',
-                    letterSpacing: '0.03em',
-                    fontFamily: "'DM Sans', system-ui, sans-serif",
-                  }}>
-                    {bubbleText}
-                  </span>
-                </div>
                 {/* Dot */}
                 <div style={{
                   position: 'absolute',

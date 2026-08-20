@@ -29,7 +29,7 @@ export default function PlansPage() {
   };
 
   const pageFont: React.CSSProperties = { fontFamily: "'DM Sans', system-ui, sans-serif" };
-  const serifFont: React.CSSProperties = { fontFamily: "'DM Serif Display', Georgia, serif" };
+  const serifFont: React.CSSProperties = { fontFamily: "'DM Sans', system-ui, sans-serif" };
 
   if (loading) {
     return (

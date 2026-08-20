@@ -1133,6 +1133,7 @@ export default function CreateClientPage() {
                   </button>
                 )}
                 <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleLogoSelect} />
+                <p className="text-xs text-red-600">Only 1:1 (square) images are accepted.</p>
               </div>
               <div className="flex gap-2 pt-2">
                 <Button onClick={handleCreateClient} disabled={creating || !clientName.trim()} className="flex-1">

@@ -23,7 +23,6 @@ import {
 } from '@/components/features/FeatureMockups';
 
 const pageFont: React.CSSProperties = { fontFamily: "'DM Sans', system-ui, sans-serif" };
-const serifFont: React.CSSProperties = { fontFamily: "'DM Serif Display', Georgia, serif" };
 
 function FeatureChip({ icon, label }: { icon: React.ReactNode; label: string }) {
   return (
@@ -85,19 +84,25 @@ export default function Home() {
         {/* ── Hero ── */}
         <section className="py-24 md:py-32" style={{ background: '#F5F3EF' }}>
           <div className="container mx-auto px-4">
-            <div className="max-w-3xl mx-auto text-center space-y-6">
+            <div className="max-w-4xl mx-auto text-center space-y-6">
               <h1
-                className="text-5xl md:text-7xl font-bold leading-none"
-                style={{ color: '#1C1917', ...serifFont, letterSpacing: '-0.02em' }}
+                className="text-center font-bold leading-tight"
+                style={{
+                  color: '#1C1917',
+                  ...pageFont,
+                  letterSpacing: '-0.02em',
+                  fontSize: 'clamp(1.25rem, 6.2vw, 3.5rem)',
+                }}
               >
-                PlanPulse
+                <span className="block whitespace-nowrap">Health checking software</span>
+                <span className="block whitespace-nowrap">for marketing agencies</span>
               </h1>
-              <p
-                className="text-2xl md:text-3xl font-semibold leading-snug"
-                style={{ color: '#3C3836', letterSpacing: '-0.01em' }}
+              <span
+                className="inline-block text-xs font-semibold uppercase tracking-widest px-3 py-1 rounded-full"
+                style={{ background: '#EAF0EB', color: '#4A7C59' }}
               >
-                Health check software for marketing agencies
-              </p>
+                Powered by Agentic AI
+              </span>
               <p className="text-lg max-w-xl mx-auto" style={{ color: '#8A8578' }}>
                 One platform to plan campaigns, track performance, manage action points, and brief your team — across every client and every channel.
               </p>
@@ -109,7 +114,11 @@ export default function Home() {
                   </Button>
                 </Link>
                 <Link href="/features">
-                  <Button size="lg" variant="outline" className="text-base px-8 py-5 h-auto">
+                  <Button
+                    size="lg"
+                    variant="outline"
+                    className="text-base px-8 py-5 h-auto bg-white text-stone-900 border-white hover:bg-white/90 hover:text-stone-900"
+                  >
                     Explore features
                   </Button>
                 </Link>
@@ -131,7 +140,7 @@ export default function Home() {
                 </span>
                 <h2
                   className="text-3xl md:text-4xl font-bold leading-tight"
-                  style={{ color: '#1C1917', ...serifFont }}
+                  style={{ color: '#1C1917', ...pageFont }}
                 >
                   Plan every campaign,<br />every channel
                 </h2>
@@ -168,7 +177,7 @@ export default function Home() {
                 </span>
                 <h2
                   className="text-3xl md:text-4xl font-bold leading-tight"
-                  style={{ color: '#1C1917', ...serifFont }}
+                  style={{ color: '#1C1917', ...pageFont }}
                 >
                   Real-time performance,<br />always visible
                 </h2>
@@ -199,7 +208,7 @@ export default function Home() {
                 </span>
                 <h2
                   className="text-3xl md:text-4xl font-bold leading-tight"
-                  style={{ color: '#1C1917', ...serifFont }}
+                  style={{ color: '#1C1917', ...pageFont }}
                 >
                   Catch problems<br />before they cost you
                 </h2>
@@ -231,12 +240,12 @@ export default function Home() {
             <div className="text-center mb-12">
               <h2
                 className="text-3xl md:text-4xl font-bold mb-3"
-                style={{ color: '#1C1917', ...serifFont }}
+                style={{ color: '#1C1917', ...pageFont }}
               >
                 Everything else you need
               </h2>
               <p className="text-base max-w-xl mx-auto" style={{ color: '#8A8578' }}>
-                PlanPulse is built end-to-end for marketing agencies — from campaign setup to client reporting.
+                Built end-to-end for marketing agencies — from campaign setup to client reporting.
               </p>
             </div>
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5 max-w-5xl mx-auto">
@@ -312,7 +321,7 @@ export default function Home() {
             <div className="max-w-2xl mx-auto text-center space-y-6">
               <h2
                 className="text-3xl md:text-4xl font-bold"
-                style={{ color: '#F5F3EF', ...serifFont }}
+                style={{ color: '#F5F3EF', ...pageFont }}
               >
                 Ready to take control of your agency?
               </h2>

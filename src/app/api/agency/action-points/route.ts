@@ -396,6 +396,14 @@ export async function GET(request: NextRequest) {
       if (ap.category !== 'TODO') continue;
       if (ap.completed) continue;
 
+      // TODOs scoped to a client persist their assignee on the same
+      // client_action_point_completions row as SET UP/HEALTH CHECK items;
+      // agency-wide TODOs (no client_id) have no client to key that table on,
+      // so they always come back unassigned today.
+      const todoAssignedTo = ap.client_id
+        ? completionLookup.get(ap.client_id)?.get(ap.id)?.assignedTo ?? null
+        : null;
+
       const apEntry: AgencyActionPoint = {
         id: ap.id,
         text: ap.text,
@@ -404,7 +412,7 @@ export async function GET(request: NextRequest) {
         due_date: ap.due_date || null,
         frequency: null,
         days_before_live_due: null,
-        assigned_to: null,
+        assigned_to: todoAssignedTo,
       };
 
       if (ap.client_id) {

@@ -80,13 +80,20 @@ function formatDueDate(dateStr: string | null | undefined): string {
   return new Date(y, m - 1, d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
 }
 
-// Single accent (Moleskine red) reserved for urgency; everything else steps through graphite neutrals.
+// Row-anatomy due colour rules, shared with the agency To Do panel.
 function dueDateColor(dateStr: string | null | undefined): string {
   if (!dateStr) return FAINT;
   const diff = daysFromToday(dateStr);
-  if (diff <= 2) return RED;
-  if (diff <= 6) return GRAPHITE;
-  return MUTED;
+  if (diff < 0) return '#A0442A';
+  if (diff === 0) return '#B07030';
+  if (diff <= 2) return '#5F5A50';
+  return '#8A8578';
+}
+
+function dueDateWeight(dateStr: string | null | undefined): number {
+  if (!dateStr) return 400;
+  const diff = daysFromToday(dateStr);
+  return diff <= 0 ? 500 : 400;
 }
 
 // ---------------------------------------------------------------------------
@@ -154,6 +161,8 @@ export default function ClientActionPointsList({ actionPoints, onToggle }: Props
   const incomplete = useMemo(() => actionPoints.filter(ap => !ap.completed), [actionPoints]);
 
   return (
+    <>
+    <style>{`.av2-ap-row:hover { background: ${PAPER_BG}; }`}</style>
     <div style={{
       display: 'flex',
       flexDirection: 'column',
@@ -257,6 +266,7 @@ export default function ClientActionPointsList({ actionPoints, onToggle }: Props
         <GanttViewActionPoints actionPoints={actionPoints} onToggle={onToggle} />
       )}
     </div>
+    </>
   );
 }
 
@@ -281,23 +291,23 @@ function ListActionPointRow({ item, onToggle, isLast }: { item: ActionPoint; onT
   };
 
   return (
-    <div style={{
+    <div className="av2-ap-row" style={{
       display: 'flex',
-      alignItems: 'flex-start',
-      gap: 10,
-      padding: '11px 2px',
+      alignItems: 'center',
+      gap: 9,
+      height: 38,
       borderBottom: isLast ? 'none' : `1px solid ${BORDER_SOFT}`,
       opacity: effectiveCompleted || isCompleting ? 0.5 : 1,
       transition: 'opacity 0.4s',
       flexShrink: 0,
+      borderRadius: 4,
     }}>
       {/* Ring checkbox — fills red with white check when complete */}
       <div
         onClick={handleClick}
         style={{
-          marginTop: 3,
-          width: 14,
-          height: 14,
+          width: 18,
+          height: 18,
           borderRadius: '50%',
           flexShrink: 0,
           border: `1.5px solid ${effectiveCompleted || isCompleting ? RED : BORDER}`,
@@ -310,38 +320,36 @@ function ListActionPointRow({ item, onToggle, isLast }: { item: ActionPoint; onT
         }}
       >
         {(effectiveCompleted || isCompleting) && (
-          <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
+          <svg width="9" height="9" viewBox="0 0 8 8" fill="none">
             <path d="M1.5 4L3 5.5L6.5 2" stroke={CARD_BG} strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         )}
       </div>
 
-      {/* Text + meta */}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{
-          fontSize: 14,
-          lineHeight: 1.4,
-          color: effectiveCompleted || isCompleting ? FAINT : INK,
-          textDecoration: effectiveCompleted ? 'line-through' : 'none',
-          wordBreak: 'break-word',
-          fontFamily: sansFont,
-        }}>
-          {item.text}
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 4, flexWrap: 'wrap' }}>
-          {item.channel_type && <Tag>{item.channel_type}</Tag>}
-          <Tag accent={item.category === 'HEALTH CHECK'}>{item.category}</Tag>
-          {item.due_date && (
-            <span style={{
-              fontSize: 11,
-              color: dueDateColor(item.due_date),
-              fontWeight: 500,
-              fontFamily: monoFont,
-            }}>
-              {formatDueDate(item.due_date)}
-            </span>
-          )}
-        </div>
+      {/* Title, single line, ellipsis — stage/channel no longer print on every row */}
+      <div style={{
+        flex: 1,
+        minWidth: 0,
+        fontSize: 14,
+        lineHeight: 1.4,
+        color: effectiveCompleted || isCompleting ? FAINT : INK,
+        textDecoration: effectiveCompleted ? 'line-through' : 'none',
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        fontFamily: sansFont,
+      }}>
+        {item.text}
+      </div>
+
+      {/* Due, right-aligned fixed column */}
+      <div style={{
+        width: 86, flexShrink: 0, textAlign: 'right',
+        fontSize: 12, fontFamily: sansFont,
+        color: item.due_date ? dueDateColor(item.due_date) : FAINT,
+        fontWeight: item.due_date ? dueDateWeight(item.due_date) : 400,
+      }}>
+        {item.due_date ? formatDueDate(item.due_date) : ''}
       </div>
     </div>
   );
