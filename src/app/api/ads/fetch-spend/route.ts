@@ -1,25 +1,8 @@
 import { NextRequest } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { Nango } from '@nangohq/node';
-import type { Database } from '@/types/database';
-import { toNangoPlatform } from '@/lib/platform-mapping';
-import { saveGoogleAdsMetrics, saveMetaAdsMetrics } from '@/lib/ad-metrics';
-
-// TypeScript interface for Google Ads performance metrics
-interface GoogleAdMetrics {
-  customerId: string;
-  accountName: string;
-  campaignId: string;
-  campaignName: string;
-  date: string;
-  spend: number;
-  impressions: number;
-  clicks: number;
-  ctr: number;
-  averageCpc: number;
-  conversions: number;
-  currency: string;
-}
+import { saveMetaAdsMetrics } from '@/lib/ad-metrics';
+import { syncGoogleAdsSpend } from '@/lib/ads/google-ads-live';
 
 export async function POST(request: NextRequest) {
   console.log('=== POST /api/ads/fetch-spend ===');
@@ -89,7 +72,7 @@ export async function POST(request: NextRequest) {
     // For Google Ads and Meta Ads, if no client-specific connection exists, fall back to any user connection
     let query = supabase
       .from('ad_platform_connections')
-      .select('connection_id, platform, connection_status, client_id')
+      .select('id, connection_id, platform, connection_status, client_id')
       .eq('user_id', user.id)
       .eq('platform', platform)
       .eq('connection_status', 'active');
@@ -148,367 +131,39 @@ export async function POST(request: NextRequest) {
 
     if (platform === 'google-ads') {
       try {
-        console.log('=== GOOGLE ADS DATA FETCH ===');
-        
-        // Step 1: Get Google Ads accounts — prefer client-scoped, fall back to connection-scoped.
-        let { data: googleAdsAccountsData, error: accountsError } = clientId
-          ? await supabase
-              .from('google_ads_accounts')
-              .select('customer_id, account_name, manager_customer_id, is_active')
-              .eq('user_id', user.id)
-              .eq('client_id', clientId)
-              .eq('is_active', true)
-          : await supabase
-              .from('google_ads_accounts')
-              .select('customer_id, account_name, manager_customer_id, is_active')
-              .eq('user_id', user.id)
-              .eq('connection_id', connection.connection_id)
-              .eq('is_active', true);
-
-        if (clientId && (!googleAdsAccountsData || googleAdsAccountsData.length === 0)) {
-          ({ data: googleAdsAccountsData, error: accountsError } = await supabase
-            .from('google_ads_accounts')
-            .select('customer_id, account_name, manager_customer_id, is_active')
-            .eq('user_id', user.id)
-            .eq('connection_id', connection.connection_id)
-            .eq('is_active', true));
-        }
-
-        const googleAdsAccounts = (googleAdsAccountsData || []) as any[];
-
-        if (accountsError || !googleAdsAccounts || googleAdsAccounts.length === 0) {
-          return Response.json({
-            success: false,
-            error: 'No Google Ads accounts configured. Please visit /api/ads/google-ads/accounts to see available accounts and save them.'
-          }, { status: 404 });
-        }
-
-        console.log(`Found ${googleAdsAccounts.length} Google Ads account(s)`);
-        googleAdsAccounts.forEach((account: any, idx) => {
-          console.log(`  Account ${idx + 1}:`, {
-            customerId: account.customer_id,
-            accountName: account.account_name,
-            isActive: account.is_active
-          });
+        const result = await syncGoogleAdsSpend({
+          supabase,
+          nango,
+          userId: user.id,
+          clientId: clientId || null,
+          connectionId: connection.connection_id,
+          connectionRowId: connection.id,
+          startDate,
+          endDate,
         });
 
-        // Step 2: Get the OAuth access token from Nango's connection using SDK
-        // Use the connection_id from ad_platform_connections (current active connection)
-        // This ensures we use the correct OAuth token for the account
-        const accountConnectionId = connection.connection_id;
-        console.log('Step 2: Getting access token from Nango...');
-        console.log('Account Connection ID:', accountConnectionId);
-        console.log('Provider config key:', toNangoPlatform('google-ads'));
-
-        let nangoConnection;
-        try {
-          nangoConnection = await nango.getConnection(toNangoPlatform('google-ads'), accountConnectionId);
-          console.log('Nango connection retrieved successfully');
-        } catch (nangoError: any) {
-          console.error('Failed to get Nango connection:', {
-            status: nangoError.status,
-            message: nangoError.message,
-            code: nangoError.code,
-            response: nangoError.response
-          });
-          
-          // Mark this connection as expired in the DB so the UI shows the
-          // correct state (orange reconnect prompt) on the next page load.
-          void supabase
-            .from('ad_platform_connections')
-            .update({ connection_status: 'expired', updated_at: new Date().toISOString() })
-            .eq('user_id', user.id)
-            .eq('connection_id', accountConnectionId)
-            .then(({ error: e }) => {
-              if (e) console.error('Failed to mark connection expired:', e);
-              else console.log('Marked Google Ads connection as expired');
-            });
-
-          return Response.json({
-            success: false,
-            error: 'Google Ads connection not found or expired. Please reconnect your Google Ads account.',
-            details: nangoError.message,
-            connectionId: accountConnectionId
-          }, { status: 424 });
-        }
-        
-        const accessToken = (nangoConnection.credentials as any)?.access_token;
-
-        if (!accessToken) {
-          return Response.json({
-            success: false,
-            error: 'No access token found in Google Ads connection. Please reconnect your account.'
-          }, { status: 401 });
-        }
-
-        console.log('✓ Got OAuth token from Nango');
-
-        // Step 3: For each customer ID, call Google Ads API directly
-        const allSpendData: GoogleAdMetrics[] = [];
-        const errors: Array<{ customerId: string; accountName: string; error: string }> = [];
-
-        for (const account of googleAdsAccounts) {
-          const customerId = account.customer_id;
-          // Strip dashes from customer ID for API call
-          const cleanCustomerId = customerId.replace(/-/g, '');
-
-          const query = `
-            SELECT
-              campaign.id,
-              campaign.name,
-              segments.date,
-              metrics.cost_micros,
-              metrics.impressions,
-              metrics.clicks,
-              metrics.ctr,
-              metrics.average_cpc,
-              metrics.conversions
-            FROM campaign
-            WHERE segments.date >= '${startDate}' AND segments.date <= '${endDate}'
-            ORDER BY segments.date DESC
-          `;
-
-          console.log(`\n=== Fetching Google Ads spend data ===`);
-          console.log(`  Customer ID (raw): ${customerId}`);
-          console.log(`  Customer ID (clean, for API): ${cleanCustomerId}`);
-          console.log(`  Account Name: ${account.account_name || 'N/A'}`);
-          console.log(`  Date range: ${startDate} to ${endDate}`);
-          console.log(`  Full query:`, query);
-
-          try {
-            // Google Ads API requires customer IDs without dashes in the URL
-            // Also verify the customer ID is properly formatted (10 digits)
-            if (cleanCustomerId.length !== 10) {
-              throw new Error(`Invalid customer ID format: ${customerId} (cleaned: ${cleanCustomerId}). Customer IDs must be 10 digits.`);
-            }
-            
-            const apiUrl = `https://googleads.googleapis.com/v25/customers/${cleanCustomerId}/googleAds:search`;
-            console.log(`  API URL: ${apiUrl}`);
-
-            // Use the stored manager_customer_id for sub-accounts under an MCC.
-            // Standalone accounts have no manager_customer_id — omit the header entirely.
-            const loginCustomerId = account.manager_customer_id
-              ? account.manager_customer_id.replace(/-/g, '')
-              : null;
-
-            const requestHeaders: Record<string, string> = {
-              'Authorization': `Bearer ${accessToken}`,
-              'developer-token': process.env.GOOGLE_ADS_DEVELOPER_TOKEN || '',
-              'Content-Type': 'application/json',
-              ...(loginCustomerId ? { 'login-customer-id': loginCustomerId } : {}),
-            };
-
-            const response = await fetch(
-              apiUrl,
-              {
-                method: 'POST',
-                headers: requestHeaders,
-                body: JSON.stringify({ query: query })
-              }
-            );
-
-            console.log(`Response status: ${response.status}`);
-
-            if (!response.ok) {
-              let errorText = '';
-              let errorJson = null;
-              try {
-                errorText = await response.text();
-                try {
-                  errorJson = JSON.parse(errorText);
-                } catch {
-                  // Not JSON
-                }
-              } catch (e) {
-                errorText = 'Could not read error response';
-              }
-
-              // Deactivate accounts that are not enabled — no point retrying them
-              const isNotEnabled = errorJson?.error?.details?.[0]?.errors?.[0]?.errorCode?.authorizationError === 'CUSTOMER_NOT_ENABLED';
-              if (isNotEnabled) {
-                console.log(`⚠ Customer ${customerId} not enabled — marking inactive`);
-                supabase.from('google_ads_accounts').update({ is_active: false })
-                  .eq('user_id', user.id).eq('customer_id', account.customer_id).then(() => {});
-                continue;
-              }
-
-              console.error(`❌ Google Ads API error for customer ${customerId}:`, {
-                status: response.status,
-                statusText: response.statusText,
-                errorText: errorText.substring(0, 500),
-                url: `https://googleads.googleapis.com/v25/customers/${cleanCustomerId}/googleAds:search`
-              });
-              
-              // Provide more helpful error messages
-              if (response.status === 404) {
-                const errorMessage = errorJson?.error?.message || errorJson?.error || 'Customer ID not found or not accessible';
-                console.error(`  🔴 404 Error Details:`, {
-                  customerId,
-                  cleanCustomerId,
-                  errorMessage,
-                });
-
-                errors.push({
-                  customerId: customerId,
-                  accountName: account.account_name,
-                  error: `404 - Customer ID ${customerId} not found or not accessible. Please verify the customer ID is correct and your Google Ads account has access to it.`
-                });
-              } else if (response.status === 400) {
-                // Extract detailed error information for 400 errors
-                const errorMessage = errorJson?.error?.message || 
-                                    errorJson?.error?.status || 
-                                    errorJson?.error || 
-                                    errorText.substring(0, 500);
-                const errorDetails = errorJson?.error?.errors || 
-                                    errorJson?.error?.details || 
-                                    [];
-                
-                console.error(`  🔴 400 Error Details:`, {
-                  customerId,
-                  cleanCustomerId,
-                  errorMessage,
-                  errorDetails,
-                  query: query.substring(0, 200),
-                  possibleCauses: [
-                    'Invalid query syntax',
-                    'Invalid date format',
-                    'Invalid field names',
-                    'Query contains unsupported operators'
-                  ]
-                });
-                
-                const detailedError = errorDetails.length > 0 
-                  ? `${errorMessage}: ${JSON.stringify(errorDetails)}`
-                  : errorMessage;
-                
-                errors.push({
-                  customerId: customerId,
-                  accountName: account.account_name,
-                  error: `Google Ads API error 400: ${detailedError}`
-                });
-              } else {
-                errors.push({
-                  customerId: customerId,
-                  accountName: account.account_name,
-                  error: `Google Ads API error ${response.status}: ${errorJson?.error?.message || errorJson?.error || errorText.substring(0, 200)}`
-                });
-              }
-              // Continue to next account instead of throwing
-              continue;
-            }
-
-            const data = await response.json();
-            console.log(`✓ Success! Got ${data.results?.length || 0} results`);
-            console.log(`  Query date range: ${startDate} to ${endDate}`);
-            console.log(`  Customer ID: ${customerId} (clean: ${cleanCustomerId})`);
-            
-            if (!data.results || data.results.length === 0) {
-              console.log(`  ⚠ No results returned from Google Ads API for date range ${startDate} to ${endDate}`);
-              console.log(`  This could mean:`);
-              console.log(`    - No campaigns have spend in this date range`);
-              console.log(`    - Date range is in the future (no spend data yet)`);
-              console.log(`    - All campaigns are paused or have no activity`);
-              console.log(`    - Customer ID doesn't have access to campaigns with spend`);
-              console.log(`  Full response keys:`, Object.keys(data));
-              if (data.fieldMask) {
-                console.log(`  Field mask:`, data.fieldMask);
-              }
-              if (data.requestId) {
-                console.log(`  Request ID:`, data.requestId);
-              }
-              // Log first 500 chars of response for debugging
-              const responseStr = JSON.stringify(data, null, 2);
-              console.log(`  Response preview:`, responseStr.substring(0, 500));
-            }
-
-            // Process results
-            if (data.results && Array.isArray(data.results)) {
-              for (const result of data.results) {
-                const spend = (result.metrics?.costMicros || 0) / 1000000;
-                const averageCpc = (result.metrics?.averageCpc || 0) / 1000000;
-                const impressions = parseInt(result.metrics?.impressions || '0', 10);
-                const clicks = parseInt(result.metrics?.clicks || '0', 10);
-                const ctr = parseFloat(result.metrics?.ctr || '0');
-                const conversions = parseFloat(result.metrics?.conversions || '0');
-                const date = result.segments?.date || '';
-
-                console.log(`  - Date: ${date}, Spend: $${spend}, Impressions: ${impressions}, Clicks: ${clicks}, Campaign: ${result.campaign?.name || 'N/A'}`);
-
-                allSpendData.push({
-                  customerId: customerId,
-                  accountName: account.account_name,
-                  campaignId: result.campaign?.id?.toString() || '',
-                  campaignName: result.campaign?.name || '',
-                  date: date,
-                  spend: spend,
-                  impressions: impressions,
-                  clicks: clicks,
-                  ctr: ctr,
-                  averageCpc: averageCpc,
-                  conversions: conversions,
-                  currency: 'USD'
-                });
-              }
-            } else {
-              console.log('  ⚠ No results array in response or results is empty');
-              console.log('  Response structure:', Object.keys(data));
-            }
-
-          } catch (error: any) {
-            console.error(`Failed for customer ${customerId}:`, error.message);
-            errors.push({
-              customerId: customerId,
-              accountName: account.account_name,
-              error: error.message
-            });
-          }
-        }
-
-        console.log(`=== GOOGLE ADS FETCH COMPLETE ===`);
-        console.log(`Total spend data items: ${allSpendData.length}`);
-        console.log(`Accounts processed: ${googleAdsAccounts.length}`);
-        console.log(`Errors: ${errors.length}`);
-        if (allSpendData.length > 0) {
-          console.log(`Sample data:`, allSpendData.slice(0, 3));
-        }
-        
-        // Return response - if we have errors, still return success but include errors
-        // Only return error status if all accounts failed
-        const hasAnySuccess = allSpendData.length > 0;
-        const hasAnyErrors = errors.length > 0;
-        
-        if (!hasAnySuccess && hasAnyErrors && googleAdsAccounts.length > 0) {
-          // All accounts failed - return error status
-          const firstError = errors[0];
+        if (!result.success) {
+          const status = /not found or expired/i.test(result.error || '') ? 424
+            : /No access token/i.test(result.error || '') ? 401
+            : 404;
           return Response.json({
             success: false,
             platform: 'google-ads',
             dateRange: { startDate, endDate },
             data: [],
-            error: firstError.error,
-            errors: errors,
-            accountsProcessed: googleAdsAccounts.length
-          }, { status: 404 });
-        }
-        
-        // Persist spend data so the agency dashboard can read it per-client
-        if (allSpendData.length > 0) {
-          try {
-            await saveGoogleAdsMetrics(user.id, clientId || null, allSpendData);
-            console.log(`✓ Saved ${allSpendData.length} Google Ads metrics to database (clientId: ${clientId || 'none'})`);
-          } catch (saveError) {
-            // Non-fatal — log but still return the data to the caller
-            console.error('Failed to persist Google Ads metrics:', saveError);
-          }
+            error: result.error,
+            errors: result.errors,
+            accountsProcessed: result.accountsProcessed,
+          }, { status });
         }
 
         return Response.json({
           success: true,
           platform: 'google-ads',
           dateRange: { startDate, endDate },
-          data: allSpendData,
-          accountsProcessed: googleAdsAccounts.length,
-          errors: errors.length > 0 ? errors : undefined
+          data: result.data,
+          accountsProcessed: result.accountsProcessed,
+          errors: result.errors,
         });
 
       } catch (error: any) {

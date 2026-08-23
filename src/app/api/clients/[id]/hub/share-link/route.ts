@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { randomBytes } from 'crypto';
 import { createClient } from '@/lib/supabase/server';
+import { isClientOwnedByUser } from '@/lib/client-hub/assert-ownership';
 
 type Params = { params: Promise<{ id: string }> | { id: string } };
 
@@ -18,6 +19,9 @@ export async function GET(_req: NextRequest, { params }: Params) {
   const supabase = await createClient();
   const { data: { session } } = await supabase.auth.getSession();
   if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!(await isClientOwnedByUser(supabase, clientId, session.user.id))) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
 
   const { data: existing } = await supabase
     .from('client_hub_share_links')
@@ -43,6 +47,9 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const supabase = await createClient();
   const { data: { session } } = await supabase.auth.getSession();
   if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!(await isClientOwnedByUser(supabase, clientId, session.user.id))) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
 
   const { is_enabled } = await req.json();
   if (typeof is_enabled !== 'boolean') {

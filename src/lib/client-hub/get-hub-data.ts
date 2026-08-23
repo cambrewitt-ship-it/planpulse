@@ -14,6 +14,8 @@ import { toBenchmarkChannelName } from '@/lib/calculate-performance-health';
 const AD_PLATFORMS = ['meta-ads', 'google-ads'] as const;
 type AdPlatform = typeof AD_PLATFORMS[number];
 
+export type ConversionPlatform = 'meta-ads' | 'google-ads' | 'ga4';
+
 export interface HubMetric {
   key: string;
   label: string;
@@ -91,12 +93,13 @@ export interface HubSpendRow {
 }
 
 export interface HubConversionConfig {
-  /** The Meta Ads action_type actually used to count conversions, or null if none matched. */
+  /** Which platform the "Leads" metric is sourced from. */
+  platform: ConversionPlatform;
+  /** The event/action actually used to count conversions within that platform (Meta action_type,
+   *  Google Ads conversion action name, or GA4 event name), or null if auto-detected/unset. */
   actionType: string | null;
   /** Display label for the conversion metric card (e.g. "Leads"). */
   label: string;
-  /** All action_types seen in the period's Meta Ads data, most active first — for the picker. */
-  available: string[];
 }
 
 export interface ClientHubData {
@@ -119,7 +122,9 @@ export interface GetHubDataOptions {
   /** Overrides the default reporting period (campaign-to-date / trailing 150 days). */
   start?: string;
   end?: string;
-  /** Explicit Meta Ads action_type to count as conversions; null/undefined falls back to auto-detection. */
+  /** Which platform the "Leads" metric is sourced from; defaults to 'meta-ads'. */
+  conversionPlatform?: ConversionPlatform | null;
+  /** Explicit event/action within that platform to count as conversions; null/undefined falls back to auto-detection. */
   conversionActionType?: string | null;
   /** Display label for the conversion metric; defaults to "Leads". */
   conversionLabel?: string;
@@ -134,6 +139,13 @@ interface AdRow {
   ctr: number | null;
   conversions: number | null;
   meta_actions: Array<{ action_type: string; value: string }> | null;
+  google_conversion_actions: Array<{ action_type: string; value: string }> | null;
+}
+
+interface Ga4Row {
+  date: string;
+  metric_name: string;
+  metric_value: number;
 }
 
 function metaActionTotals(rows: AdRow[]): Map<string, number> {
@@ -145,11 +157,6 @@ function metaActionTotals(rows: AdRow[]): Map<string, number> {
     }
   }
   return totals;
-}
-
-/** Action types available for the client to pick as "the" conversion metric, most active first. */
-function availableMetaConversionTypes(totals: Map<string, number>): string[] {
-  return [...totals.entries()].sort(([, a], [, b]) => b - a).map(([type]) => type);
 }
 
 function detectMetaConversionType(totals: Map<string, number>): string | null {
@@ -169,24 +176,38 @@ function detectMetaConversionType(totals: Map<string, number>): string | null {
   return best;
 }
 
-function conversionsFor(row: AdRow, metaConversionType: string | null): number {
-  if (row.platform === 'meta-ads') {
-    if (!metaConversionType || !row.meta_actions) return 0;
+/** Conversions contributed by one ad_performance_metrics row, given the configured Leads source. */
+function conversionsFor(row: AdRow, platform: ConversionPlatform, actionType: string | null): number {
+  if (platform === 'ga4' || row.platform !== platform) return 0;
+  if (platform === 'meta-ads') {
+    if (!actionType || !row.meta_actions) return 0;
     return row.meta_actions
-      .filter(a => a.action_type === metaConversionType)
+      .filter(a => a.action_type === actionType)
+      .reduce((s, a) => s + (parseInt(a.value, 10) || 0), 0);
+  }
+  // google-ads
+  if (actionType && row.google_conversion_actions) {
+    return row.google_conversion_actions
+      .filter(a => a.action_type === actionType)
       .reduce((s, a) => s + (parseInt(a.value, 10) || 0), 0);
   }
   return row.conversions ?? 0;
 }
 
-function aggregate(rows: AdRow[], metaConversionType: string | null) {
-  let spend = 0, impressions = 0, clicks = 0, conversions = 0;
+/** Sum of a GA4 metric across rows for the configured event name (defaults to 'conversions'). */
+function ga4ConversionsFor(rows: Ga4Row[], eventName: string | null): number {
+  const target = eventName || 'conversions';
+  return rows.filter(r => r.metric_name === target).reduce((s, r) => s + r.metric_value, 0);
+}
+
+function aggregate(rows: AdRow[], platform: ConversionPlatform, actionType: string | null, ga4Rows: Ga4Row[]) {
+  let spend = 0, impressions = 0, clicks = 0;
   for (const r of rows) {
     spend += r.spend;
     impressions += r.impressions;
     clicks += r.clicks;
-    conversions += conversionsFor(r, metaConversionType);
   }
+  const conversions = platform === 'ga4' ? ga4ConversionsFor(ga4Rows, actionType) : rows.reduce((s, r) => s + conversionsFor(r, platform, actionType), 0);
   return { spend, impressions, clicks, conversions };
 }
 
@@ -280,7 +301,7 @@ export async function getClientHubData(
   // ── Ad performance metrics over the period ─────────────────────────────
   const { data: adRowsRaw } = await supabase
     .from('ad_performance_metrics')
-    .select('date, platform, spend, impressions, clicks, ctr, conversions, meta_actions')
+    .select('date, platform, spend, impressions, clicks, ctr, conversions, meta_actions, google_conversion_actions')
     .eq('client_id', clientId)
     .in('platform', AD_PLATFORMS as unknown as string[])
     .gte('date', period.start)
@@ -296,11 +317,15 @@ export async function getClientHubData(
     ctr: r.ctr != null ? Number(r.ctr) : null,
     conversions: r.conversions != null ? Number(r.conversions) : null,
     meta_actions: r.meta_actions ?? null,
+    google_conversion_actions: r.google_conversion_actions ?? null,
   }));
 
+  const conversionPlatform: ConversionPlatform = options.conversionPlatform || 'meta-ads';
   const metaActionCounts = metaActionTotals(adRows);
-  const metaConversionType = options.conversionActionType || detectMetaConversionType(metaActionCounts);
-  const totals = aggregate(adRows, metaConversionType);
+  const explicitConversionEvent = options.conversionActionType || null;
+  const conversionEvent = conversionPlatform === 'meta-ads'
+    ? (explicitConversionEvent || detectMetaConversionType(metaActionCounts))
+    : explicitConversionEvent;
   const conversionLabel = options.conversionLabel || 'Leads';
 
   // Prior period of equal length, for delta comparisons
@@ -309,22 +334,37 @@ export async function getClientHubData(
   const priorEnd = format(subDays(periodStartClamped, 1), 'yyyy-MM-dd');
   const { data: priorRowsRaw } = await supabase
     .from('ad_performance_metrics')
-    .select('date, platform, spend, impressions, clicks, ctr, conversions, meta_actions')
+    .select('date, platform, spend, impressions, clicks, ctr, conversions, meta_actions, google_conversion_actions')
     .eq('client_id', clientId)
     .in('platform', AD_PLATFORMS as unknown as string[])
     .gte('date', priorStart)
     .lte('date', priorEnd)
     .not('campaign_id', 'like', 'manual-override-%');
-  const priorTotals = aggregate(
-    (priorRowsRaw ?? []).map((r: any) => ({
-      date: r.date, platform: r.platform, spend: Number(r.spend || 0),
-      impressions: Number(r.impressions || 0), clicks: Number(r.clicks || 0),
-      ctr: r.ctr != null ? Number(r.ctr) : null,
-      conversions: r.conversions != null ? Number(r.conversions) : null,
-      meta_actions: r.meta_actions ?? null,
-    })),
-    metaConversionType,
-  );
+  const priorAdRows: AdRow[] = (priorRowsRaw ?? []).map((r: any) => ({
+    date: r.date, platform: r.platform, spend: Number(r.spend || 0),
+    impressions: Number(r.impressions || 0), clicks: Number(r.clicks || 0),
+    ctr: r.ctr != null ? Number(r.ctr) : null,
+    conversions: r.conversions != null ? Number(r.conversions) : null,
+    meta_actions: r.meta_actions ?? null,
+    google_conversion_actions: r.google_conversion_actions ?? null,
+  }));
+
+  // GA4 rows — only fetched when GA4 is the configured Leads source
+  let ga4Rows: Ga4Row[] = [];
+  let priorGa4Rows: Ga4Row[] = [];
+  if (conversionPlatform === 'ga4') {
+    const [{ data: ga4RowsRaw }, { data: priorGa4RowsRaw }] = await Promise.all([
+      supabase.from('google_analytics_metrics').select('date, metric_name, metric_value')
+        .eq('client_id', clientId).gte('date', period.start).lte('date', period.end),
+      supabase.from('google_analytics_metrics').select('date, metric_name, metric_value')
+        .eq('client_id', clientId).gte('date', priorStart).lte('date', priorEnd),
+    ]);
+    ga4Rows = (ga4RowsRaw ?? []).map((r: any) => ({ date: r.date, metric_name: r.metric_name, metric_value: Number(r.metric_value || 0) }));
+    priorGa4Rows = (priorGa4RowsRaw ?? []).map((r: any) => ({ date: r.date, metric_name: r.metric_name, metric_value: Number(r.metric_value || 0) }));
+  }
+
+  const totals = aggregate(adRows, conversionPlatform, conversionEvent, ga4Rows);
+  const priorTotals = aggregate(priorAdRows, conversionPlatform, conversionEvent, priorGa4Rows);
 
   const pctDelta = (curr: number, prev: number): number | null =>
     prev > 0 ? ((curr - prev) / prev) * 100 : null;
@@ -351,8 +391,17 @@ export async function getClientHubData(
     const key = r.date.slice(0, 7);
     const cur = byMonth.get(key) ?? { spend: 0, leads: 0 };
     cur.spend += r.spend;
-    cur.leads += conversionsFor(r, metaConversionType);
+    cur.leads += conversionsFor(r, conversionPlatform, conversionEvent);
     byMonth.set(key, cur);
+  }
+  if (conversionPlatform === 'ga4') {
+    for (const r of ga4Rows) {
+      if (r.metric_name !== (conversionEvent || 'conversions')) continue;
+      const key = r.date.slice(0, 7);
+      const cur = byMonth.get(key) ?? { spend: 0, leads: 0 };
+      cur.leads += r.metric_value;
+      byMonth.set(key, cur);
+    }
   }
   const monthlyTrend: HubTrendPoint[] = [...byMonth.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
@@ -474,7 +523,8 @@ export async function getClientHubData(
     .order('set_at', { ascending: false });
 
   const metricAliases: Record<string, keyof ReturnType<typeof aggregate> | 'ctr' | 'cpc' | 'cpl'> = {
-    cpl: 'cpl', cost_per_lead: 'cpl', ctr: 'ctr', cpc: 'cpc', leads: 'conversions', conversions: 'conversions',
+    cpl: 'cpl', cost_per_lead: 'cpl', cpa: 'cpl', cost_per_acquisition: 'cpl',
+    ctr: 'ctr', cpc: 'cpc', leads: 'conversions', conversions: 'conversions',
   };
   const goals: HubGoal[] = (goalRows ?? []).map((g: any) => {
     const channelAgg = channelActuals.find(c => c.name === g.channel);
@@ -532,9 +582,9 @@ export async function getClientHubData(
     documents,
     spendRows,
     conversion: {
-      actionType: metaConversionType,
+      platform: conversionPlatform,
+      actionType: conversionEvent,
       label: conversionLabel,
-      available: availableMetaConversionTypes(metaActionCounts),
     },
   };
 }

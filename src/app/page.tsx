@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import Footer from '@/components/Footer';
@@ -17,10 +18,9 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import {
-  ChannelPerformanceMockup,
-  CPAGaugeMockup,
   MediaPlanMockup,
 } from '@/components/features/FeatureMockups';
+import TourLandingSlideshow from '@/components/product-tour/TourLandingSlideshow';
 
 const pageFont: React.CSSProperties = { fontFamily: "'DM Sans', system-ui, sans-serif" };
 
@@ -166,7 +166,13 @@ export default function Home() {
           <div className="container mx-auto px-4">
             <div className="max-w-6xl mx-auto grid lg:grid-cols-2 gap-12 items-center">
               <div className="order-2 lg:order-1" style={{ boxShadow: '0 8px 40px rgba(0,0,0,0.10), 0 2px 8px rgba(0,0,0,0.06)', borderRadius: 16, overflow: 'hidden' }}>
-                <ChannelPerformanceMockup />
+                <Image
+                  src="/channel-performance.png"
+                  alt="Real-time performance dashboard showing pacing, spend variance, and platform metrics"
+                  width={2002}
+                  height={1502}
+                  className="w-full h-auto"
+                />
               </div>
               <div className="order-1 lg:order-2 space-y-6">
                 <span
@@ -224,10 +230,22 @@ export default function Home() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div style={{ boxShadow: '0 4px 24px rgba(0,0,0,0.08)', borderRadius: 16, overflow: 'hidden' }}>
-                  <CPAGaugeMockup overTarget={false} />
+                  <Image
+                    src="/client-card.png"
+                    alt="Client card showing CPA gauge within target"
+                    width={2696}
+                    height={614}
+                    className="w-full h-auto"
+                  />
                 </div>
                 <div style={{ boxShadow: '0 4px 24px rgba(0,0,0,0.08)', borderRadius: 16, overflow: 'hidden' }}>
-                  <CPAGaugeMockup overTarget={true} />
+                  <Image
+                    src="/client-card.png"
+                    alt="Client card showing CPA gauge over target"
+                    width={2696}
+                    height={614}
+                    className="w-full h-auto"
+                  />
                 </div>
               </div>
             </div>
@@ -312,6 +330,24 @@ export default function Home() {
                 </Button>
               </Link>
             </div>
+          </div>
+        </section>
+
+        {/* ── Product tour slideshow ── */}
+        <section className="py-20" style={{ background: '#FDFCF8' }}>
+          <div className="container mx-auto px-4">
+            <div className="text-center mb-12">
+              <h2
+                className="text-3xl md:text-4xl font-bold mb-3"
+                style={{ color: '#1C1917', ...pageFont }}
+              >
+                See PlanPulse in action
+              </h2>
+              <p className="text-base max-w-xl mx-auto" style={{ color: '#8A8578' }}>
+                Click through a guided tour of the Agency dashboard, Client Dashboard, and Library — no account required.
+              </p>
+            </div>
+            <TourLandingSlideshow />
           </div>
         </section>
 

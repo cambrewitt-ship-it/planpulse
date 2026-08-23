@@ -38,7 +38,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Prefer the client-specific connection when clientId is provided
+    // Look up this client's own Google Ads connection. ad_platform_connections is
+    // scoped one row per (client_id, platform) — never fall back to another
+    // client's connection, as that would attribute its ad spend to this client.
     let connectionQuery = supabase
       .from('ad_platform_connections')
       .select('connection_id')
@@ -48,18 +50,7 @@ export async function POST(request: NextRequest) {
       .order('created_at', { ascending: false })
       .limit(1);
     if (clientId) connectionQuery = connectionQuery.eq('client_id', clientId);
-    let { data: connections, error: connectionError } = await connectionQuery;
-    // Fall back to any active connection when no client-specific one exists
-    if ((!connections || connections.length === 0) && clientId) {
-      ({ data: connections, error: connectionError } = await supabase
-        .from('ad_platform_connections')
-        .select('connection_id')
-        .eq('user_id', user.id)
-        .eq('platform', 'google-ads')
-        .eq('connection_status', 'active')
-        .order('created_at', { ascending: false })
-        .limit(1));
-    }
+    const { data: connections, error: connectionError } = await connectionQuery;
 
     if (connectionError || !connections || connections.length === 0) {
       console.error('Connection lookup error:', connectionError);
@@ -86,7 +77,7 @@ export async function POST(request: NextRequest) {
           updated_at: new Date().toISOString(),
         },
         {
-          onConflict: 'user_id,customer_id',
+          onConflict: 'user_id,client_id,customer_id',
           ignoreDuplicates: false,
         }
       )

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, Plus, GripVertical, Trash2, Check, ChevronsUpDown, Link2 } from 'lucide-react';
 import {
   Dialog,
@@ -333,7 +333,7 @@ function SortableStageRow({
                     <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent className="w-full p-0" align="start">
+                <PopoverContent className="w-full p-0" align="start" side="bottom" avoidCollisions={false}>
                   <Command>
                     <CommandInput
                       placeholder="Search events or type custom..."
@@ -424,7 +424,7 @@ function SortableStageRow({
                     <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent className="w-full p-0" align="start">
+                <PopoverContent className="w-full p-0" align="start" side="bottom" avoidCollisions={false}>
                   <Command>
                     <CommandInput
                       placeholder="Search events or type custom..."
@@ -746,6 +746,7 @@ export function FunnelBuilderModal({
   console.log('[FunnelBuilderModal] Rendered with availableChannels:', availableChannels);
   
   const [funnelName, setFunnelName] = useState(initialConfig?.name || '');
+  const funnelNameRef = useRef<HTMLInputElement>(null);
   const [selectedChannelIds, setSelectedChannelIds] = useState<string[]>(
     initialConfig?.channelIds || []
   );
@@ -905,6 +906,8 @@ export function FunnelBuilderModal({
 
     if (!funnelName.trim()) {
       newErrors.push('Funnel name is required');
+      funnelNameRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      funnelNameRef.current?.focus();
     }
 
     if (!selectedChannelIds || selectedChannelIds.length === 0) {
@@ -1083,6 +1086,7 @@ export function FunnelBuilderModal({
             <Label htmlFor="funnel-name">Funnel Name</Label>
             <Input
               id="funnel-name"
+              ref={funnelNameRef}
               value={funnelName}
               onChange={(e) => setFunnelName(e.target.value)}
               placeholder="e.g., Q1 Campaign Funnel"

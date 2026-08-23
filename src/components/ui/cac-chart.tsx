@@ -88,7 +88,18 @@ interface CostPerMetricChartProps {
   availableCampaigns?: Array<{ id: string; name: string; channelId: string }>;
   selectedCampaignIds?: Set<string>;
   onCampaignIdsChange?: (ids: Set<string>) => void;
+  // Override the GA4 metric dropdown's option list (e.g. to hide "Events" where a
+  // custom-event picker isn't available, such as the public Client Hub view)
+  metricOptions?: Array<{ value: string; label: string }>;
 }
+
+const DEFAULT_GA4_METRIC_OPTIONS = [
+  { value: 'conversions', label: 'Conversions' },
+  { value: 'activeUsers', label: 'Active Users' },
+  { value: 'totalUsers', label: 'Total Users' },
+  { value: 'sessions', label: 'Sessions' },
+  { value: 'eventCount', label: 'Events' },
+];
 
 // Get singular display name for metric
 function getMetricDisplayName(metricKey: string): string {
@@ -201,6 +212,7 @@ export function CostPerMetricChart({
   availableCampaigns = [],
   selectedCampaignIds = new Set(),
   onCampaignIdsChange,
+  metricOptions = DEFAULT_GA4_METRIC_OPTIONS,
 }: CostPerMetricChartProps) {
   // State for comparison mode
   const [showComparison, setShowComparison] = useState(false);
@@ -654,13 +666,7 @@ export function CostPerMetricChart({
                     <SelectValue placeholder="Select metric" />
                   </SelectTrigger>
                   <SelectContent>
-                    {[
-                      { value: 'conversions', label: 'Conversions' },
-                      { value: 'activeUsers', label: 'Active Users' },
-                      { value: 'totalUsers', label: 'Total Users' },
-                      { value: 'sessions', label: 'Sessions' },
-                      { value: 'eventCount', label: 'Events' },
-                    ].map((option) => {
+                    {metricOptions.map((option) => {
                       const isAvailable = availableMetrics ? availableMetrics.has(option.value) : true;
                       return (
                         <SelectItem
@@ -918,26 +924,6 @@ export function CostPerMetricChart({
             />
             <Tooltip content={<CustomTooltip />} />
 
-            {/* Previous period bars (shown first, behind current) */}
-            {showComparison && previousPeriodMetrics && (
-              <Bar
-                dataKey="prev_dailyCost"
-                fill="#5794F2"
-                name="prev_daily_cost"
-                radius={[2, 2, 0, 0]}
-                fillOpacity={0.2}
-              />
-            )}
-
-            {/* Daily Cost as bars */}
-            <Bar
-              dataKey="dailyCost"
-              fill="#5794F2"
-              name="daily_cost"
-              radius={[2, 2, 0, 0]}
-              fillOpacity={0.6}
-            />
-
             {/* Previous period 7-day moving average */}
             {showComparison && previousPeriodMetrics && (
               <Line
@@ -953,7 +939,7 @@ export function CostPerMetricChart({
               />
             )}
 
-            {/* 7-day moving average */}
+            {/* 7-day moving average (rendered behind the bars) */}
             <Area
               type="monotone"
               dataKey="cost_7d"
@@ -980,7 +966,7 @@ export function CostPerMetricChart({
               />
             )}
 
-            {/* 14-day moving average */}
+            {/* 14-day moving average (rendered behind the bars) */}
             <Area
               type="monotone"
               dataKey="cost_14d"
@@ -1007,7 +993,7 @@ export function CostPerMetricChart({
               />
             )}
 
-            {/* 30-day moving average */}
+            {/* 30-day moving average (rendered behind the bars) */}
             <Area
               type="monotone"
               dataKey="cost_30d"
@@ -1017,6 +1003,26 @@ export function CostPerMetricChart({
               dot={false}
               name="cost_30d"
               connectNulls
+            />
+
+            {/* Previous period bars (shown first, behind current) */}
+            {showComparison && previousPeriodMetrics && (
+              <Bar
+                dataKey="prev_dailyCost"
+                fill="#5794F2"
+                name="prev_daily_cost"
+                radius={[2, 2, 0, 0]}
+                fillOpacity={0.2}
+              />
+            )}
+
+            {/* Daily Cost as bars (rendered in front of the moving-average areas) */}
+            <Bar
+              dataKey="dailyCost"
+              fill="#5794F2"
+              name="daily_cost"
+              radius={[2, 2, 0, 0]}
+              fillOpacity={0.6}
             />
           </ComposedChart>
         </ResponsiveContainer>

@@ -9,6 +9,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Eye, EyeOff } from 'lucide-react';
 import Link from 'next/link';
+import { TurnstileWidget } from '@/components/auth/turnstile-widget';
+
+const CAPTCHA_REQUIRED = !!process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
 
 export default function LoginPage() {
   const router = useRouter();
@@ -17,16 +20,24 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError('');
 
+    if (CAPTCHA_REQUIRED && !captchaToken) {
+      setError('Please complete the verification check');
+      setLoading(false);
+      return;
+    }
+
     try {
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
+        ...(captchaToken ? { options: { captchaToken } } : {}),
       });
 
       if (error) throw error;
@@ -99,9 +110,11 @@ export default function LoginPage() {
               </div>
             </div>
 
+            <TurnstileWidget onVerify={setCaptchaToken} />
+
             <Button
               type="submit"
-              disabled={loading}
+              disabled={loading || (CAPTCHA_REQUIRED && !captchaToken)}
               className="w-full"
             >
               {loading ? 'Signing in...' : 'Sign in'}

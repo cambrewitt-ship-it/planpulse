@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { waitUntil } from '@vercel/functions';
-import { createHmac } from 'crypto';
+import { createHmac, timingSafeEqual } from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 import Anthropic from '@anthropic-ai/sdk';
 import { BOT_TOOL_DEFINITIONS } from '@/lib/agent-tools';
@@ -31,11 +31,13 @@ function stripMarkdownBold(text: string): string {
 
 function validateTeamsHmac(body: string, authHeader: string | null, secret: string): boolean {
   if (!authHeader?.startsWith('HMAC ')) return false;
-  const provided = authHeader.slice(5);
+  const provided = Buffer.from(authHeader.slice(5));
   const expected = createHmac('sha256', Buffer.from(secret, 'base64'))
     .update(Buffer.from(body, 'utf8'))
     .digest('base64');
-  return provided === expected;
+  const expectedBuf = Buffer.from(expected);
+  if (provided.length !== expectedBuf.length) return false;
+  return timingSafeEqual(provided, expectedBuf);
 }
 
 function teamsResponse(text: string): NextResponse {

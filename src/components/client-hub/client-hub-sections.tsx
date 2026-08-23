@@ -1,9 +1,14 @@
 'use client';
 
+import {
+  ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip,
+  PieChart, Pie, Cell, BarChart, LabelList,
+} from 'recharts';
 import type {
   HubMetric, HubTrendPoint, HubChannelActual, HubPacing, HubGoal, HubBrief, HubNote, HubDocument, HubSpendRow,
 } from '@/lib/client-hub/get-hub-data';
 import { COLOR, FONT_HEAD, cardStyle, sectionTitleStyle, channelColor, fmtMoney, fmtCompact, fmtPct, fmtDate, clampPct } from './tokens';
+import { HubTooltip, HubLegend, axisTickStyle, gridProps, axisLineProps } from './chart-kit';
 
 // ── Metrics snapshot ────────────────────────────────────────────────────────
 
@@ -37,76 +42,60 @@ export function MetricsSnapshot({ metrics }: { metrics: HubMetric[] }) {
 
 // ── Performance charts ───────────────────────────────────────────────────────
 
-export function PerformanceCharts({ monthlyTrend, channelActuals }: { monthlyTrend: HubTrendPoint[]; channelActuals: HubChannelActual[] }) {
-  const maxSpend = Math.max(1, ...monthlyTrend.map(t => t.spend));
-  const maxLeads = Math.max(1, ...monthlyTrend.map(t => t.leads));
-  const n = monthlyTrend.length || 1;
-  const dots = monthlyTrend.map((t, i) => ({
-    x: (i + 0.5) * (100 / n),
-    y: 100 - (t.leads / maxLeads) * 88 - 4,
-  }));
-  const linePoints = dots.map(d => `${d.x.toFixed(2)},${d.y.toFixed(2)}`).join(' ');
-
+export function PerformanceCharts({ monthlyTrend, channelActuals, leadsLabel = 'Leads' }: { monthlyTrend: HubTrendPoint[]; channelActuals: HubChannelActual[]; leadsLabel?: string }) {
   const totalSpend = channelActuals.reduce((s, c) => s + c.spend, 0);
-  let cum = 0;
-  const donutStops = channelActuals.map(c => {
-    const color = channelColor(c.platform);
-    const start = totalSpend > 0 ? (cum / totalSpend) * 100 : 0;
-    cum += c.spend;
-    const end = totalSpend > 0 ? (cum / totalSpend) * 100 : 0;
-    return `${color} ${start.toFixed(2)}% ${end.toFixed(2)}%`;
-  });
-  const donutGradient = donutStops.length ? `conic-gradient(${donutStops.join(', ')})` : COLOR.divider;
-
-  const maxCtr = Math.max(0.01, ...channelActuals.map(c => c.ctr ?? 0));
+  const donutData = channelActuals.map(c => ({ name: c.name, value: c.spend, platform: c.platform }));
+  const ctrData = channelActuals.filter(c => c.ctr != null);
+  const ctrChartHeight = Math.max(140, ctrData.length * 44);
 
   return (
     <div>
-      <h2 style={sectionTitleStyle}>Spend &amp; leads trend</h2>
+      <h2 style={sectionTitleStyle}>Spend &amp; {leadsLabel.toLowerCase()} trend</h2>
       <div style={{ ...cardStyle, padding: '22px 24px', marginBottom: 16 }}>
-        <div style={{ display: 'flex', gap: 18, marginBottom: 14 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: COLOR.mutedSecondary }}>
-            <span style={{ width: 10, height: 10, background: '#D9CBBB', display: 'inline-block', borderRadius: 2 }} />Spend
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: COLOR.mutedSecondary }}>
-            <span style={{ width: 14, height: 2, background: COLOR.accent, display: 'inline-block' }} />Leads
-          </div>
+        <div style={{ marginBottom: 14 }}>
+          <HubLegend entries={[
+            { label: 'Spend', color: '#D9CBBB' },
+            { label: leadsLabel, color: COLOR.accent, kind: 'line' },
+          ]} />
         </div>
         {monthlyTrend.length === 0 ? (
           <div style={{ fontSize: 13, color: COLOR.muted, padding: '40px 0', textAlign: 'center' }}>No performance data yet for this period.</div>
         ) : (
-          <>
-            <div style={{ position: 'relative', height: 180 }}>
-              <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', overflow: 'visible' }}>
-                <polyline points={linePoints} fill="none" stroke={COLOR.accent} strokeWidth={1.6} vectorEffect="non-scaling-stroke" />
-                {dots.map((d, i) => <circle key={i} cx={d.x} cy={d.y} r={1.6} fill={COLOR.accent} />)}
-              </svg>
-              <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'flex-end', justifyContent: 'space-around', gap: 10 }}>
-                {monthlyTrend.map((t, i) => (
-                  <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, flex: 1 }}>
-                    <div style={{ width: '100%', maxWidth: 46, background: '#D9CBBB', borderRadius: '3px 3px 0 0', height: Math.round((t.spend / maxSpend) * 160) }} />
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: 8 }}>
-              {monthlyTrend.map((t, i) => (
-                <div key={i} style={{ flex: 1, textAlign: 'center', fontSize: 12, color: COLOR.muted }}>{t.month}</div>
-              ))}
-            </div>
-          </>
+          <ResponsiveContainer width="100%" height={220}>
+            <ComposedChart data={monthlyTrend} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
+              <CartesianGrid {...gridProps} />
+              <XAxis dataKey="month" tick={axisTickStyle} axisLine={axisLineProps} tickLine={false} />
+              <YAxis yAxisId="spend" tick={axisTickStyle} axisLine={false} tickLine={false} tickFormatter={fmtCompact} width={48} />
+              <YAxis yAxisId="leads" orientation="right" tick={axisTickStyle} axisLine={false} tickLine={false} width={36} />
+              <Tooltip
+                content={
+                  <HubTooltip
+                    formatValue={(entry) => entry.dataKey === 'spend' ? fmtMoney(Number(entry.value ?? 0)) : String(entry.value ?? 0)}
+                  />
+                }
+              />
+              <Bar yAxisId="spend" dataKey="spend" name="Spend" fill="#D9CBBB" radius={[3, 3, 0, 0]} maxBarSize={46} />
+              <Line yAxisId="leads" dataKey="leads" name={leadsLabel} stroke={COLOR.accent} strokeWidth={1.6} dot={{ r: 3, fill: COLOR.accent, strokeWidth: 0 }} />
+            </ComposedChart>
+          </ResponsiveContainer>
         )}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: 16 }}>
         <div style={{ ...cardStyle, padding: 20 }}>
           <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 14 }}>Spend by channel</div>
-          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 14 }}>
-            <div style={{ width: 150, height: 150, borderRadius: '50%', position: 'relative', background: donutGradient }}>
-              <div style={{ position: 'absolute', inset: 26, borderRadius: '50%', background: COLOR.card, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                <div style={{ fontFamily: FONT_HEAD, fontSize: 19 }}>{fmtMoney(totalSpend)}</div>
-                <div style={{ fontSize: 10.5, color: COLOR.muted }}>Period spend</div>
-              </div>
+          <div style={{ position: 'relative', width: 150, height: 150, margin: '0 auto 14px' }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie data={donutData} dataKey="value" nameKey="name" innerRadius={49} outerRadius={75} startAngle={90} endAngle={-270} stroke="none">
+                  {donutData.map((d, i) => <Cell key={i} fill={channelColor(d.platform)} />)}
+                </Pie>
+                <Tooltip content={<HubTooltip formatValue={(entry) => fmtMoney(Number(entry.value ?? 0))} />} />
+              </PieChart>
+            </ResponsiveContainer>
+            <div style={{ position: 'absolute', inset: 26, borderRadius: '50%', pointerEvents: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+              <div style={{ fontFamily: FONT_HEAD, fontSize: 19 }}>{fmtMoney(totalSpend)}</div>
+              <div style={{ fontSize: 10.5, color: COLOR.muted }}>Period spend</div>
             </div>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -123,18 +112,26 @@ export function PerformanceCharts({ monthlyTrend, channelActuals }: { monthlyTre
 
         <div style={{ ...cardStyle, padding: 20 }}>
           <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 16 }}>CTR by channel</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {channelActuals.filter(c => c.ctr != null).map(c => (
-              <div key={c.name}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, marginBottom: 5 }}>
-                  <span>{c.name}</span><span style={{ fontWeight: 600 }}>{(c.ctr ?? 0).toFixed(2)}%</span>
-                </div>
-                <div style={{ height: 8, background: COLOR.divider, borderRadius: 4, overflow: 'hidden' }}>
-                  <div style={{ height: '100%', width: `${((c.ctr ?? 0) / maxCtr) * 100}%`, background: channelColor(c.platform), borderRadius: 4 }} />
-                </div>
-              </div>
-            ))}
-          </div>
+          {ctrData.length === 0 ? (
+            <div style={{ fontSize: 13, color: COLOR.muted, padding: '20px 0', textAlign: 'center' }}>No CTR data yet.</div>
+          ) : (
+            <ResponsiveContainer width="100%" height={ctrChartHeight}>
+              <BarChart data={ctrData} layout="vertical" margin={{ top: 0, right: 36, left: 0, bottom: 0 }}>
+                <XAxis type="number" hide />
+                <YAxis type="category" dataKey="name" tick={axisTickStyle} axisLine={false} tickLine={false} width={110} />
+                <Tooltip content={<HubTooltip formatValue={(entry) => `${Number(entry.value ?? 0).toFixed(2)}%`} />} cursor={{ fill: COLOR.divider }} />
+                <Bar dataKey="ctr" name="CTR" radius={[0, 4, 4, 0]} maxBarSize={16}>
+                  {ctrData.map((c, i) => <Cell key={i} fill={channelColor(c.platform)} />)}
+                  <LabelList
+                    dataKey="ctr"
+                    position="right"
+                    formatter={(v: number) => `${v.toFixed(2)}%`}
+                    style={{ fontFamily: FONT_HEAD, fontSize: 12, fill: COLOR.ink }}
+                  />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          )}
         </div>
       </div>
     </div>

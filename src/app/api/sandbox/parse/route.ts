@@ -3,6 +3,7 @@ import ExcelJS from 'exceljs';
 import Anthropic from '@anthropic-ai/sdk';
 import type { SandboxPlan, Week, PlanRow, Flight } from '@/components/sandbox/types';
 import { FLIGHT_COLORS } from '@/components/sandbox/types';
+import { rateLimit } from '@/lib/rate-limit';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -61,16 +62,19 @@ function isFillColored(fill: ExcelJS.Fill | undefined, solidOnly = false): boole
   if (fg.argb) {
     const hex = (fg.argb as string).toUpperCase();
     if (hex.startsWith('00')) return false; // transparent
-    if (hex === 'FFFFFFFF') return false;   // pure white
     const r = parseInt(hex.slice(-6, -4), 16);
     const g = parseInt(hex.slice(-4, -2), 16);
     const b = parseInt(hex.slice(-2), 16);
-    return (0.299 * r + 0.587 * g + 0.114 * b) / 255 < 0.90; // tightened from 0.92
+    // Grayscale (white, light-gray banding, black borders) has R≈G≈B regardless of
+    // brightness, whereas a deliberate flight-highlight fill has a visible hue even
+    // when pale (e.g. light yellow/blue/green). Detect via channel spread instead of
+    // a luminance cutoff, which misclassified common pastel highlight colors as white.
+    return Math.max(r, g, b) - Math.min(r, g, b) >= 10;
   }
   if (fg.theme !== undefined) {
     // Theme 0 (Background1) and 2 (Background2) are white/near-white in almost all themes
     if (fg.theme === 0 || fg.theme === 2) return false;
-    return (fg.tint ?? 0) < 0.9;
+    return true; // any other theme color is a deliberately chosen accent, even if lightly tinted
   }
   if (fg.indexed !== undefined) {
     // 65 = no fill sentinel; 1 and 9 are both white in the OOXML indexed palette
@@ -156,41 +160,37 @@ Identify the structure. Return ONLY a JSON object (no prose):
 
 For "customColumns": include any descriptor columns that appear before the date columns and are NOT already identified as funnel/channel/detail/audience/budget. Examples: Creative, CPM, Est Imps, Format, Placement, Ad Type, Objective, etc. Return an empty array [] if none found.`;
 
-  try {
-    const res = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 500,
-      messages: [{ role: 'user', content: prompt }],
-    });
-    const text = res.content.find(b => b.type === 'text')?.text ?? '';
-    const clean = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
-    const obj = JSON.parse(clean);
-    const rawCustom = Array.isArray(obj.customColumns) ? obj.customColumns : [];
-    return {
-      dateHeaderRow: obj.dateHeaderRow ?? 2,
-      funnel: obj.funnel ?? null,
-      channel: obj.channel ?? null,
-      detail: obj.detail ?? null,
-      audience: obj.audience ?? null,
-      budget: obj.budget ?? null,
-      year: obj.year ?? new Date().getFullYear(),
-      asAtLabel: obj.asAtLabel ?? '',
-      customColumns: rawCustom.filter((c: any) => c.col && c.name).map((c: any) => ({ col: Number(c.col), name: String(c.name) })),
-    };
-  } catch {
-    // Fallback: assume standard layout
-    return {
-      dateHeaderRow: 2,
-      funnel: 1, channel: 2, detail: 3, audience: 4, budget: 5,
-      year: new Date().getFullYear(), asAtLabel: '',
-      customColumns: [],
-    };
-  }
+  // Note: deliberately no fallback to a guessed column layout here. A wrong guess
+  // (e.g. wrong dateHeaderRow) silently collapses the date-column range and makes
+  // every row parse with 0 flights instead of failing loudly — worse than an error.
+  const res = await anthropic.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 500,
+    messages: [{ role: 'user', content: prompt }],
+  });
+  const text = res.content.find(b => b.type === 'text')?.text ?? '';
+  const clean = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+  const obj = JSON.parse(clean);
+  const rawCustom = Array.isArray(obj.customColumns) ? obj.customColumns : [];
+  return {
+    dateHeaderRow: obj.dateHeaderRow ?? 2,
+    funnel: obj.funnel ?? null,
+    channel: obj.channel ?? null,
+    detail: obj.detail ?? null,
+    audience: obj.audience ?? null,
+    budget: obj.budget ?? null,
+    year: obj.year ?? new Date().getFullYear(),
+    asAtLabel: obj.asAtLabel ?? '',
+    customColumns: rawCustom.filter((c: any) => c.col && c.name).map((c: any) => ({ col: Number(c.col), name: String(c.name) })),
+  };
 }
 
 // ── Main parse ────────────────────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
+  const limited = await rateLimit(request, 'sandbox-parse', 10, 60);
+  if (limited) return limited;
+
   if (!process.env.ANTHROPIC_API_KEY) {
     return NextResponse.json({ error: 'ANTHROPIC_API_KEY not configured' }, { status: 500 });
   }
@@ -266,7 +266,16 @@ export async function POST(request: NextRequest) {
   }
 
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-  const colMap = await detectColumns(ws, anthropic);
+  let colMap: ColumnMap;
+  try {
+    colMap = await detectColumns(ws, anthropic);
+  } catch (err) {
+    console.error('detectColumns failed:', err);
+    return NextResponse.json(
+      { error: 'Could not analyze the spreadsheet structure. Please try again in a moment.' },
+      { status: 502 }
+    );
+  }
   if (userYear) colMap.year = userYear;
 
   // Build date column map from date header row with year-rollover-aware assignment.

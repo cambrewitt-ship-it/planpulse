@@ -2,14 +2,14 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { RefreshCw, Maximize2 } from 'lucide-react';
+import Link from 'next/link';
+import { RefreshCw, Maximize2, Plus } from 'lucide-react';
 import { format, startOfYear } from 'date-fns';
 import type { ClientCardData } from '@/app/api/agency/clients/route';
 import { fetchSpendData } from '@/lib/api/analytics-data-integration';
 import type { AgencyClientActionPoints } from '@/app/api/agency/action-points/route';
 import { ClientCardCompact } from '@/components/agency/ClientCardCompact';
 import { TodayCard } from '@/components/agency/TodayCard';
-import { AgentsSummaryCard } from '@/components/agency/AgentsSummaryCard';
 import { AgencyChat, type AgencyChatHandle } from '@/components/agency/AgencyChat';
 import { KanbanBoard } from '@/components/agency/KanbanBoard';
 import { NotesChecklist } from '@/components/agency/NotesChecklist';
@@ -98,7 +98,7 @@ export default function AgencyDashboard() {
 
   const chatRef = useRef<AgencyChatHandle>(null);
   const [kanbanView, setKanbanView] = useState<'kanban' | 'list' | 'gantt'>('list');
-  const [activeCardTab, setActiveCardTab] = useState<'clients' | 'todo' | 'timeline'>('timeline');
+  const [activeCardTab, setActiveCardTab] = useState<'clients' | 'todo' | 'timeline'>('todo');
   const [timelineZoom, setTimelineZoom] = useState(DEFAULT_TIMELINE_ZOOM);
   const [timelineSort, setTimelineSort] = useState<'default' | 'ending-soon' | 'starting-soon'>('ending-soon');
   const today = useMemo(() => new Date(), []);
@@ -388,7 +388,7 @@ export default function AgencyDashboard() {
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#F5F3EF', ...pageFont }}>
       {/* ── Subheader ──────────────────────────────────────── */}
-      <div style={{
+      <div data-tour-id="agency-overview" style={{
         height: 48, flexShrink: 0, background: '#FDFCF8', borderBottom: '0.5px solid #E8E4DC',
         display: 'flex', alignItems: 'center', paddingLeft: 16, paddingRight: 16, gap: 9,
         overflow: 'hidden',
@@ -430,7 +430,7 @@ export default function AgencyDashboard() {
       </div>
 
       {/* ── Team member tabs ──────────────────────────────── */}
-      <div style={{
+      <div data-tour-id="agency-filters" style={{
         display: 'flex', alignItems: 'flex-end', gap: 4,
         padding: '12px 18px 0', maxWidth: 1440, margin: '0 auto',
         flexShrink: 0,
@@ -497,12 +497,13 @@ export default function AgencyDashboard() {
 
         {/* ── Column 1: Today + Notes ──────────────────── */}
         <div style={{ width: 240, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 12, minHeight: 0 }}>
-          <TodayCard clients={filteredClients} today={today} />
-
-          <AgentsSummaryCard />
+          <div data-tour-id="agency-today-agents" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <TodayCard clients={filteredClients} today={today} />
+          </div>
 
           {/* Notes — dark spine + files panel + content */}
           <div
+            data-tour-id="agency-notes"
             style={{
               flex: 1,
               minHeight: 0,
@@ -620,7 +621,7 @@ export default function AgencyDashboard() {
         </div>
 
         {/* ── Column 2: AI Chat (full height) ──────────── */}
-        <div style={{ width: 380, flexShrink: 0, alignSelf: 'stretch', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+        <div data-tour-id="agency-ai-chat" style={{ width: 380, flexShrink: 0, alignSelf: 'stretch', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           <AgencyChat ref={chatRef} />
         </div>
 
@@ -628,7 +629,7 @@ export default function AgencyDashboard() {
         <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
 
           {/* Tabbed card: Clients / To Do */}
-          <div style={{
+          <div data-tour-id="agency-clients-todo-timeline" style={{
             background: '#FDFCF8',
             border: '1px solid rgba(232,228,220,0.7)',
             borderRadius: 18,
@@ -675,6 +676,29 @@ export default function AgencyDashboard() {
                     }}
                   >
                     {label}
+                    {tab === 'clients' && !loading && clients.length === 0 && (
+                      <span
+                        style={{
+                          position: 'absolute',
+                          top: 4,
+                          left: 6,
+                          width: 16,
+                          height: 16,
+                          background: '#DC2626',
+                          color: '#fff',
+                          fontSize: 10,
+                          fontWeight: 700,
+                          borderRadius: '50%',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          boxShadow: '0 1px 4px rgba(0,0,0,0.25)',
+                          fontFamily: "'DM Sans', system-ui, sans-serif",
+                        }}
+                      >
+                        !
+                      </span>
+                    )}
                     {tab === 'timeline' && isActive && (
                       <span
                         style={{ display: 'flex', alignItems: 'center', gap: 3 }}
@@ -769,19 +793,50 @@ export default function AgencyDashboard() {
             {/* ── Tab: Clients ── */}
             {activeCardTab === 'clients' && (
               <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: '8px 10px' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 8, rowGap: 0 }}>
-                  {filteredClients.map((client, idx) => (
-                    <ClientCardCompact
-                      key={client.id}
-                      client={client}
-                      selected={selectedClientId === client.id}
-                      onClick={() => setSelectedClientId(client.id)}
-                      index={idx}
-                      accountManagers={accountManagers}
-                      variant="agency"
-                    />
-                  ))}
-                </div>
+                {!loading && clients.length === 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: 200, gap: 14 }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: '#DC2626', textAlign: 'center', whiteSpace: 'nowrap', marginTop: -48 }}>
+                      Add your first client to begin using PlanPulse
+                    </div>
+                    <Link href="/clients/create">
+                      <button
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 10,
+                          padding: '20px 40px',
+                          borderRadius: 12,
+                          border: 'none',
+                          background: '#2563eb',
+                          color: '#fff',
+                          fontSize: 20,
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <Plus size={26} />
+                        Create Client
+                      </button>
+                    </Link>
+                    <div style={{ fontSize: 13, color: '#6b7280', textAlign: 'center', maxWidth: 260 }}>
+                      Upload a Media Plan Excel spreadsheet & onboard with AI
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 8, rowGap: 0 }}>
+                    {filteredClients.map((client, idx) => (
+                      <ClientCardCompact
+                        key={client.id}
+                        client={client}
+                        selected={selectedClientId === client.id}
+                        onClick={() => setSelectedClientId(client.id)}
+                        index={idx}
+                        accountManagers={accountManagers}
+                        variant="agency"
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 

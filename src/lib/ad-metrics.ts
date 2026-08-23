@@ -5,8 +5,16 @@
 import { createClient } from '@/lib/supabase/server';
 import type { AdPerformanceMetricInsert } from '@/types/database';
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnySupabase = any;
+
 /**
- * Save Google Ads metrics to the database
+ * Save Google Ads metrics to the database.
+ *
+ * Accepts an optional Supabase client so callers outside a request context —
+ * the 6-hour refresh cron, which has no session and uses a service-role
+ * client — can persist metrics too. Defaults to the session-cookie client
+ * for existing request-scoped callers.
  */
 export async function saveGoogleAdsMetrics(
   userId: string,
@@ -24,9 +32,11 @@ export async function saveGoogleAdsMetrics(
     averageCpc: number;
     conversions: number;
     currency: string;
-  }>
+    conversionActions?: Array<{ action_type: string; value: string }>;
+  }>,
+  supabaseClient?: AnySupabase,
 ) {
-  const supabase = await createClient();
+  const supabase = supabaseClient ?? await createClient();
 
   const metricsToInsert: AdPerformanceMetricInsert[] = metrics.map(metric => ({
     user_id: userId,
@@ -44,6 +54,7 @@ export async function saveGoogleAdsMetrics(
     ctr: metric.ctr,
     average_cpc: metric.averageCpc,
     conversions: metric.conversions,
+    google_conversion_actions: metric.conversionActions && metric.conversionActions.length > 0 ? metric.conversionActions : null,
     // Meta Ads specific fields are null for Google Ads
     reach: null,
     cpc: null,
@@ -54,7 +65,7 @@ export async function saveGoogleAdsMetrics(
   const { data, error } = await supabase
     .from('ad_performance_metrics')
     .upsert(metricsToInsert, {
-      onConflict: 'user_id,platform,account_id,campaign_id,date',
+      onConflict: 'user_id,client_id,platform,account_id,campaign_id,date',
       ignoreDuplicates: false, // Update existing records
     })
     .select();
@@ -68,7 +79,8 @@ export async function saveGoogleAdsMetrics(
 }
 
 /**
- * Save Meta Ads metrics to the database
+ * Save Meta Ads metrics to the database. See saveGoogleAdsMetrics for why
+ * an explicit Supabase client can be passed in.
  */
 export async function saveMetaAdsMetrics(
   userId: string,
@@ -90,9 +102,10 @@ export async function saveMetaAdsMetrics(
     frequency: number;
     currency: string;
     actions?: Array<{ action_type: string; value: string }>;
-  }>
+  }>,
+  supabaseClient?: AnySupabase,
 ) {
-  const supabase = await createClient();
+  const supabase = supabaseClient ?? await createClient();
 
   const metricsToInsert: AdPerformanceMetricInsert[] = metrics.map(metric => {
     const linkClickAction = (metric.actions || []).find(a => a.action_type === 'link_click');
@@ -126,7 +139,7 @@ export async function saveMetaAdsMetrics(
   const { data, error } = await supabase
     .from('ad_performance_metrics')
     .upsert(metricsToInsert, {
-      onConflict: 'user_id,platform,account_id,campaign_id,date',
+      onConflict: 'user_id,client_id,platform,account_id,campaign_id,date',
       ignoreDuplicates: false, // Update existing records
     })
     .select();
@@ -134,6 +147,109 @@ export async function saveMetaAdsMetrics(
   if (error) {
     console.error('Error saving Meta Ads metrics:', error);
     throw new Error(`Failed to save metrics: ${error.message}`);
+  }
+
+  return data;
+}
+
+export interface DemographicRow {
+  accountId: string;
+  date: string;
+  /**
+   * Meta reports age×gender jointly ('age_gender', value e.g. '25-34|female')
+   * plus 'country'. Google's age_range_view/gender_view resources report age
+   * and gender as separate breakdowns ('age'/'gender'), and Google has no
+   * country breakdown wired up in v1 — get-demographics.ts collapses all of
+   * these into unified age/gender/country views for the chart.
+   */
+  breakdownType: 'age_gender' | 'age' | 'gender' | 'country';
+  breakdownValue: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  reach?: number | null;
+  conversions?: number | null;
+}
+
+/**
+ * Save Meta Ads audience demographic breakdown rows (age×gender, country).
+ */
+export async function saveMetaDemographics(
+  userId: string,
+  clientId: string | null,
+  rows: DemographicRow[]
+) {
+  const supabase = await createClient();
+
+  const toInsert = rows.map(r => ({
+    user_id: userId,
+    client_id: clientId,
+    platform: 'meta-ads',
+    account_id: r.accountId,
+    date: r.date,
+    breakdown_type: r.breakdownType,
+    breakdown_value: r.breakdownValue,
+    spend: r.spend,
+    impressions: r.impressions,
+    clicks: r.clicks,
+    reach: r.reach ?? null,
+    conversions: null,
+    updated_at: new Date().toISOString(),
+  }));
+
+  const { data, error } = await supabase
+    .from('client_ad_demographics')
+    .upsert(toInsert, {
+      onConflict: 'user_id,client_id,platform,account_id,date,breakdown_type,breakdown_value',
+      ignoreDuplicates: false,
+    })
+    .select();
+
+  if (error) {
+    console.error('Error saving Meta demographics:', error);
+    throw new Error(`Failed to save demographics: ${error.message}`);
+  }
+
+  return data;
+}
+
+/**
+ * Save Google Ads audience demographic breakdown rows (age×gender, country).
+ */
+export async function saveGoogleDemographics(
+  userId: string,
+  clientId: string | null,
+  rows: DemographicRow[]
+) {
+  const supabase = await createClient();
+
+  const toInsert = rows.map(r => ({
+    user_id: userId,
+    client_id: clientId,
+    platform: 'google-ads',
+    account_id: r.accountId,
+    date: r.date,
+    breakdown_type: r.breakdownType,
+    breakdown_value: r.breakdownValue,
+    spend: r.spend,
+    impressions: r.impressions,
+    clicks: r.clicks,
+    reach: null,
+    conversions: r.conversions ?? null,
+    updated_at: new Date().toISOString(),
+  }));
+
+  const { data, error } = await supabase
+    .from('client_ad_demographics')
+    .upsert(toInsert, {
+      onConflict: 'user_id,client_id,platform,account_id,date,breakdown_type,breakdown_value',
+      ignoreDuplicates: false,
+    })
+    .select();
+
+  if (error) {
+    console.error('Error saving Google demographics:', error);
+    throw new Error(`Failed to save demographics: ${error.message}`);
   }
 
   return data;

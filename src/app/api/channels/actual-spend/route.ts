@@ -86,7 +86,7 @@ export async function POST(request: NextRequest) {
         clicks: 0,
         ctr: 0,
       }, {
-        onConflict: 'user_id,platform,account_id,campaign_id,date',
+        onConflict: 'user_id,client_id,platform,account_id,campaign_id,date',
         ignoreDuplicates: false,
       });
 

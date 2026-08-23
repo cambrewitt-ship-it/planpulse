@@ -2,13 +2,14 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
-import type { ClientHubData } from '@/lib/client-hub/get-hub-data';
+import type { ClientHubData, ConversionPlatform } from '@/lib/client-hub/get-hub-data';
 import { ClientHubView, type ClientHubShareLink } from '@/components/client-hub/client-hub-view';
 import type { DateRange } from '@/components/client-hub/client-hub-controls';
 import { COLOR, FONT_BODY } from '@/components/client-hub/tokens';
 
 interface HubApiResponse extends ClientHubData {
   sections: Record<string, boolean>;
+  sectionOrder: string[];
   shareLink: ClientHubShareLink | null;
 }
 
@@ -19,6 +20,7 @@ export default function ClientHubAgencyPage() {
   const [response, setResponse] = useState<HubApiResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [range, setRange] = useState<DateRange | null>(null);
+  const [isRefreshingData, setIsRefreshingData] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -36,17 +38,32 @@ export default function ClientHubAgencyPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  const handleConversionChange = useCallback(async (actionType: string | null, label: string) => {
+  const handleConversionChange = useCallback(async (platform: ConversionPlatform, actionType: string | null, label: string) => {
     try {
       const res = await fetch(`/api/clients/${clientId}/hub/conversion`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ actionType, label }),
+        body: JSON.stringify({ platform, actionType, label }),
       });
       if (!res.ok) throw new Error();
       await load();
     } catch { /* leave prior selection on failure */ }
   }, [clientId, load]);
+
+  const handleClientNameChange = useCallback(async (name: string) => {
+    const prevName = response?.client.name;
+    setResponse(prev => prev ? { ...prev, client: { ...prev.client, name } } : prev);
+    try {
+      const res = await fetch(`/api/clients/${clientId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) throw new Error();
+    } catch {
+      setResponse(prev => prev && prevName !== undefined ? { ...prev, client: { ...prev.client, name: prevName } } : prev);
+    }
+  }, [clientId, response?.client.name]);
 
   const handleToggleSection = useCallback(async (key: string, visible: boolean) => {
     setResponse(prev => prev ? { ...prev, sections: { ...prev.sections, [key]: visible } } : prev);
@@ -64,6 +81,35 @@ export default function ClientHubAgencyPage() {
       setResponse(prev => prev ? { ...prev, sections: { ...prev.sections, [key]: !visible } } : prev);
     }
   }, [clientId]);
+
+  const handleReorderSections = useCallback(async (order: string[]) => {
+    const prevOrder = response?.sectionOrder;
+    setResponse(prev => prev ? { ...prev, sectionOrder: order } : prev);
+    try {
+      const res = await fetch(`/api/clients/${clientId}/hub/section-order`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order }),
+      });
+      if (!res.ok) throw new Error();
+      const { sectionOrder } = await res.json();
+      setResponse(prev => prev ? { ...prev, sectionOrder } : prev);
+    } catch {
+      if (prevOrder) setResponse(prev => prev ? { ...prev, sectionOrder: prevOrder } : prev);
+    }
+  }, [clientId, response?.sectionOrder]);
+
+  const handleRefreshData = useCallback(async () => {
+    if (isRefreshingData || !response) return;
+    setIsRefreshingData(true);
+    try {
+      const { start, end } = range ?? response.period;
+      await fetch(`/api/clients/${clientId}/analytics-data?startDate=${start}&endDate=${end}&force=1`);
+      await load();
+    } finally {
+      setIsRefreshingData(false);
+    }
+  }, [clientId, range, response, isRefreshingData, load]);
 
   const handleEnsureShareLink = useCallback(async () => {
     try {
@@ -110,14 +156,19 @@ export default function ClientHubAgencyPage() {
     <ClientHubView
       data={response}
       sections={response.sections}
+      sectionOrder={response.sectionOrder}
       editable
       onToggleSection={handleToggleSection}
+      onReorderSections={handleReorderSections}
       shareLink={response.shareLink}
       onEnsureShareLink={handleEnsureShareLink}
       onToggleShareEnabled={handleToggleShareEnabled}
       shareOrigin={typeof window !== 'undefined' ? window.location.origin : ''}
       onPeriodChange={setRange}
       onConversionChange={handleConversionChange}
+      onRefreshData={handleRefreshData}
+      isRefreshingData={isRefreshingData}
+      onClientNameChange={handleClientNameChange}
     />
   );
 }

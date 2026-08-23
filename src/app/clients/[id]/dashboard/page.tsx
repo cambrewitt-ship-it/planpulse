@@ -29,9 +29,8 @@ import { FLIGHT_COLORS } from '@/components/sandbox/types';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { getClientById, getMediaPlans, getPlanById, updateClient, updateClientLogoUrl } from '@/lib/db/plans';
-import { fetchAnalyticsData, calculateCostPerMetric, calculateCostPerPlatformMetric, extractPlatformEventOptions, SpendDataPoint, CostMetricPoint, MetricSource, PlatformEventOption } from '@/lib/api/analytics-data-integration';
-import { subDays, addDays, format, differenceInDays, parseISO, startOfMonth, endOfMonth, startOfYear } from 'date-fns';
-import { FunnelStage, MediaPlanFunnel, FunnelConfig } from '@/lib/types/funnel';
+import { fetchCachedAnalyticsData, SpendDataPoint } from '@/lib/api/analytics-data-integration';
+import { addDays, format, parseISO, startOfMonth, endOfMonth, startOfYear } from 'date-fns';
 import { calculateHealthScore, type HealthScoreResult } from '@/lib/utils/health-score';
 import { calculatePerformanceHealth, type PerformanceHealthResult } from '@/lib/calculate-performance-health';
 import {
@@ -47,10 +46,7 @@ import OtherChannelCard from '@/components/dashboard-v2/other-channel-card';
 import DisplayNativeCard from '@/components/dashboard-v2/display-native-card';
 import type { OrganicSocialActual, EdmActual, ChannelBenchmark, MetricPreset, ClientChannelPreset } from '@/types/database';
 import { startOfWeek } from 'date-fns';
-import { CACChart } from '@/components/ui/cac-chart';
 import { DateRangePicker } from '@/components/ui/date-range-picker';
-import { FunnelChart } from '@/components/funnel-chart';
-import { FunnelBuilderModal } from '@/components/funnel-builder-modal';
 import TodoSection from '@/components/TodoSection';
 import AdPlatformConnector from '@/components/AdPlatformConnector';
 import HeroHealthSection from '@/components/dashboard-v2/hero-health-section';
@@ -84,22 +80,11 @@ interface MediaPlan {
   channels?: any[];
 }
 
-const METRIC_OPTIONS: any = [
-  { value: 'activeUsers', label: 'Active Users' },
-  { value: 'totalUsers', label: 'Total Users' },
-  { value: 'newUsers', label: 'New Users' },
-  { value: 'sessions', label: 'Sessions' },
-  { value: 'engagedSessions', label: 'Engaged Sessions' },
-  { value: 'eventCount', label: 'Events' },
-  { value: 'bounceRate', label: 'Bounces (inverted)' },
-];
-
 const GANTT_COLORS = ['#6366f1', '#f59e0b', '#10b981', '#ef4444', '#3b82f6', '#8b5cf6', '#ec4899', '#14b8a6'];
 
-const VIEW_MODE_ORDER = ['overview', 'funnels', 'media-plan', 'client-hub'] as const;
+const VIEW_MODE_ORDER = ['overview', 'media-plan', 'client-hub'] as const;
 const VIEW_MODE_COLORS: Record<typeof VIEW_MODE_ORDER[number], string> = {
   overview: '#2f3a56',
-  funnels: '#2a5fa5',
   'media-plan': '#35586b',
   'client-hub': '#7A5C8A',
 };
@@ -157,7 +142,6 @@ export default function DashboardV2() {
   const [isLoadingMediaPlanBuilder, setIsLoadingMediaPlanBuilder] = useState(true);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isInitialLoadRef = useRef(true);
-  const metricSourceInitialisedRef = useRef(false);
   const [isEditingClientName, setIsEditingClientName] = useState(false);
   const [editingClientName, setEditingClientName] = useState('');
   const [isSavingClientName, setIsSavingClientName] = useState(false);
@@ -173,28 +157,10 @@ export default function DashboardV2() {
   const [isSavingClientNotes, setIsSavingClientNotes] = useState(false);
   const [isSavingAccountManager, setIsSavingAccountManager] = useState(false);
   const [accountManagers, setAccountManagers] = useState<Array<{ id: string; name: string; email: string | null }>>([]);
-  const [spendData, setSpendData] = useState<SpendDataPoint[]>([]);
-  const [ga4Data, setGa4Data] = useState<any[]>([]);
-  const [cacMetrics, setCacMetrics] = useState<CostMetricPoint[]>([]);
-  const [cacError, setCacError] = useState<string | undefined>();
-  const [cacErrorDetails, setCacErrorDetails] = useState<string | undefined>();
   const [loadingAnalytics, setLoadingAnalytics] = useState(false);
-  const [selectedMetric, setSelectedMetric] = useState<string>('activeUsers');
-  const [availableMetrics, setAvailableMetrics] = useState<Set<string>>(new Set(['activeUsers']));
-  const [previousPeriodMetrics, setPreviousPeriodMetrics] = useState<CostMetricPoint[] | null>(null);
-  const [loadingComparison, setLoadingComparison] = useState(false);
+  const [isRefreshingData, setIsRefreshingData] = useState(false);
   const [exportToast, setExportToast] = useState<string | null>(null);
-  const [selectedEventName, setSelectedEventName] = useState<string | null>(null);
-  const [availableEventNames, setAvailableEventNames] = useState<Array<{ name: string; count: number }>>([]);
-  const [loadingEventNames, setLoadingEventNames] = useState(false);
-  const [selectedMetricSource, setSelectedMetricSource] = useState<MetricSource>('ga4');
-  const [selectedPlatformMetricKey, setSelectedPlatformMetricKey] = useState<string>('clicks');
-  const [availablePlatformEvents, setAvailablePlatformEvents] = useState<PlatformEventOption[]>([]);
-  const [selectedChannels, setSelectedChannels] = useState<Set<string>>(new Set());
-  const [availableChannels, setAvailableChannels] = useState<Array<{ id: string; name: string }>>([]);
-  const [selectedCampaignIds, setSelectedCampaignIds] = useState<Set<string>>(new Set());
-  const [availableCampaigns, setAvailableCampaigns] = useState<Array<{ id: string; name: string; channelId: string }>>([]);;
-  const [viewMode, setViewMode] = useState<'overview' | 'funnels' | 'media-plan' | 'client-hub'>('overview');
+  const [viewMode, setViewMode] = useState<'overview' | 'media-plan' | 'client-hub'>('overview');
   const [adminNeedsConfig, setAdminNeedsConfig] = useState(false);
 
   // Eagerly check if any connected platform is missing saved accounts
@@ -253,13 +219,6 @@ export default function DashboardV2() {
     } catch {}
     return new Date();
   });
-  const [funnels, setFunnels] = useState<MediaPlanFunnel[]>([]);
-  const [selectedFunnelId, setSelectedFunnelId] = useState<string | null>(null);
-  const [funnelStages, setFunnelStages] = useState<FunnelStage[]>([]);
-  const [loadingFunnels, setLoadingFunnels] = useState(false);
-  const [isFunnelBuilderOpen, setIsFunnelBuilderOpen] = useState(false);
-  const [editingFunnel, setEditingFunnel] = useState<MediaPlanFunnel | null>(null);
-  const [mediaChannels, setMediaChannels] = useState<any[]>([]);
   const [actionPointsStats, setActionPointsStats] = useState<{ totalAll: number; completedAll: number; trafficLightColor: string; loading: boolean }>({ totalAll: 0, completedAll: 0, trafficLightColor: 'bg-gray-400', loading: true });
   const [allActionPoints, setAllActionPoints] = useState<any[]>([]);
   const [actionPointsRefetchTrigger, setActionPointsRefetchTrigger] = useState(0);
@@ -537,7 +496,7 @@ export default function DashboardV2() {
       };
     });
 
-    if (converted.length > 0 && converted.some(ch => ch.flights.length > 0)) {
+    if (converted.length > 0) {
       setMediaPlanBuilderChannels(converted);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -793,74 +752,18 @@ export default function DashboardV2() {
       Promise.all([
         loadData(),
         loadMediaPlanBuilderData(),
-        loadFunnels(),
         loadNonDigitalActuals(),
       ]);
     }
   }, [clientId]);
 
-  // Load event names when eventCount metric is selected
-  useEffect(() => {
-    if (clientId && selectedMetric === 'eventCount' && availableEventNames.length === 0) {
-      loadEventNames();
-    }
-  }, [clientId, selectedMetric]);
-
-  // When a funnel is selected, update the date range to match the funnel's config,
-  // but only while in the "Results" (funnels) view so the dashboard's initial
-  // load still defaults to the current month.
-  useEffect(() => {
-    if (!selectedFunnelId || funnels.length === 0 || viewMode !== 'funnels') return;
-
-    const selectedFunnel = funnels.find(f => f.id === selectedFunnelId);
-    if (selectedFunnel?.config?.dateRange) {
-      setAnalyticsDateRange({
-        startDate: selectedFunnel.config.dateRange.startDate,
-        endDate: selectedFunnel.config.dateRange.endDate,
-      });
-    }
-  }, [selectedFunnelId, funnels, viewMode]);
-
-  // Reload analytics when date range, selected metric, or event name changes.
-  // Switching metricSource / platformMetricKey does NOT need a full refetch —
-  // the second effect below recalculates in-memory from already-loaded spend data.
+  // Reload analytics when date range changes.
   useEffect(() => {
     if (clientId) {
-      const eventName = selectedMetric === 'eventCount' ? selectedEventName : null;
-      loadAnalyticsData(selectedMetric, eventName);
-
-      if (selectedFunnelId) {
-        calculateFunnel(selectedFunnelId);
-      }
+      loadAnalyticsData();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [analyticsDateRange.startDate, analyticsDateRange.endDate, clientId, selectedMetric, selectedEventName]);
-
-  // Recalculate cost metrics when selected channels, campaigns, source, or platform metric key changes
-  useEffect(() => {
-    if (spendData.length > 0 && availableChannels.length > 0 && selectedChannels.size > 0) {
-      const filteredSpendData = spendData.filter((point: any) => {
-        if (point.channelId && !selectedChannels.has(point.channelId)) return false;
-        if (selectedCampaignIds.size > 0 && point.campaignId && !selectedCampaignIds.has(point.campaignId)) return false;
-        return true;
-      });
-
-      const costResult = selectedMetricSource !== 'ga4'
-        ? calculateCostPerPlatformMetric(filteredSpendData, selectedPlatformMetricKey, selectedMetricSource as 'meta' | 'google')
-        : calculateCostPerMetric(filteredSpendData, ga4Data, selectedMetric);
-
-      if (!costResult.error) {
-        setCacError(undefined);
-        setCacErrorDetails(undefined);
-        setCacMetrics(costResult.data);
-      } else {
-        setCacError(costResult.error);
-        setCacErrorDetails(costResult.errorDetails);
-        setCacMetrics([]);
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedChannels, selectedCampaignIds, spendData, ga4Data, selectedMetric, selectedMetricSource, selectedPlatformMetricKey]);
+  }, [analyticsDateRange.startDate, analyticsDateRange.endDate, clientId]);
 
   const loadData = async () => {
     try {
@@ -1001,64 +904,17 @@ export default function DashboardV2() {
     };
   }, [mediaPlanBuilderChannels, commission, clientSandboxPlan, clientId, isLoadingMediaPlanBuilder, sandboxPlanHydrated]);
 
-  const loadEventNames = async () => {
-    if (!clientId) return;
-
-    setLoadingEventNames(true);
-    try {
-      const response = await fetch('/api/ads/google-analytics/event-names', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientId }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success && data.eventNames) {
-          setAvailableEventNames(data.eventNames);
-          if (!selectedEventName && data.eventNames.length > 0) {
-            setSelectedEventName(data.eventNames[0].name);
-          }
-        }
-      } else {
-        setAvailableEventNames([]);
-      }
-    } catch (error) {
-      console.error('Error loading event names:', error);
-      setAvailableEventNames([]);
-    } finally {
-      setLoadingEventNames(false);
-    }
-  };
-
-  const loadAnalyticsData = async (metricKey: string = 'activeUsers', eventName: string | null = null) => {
+  const loadAnalyticsData = async (force: boolean = false) => {
     if (!clientId) return;
 
     setLoadingAnalytics(true);
     setIsLoadingSpend(true);
     try {
-      const allMetricKeys = METRIC_OPTIONS.map((m: any) => m.value);
-
-      const result = await fetchAnalyticsData({
+      const result = await fetchCachedAnalyticsData(clientId, {
         startDate: analyticsDateRange.startDate,
         endDate: analyticsDateRange.endDate,
-        clientId: clientId,
-        includeSpendData: true,
-        metrics: allMetricKeys,
-        eventName: eventName || undefined,
+        force,
       });
-
-      const metricsWithData = new Set<string>();
-      if (result.ga4Data && result.ga4Data.length > 0) {
-        allMetricKeys.forEach((metric: string) => {
-          const hasData = result.ga4Data.some((point: any) => {
-            const value = point[metric];
-            return value !== null && value !== undefined && value !== '' && Number(value) > 0;
-          });
-          if (hasData) metricsWithData.add(metric);
-        });
-      }
-      setAvailableMetrics(metricsWithData);
 
       const enhancedSpendData = (result.spendData || []).map((point: any) => {
         const matchingPlan = plans.find(plan => {
@@ -1077,165 +933,27 @@ export default function DashboardV2() {
         return { ...point, planId: matchingPlan?.id, planName: matchingPlan?.name, channelId, channelName };
       });
 
-      setSpendData(enhancedSpendData);
       setChannelMonthSpendData(enhancedSpendData);
       setIsLoadingSpend(false);
       setSpendApiErrors((result as any).errors?.filter((e: string) => !e.startsWith('GA4')) ?? []);
-      setGa4Data(result.ga4Data || []);
-
-      // Extract platform-native event options from the loaded spend data
-      setAvailablePlatformEvents(extractPlatformEventOptions(enhancedSpendData));
-
-      // Default metricSource to the connected ad platform on first load
-      if (!metricSourceInitialisedRef.current && enhancedSpendData.length > 0) {
-        metricSourceInitialisedRef.current = true;
-        const hasMeta = enhancedSpendData.some((p: any) => p.platform === 'meta-ads');
-        const hasGoogle = enhancedSpendData.some((p: any) => p.platform === 'google-ads');
-        if (hasMeta) setSelectedMetricSource('meta');
-        else if (hasGoogle) setSelectedMetricSource('google');
-      }
-
-      const channelMap = new Map<string, string>();
-      enhancedSpendData.forEach((point: any) => {
-        if (point.channelId && point.channelName) {
-          channelMap.set(point.channelId, point.channelName);
-        }
-      });
-      const channels = Array.from(channelMap.entries()).map(([id, name]) => ({ id, name }));
-      setAvailableChannels(channels);
-
-      if (selectedChannels.size === 0 && channels.length > 0) {
-        setSelectedChannels(new Set(channels.map(ch => ch.id)));
-      }
-
-      // Derive available campaigns from spend data
-      const campaignMap = new Map<string, { name: string; channelId: string }>();
-      enhancedSpendData.forEach((point: any) => {
-        if (point.campaignId && point.campaignName && !campaignMap.has(point.campaignId)) {
-          campaignMap.set(point.campaignId, { name: point.campaignName, channelId: point.channelId || '' });
-        }
-      });
-      setAvailableCampaigns(Array.from(campaignMap.entries()).map(([id, { name, channelId }]) => ({ id, name, channelId })));
-
-      const filteredSpendData = enhancedSpendData.filter((point: any) => {
-        if (selectedChannels.size > 0 && point.channelId && !selectedChannels.has(point.channelId)) return false;
-        if (selectedCampaignIds.size > 0 && point.campaignId && !selectedCampaignIds.has(point.campaignId)) return false;
-        return true;
-      });
-
-      const costResult = selectedMetricSource !== 'ga4'
-        ? calculateCostPerPlatformMetric(filteredSpendData, selectedPlatformMetricKey, selectedMetricSource as 'meta' | 'google')
-        : calculateCostPerMetric(filteredSpendData, result.ga4Data || [], metricKey);
-
-      if (costResult.error) {
-        setCacError(costResult.error);
-        setCacErrorDetails(costResult.errorDetails);
-        setCacMetrics([]);
-      } else {
-        setCacError(undefined);
-        setCacErrorDetails(undefined);
-        setCacMetrics(costResult.data);
-      }
     } catch (error: any) {
       console.error('Error loading analytics data:', error);
-      setCacError('Failed to load analytics data');
-      setCacErrorDetails(error.message || 'Unknown error');
-      setCacMetrics([]);
       setIsLoadingSpend(false);
     } finally {
       setLoadingAnalytics(false);
     }
   };
 
-  const loadPreviousPeriodData = async (enabled: boolean) => {
-    if (!enabled) {
-      setPreviousPeriodMetrics(null);
-      return;
-    }
-    if (!clientId) return;
-
-    setLoadingComparison(true);
+  // Force-refreshes GA4 + all connected ad platforms for this client, bypassing
+  // the 6-hour cache — the "Refresh Data" button next to the timeframe picker.
+  // Resets each platform's staleness clock so the cron skips it for 6h.
+  const handleRefreshData = async () => {
+    if (isRefreshingData) return;
+    setIsRefreshingData(true);
     try {
-      const startDate = parseISO(analyticsDateRange.startDate);
-      const endDate = parseISO(analyticsDateRange.endDate);
-      const periodLength = differenceInDays(endDate, startDate);
-      const prevEndDate = subDays(startDate, 1);
-      const prevStartDate = subDays(prevEndDate, periodLength);
-
-      const allMetricKeys = METRIC_OPTIONS.map((m: any) => m.value);
-      const eventName = selectedMetric === 'eventCount' ? selectedEventName : null;
-
-      const result = await fetchAnalyticsData({
-        startDate: format(prevStartDate, 'yyyy-MM-dd'),
-        endDate: format(prevEndDate, 'yyyy-MM-dd'),
-        clientId: clientId,
-        includeSpendData: true,
-        metrics: allMetricKeys,
-        eventName: eventName || undefined,
-      });
-
-      const costResult = selectedMetricSource !== 'ga4'
-        ? calculateCostPerPlatformMetric(result.spendData || [], selectedPlatformMetricKey, selectedMetricSource as 'meta' | 'google')
-        : calculateCostPerMetric(result.spendData || [], result.ga4Data || [], selectedMetric);
-      if (!costResult.error) {
-        setPreviousPeriodMetrics(costResult.data);
-      } else {
-        setPreviousPeriodMetrics(null);
-      }
-    } catch (error) {
-      console.error('Error loading previous period data:', error);
-      setPreviousPeriodMetrics(null);
+      await loadAnalyticsData(true);
     } finally {
-      setLoadingComparison(false);
-    }
-  };
-
-  const loadFunnels = async () => {
-    setLoadingFunnels(true);
-    try {
-      const [channelsResponse, funnelsResponse] = await Promise.all([
-        fetch(`/api/media-plan/channels?clientId=${clientId}`),
-        fetch(`/api/funnels?clientId=${clientId}`),
-      ]);
-      const [channelsData, data] = await Promise.all([
-        channelsResponse.json(),
-        funnelsResponse.json(),
-      ]);
-
-      if (channelsData.success && channelsData.channels) {
-        setMediaChannels(channelsData.channels);
-      }
-
-      if (data.success && data.funnels) {
-        setFunnels(data.funnels);
-        if (data.funnels.length > 0 && !selectedFunnelId) {
-          const firstFunnelId = data.funnels[0].id;
-          setSelectedFunnelId(firstFunnelId);
-          await calculateFunnel(firstFunnelId);
-        }
-      }
-    } catch (error) {
-      console.error('Failed to load funnels:', error);
-    } finally {
-      setLoadingFunnels(false);
-    }
-  };
-
-  const calculateFunnel = async (funnelId: string) => {
-    setLoadingFunnels(true);
-    try {
-      const response = await fetch(
-        `/api/funnels/${funnelId}/calculate?startDate=${analyticsDateRange.startDate}&endDate=${analyticsDateRange.endDate}`
-      );
-      const data = await response.json();
-      if (data.success && data.stages) {
-        setFunnelStages(data.stages);
-      }
-    } catch (error) {
-      console.error('Failed to calculate funnel:', error);
-      setFunnelStages([]);
-    } finally {
-      setLoadingFunnels(false);
+      setIsRefreshingData(false);
     }
   };
 
@@ -1474,6 +1192,36 @@ export default function DashboardV2() {
       setIsUploadingLogo(false);
     }
   }, [clientId, client]);
+
+  // ── Client name edit/save handler ────────────────────────────────────────
+  const handleStartEditClientName = useCallback(() => {
+    setEditingClientName(client?.name ?? '');
+    setIsEditingClientName(true);
+  }, [client]);
+
+  const handleCancelEditClientName = useCallback(() => {
+    setIsEditingClientName(false);
+    setEditingClientName('');
+  }, []);
+
+  const handleSaveClientName = useCallback(async () => {
+    if (!clientId) return;
+    const trimmed = editingClientName.trim();
+    if (!trimmed || trimmed === client?.name) {
+      setIsEditingClientName(false);
+      return;
+    }
+    setIsSavingClientName(true);
+    try {
+      const updated = await updateClient(clientId, trimmed);
+      if (client) setClient({ ...client, name: updated?.name ?? trimmed });
+      setIsEditingClientName(false);
+    } catch (err) {
+      console.error('Failed to update client name:', err);
+    } finally {
+      setIsSavingClientName(false);
+    }
+  }, [clientId, client, editingClientName]);
 
   // ── Adjusted health score with custom weights ────────────────────────────
   const adjustedHealthScore = useMemo(() => {
@@ -2125,11 +1873,8 @@ export default function DashboardV2() {
   }, []);
 
   const handleViewReport = useCallback((_platform: string) => {
-    const section = document.getElementById('cost-per-metric-section');
-    if (section) {
-      section.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, []);
+    router.push(`/clients/${clientId}/hub#section-costPerMetric`);
+  }, [router, clientId]);
 
   const handleReconnectPlatform = useCallback(() => {
     setViewMode('client-hub');
@@ -2197,56 +1942,6 @@ export default function DashboardV2() {
 
   const handleCommissionChange = (value: number) => {
     setCommission(value);
-  };
-
-  const handleFunnelSaved = async (config: FunnelConfig) => {
-    try {
-      if (editingFunnel) {
-        const response = await fetch(`/api/funnels/${editingFunnel.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ channelIds: config.channelIds, name: config.name, config }),
-        });
-        if (!response.ok) throw new Error('Failed to update funnel');
-      } else {
-        const response = await fetch('/api/funnels', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ clientId, channelIds: config.channelIds, name: config.name, config }),
-        });
-        if (!response.ok) throw new Error('Failed to create funnel');
-      }
-      if (config.dateRange) {
-        setAnalyticsDateRange({ startDate: config.dateRange.startDate, endDate: config.dateRange.endDate });
-      }
-      await loadFunnels();
-      if (selectedFunnelId) await calculateFunnel(selectedFunnelId);
-    } catch (error) {
-      console.error('Error saving funnel:', error);
-    } finally {
-      setIsFunnelBuilderOpen(false);
-      setEditingFunnel(null);
-    }
-  };
-
-  const handleDeleteFunnel = async (funnelId: string) => {
-    if (!confirm('Are you sure you want to delete this funnel? This action cannot be undone.')) return;
-    try {
-      const response = await fetch(`/api/funnels/${funnelId}`, { method: 'DELETE' });
-      const data = await response.json();
-      if (data.success) {
-        setFunnels(prev => prev.filter(f => f.id !== funnelId));
-        if (selectedFunnelId === funnelId) {
-          setSelectedFunnelId(null);
-          setFunnelStages([]);
-        }
-      } else {
-        alert(data.error || 'Failed to delete funnel');
-      }
-    } catch (error) {
-      console.error('Error deleting funnel:', error);
-      alert('Failed to delete funnel. Please try again.');
-    }
   };
 
   const pageFont: React.CSSProperties = { fontFamily: "'DM Sans', system-ui, sans-serif" };
@@ -2325,6 +2020,7 @@ export default function DashboardV2() {
         ) : (
           <>
             {/* ── Hero: health score + quick metrics ── */}
+            <div data-tour-id="client-hero">
             {(
               loadingAnalytics ? (
                 <div className="bg-white rounded-xl border border-gray-200 px-7 py-6 animate-pulse">
@@ -2355,6 +2051,7 @@ export default function DashboardV2() {
                 </div>
               )
             )}
+            </div>
 
             {/* ── Global View Mode & Date Controls (same card as the content below) ── */}
             <div className="mb-6">
@@ -2363,10 +2060,11 @@ export default function DashboardV2() {
               <div style={{ display: 'flex', alignItems: 'flex-end' }}>
                 {VIEW_MODE_ORDER.map((tab, idx) => {
                   const isActive = viewMode === tab;
-                  const label = tab === 'overview' ? 'Overview' : tab === 'funnels' ? 'Results' : tab === 'media-plan' ? 'Media Plan' : 'Client Hub';
+                  const label = tab === 'overview' ? 'Overview' : tab === 'media-plan' ? 'Media Plan' : 'Client Hub';
                   return (
                     <button
                       key={tab}
+                      data-tour-id={tab === 'overview' ? 'client-overview-tab' : tab === 'media-plan' ? 'client-media-plan-tab' : 'client-hub-tab'}
                       onClick={() => setViewMode(tab)}
                       style={{
                         position: 'relative',
@@ -2409,23 +2107,28 @@ export default function DashboardV2() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                 <Link
                   href={`/clients/${clientId}/hub`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-tour-id="client-portal-share"
                   style={{
-                    display: 'flex', alignItems: 'center', gap: 6,
-                    padding: '8px 14px', borderRadius: 12, border: '0.5px solid #1E3A8A',
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '12px 20px', borderRadius: 14, border: '0.5px solid #1E3A8A',
                     background: '#1E3A8A', color: '#FFFFFF',
-                    fontSize: 16, fontWeight: 500, cursor: 'pointer',
+                    fontSize: 18, fontWeight: 700, cursor: 'pointer',
                     fontFamily: "'DM Sans', system-ui, sans-serif",
                     textDecoration: 'none',
+                    boxShadow: '0 4px 12px rgba(30, 58, 138, 0.35)',
                   }}
                 >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
                     <polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
                   </svg>
-                  Client Portal
+                  Client Performance Portal
                 </Link>
                 <button
                   onClick={() => setShowFullscreenGantt(true)}
+                  data-tour-id="client-timeline"
                   style={{
                     display: 'flex', alignItems: 'center', gap: 6,
                     padding: '8px 14px', borderRadius: 12, border: '0.5px solid #D5D0C5',
@@ -2721,6 +2424,15 @@ export default function DashboardV2() {
 
                 {/* Timeframe — applies to Channel Performance below */}
                 <div className="flex items-center justify-end gap-2 mt-6">
+                  <button
+                    type="button"
+                    onClick={handleRefreshData}
+                    disabled={isRefreshingData || loadingAnalytics}
+                    className="text-sm text-gray-500 hover:text-gray-800 disabled:opacity-50 disabled:cursor-not-allowed underline underline-offset-2"
+                    title="Refresh GA4 + ad spend data now (normally refreshes automatically every 6 hours)"
+                  >
+                    {isRefreshingData ? 'Refreshing…' : 'Refresh Data'}
+                  </button>
                   <span className="text-sm text-gray-500">Timeframe:</span>
                   <DateRangePicker
                     value={analyticsDateRange}
@@ -2935,139 +2647,6 @@ export default function DashboardV2() {
               </>
             )}
 
-            {/* ── Funnels view ── */}
-            {viewMode === 'funnels' && (
-              <>
-                {/* Timeframe — applies to Results below */}
-                <div className="flex items-center justify-end gap-2" style={{ marginBottom: 14 }}>
-                  <span className="text-sm text-gray-500">Timeframe:</span>
-                  <DateRangePicker
-                    value={analyticsDateRange}
-                    onChange={setAnalyticsDateRange}
-                    disabled={loadingAnalytics}
-                  />
-                </div>
-
-                {/* Funnel selector */}
-                <div style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', padding: '20px 24px', marginBottom: 14 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-                    <span style={{ fontSize: 16, fontWeight: 600, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Funnels</span>
-                    <button
-                      onClick={() => { setEditingFunnel(null); setIsFunnelBuilderOpen(true); }}
-                      style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 12, border: '0.5px solid #D5D0C5', background: '#FDFCF8', color: '#4A6580', fontSize: 16, fontWeight: 500, cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif" }}
-                    >
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                      Create Funnel
-                    </button>
-                  </div>
-                  {loadingFunnels && funnels.length === 0 ? (
-                    <p style={{ fontSize: 16, color: '#A0998F', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Loading funnels...</p>
-                  ) : funnels.length === 0 ? (
-                    <p style={{ fontSize: 16, color: '#A0998F', fontFamily: "'DM Sans', system-ui, sans-serif" }}>No funnels created yet. Click &quot;Create Funnel&quot; to get started.</p>
-                  ) : (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-                      {funnels.map((funnel) => (
-                        <div
-                          key={funnel.id}
-                          style={{
-                            padding: '10px 14px', borderRadius: 12,
-                            border: selectedFunnelId === funnel.id ? '1.5px solid #4A6580' : '0.5px solid #E8E4DC',
-                            background: selectedFunnelId === funnel.id ? '#EEF2F6' : '#FAFAF8',
-                            display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer',
-                          }}
-                        >
-                          <button
-                            onClick={async () => {
-                              if (loadingFunnels) return;
-                              setSelectedFunnelId(funnel.id);
-                              await calculateFunnel(funnel.id);
-                            }}
-                            disabled={loadingFunnels}
-                            style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 16, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}
-                          >
-                            {funnel.name}
-                          </button>
-                          <span style={{ fontSize: 14, color: '#A0998F', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
-                            {(funnel.config as FunnelConfig).stages.length} stages
-                          </span>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); setEditingFunnel(funnel); setIsFunnelBuilderOpen(true); }}
-                            title="Edit funnel"
-                            style={{ background: 'none', border: 'none', padding: '2px 4px', cursor: 'pointer', color: '#A0998F', display: 'flex', alignItems: 'center' }}
-                          >
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                          </button>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleDeleteFunnel(funnel.id); }}
-                            title="Delete funnel"
-                            style={{ background: 'none', border: 'none', padding: '2px 4px', cursor: 'pointer', color: '#C97B6A', display: 'flex', alignItems: 'center' }}
-                          >
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 space-y-8">
-                  {selectedFunnelId && (
-                    <FunnelChart
-                      funnelStages={funnelStages}
-                      totalCost={totalActualSpend}
-                      dateRange={analyticsDateRange}
-                      isLoading={loadingFunnels}
-                      client={client}
-                    />
-                  )}
-
-                  {/* Cost Per chart under the funnel visual */}
-                  <div id="cost-per-metric-section">
-                    <CACChart
-                      cacMetrics={cacMetrics}
-                      previousPeriodMetrics={previousPeriodMetrics}
-                      height={340}
-                      isLoading={loadingAnalytics}
-                      isComparisonLoading={loadingComparison}
-                      selectedMetric={selectedMetric}
-                      error={cacError}
-                      errorDetails={cacErrorDetails}
-                      onComparisonToggle={loadPreviousPeriodData}
-                      availableChannels={availableChannels}
-                      selectedChannels={selectedChannels}
-                      onChannelsChange={setSelectedChannels}
-                      onMetricChange={setSelectedMetric}
-                      availableMetrics={availableMetrics}
-                      availableEventNames={availableEventNames}
-                      selectedEventName={selectedEventName}
-                      onEventNameChange={setSelectedEventName}
-                      loadingEventNames={loadingEventNames}
-                      metricSource={selectedMetricSource}
-                      onMetricSourceChange={setSelectedMetricSource}
-                      availablePlatformEvents={availablePlatformEvents}
-                      selectedPlatformMetricKey={selectedPlatformMetricKey}
-                      onPlatformMetricChange={setSelectedPlatformMetricKey}
-                      availableCampaigns={availableCampaigns}
-                      selectedCampaignIds={selectedCampaignIds}
-                      onCampaignIdsChange={setSelectedCampaignIds}
-                    />
-                  </div>
-
-              <FunnelBuilderModal
-                    isOpen={isFunnelBuilderOpen}
-                    onClose={() => {
-                      setIsFunnelBuilderOpen(false);
-                      setEditingFunnel(null);
-                    }}
-                    onSave={handleFunnelSaved}
-                    initialConfig={editingFunnel?.config as FunnelConfig | undefined}
-                    availableChannels={mediaChannels}
-                    availableCampaigns={availableCampaigns}
-                  />
-                </div>
-              </>
-            )}
-
             {/* ── Media Plan view ── */}
             {viewMode === 'media-plan' && sandboxPlanHydrated && (
               clientSandboxPlan ? (
@@ -3166,10 +2745,10 @@ export default function DashboardV2() {
                   </p>
                 </div>
 
-                {/* Client Logo */}
+                {/* Client Logo & Name */}
                 <div style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', padding: '20px 24px' }}>
                   <div style={{ marginBottom: 16 }}>
-                    <span style={{ fontSize: 16, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Client Logo</span>
+                    <span style={{ fontSize: 16, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Client Logo & Name</span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                     {client?.logo_url ? (
@@ -3200,6 +2779,75 @@ export default function DashboardV2() {
                       <span style={{ fontSize: 13, color: '#DC2626', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Only 1:1 (square) images are accepted.</span>
                       {logoUploadError && (
                         <span style={{ fontSize: 14, color: '#A0442A', fontFamily: "'DM Sans', system-ui, sans-serif" }}>{logoUploadError}</span>
+                      )}
+                    </div>
+
+                    <div style={{ width: 1, alignSelf: 'stretch', background: '#E8E4DC', margin: '0 4px' }} />
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, minWidth: 0 }}>
+                      <span style={{ fontSize: 13, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Client Name</span>
+                      {isEditingClientName ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <input
+                            type="text"
+                            value={editingClientName}
+                            onChange={(e) => setEditingClientName(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleSaveClientName();
+                              if (e.key === 'Escape') handleCancelEditClientName();
+                            }}
+                            autoFocus
+                            disabled={isSavingClientName}
+                            style={{
+                              height: 34, padding: '0 10px', borderRadius: 10,
+                              border: '0.5px solid #D5D0C5', background: '#FFFFFF',
+                              color: '#1C1917', fontSize: 15, fontFamily: "'DM Sans', system-ui, sans-serif",
+                              flex: 1, minWidth: 0, outline: 'none',
+                            }}
+                          />
+                          <button
+                            onClick={handleSaveClientName}
+                            disabled={isSavingClientName || !editingClientName.trim()}
+                            style={{
+                              height: 34, padding: '0 12px', borderRadius: 10,
+                              border: 'none', background: '#1C1917',
+                              color: '#FDFCF8', fontSize: 14, fontWeight: 500,
+                              cursor: isSavingClientName ? 'not-allowed' : 'pointer',
+                              fontFamily: "'DM Sans', system-ui, sans-serif",
+                              opacity: isSavingClientName || !editingClientName.trim() ? 0.6 : 1,
+                            }}
+                          >
+                            {isSavingClientName ? 'Saving...' : 'Save'}
+                          </button>
+                          <button
+                            onClick={handleCancelEditClientName}
+                            disabled={isSavingClientName}
+                            style={{
+                              height: 34, padding: '0 12px', borderRadius: 10,
+                              border: '0.5px solid #D5D0C5', background: '#FDFCF8',
+                              color: '#1C1917', fontSize: 14, fontWeight: 500,
+                              cursor: isSavingClientName ? 'not-allowed' : 'pointer',
+                              fontFamily: "'DM Sans', system-ui, sans-serif",
+                            }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <span style={{ fontSize: 17, fontWeight: 600, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}>{client?.name ?? '—'}</span>
+                          <button
+                            onClick={handleStartEditClientName}
+                            style={{
+                              height: 28, padding: '0 10px', borderRadius: 10,
+                              border: '0.5px solid #D5D0C5', background: '#FDFCF8',
+                              color: '#1C1917', fontSize: 13, fontWeight: 500,
+                              cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif",
+                            }}
+                          >
+                            Edit
+                          </button>
+                        </div>
                       )}
                     </div>
                   </div>

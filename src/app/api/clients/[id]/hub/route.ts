@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getClientHubData } from '@/lib/client-hub/get-hub-data';
+import { isClientOwnedByUser } from '@/lib/client-hub/assert-ownership';
+import { normalizeSectionOrder } from '@/lib/client-hub/section-meta';
 
 type Params = { params: Promise<{ id: string }> | { id: string } };
 
@@ -9,8 +11,8 @@ async function resolveId(params: Params['params']): Promise<string> {
 }
 
 const DEFAULT_SECTIONS = {
-  snapshot: true, charts: true, pacing: true, goals: true,
-  brief: true, notes: true, documents: true, spend: true,
+  snapshot: true, cpaTrend: true, charts: true, funnels: true, costPerMetric: true, trends: true, demographics: true, pacing: true, goals: true,
+  brief: true, notes: true, documents: true, spend: true, creatives: true,
 };
 
 // GET — full hub data bag + section visibility + share-link status, for the agency edit view
@@ -20,16 +22,20 @@ export async function GET(req: NextRequest, { params }: Params) {
   const supabase = await createClient();
   const { data: { session } } = await supabase.auth.getSession();
   if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!(await isClientOwnedByUser(supabase, clientId, session.user.id))) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
 
   const { data: config } = await supabase
     .from('client_hub_config')
-    .select('sections, conversion_action_type, conversion_label')
+    .select('sections, section_order, conversion_platform, conversion_action_type, conversion_label')
     .eq('client_id', clientId)
     .maybeSingle();
 
   const data = await getClientHubData(supabase, clientId, {
     start: req.nextUrl.searchParams.get('start') ?? undefined,
     end: req.nextUrl.searchParams.get('end') ?? undefined,
+    conversionPlatform: (config?.conversion_platform as any) ?? null,
     conversionActionType: config?.conversion_action_type ?? null,
     conversionLabel: config?.conversion_label ?? undefined,
   });
@@ -43,7 +49,8 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   return NextResponse.json({
     ...data,
-    sections: config?.sections ?? DEFAULT_SECTIONS,
+    sections: { ...DEFAULT_SECTIONS, ...(config?.sections ?? {}) },
+    sectionOrder: normalizeSectionOrder(config?.section_order),
     shareLink: shareLink ?? null,
   });
 }

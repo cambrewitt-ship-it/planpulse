@@ -127,10 +127,16 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // TODO items support a direct due_date and optional client association
+    // TODO items support a direct due_date and optional client association.
+    // Agency-wide TODOs (no client_id) have no other ownership signal, so
+    // they're stamped with the creating user directly.
     if (category === 'TODO') {
       if (due_date) insertData.due_date = due_date;
-      if (client_id) insertData.client_id = client_id;
+      if (client_id) {
+        insertData.client_id = client_id;
+      } else {
+        insertData.user_id = session.user.id;
+      }
     }
 
     const { data, error } = await supabase

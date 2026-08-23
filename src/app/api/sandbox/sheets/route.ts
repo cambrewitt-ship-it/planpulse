@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import ExcelJS from 'exceljs';
+import { rateLimit } from '@/lib/rate-limit';
 
 export async function POST(request: NextRequest) {
+  const limited = await rateLimit(request, 'sandbox-sheets', 20, 60);
+  if (limited) return limited;
+
   let formData: FormData;
   try { formData = await request.formData(); }
   catch { return NextResponse.json({ error: 'Invalid form data' }, { status: 400 }); }

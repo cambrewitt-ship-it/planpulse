@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient as createSupabaseAdmin } from '@supabase/supabase-js';
 import { getClientHubData } from '@/lib/client-hub/get-hub-data';
+import { rateLimit } from '@/lib/rate-limit';
+import { normalizeSectionOrder } from '@/lib/client-hub/section-meta';
 
 type Params = { params: Promise<{ token: string }> | { token: string } };
 
@@ -9,8 +11,8 @@ async function resolveToken(params: Params['params']): Promise<string> {
 }
 
 const DEFAULT_SECTIONS: Record<string, boolean> = {
-  snapshot: true, charts: true, pacing: true, goals: true,
-  brief: true, notes: true, documents: true, spend: true,
+  snapshot: true, cpaTrend: true, charts: true, funnels: true, costPerMetric: true, trends: true, demographics: true, pacing: true, goals: true,
+  brief: true, notes: true, documents: true, spend: true, creatives: true,
 };
 
 /**
@@ -21,6 +23,9 @@ const DEFAULT_SECTIONS: Record<string, boolean> = {
  * the share-link row, never accepted from the caller.
  */
 export async function GET(req: NextRequest, { params }: Params) {
+  const limited = await rateLimit(req, 'hub-public', 60, 60);
+  if (limited) return limited;
+
   const token = await resolveToken(params);
 
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
@@ -41,13 +46,14 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   const { data: config } = await admin
     .from('client_hub_config')
-    .select('sections, conversion_action_type, conversion_label')
+    .select('sections, section_order, conversion_platform, conversion_action_type, conversion_label')
     .eq('client_id', link.client_id)
     .maybeSingle();
 
   const data = await getClientHubData(admin, link.client_id, {
     start: req.nextUrl.searchParams.get('start') ?? undefined,
     end: req.nextUrl.searchParams.get('end') ?? undefined,
+    conversionPlatform: (config?.conversion_platform as any) ?? null,
     conversionActionType: config?.conversion_action_type ?? null,
     conversionLabel: config?.conversion_label ?? undefined,
   });
@@ -64,6 +70,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     period: data.period,
     conversion: data.conversion,
     sections,
+    sectionOrder: normalizeSectionOrder(config?.section_order),
     metrics: sections.snapshot ? data.metrics : [],
     monthlyTrend: sections.charts ? data.monthlyTrend : [],
     channelActuals: sections.charts ? data.channelActuals : [],

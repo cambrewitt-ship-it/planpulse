@@ -9,6 +9,7 @@ import { COLOR, FONT_BODY, FONT_HEAD } from '@/components/client-hub/tokens';
 
 interface PublicHubResponse extends ClientHubData {
   sections: Record<string, boolean>;
+  sectionOrder: string[];
 }
 
 export default function ClientHubPublicPage() {
@@ -55,5 +56,5 @@ export default function ClientHubPublicPage() {
     );
   }
 
-  return <ClientHubView data={data} sections={data.sections} editable={false} onPeriodChange={setRange} />;
+  return <ClientHubView data={data} sections={data.sections} sectionOrder={data.sectionOrder} editable={false} onPeriodChange={setRange} publicToken={token} />;
 }

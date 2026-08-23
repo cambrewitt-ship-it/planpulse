@@ -559,6 +559,7 @@ export function UploadWizard({ onPlanLoaded }: Props) {
   if (step === "review" && parsedPlan) {
     const total = totalBudget(parsedPlan.rows);
     const channelSet = new Set(parsedPlan.rows.map(r => r.channel || r.funnel).filter(Boolean));
+    const totalFlights = parsedPlan.rows.reduce((s, r) => s + r.flights.length, 0);
 
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50 p-8">
@@ -582,6 +583,18 @@ export function UploadWizard({ onPlanLoaded }: Props) {
               </div>
             ))}
           </div>
+
+          {/* No flights detected across any row — timeline will load empty */}
+          {totalFlights === 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4 flex items-start gap-2">
+              <svg className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span className="text-xs text-amber-800">
+                No flights were detected in any row, so the timeline will load with channels but no scheduled spend. This usually means the flight cells in your spreadsheet aren&apos;t filled with a solid highlight color — check that the date cells marking each flight have a background fill, then re-upload.
+              </span>
+            </div>
+          )}
 
           {/* Custom columns detected */}
           {parsedPlan.customColumns && parsedPlan.customColumns.length > 0 && (

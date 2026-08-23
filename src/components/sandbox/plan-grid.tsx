@@ -1295,8 +1295,10 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
 
           <thead>
             <tr style={{ height: HEADER_H }}>
-              <th colSpan={3 + customColumns.length} className={stickyHeader}
+              <th colSpan={leftColSpan} className={stickyHeader}
                 style={{ position: "sticky", left: 0, top: 0, zIndex: 30, textAlign: "left" }} />
+              <th className={stickyHeader}
+                style={{ position: "sticky", left: dynamicTotalLeft, top: 0, zIndex: 30 }} />
               {monthGroups.map(mg => (
                 <th key={`${mg.month}-${mg.year}`} colSpan={mg.count}
                   className="border border-gray-300 bg-gray-700 text-white text-xs font-bold uppercase tracking-wider text-center"

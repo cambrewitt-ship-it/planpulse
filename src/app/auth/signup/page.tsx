@@ -9,6 +9,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Eye, EyeOff } from 'lucide-react';
 import Link from 'next/link';
+import { TurnstileWidget } from '@/components/auth/turnstile-widget';
+
+const CAPTCHA_REQUIRED = !!process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
 
 export default function SignupPage() {
   const router = useRouter();
@@ -21,6 +24,7 @@ export default function SignupPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -40,13 +44,20 @@ export default function SignupPage() {
       return;
     }
 
+    if (CAPTCHA_REQUIRED && !captchaToken) {
+      setError('Please complete the verification check');
+      setLoading(false);
+      return;
+    }
+
     try {
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
           data: { first_name: firstName.trim() },
-          emailRedirectTo: `${window.location.origin}/auth/callback?next=/clients/create`,
+          emailRedirectTo: `${window.location.origin}/auth/callback?next=/agency`,
+          ...(captchaToken ? { captchaToken } : {}),
         },
       });
 
@@ -57,8 +68,9 @@ export default function SignupPage() {
         setSuccess(true);
         setError('Please check your email to confirm your account');
       } else if (data.session) {
-        // Auto-signed in (email confirmation disabled) — go straight to client onboarding
-        router.push('/clients/create');
+        // Auto-signed in (email confirmation disabled) — go straight to the agency
+        // dashboard, where the first-run product tour picks up from here.
+        router.push('/agency');
         router.refresh();
       }
     } catch (error: any) {
@@ -187,13 +199,22 @@ export default function SignupPage() {
                 </div>
               </div>
 
+              <TurnstileWidget onVerify={setCaptchaToken} />
+
               <Button
                 type="submit"
-                disabled={loading}
+                disabled={loading || (CAPTCHA_REQUIRED && !captchaToken)}
                 className="w-full"
               >
                 {loading ? 'Creating account...' : 'Sign up'}
               </Button>
+
+              <p className="text-center text-xs" style={{ color: '#8A8578' }}>
+                By clicking Sign Up, you agree to our{' '}
+                <Link href="/terms" style={{ color: '#4A6580', fontWeight: 500 }}>
+                  Terms and Conditions
+                </Link>
+              </p>
 
               <div className="text-center text-sm">
                 <span style={{ color: '#8A8578' }}>Already have an account? </span>

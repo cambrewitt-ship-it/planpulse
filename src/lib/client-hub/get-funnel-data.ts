@@ -1,0 +1,288 @@
+/**
+ * Aggregates Meta/Google spend metrics and GA4 events for a funnel's date
+ * range and runs them through calculateFunnelMetrics. Shared by the
+ * session-authenticated funnel calculate route (agency dashboard / Client
+ * Hub editor) and the public token-gated Client Hub calculate route, same
+ * shared-aggregator principle as get-demographics.ts.
+ */
+
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { calculateFunnelMetrics } from '@/lib/utils/funnel-calculations';
+import type { FunnelConfig, FunnelStage } from '@/lib/types/funnel';
+import { Nango } from '@nangohq/node';
+import { toNangoPlatform } from '@/lib/platform-mapping';
+
+const ALL_GA4_METRICS = [
+  'activeUsers', 'totalUsers', 'newUsers', 'sessions', 'engagedSessions',
+  'conversions', 'eventCount', 'bounceRate', 'screenPageViews',
+];
+
+export interface ComputeFunnelStagesOptions {
+  userId: string;
+  clientId: string | null;
+  config: FunnelConfig;
+  startDate: string;
+  endDate: string;
+}
+
+export interface ComputeFunnelStagesResult {
+  stages: FunnelStage[];
+  totalSpend: number;
+}
+
+export async function computeFunnelStages(
+  supabase: SupabaseClient,
+  { userId, clientId, config, startDate, endDate }: ComputeFunnelStagesOptions
+): Promise<ComputeFunnelStagesResult> {
+  // Aggregate Meta Ads spend metrics for the date range
+  let metaSpend = 0;
+  let metaImpressions = 0;
+  let metaClicks = 0;
+  let metaLinkClicks = 0;
+  const metaConversionEventMap = new Map<string, number>();
+
+  let googleSpend = 0;
+  let googleImpressions = 0;
+  let googleClicks = 0;
+
+  let metaQuery = supabase
+    .from('ad_performance_metrics')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('platform', 'meta-ads')
+    .gte('date', startDate)
+    .lte('date', endDate);
+
+  if (clientId) {
+    metaQuery = metaQuery.eq('client_id', clientId);
+  }
+
+  let googleQuery = supabase
+    .from('ad_performance_metrics')
+    .select('spend, impressions, clicks')
+    .eq('user_id', userId)
+    .eq('platform', 'google-ads')
+    .gte('date', startDate)
+    .lte('date', endDate);
+
+  if (clientId) {
+    googleQuery = googleQuery.eq('client_id', clientId);
+  }
+
+  const [metaResult, googleResult] = await Promise.all([metaQuery, googleQuery]);
+
+  if (metaResult.error) {
+    console.warn('[Funnel Calculate] Meta query error:', metaResult.error.message);
+  }
+  for (const row of metaResult.data || []) {
+    metaSpend += Number(row.spend) || 0;
+    metaImpressions += Number(row.impressions) || 0;
+    metaClicks += Number(row.clicks) || 0;
+    metaLinkClicks += Number(row.link_clicks) || 0;
+
+    // Aggregate conversion events from stored actions JSON
+    if (row.meta_actions && Array.isArray(row.meta_actions)) {
+      for (const action of row.meta_actions as Array<{ action_type: string; value: string }>) {
+        const current = metaConversionEventMap.get(action.action_type) || 0;
+        metaConversionEventMap.set(action.action_type, current + (parseInt(action.value, 10) || 0));
+      }
+    }
+  }
+
+  const metaConversionEvents = Array.from(metaConversionEventMap.entries()).map(([name, count]) => ({ name, count }));
+
+  for (const row of googleResult.data || []) {
+    googleSpend += Number(row.spend) || 0;
+    googleImpressions += Number(row.impressions) || 0;
+    googleClicks += Number(row.clicks) || 0;
+  }
+
+  // Fetch GA4 data directly (same pattern as fetch-data route, no HTTP loopback)
+  const ga4StandardMetrics: Record<string, number> = {};
+  const ga4Events: Array<{ name: string; count: number; users: number }> = [];
+
+  try {
+    // Mirror fetch-data route: filter by client_id if present, then fall back to user-level
+    let connectionQuery = supabase
+      .from('ad_platform_connections')
+      .select('connection_id')
+      .eq('user_id', userId)
+      .eq('platform', 'google-analytics')
+      .eq('connection_status', 'active');
+
+    if (clientId) {
+      connectionQuery = connectionQuery.eq('client_id', clientId);
+    }
+
+    let { data: connection } = await connectionQuery.maybeSingle();
+
+    // Fall back to any active GA4 connection for this user if client-scoped lookup failed
+    if (!connection && clientId) {
+      const { data: fallback } = await supabase
+        .from('ad_platform_connections')
+        .select('connection_id')
+        .eq('user_id', userId)
+        .eq('platform', 'google-analytics')
+        .eq('connection_status', 'active')
+        .maybeSingle();
+      connection = fallback;
+    }
+
+    if (connection) {
+      const nangoSecretKey = process.env.NANGO_SECRET_KEY_DEV_PLAN_CHECK;
+      if (!nangoSecretKey) {
+        console.warn('[Funnel Calculate] NANGO_SECRET_KEY_DEV_PLAN_CHECK not set');
+      } else {
+        const nango = new Nango({ secretKey: nangoSecretKey });
+        const nangoConnection = await nango.getConnection(
+          toNangoPlatform('google-analytics'),
+          connection.connection_id
+        );
+        const accessToken = (nangoConnection.credentials as any)?.access_token as string;
+
+        if (accessToken) {
+          // GA4 accounts stored per-user only (no client_id column)
+          const { data: gaAccounts } = await supabase
+            .from('google_analytics_accounts')
+            .select('property_id, property_name')
+            .eq('user_id', userId)
+            .eq('is_active', true);
+
+          if (gaAccounts && gaAccounts.length > 0) {
+            for (const account of gaAccounts) {
+              try {
+                const requestBody = {
+                  dateRanges: [{ startDate, endDate }],
+                  dimensions: [{ name: 'date' }],
+                  metrics: ALL_GA4_METRICS.map(m => ({ name: m })),
+                };
+
+                const ga4Response = await fetch(
+                  `https://analyticsdata.googleapis.com/v1beta/properties/${account.property_id}:runReport`,
+                  {
+                    method: 'POST',
+                    headers: {
+                      'Authorization': `Bearer ${accessToken}`,
+                      'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(requestBody),
+                  }
+                );
+
+                if (ga4Response.ok) {
+                  const ga4Data = await ga4Response.json();
+
+                  if (ga4Data.rows && Array.isArray(ga4Data.rows)) {
+                    // Build metric header index map
+                    const metricHeaderMap = new Map<string, number>();
+                    (ga4Data.metricHeaders || []).forEach((header: any, index: number) => {
+                      if (header?.name) metricHeaderMap.set(header.name, index);
+                    });
+
+                    // Sum each metric across all days
+                    for (const row of ga4Data.rows) {
+                      for (const metric of ALL_GA4_METRICS) {
+                        const metricIndex = metricHeaderMap.get(metric);
+                        if (metricIndex !== undefined && row.metricValues?.[metricIndex]) {
+                          const value = parseFloat(row.metricValues[metricIndex]?.value || '0') || 0;
+                          ga4StandardMetrics[metric] = (ga4StandardMetrics[metric] || 0) + value;
+                        }
+                      }
+                    }
+                  }
+                } else {
+                  const errText = await ga4Response.text().catch(() => '');
+                  console.warn(`[Funnel Calculate] GA4 API error for property ${account.property_id}:`, ga4Response.status, errText.substring(0, 200));
+                }
+
+                // Second call: fetch event counts by event name (for funnel stages using specific events)
+                const eventRequestBody = {
+                  dateRanges: [{ startDate, endDate }],
+                  dimensions: [{ name: 'eventName' }],
+                  metrics: [{ name: 'eventCount' }, { name: 'activeUsers' }],
+                };
+
+                const ga4EventResponse = await fetch(
+                  `https://analyticsdata.googleapis.com/v1beta/properties/${account.property_id}:runReport`,
+                  {
+                    method: 'POST',
+                    headers: {
+                      'Authorization': `Bearer ${accessToken}`,
+                      'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(eventRequestBody),
+                  }
+                );
+
+                if (ga4EventResponse.ok) {
+                  const ga4EventData = await ga4EventResponse.json();
+
+                  if (ga4EventData.rows && Array.isArray(ga4EventData.rows)) {
+                    for (const row of ga4EventData.rows) {
+                      const eventName = row.dimensionValues?.[0]?.value;
+                      const eventCount = parseFloat(row.metricValues?.[0]?.value || '0') || 0;
+                      const eventUsers = parseFloat(row.metricValues?.[1]?.value || '0') || 0;
+
+                      if (eventName && eventName !== '(not set)') {
+                        const existing = ga4Events.find(e => e.name === eventName);
+                        if (existing) {
+                          existing.count += eventCount;
+                          existing.users += eventUsers;
+                        } else {
+                          ga4Events.push({ name: eventName, count: eventCount, users: eventUsers });
+                        }
+                      }
+                    }
+                  }
+                } else {
+                  const errText = await ga4EventResponse.text().catch(() => '');
+                  console.warn(`[Funnel Calculate] GA4 Events API error for property ${account.property_id}:`, ga4EventResponse.status, errText.substring(0, 200));
+                }
+              } catch (propError: any) {
+                console.warn(`[Funnel Calculate] Failed to fetch GA4 for property ${account.property_id}:`, propError.message);
+              }
+            }
+          }
+        }
+      }
+    }
+  } catch (ga4Error: any) {
+    console.warn('[Funnel Calculate] GA4 fetch error (non-blocking):', ga4Error.message);
+  }
+
+  const totalSpend = metaSpend + googleSpend;
+
+  const rawData = {
+    metaMetrics: {
+      impressions: metaImpressions,
+      clicks: metaClicks,
+      link_clicks: metaLinkClicks,
+      spend: metaSpend,
+      conversionEvents: metaConversionEvents,
+    },
+    googleMetrics: {
+      impressions: googleImpressions,
+      clicks: googleClicks,
+      spend: googleSpend,
+    },
+    ga4Metrics: {
+      standardMetrics: {
+        activeUsers: ga4StandardMetrics['activeUsers'] || 0,
+        totalUsers: ga4StandardMetrics['totalUsers'] || 0,
+        newUsers: ga4StandardMetrics['newUsers'] || 0,
+        sessions: ga4StandardMetrics['sessions'] || 0,
+        engagedSessions: ga4StandardMetrics['engagedSessions'] || 0,
+        conversions: ga4StandardMetrics['conversions'] || 0,
+        eventCount: ga4StandardMetrics['eventCount'] || 0,
+        bounceRate: ga4StandardMetrics['bounceRate'] || 0,
+        screenPageViews: ga4StandardMetrics['screenPageViews'] || 0,
+      },
+      events: ga4Events,
+    },
+    totalSpend,
+  };
+
+  const stages = calculateFunnelMetrics(config, rawData);
+
+  return { stages, totalSpend };
+}

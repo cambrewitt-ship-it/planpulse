@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
-import { RefreshCw, ChevronDown, ChevronRight, ExternalLink, Bot, X, ReceiptText, BarChart2, CalendarRange, ListChecks, ClipboardList, TrendingUp, FileText, PenLine, Users, Zap, Target } from 'lucide-react';
+import Link from 'next/link';
+import { RefreshCw, ChevronDown, ChevronRight, ExternalLink, Bot, X, ReceiptText, BarChart2, CalendarRange, ListChecks, ClipboardList, TrendingUp, FileText, PenLine, Users, Zap, Target, Plus } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import type { AgentAuditStep, AgentOutputLink, UserAgent } from '@/types/database';
@@ -1172,6 +1173,20 @@ export const AgencyChat = forwardRef<AgencyChatHandle, AgencyChatProps>(function
                     </div>
                   </>
                 )}
+                <Link
+                  href="/agents"
+                  style={{
+                    marginTop: 10,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                    padding: '7px 10px', borderRadius: 10,
+                    border: '0.5px solid #E8E4DC', background: '#FFFFFF',
+                    fontSize: 12.5, fontWeight: 600, color: '#1C1917',
+                    textDecoration: 'none', ...font,
+                  }}
+                >
+                  <Plus size={13} />
+                  Manage Agents
+                </Link>
               </div>
             </div>
 

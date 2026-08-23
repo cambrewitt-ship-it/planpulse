@@ -328,6 +328,52 @@ export async function fetchAnalyticsData(
   } as any;
 }
 
+export interface PlatformSyncStatus {
+  connected: boolean;
+  lastSyncedAt: string | null;
+  refreshed: boolean;
+  error?: string;
+}
+
+export interface CachedAnalyticsDataResponse extends AnalyticsDataResponse {
+  syncStatus?: Record<'google-ads' | 'meta-ads' | 'google-analytics', PlatformSyncStatus>;
+}
+
+/**
+ * Cache-first counterpart to fetchAnalyticsData, used by the main client
+ * dashboard. Reads ad spend / GA4 data from the DB cache instead of the live
+ * platform APIs on every load — the cache is kept fresh by a 6-hour cron
+ * (src/app/api/cron/refresh-ad-data) and by manual "Refresh Data" actions
+ * (pass `force: true`). See src/app/api/clients/[id]/analytics-data/route.ts.
+ */
+export async function fetchCachedAnalyticsData(
+  clientId: string,
+  options: { startDate: string; endDate: string; metrics?: string[]; eventName?: string; force?: boolean },
+): Promise<CachedAnalyticsDataResponse> {
+  const params = new URLSearchParams({ startDate: options.startDate, endDate: options.endDate });
+  if (options.metrics?.length) params.set('metrics', options.metrics.join(','));
+  if (options.eventName) params.set('eventName', options.eventName);
+  if (options.force) params.set('force', '1');
+
+  const response = await fetch(`/api/clients/${clientId}/analytics-data?${params.toString()}`);
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok || !data.success) {
+    return {
+      ga4Data: [],
+      spendData: [],
+      errors: [data.error || `Failed to load analytics data (${response.status})`],
+    };
+  }
+
+  return {
+    ga4Data: data.ga4Data || [],
+    spendData: data.spendData || [],
+    errors: data.errors,
+    syncStatus: data.syncStatus,
+  };
+}
+
 /**
  * Calculate moving average for an array of values
  * @param data Array of objects with numeric values

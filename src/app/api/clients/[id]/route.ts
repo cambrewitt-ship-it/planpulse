@@ -24,6 +24,33 @@ export async function GET(
   return NextResponse.json(data);
 }
 
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id: clientId } = await params;
+  const supabase = await createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const { name } = await request.json();
+  if (typeof name !== 'string' || !name.trim()) {
+    return NextResponse.json({ error: 'name must be a non-empty string' }, { status: 400 });
+  }
+
+  const { data, error } = await supabase
+    .from('clients')
+    .update({ name: name.trim() })
+    .eq('id', clientId)
+    .eq('user_id', session.user.id)
+    .select('id, name, logo_url, billing_address')
+    .maybeSingle();
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (!data) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  return NextResponse.json(data);
+}
+
 export async function DELETE(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }

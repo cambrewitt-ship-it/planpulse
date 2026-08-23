@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { isClientOwnedByUser } from '@/lib/client-hub/assert-ownership';
 
 type Params = { params: Promise<{ id: string }> | { id: string } };
 
@@ -8,8 +9,8 @@ async function resolveId(params: Params['params']): Promise<string> {
 }
 
 const DEFAULT_SECTIONS: Record<string, boolean> = {
-  snapshot: true, charts: true, pacing: true, goals: true,
-  brief: true, notes: true, documents: true, spend: true,
+  snapshot: true, cpaTrend: true, charts: true, funnels: true, costPerMetric: true, trends: true, demographics: true, pacing: true, goals: true,
+  brief: true, notes: true, documents: true, spend: true, creatives: true,
 };
 
 const VALID_KEYS = Object.keys(DEFAULT_SECTIONS);
@@ -20,6 +21,9 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const supabase = await createClient();
   const { data: { session } } = await supabase.auth.getSession();
   if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!(await isClientOwnedByUser(supabase, clientId, session.user.id))) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
 
   const { key, visible } = await req.json();
   if (!VALID_KEYS.includes(key) || typeof visible !== 'boolean') {

@@ -945,7 +945,7 @@ export default function LibraryPage() {
       </div>
 
       {/* Search bar */}
-      <div className="relative mb-6">
+      <div data-tour-id="library-channels" className="relative mb-6">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none" style={{ color: '#A09890' }} />
           <input
@@ -1058,6 +1058,7 @@ export default function LibraryPage() {
           Channels
         </Button>
         <Button
+          data-tour-id="library-benchmarks"
           size="sm"
           variant={activeTab === 'benchmarks' ? 'default' : 'ghost'}
           onClick={() => setActiveTab('benchmarks')}
@@ -1066,6 +1067,7 @@ export default function LibraryPage() {
           Metrics & Benchmarks
         </Button>
         <Button
+          data-tour-id="library-playbook"
           size="sm"
           variant={activeTab === 'playbooks' ? 'default' : 'ghost'}
           onClick={() => setActiveTab('playbooks')}
@@ -1314,7 +1316,7 @@ export default function LibraryPage() {
         </Card>
       ) : (
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {libraryEntries.map((entry) => {
+          {libraryEntries.map((entry, entryIndex) => {
             const allChannelActionPoints = actionPoints[entry.channel_type] || [];
             const currentFilter = actionPointFilter[entry.channel_type] || 'SET UP';
             const channelActionPoints = allChannelActionPoints.filter(ap => ap.category === currentFilter);
@@ -1323,6 +1325,7 @@ export default function LibraryPage() {
             return (
               <div
                 key={entry.id}
+                data-tour-id={entryIndex < 3 ? 'library-channels' : undefined}
                 ref={(el) => { if (el) cardRefs.current.set(entry.id, el); else cardRefs.current.delete(entry.id); }}
                 style={{ borderRadius: 18, transition: 'box-shadow 0.3s, outline 0.3s', outline: highlightedEntryId === entry.id ? '2px solid #C4A882' : '2px solid transparent', outlineOffset: 2 }}
               >

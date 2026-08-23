@@ -229,6 +229,7 @@ export interface Database {
             days_before_live_due: number | null;
             due_date: string | null;
             client_id: string | null;
+            user_id: string | null;
             created_at: string;
             updated_at: string;
           };
@@ -242,6 +243,7 @@ export interface Database {
             days_before_live_due?: number | null;
             due_date?: string | null;
             client_id?: string | null;
+            user_id?: string | null;
             created_at?: string;
             updated_at?: string;
           };
@@ -255,6 +257,7 @@ export interface Database {
             days_before_live_due?: number | null;
             due_date?: string | null;
             client_id?: string | null;
+            user_id?: string | null;
             updated_at?: string;
           };
           Relationships: [];
@@ -418,6 +421,7 @@ export interface Database {
             frequency: number | null;
             link_clicks: number | null;
             meta_actions: Array<{ action_type: string; value: string }> | null;
+            google_conversion_actions: Array<{ action_type: string; value: string }> | null;
             created_at: string;
             updated_at: string;
           };
@@ -444,6 +448,7 @@ export interface Database {
             frequency?: number | null;
             link_clicks?: number | null;
             meta_actions?: Array<{ action_type: string; value: string }> | null;
+            google_conversion_actions?: Array<{ action_type: string; value: string }> | null;
             created_at?: string;
             updated_at?: string;
           };
@@ -470,6 +475,7 @@ export interface Database {
             frequency?: number | null;
             link_clicks?: number | null;
             meta_actions?: Array<{ action_type: string; value: string }> | null;
+            google_conversion_actions?: Array<{ action_type: string; value: string }> | null;
             updated_at?: string;
           };
           Relationships: [];
@@ -549,6 +555,7 @@ export interface Database {
             platform: string;
             connection_id: string;
             connection_status: string;
+            last_synced_at: string | null;
             created_at: string;
             updated_at: string;
           };
@@ -559,6 +566,7 @@ export interface Database {
             platform: string;
             connection_id: string;
             connection_status?: string;
+            last_synced_at?: string | null;
             created_at?: string;
             updated_at?: string;
           };
@@ -569,6 +577,7 @@ export interface Database {
             platform?: string;
             connection_id?: string;
             connection_status?: string;
+            last_synced_at?: string | null;
             updated_at?: string;
           };
           Relationships: [];
@@ -1186,24 +1195,39 @@ export interface Database {
             id: string;
             client_id: string;
             sections: Record<string, boolean>;
+            section_order: string[] | null;
+            conversion_platform: string;
             conversion_action_type: string | null;
             conversion_label: string;
+            trend_widget: Record<string, string>;
+            cpa_trend_widget: Record<string, string | null>;
+            hidden_cards: Record<string, string[]>;
             updated_at: string;
           };
           Insert: {
             id?: string;
             client_id: string;
             sections?: Record<string, boolean>;
+            section_order?: string[] | null;
+            conversion_platform?: string;
             conversion_action_type?: string | null;
             conversion_label?: string;
+            trend_widget?: Record<string, string>;
+            cpa_trend_widget?: Record<string, string | null>;
+            hidden_cards?: Record<string, string[]>;
             updated_at?: string;
           };
           Update: {
             id?: string;
             client_id?: string;
             sections?: Record<string, boolean>;
+            section_order?: string[] | null;
+            conversion_platform?: string;
             conversion_action_type?: string | null;
             conversion_label?: string;
+            trend_widget?: Record<string, string>;
+            cpa_trend_widget?: Record<string, string | null>;
+            hidden_cards?: Record<string, string[]>;
             updated_at?: string;
           };
           Relationships: [];
@@ -1232,6 +1256,87 @@ export interface Database {
             is_enabled?: boolean;
             created_at?: string;
             created_by?: string | null;
+          };
+          Relationships: [];
+        };
+        client_hub_creatives: {
+          Row: {
+            id: string;
+            client_id: string;
+            image_url: string;
+            caption: string | null;
+            display_order: number;
+            uploaded_by: string | null;
+            uploaded_at: string;
+          };
+          Insert: {
+            id?: string;
+            client_id: string;
+            image_url: string;
+            caption?: string | null;
+            display_order?: number;
+            uploaded_by?: string | null;
+            uploaded_at?: string;
+          };
+          Update: {
+            id?: string;
+            client_id?: string;
+            image_url?: string;
+            caption?: string | null;
+            display_order?: number;
+            uploaded_by?: string | null;
+            uploaded_at?: string;
+          };
+          Relationships: [];
+        };
+        client_ad_demographics: {
+          Row: {
+            id: string;
+            user_id: string;
+            client_id: string;
+            platform: string;
+            account_id: string;
+            date: string;
+            breakdown_type: string;
+            breakdown_value: string;
+            spend: number | null;
+            impressions: number | null;
+            clicks: number | null;
+            reach: number | null;
+            conversions: number | null;
+            updated_at: string;
+          };
+          Insert: {
+            id?: string;
+            user_id: string;
+            client_id: string;
+            platform: string;
+            account_id: string;
+            date: string;
+            breakdown_type: string;
+            breakdown_value: string;
+            spend?: number | null;
+            impressions?: number | null;
+            clicks?: number | null;
+            reach?: number | null;
+            conversions?: number | null;
+            updated_at?: string;
+          };
+          Update: {
+            id?: string;
+            user_id?: string;
+            client_id?: string;
+            platform?: string;
+            account_id?: string;
+            date?: string;
+            breakdown_type?: string;
+            breakdown_value?: string;
+            spend?: number | null;
+            impressions?: number | null;
+            clicks?: number | null;
+            reach?: number | null;
+            conversions?: number | null;
+            updated_at?: string;
           };
           Relationships: [];
         };

@@ -56,16 +56,7 @@ export const sectionTitleStyle: React.CSSProperties = {
   color: COLOR.ink,
 };
 
-export const SECTION_META: Array<{ key: string; label: string }> = [
-  { key: 'snapshot', label: 'Overview' },
-  { key: 'charts', label: 'Performance' },
-  { key: 'pacing', label: 'Pacing' },
-  { key: 'goals', label: 'Goals' },
-  { key: 'brief', label: 'Brief' },
-  { key: 'notes', label: 'Notes' },
-  { key: 'documents', label: 'Documents' },
-  { key: 'spend', label: 'Spend by channel' },
-];
+export { SECTION_META, SECTION_KEYS } from '@/lib/client-hub/section-meta';
 
 export function fmtMoney(v: number): string {
   return '$' + Math.round(v).toLocaleString('en-US');

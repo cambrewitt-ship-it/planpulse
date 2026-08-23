@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { COLOR, FONT_BODY } from './tokens';
+import type { ConversionPlatform } from '@/lib/client-hub/get-hub-data';
 
 export type DateRange = { start: string; end: string };
 
@@ -67,37 +68,108 @@ export function TimeframeSelector({ onChange }: { onChange: (range: DateRange | 
   );
 }
 
+export function RefreshDataButton({ isRefreshing, onClick }: { isRefreshing: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={isRefreshing}
+      title="Refresh ad spend + analytics data now (normally refreshes automatically every 6 hours)"
+      style={{
+        fontFamily: FONT_BODY, fontSize: 12.5, color: COLOR.muted, background: 'transparent',
+        border: 'none', padding: 0, cursor: isRefreshing ? 'default' : 'pointer',
+        textDecoration: 'underline', textUnderlineOffset: 2,
+        opacity: isRefreshing ? 0.6 : 1,
+      }}
+    >
+      {isRefreshing ? 'Refreshing…' : 'Refresh data'}
+    </button>
+  );
+}
+
 function prettifyActionType(type: string): string {
   return type.replace(/^offsite_conversion\.fb_pixel_/, '').replace(/[._]/g, ' ')
     .replace(/\b\w/g, c => c.toUpperCase());
 }
 
-export interface ConversionSelectorProps {
-  actionType: string | null;
-  label: string;
-  available: string[];
-  onChange: (actionType: string | null, label: string) => void;
+const CONVERSION_PLATFORMS: Array<{ key: ConversionPlatform; label: string }> = [
+  { key: 'meta-ads', label: 'Meta Ads' },
+  { key: 'google-ads', label: 'Google Ads' },
+  { key: 'ga4', label: 'GA4' },
+];
+
+const LIST_EVENTS_ENDPOINT: Record<ConversionPlatform, string> = {
+  'meta-ads': '/api/ads/meta/list-conversion-events',
+  'google-ads': '/api/ads/google-ads/list-conversion-events',
+  'ga4': '/api/ads/google-analytics/list-events',
+};
+
+const AUTO_OPTION_LABEL: Record<ConversionPlatform, string> = {
+  'meta-ads': 'Auto-detect',
+  'google-ads': 'All conversions',
+  'ga4': 'Conversions (default)',
+};
+
+interface ConversionEvent { name: string; count: number }
+
+function useConversionEvents(clientId: string, platform: ConversionPlatform): ConversionEvent[] {
+  const [events, setEvents] = useState<ConversionEvent[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(LIST_EVENTS_ENDPOINT[platform], {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clientId }),
+    })
+      .then(res => res.ok ? res.json() : { events: [] })
+      .then(json => { if (!cancelled) setEvents(json.events ?? []); })
+      .catch(() => { if (!cancelled) setEvents([]); });
+    return () => { cancelled = true; };
+  }, [clientId, platform]);
+
+  return events;
 }
 
-export function ConversionSelector({ actionType, label, available, onChange }: ConversionSelectorProps) {
+export interface ConversionSelectorProps {
+  clientId: string;
+  platform: ConversionPlatform;
+  actionType: string | null;
+  label: string;
+  onChange: (platform: ConversionPlatform, actionType: string | null, label: string) => void;
+}
+
+export function ConversionSelector({ clientId, platform, actionType, label, onChange }: ConversionSelectorProps) {
   const [labelDraft, setLabelDraft] = useState(label);
+  const events = useConversionEvents(clientId, platform);
 
   const commitLabel = () => {
     const trimmed = labelDraft.trim();
-    if (trimmed && trimmed !== label) onChange(actionType, trimmed);
+    if (trimmed && trimmed !== label) onChange(platform, actionType, trimmed);
     else setLabelDraft(label);
   };
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-      <span style={{ fontSize: 11.5, color: COLOR.muted }}>Conversion event</span>
+      <span style={{ fontSize: 11.5, color: COLOR.muted }}>Conversion metric from</span>
       <select
-        value={actionType ?? ''}
-        onChange={e => onChange(e.target.value || null, label)}
+        value={platform}
+        onChange={e => onChange(e.target.value as ConversionPlatform, null, label)}
         style={selectStyle}
       >
-        <option value="">Auto-detect</option>
-        {available.map(type => <option key={type} value={type}>{prettifyActionType(type)}</option>)}
+        {CONVERSION_PLATFORMS.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
+      </select>
+      <select
+        value={actionType ?? ''}
+        onChange={e => onChange(platform, e.target.value || null, label)}
+        style={selectStyle}
+      >
+        <option value="">{AUTO_OPTION_LABEL[platform]}</option>
+        {events.map(ev => (
+          <option key={ev.name} value={ev.name}>
+            {platform === 'meta-ads' ? prettifyActionType(ev.name) : ev.name}
+          </option>
+        ))}
       </select>
       <input
         type="text"

@@ -11,6 +11,10 @@
     {
       "path": "/api/cron/connection-health",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/refresh-ad-data",
+      "schedule": "0 */6 * * *"
     }
   ]
 }
