@@ -4,7 +4,6 @@ import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
@@ -487,57 +486,6 @@ export default function LibraryPage() {
       alert(error.message || 'Failed to create action point. Please try again.');
     } finally {
       setIsSaving(false);
-    }
-  };
-
-  const handleToggleActionPoint = async (actionPointId: string, channelType: string, completed: boolean) => {
-    const newCompleted = !completed;
-
-    // Optimistically update local state
-    setActionPoints((prev) => {
-      const updated = { ...prev };
-      if (updated[channelType]) {
-        updated[channelType] = updated[channelType].map((ap) =>
-          ap.id === actionPointId ? { ...ap, completed: newCompleted } : ap
-        );
-      }
-      return updated;
-    });
-
-    try {
-      const response = await fetch('/api/action-points', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: actionPointId,
-          completed: newCompleted,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to update action point');
-      }
-
-      // Reload action points to ensure consistency
-      const actionPointsResponse = await fetch(`/api/action-points?channel_type=${encodeURIComponent(channelType)}`);
-      if (actionPointsResponse.ok) {
-        const { data } = await actionPointsResponse.json();
-        setActionPoints((prev) => ({
-          ...prev,
-          [channelType]: data || [],
-        }));
-      }
-    } catch (error) {
-      console.error('Error updating action point:', error);
-      // Reload on error to revert optimistic update
-      const actionPointsResponse = await fetch(`/api/action-points?channel_type=${encodeURIComponent(channelType)}`);
-      if (actionPointsResponse.ok) {
-        const { data } = await actionPointsResponse.json();
-        setActionPoints((prev) => ({
-          ...prev,
-          [channelType]: data || [],
-        }));
-      }
     }
   };
 
@@ -1465,14 +1413,6 @@ export default function LibraryPage() {
                             key={actionPoint.id}
                             className="flex items-start gap-2 p-2 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors group"
                           >
-                            <Checkbox
-                              checked={actionPoint.completed}
-                              onCheckedChange={() =>
-                                handleToggleActionPoint(actionPoint.id, actionPoint.channel_type, actionPoint.completed)
-                              }
-                              disabled={true}
-                              className="mt-0.5"
-                            />
                             <div className="flex-1 min-w-0">
                               {editingActionPointId === actionPoint.id ? (
                                 <div className="space-y-2">

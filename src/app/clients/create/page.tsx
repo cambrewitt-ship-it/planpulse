@@ -32,6 +32,8 @@ import { MediaPlanChannel, MediaFlight } from '@/components/legacy-plan-builder/
 import { UploadWizard } from '@/components/sandbox/upload-wizard';
 import { PlanGrid } from '@/components/sandbox/plan-grid';
 import type { SandboxPlan } from '@/components/sandbox/types';
+import MediaPlanChatPanel from '@/components/dashboard-v2/media-plan-chat-panel';
+import { createBlankSandboxPlan } from '@/lib/media-plan/sandbox-sync';
 import Image from 'next/image';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -252,6 +254,11 @@ export default function CreateClientPage() {
   const [commission] = useState(0);
   const [sandboxPlan, setSandboxPlan] = useState<SandboxPlan | null>(null);
   const [sandboxPlanHydrated, setSandboxPlanHydrated] = useState(false);
+  // Same remount-key trick as the dashboard: PlanGrid only reads its `plan` prop
+  // on mount, so an agent-applied plan needs a `key` bump to actually show up live.
+  const [externalPlanRevision, setExternalPlanRevision] = useState(0);
+  // Screenshot picked from the Upload Wizard's "AI Agent Planner" entry point.
+  const [pendingAgentScreenshot, setPendingAgentScreenshot] = useState<{ base64: string; mimeType: string; preview: string; name: string } | null>(null);
 
   // ── Step 6: Performance Goal ──
   const [goalMetric, setGoalMetric] = useState('');
@@ -511,6 +518,20 @@ export default function CreateClientPage() {
     setSandboxPlan(null);
     setChannels([]);
     try { localStorage.removeItem(`planpulse_sandbox_plan_${clientId}`); } catch {}
+  };
+
+  // Used by the Media Plan Editor chat panel — see externalPlanRevision above.
+  const handleAgentPlanApplied = (plan: SandboxPlan) => {
+    handleSandboxPlanChange(plan);
+    setExternalPlanRevision((v) => v + 1);
+  };
+
+  // "Upload a screenshot of your Media Plan" — starts a blank plan so the grid +
+  // chat panel mount, then hands the image to the chat panel to auto-run the
+  // vision extraction, exactly as on the client dashboard's Media Plan tab.
+  const handleScreenshotSelectedFromWizard = (image: { base64: string; mimeType: string; preview: string; name: string }) => {
+    handleSandboxPlanLoaded(createBlankSandboxPlan());
+    setPendingAgentScreenshot(image);
   };
 
   // ── Step 3 handlers: Performance Goal ────────────────────────────────────────
@@ -1158,17 +1179,31 @@ export default function CreateClientPage() {
               </Button>
             </div>
             {sandboxPlan ? (
-              <div style={{ height: 'calc(100vh - 220px)', borderRadius: 12, border: '1px solid rgba(232,228,220,0.7)', boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', overflow: 'hidden' }}>
-                <PlanGrid
-                  plan={sandboxPlan}
-                  onPlanChange={handleSandboxPlanChange}
-                  onUpload={handleSandboxPlanUpload}
-                  outerStyle={{ height: '100%' }}
-                />
+              <div style={{ height: 'calc(100vh - 220px)', display: 'flex', gap: 12 }}>
+                <div style={{ flex: '0 0 32%', minWidth: 280, maxWidth: 420 }}>
+                  <MediaPlanChatPanel
+                    clientId={clientId}
+                    clientName={clientName}
+                    currentPlan={sandboxPlan}
+                    onPlanApplied={handleAgentPlanApplied}
+                    autoAttachImage={pendingAgentScreenshot}
+                    onAutoAttachConsumed={() => setPendingAgentScreenshot(null)}
+                    height="100%"
+                  />
+                </div>
+                <div style={{ flex: '1 1 68%', minWidth: 0, borderRadius: 12, border: '1px solid rgba(232,228,220,0.7)', boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', overflow: 'hidden' }}>
+                  <PlanGrid
+                    key={externalPlanRevision}
+                    plan={sandboxPlan}
+                    onPlanChange={handleSandboxPlanChange}
+                    onUpload={handleSandboxPlanUpload}
+                    outerStyle={{ height: '100%' }}
+                  />
+                </div>
               </div>
             ) : (
               <div style={{ borderRadius: 12, border: '1px solid rgba(232,228,220,0.7)', boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', overflow: 'hidden' }}>
-                <UploadWizard onPlanLoaded={handleSandboxPlanLoaded} />
+                <UploadWizard onPlanLoaded={handleSandboxPlanLoaded} onScreenshotSelected={handleScreenshotSelectedFromWizard} />
               </div>
             )}
           </div>

@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { TOOL_DEFINITIONS } from '@/lib/agent-tools';
 import { buildAuditSummary, buildOutputLinks, TOOL_LABELS, WRITE_TOOLS } from '@/lib/agent-audit';
 import type { AgentAuditStep, AgentOutputLink } from '@/lib/agent-audit';
+import { channelsToSandboxPlan, patchSandboxPlanFlightBudget, upsertSandboxPlanFlight, snapToWeekCommencing } from '@/lib/media-plan/sandbox-sync';
 
 export const maxDuration = 60;
 
@@ -21,8 +22,12 @@ You help the team with:
 You can also take actions:
 - Complete action points: Mark tasks as done for specific clients using complete_action_point
 - Create new clients: Add new clients to the platform using create_client
-- Update budgets: Adjust channel budgets in media plans for specific months using update_media_plan_budget
+- Update budgets: Adjust channel budgets in media plans for a whole calendar month using update_media_plan_budget, or for a specific week-commencing (W/C) date range / flight using update_media_plan_flight
 - Load a full media plan: Set all channels, flights, and budgets for a client from a description or pasted data using set_media_plan_channels
+
+Budget edit tool choice — this matters, don't default to the monthly tool out of habit:
+- The user gives a whole month ("set June to $5,000") → update_media_plan_budget.
+- The user gives specific dates or a W/C range ("$10,000 on Google from Sep 7th to 21st", "week commencing the 7th through the 28th") → update_media_plan_flight. start_week/end_week must be Mondays; if the user's dates aren't Mondays, snap each to its week-commencing Monday yourself, then ask "Do these W/C dates work for you?" — stating both the snapped start/end W/C dates AND the real end date (end_week + 6 days, since end_week is inclusive of that whole week) — before calling the tool. Compute monthly_spend the same proportional-by-weeks-in-month way you would for set_media_plan_channels.
 - View live Meta campaigns: Fetch current campaign data directly from the Meta Ads API using get_live_meta_campaigns
 
 Client health indicators:
@@ -614,7 +619,7 @@ async function toolUpdateMediaPlanBudget(
   // Fetch media plan
   const { data: mediaPlan } = await supabase
     .from('client_media_plan_builder')
-    .select('client_id, channels')
+    .select('client_id, channels, sandbox_plan')
     .eq('client_id', client.id)
     .maybeSingle();
 
@@ -649,9 +654,16 @@ async function toolUpdateMediaPlanBudget(
   flights[0].monthlySpend[input.month] = input.new_budget;
   channels[channelIdx] = { ...channel, flights };
 
+  // The visible grid renders from sandbox_plan, not channels — keep both in sync
+  // so the edit actually shows up, instead of only updating the hidden column.
+  const budgetDelta = input.new_budget - Number(oldBudget);
+  const updatedSandboxPlan = mediaPlan.sandbox_plan
+    ? patchSandboxPlanFlightBudget(mediaPlan.sandbox_plan as any, channel.channelName, input.month, budgetDelta)
+    : channelsToSandboxPlan(channels);
+
   const { error: updateError } = await supabase
     .from('client_media_plan_builder')
-    .update({ channels })
+    .update({ channels, sandbox_plan: updatedSandboxPlan })
     .eq('client_id', client.id);
 
   if (updateError) return { error: 'Failed to save budget update', details: updateError.message };
@@ -666,6 +678,103 @@ async function toolUpdateMediaPlanBudget(
     previous_budget: oldBudget,
     new_budget: input.new_budget,
     ...(flights.length > 1 && { note: `${client.name} has ${flights.length} flights for this channel — updated the primary flight.` }),
+  };
+}
+
+async function toolUpdateMediaPlanFlight(
+  _request: NextRequest,
+  input: {
+    client_name: string;
+    channel_name: string;
+    start_week: string;
+    end_week: string;
+    budget: number;
+    monthly_spend: Record<string, number>;
+  }
+) {
+  const supabase = await createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.user) return { error: 'Unauthorized' };
+
+  const { data: clients } = await supabase
+    .from('clients')
+    .select('id, name')
+    .eq('user_id', session.user.id)
+    .ilike('name', `%${input.client_name}%`);
+
+  if (!clients?.length) return { error: `No client found matching "${input.client_name}"` };
+  if (clients.length > 1) return { error: 'Multiple clients matched', matches: clients.map((c: any) => c.name) };
+
+  const client = clients[0];
+
+  const { data: mediaPlan } = await supabase
+    .from('client_media_plan_builder')
+    .select('client_id, channels, sandbox_plan')
+    .eq('client_id', client.id)
+    .maybeSingle();
+
+  if (!mediaPlan) {
+    return { error: `No media plan found for ${client.name}. Create one in the app first.` };
+  }
+
+  const startWeek = snapToWeekCommencing(input.start_week);
+  const endWeek = snapToWeekCommencing(input.end_week);
+
+  const channels: any[] = JSON.parse(JSON.stringify(mediaPlan.channels || []));
+  const channelIdx = channels.findIndex((ch: any) =>
+    ch.channelName?.toLowerCase().includes(input.channel_name.toLowerCase())
+  );
+
+  if (channelIdx === -1) {
+    return {
+      error: `Channel "${input.channel_name}" not found in ${client.name}'s media plan`,
+      available_channels: channels.map((ch: any) => ch.channelName).filter(Boolean),
+    };
+  }
+
+  const channel = channels[channelIdx];
+  const flights: any[] = [...(channel.flights || [])];
+  const startMs = new Date(startWeek).getTime();
+  const endMs = new Date(endWeek).getTime();
+  const overlapIdx = flights.findIndex((f: any) => {
+    const fStart = new Date(f.startWeek).getTime();
+    const fEnd = new Date(f.endWeek).getTime();
+    return fStart <= endMs && fEnd >= startMs;
+  });
+
+  const newFlight = { id: overlapIdx >= 0 ? flights[overlapIdx].id : `flight-${Date.now()}`, startWeek, endWeek, monthlySpend: input.monthly_spend };
+  if (overlapIdx >= 0) flights[overlapIdx] = newFlight;
+  else flights.push(newFlight);
+
+  const totalBudget = flights.reduce((s: number, f: any) => {
+    const monthValues: number[] = Object.values(f.monthlySpend || {});
+    return s + monthValues.reduce((a, b) => a + Number(b), 0);
+  }, 0);
+  channels[channelIdx] = { ...channel, flights, totalBudget };
+
+  const updatedSandboxPlan = upsertSandboxPlanFlight(
+    mediaPlan.sandbox_plan as any,
+    channel.channelName,
+    { startWeek, endWeek, budget: input.budget },
+    { isOrganic: channel.channelCategory === 'organic_social', detail: channel.channelSubType }
+  );
+
+  const { error: updateError } = await supabase
+    .from('client_media_plan_builder')
+    .update({ channels, sandbox_plan: updatedSandboxPlan })
+    .eq('client_id', client.id);
+
+  if (updateError) return { error: 'Failed to save flight update', details: updateError.message };
+
+  return {
+    success: true,
+    message: `Set ${channel.channelName} to $${Number(input.budget).toLocaleString()} for W/C ${startWeek} – ${endWeek} for ${client.name}`,
+    client: client.name,
+    client_id: client.id,
+    channel: channel.channelName,
+    start_week: startWeek,
+    end_week: endWeek,
+    budget: input.budget,
   };
 }
 
@@ -879,10 +988,12 @@ async function toolSetMediaPlanChannels(
     };
   });
 
+  const sandboxPlan = channelsToSandboxPlan(mediaChannels as any);
+
   const { error: upsertError } = await supabase
     .from('client_media_plan_builder')
     .upsert(
-      { client_id: client.id, channels: mediaChannels, commission: 0 },
+      { client_id: client.id, channels: mediaChannels, commission: 0, sandbox_plan: sandboxPlan },
       { onConflict: 'client_id' }
     );
 
@@ -1271,6 +1382,8 @@ export async function POST(request: NextRequest) {
               result = await toolCreateClient(request, input);
             } else if (block.name === 'update_media_plan_budget') {
               result = await toolUpdateMediaPlanBudget(request, input);
+            } else if (block.name === 'update_media_plan_flight') {
+              result = await toolUpdateMediaPlanFlight(request, input);
             } else if (block.name === 'set_media_plan_channels') {
               result = await toolSetMediaPlanChannels(request, input);
             // Client Intelligence Hub (Tier 2)
@@ -1311,7 +1424,7 @@ export async function POST(request: NextRequest) {
             }
 
             // Emit structured action event so the UI can trigger animations
-            const writableTools = ['complete_action_point', 'create_action_point', 'create_client', 'update_media_plan_budget', 'set_media_plan_channels'];
+            const writableTools = ['complete_action_point', 'create_action_point', 'create_client', 'update_media_plan_budget', 'update_media_plan_flight', 'set_media_plan_channels'];
             if (writableTools.includes(block.name) && result?.success) {
               send({ type: 'action', tool: block.name, data: result });
             }

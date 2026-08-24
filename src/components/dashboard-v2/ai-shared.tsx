@@ -16,6 +16,7 @@ export const TOOL_LABELS: Record<string, string> = {
   get_action_points: 'Loading action points…',
   complete_action_point: 'Completing action point…',
   update_media_plan_budget: 'Updating budget…',
+  update_media_plan_flight: 'Updating flight…',
   update_manual_spend: 'Updating actual spend…',
   toggle_ooh_checklist: 'Updating OOH checklist…',
   get_daily_briefing: 'Loading daily briefing…',

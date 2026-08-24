@@ -10,8 +10,10 @@ const PUBLIC_ROUTES = [
   '/auth/signup',
   '/auth/callback',
   '/api/nango/webhook',
-  '/sandbox',
+  '/media-plan-builder',
   '/api/sandbox/',
+  '/api/media-plan-agent/',
+  '/api/media-plan-builder/',
   '/hub/',
   '/api/hub/',
 ];

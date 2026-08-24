@@ -263,6 +263,7 @@ function FloatingAIChatInner() {
                 create_client: 'Creating new client…',
                 create_action_point: 'Creating action point…',
                 update_media_plan_budget: 'Updating media plan budget…',
+                update_media_plan_flight: 'Updating media plan flight…',
                 set_media_plan_channels: 'Loading media plan…',
                 generate_invoice: 'Generating invoice…',
                 generate_report: 'Generating report…',
@@ -585,6 +586,6 @@ function FloatingAIChatInner() {
 
 export function FloatingAIChat() {
   const pathname = usePathname();
-  if (pathname === '/agency' || pathname?.startsWith('/hub/')) return null;
+  if (pathname === '/agency' || pathname?.startsWith('/hub/') || pathname?.startsWith('/media-plan-builder')) return null;
   return <FloatingAIChatInner />;
 }

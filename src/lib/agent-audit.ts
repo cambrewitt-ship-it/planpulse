@@ -14,6 +14,7 @@ export const TOOL_LABELS: Record<string, string> = {
   create_client: 'Create client',
   create_action_point: 'Create action point',
   update_media_plan_budget: 'Update media plan budget',
+  update_media_plan_flight: 'Update media plan flight',
   set_media_plan_channels: 'Set media plan channels',
   generate_invoice: 'Generate invoice',
   generate_report: 'Generate report',
@@ -24,6 +25,7 @@ export const WRITE_TOOLS = [
   'create_client',
   'create_action_point',
   'update_media_plan_budget',
+  'update_media_plan_flight',
   'set_media_plan_channels',
   'generate_invoice',
   'generate_report',
@@ -98,6 +100,13 @@ export function buildAuditSummary(toolName: string, input: any, result: any): st
         const newBudget = input?.new_budget != null ? `$${Number(input.new_budget).toLocaleString()}` : '';
         return `Updated ${channel} budget${month ? ` for ${month}` : ''} to ${newBudget} (${client})`;
       }
+      case 'update_media_plan_flight': {
+        const channel = input?.channel_name ?? 'channel';
+        const client = input?.client_name ?? 'client';
+        const budget = input?.budget != null ? `$${Number(input.budget).toLocaleString()}` : '';
+        const range = input?.start_week && input?.end_week ? ` for W/C ${input.start_week} – ${input.end_week}` : '';
+        return `Set ${channel} to ${budget}${range} (${client})`;
+      }
       case 'set_media_plan_channels': {
         const channels = input?.channels ?? [];
         const count = Array.isArray(channels) ? channels.length : '?';
@@ -143,8 +152,9 @@ export function buildOutputLinks(toolName: string, input: any, result: any, cont
     case 'generate_report':
       return [{ label: 'View Report', href: `/clients/${clientId}/dashboard` }];
     case 'update_media_plan_budget':
+    case 'update_media_plan_flight':
     case 'set_media_plan_channels':
-      return [{ label: 'Open Media Plan', href: `/clients/${clientId}/dashboard` }];
+      return [{ label: 'Open Media Plan', href: `/clients/${clientId}/dashboard?view=media-plan` }];
     default:
       return [];
   }

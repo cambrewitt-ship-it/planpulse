@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useCallback, useEffect, useRef, useMemo } from "react";
-import { Plus, Trash2, Upload, Download, X, Check, Edit2, ChevronDown } from "lucide-react";
+import { Plus, Trash2, Upload, Download, X, Check, Edit2, ChevronDown, Loader2 } from "lucide-react";
 import type { SandboxPlan, PlanRow, Flight, Week, FeeRow, CustomColumn } from "./types";
 import { FLIGHT_COLORS } from "./types";
 import { getChannelLogo, PRESET_CHANNELS } from "@/lib/utils/channel-icons";
@@ -424,7 +424,7 @@ function ChannelSelectCell({ value, onChange, libraryChannels, className = "", s
             <span className="font-semibold text-xs truncate min-w-0" title={value}>{value}</span>
           </>
         ) : (
-          <span className="text-gray-300 text-xs">Select a Channel</span>
+          <span className="text-black text-xs">Select a Channel</span>
         )}
         <ChevronDown className="w-3 h-3 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none" />
 
@@ -563,14 +563,13 @@ interface FeeRowRendererProps {
   fee: FeeRow;
   weekCount: number;
   stickyBase: string;
-  totalOffset: number;
   leftColSpan: number;
   onUpdateName: (name: string) => void;
   onUpdateAmount: (amount: number) => void;
   onDelete: () => void;
 }
 
-function FeeRowRenderer({ fee, weekCount, stickyBase, totalOffset, leftColSpan, onUpdateName, onUpdateAmount, onDelete }: FeeRowRendererProps) {
+function FeeRowRenderer({ fee, weekCount, stickyBase, leftColSpan, onUpdateName, onUpdateAmount, onDelete }: FeeRowRendererProps) {
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState(fee.name);
   const [draftAmount, setDraftAmount] = useState(fee.amount > 0 ? String(fee.amount) : "");
@@ -588,7 +587,6 @@ function FeeRowRenderer({ fee, weekCount, stickyBase, totalOffset, leftColSpan, 
       <td
         colSpan={leftColSpan}
         className={`${stickyBase} bg-amber-50/60 border-amber-100`}
-        style={{ position: "sticky", left: 0, zIndex: 10 }}
         onDoubleClick={() => { setDraftName(fee.name); setEditingName(true); }}
       >
         {editingName ? (
@@ -612,7 +610,7 @@ function FeeRowRenderer({ fee, weekCount, stickyBase, totalOffset, leftColSpan, 
       </td>
       <td
         className="border border-amber-200 px-2 py-1 text-right align-middle bg-amber-50 cursor-text"
-        style={{ position: "sticky", left: totalOffset, zIndex: 10, width: COL_WIDTHS.total, minWidth: COL_WIDTHS.total }}
+        style={{ width: COL_WIDTHS.total, minWidth: COL_WIDTHS.total }}
       >
         <div className="flex items-center justify-end gap-1">
           <span className="text-amber-500 text-xs select-none">$</span>
@@ -728,6 +726,8 @@ export function PlanGrid({ plan, onPlanChange, onUpload, outerStyle }: Props) {
   const [customColumns, setCustomColumns] = useState<CustomColumn[]>(plan.customColumns ?? []);
   const [weekWidth, setWeekWidth] = useState(WEEK_W);
   const [showAddColumn, setShowAddColumn] = useState(false);
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [resizeState, setResizeState] = useState<ResizeState | null>(null);
   const [editingFlight, setEditingFlight] = useState<EditingFlight | null>(null);
@@ -1202,6 +1202,37 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
     return cells;
   }
 
+  // ── PDF export ────────────────────────────────────────────────────────────
+
+  const handleDownloadPdf = useCallback(async () => {
+    setIsDownloadingPdf(true);
+    setPdfError(null);
+    try {
+      const res = await fetch('/api/sandbox/pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan: { ...plan, rows, weeks, fees, customColumns } }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error ?? `Failed to generate PDF (${res.status})`);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${(plan.title || 'Media_Plan').replace(/\s+/g, '_')}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setPdfError(err instanceof Error ? err.message : 'Failed to generate PDF');
+    } finally {
+      setIsDownloadingPdf(false);
+    }
+  }, [plan, rows, weeks, fees, customColumns]);
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   const stickyBase = "border border-gray-200 bg-white text-xs px-2 py-2";
@@ -1272,12 +1303,26 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
         </button>
         <FeeMenu onAdd={addFee} />
         <button
+          onClick={handleDownloadPdf}
+          disabled={isDownloadingPdf}
+          title={pdfError ?? undefined}
+          className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-xs font-medium hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          {isDownloadingPdf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+          {isDownloadingPdf ? 'Generating…' : 'Download PDF'}
+        </button>
+        <button
           onClick={onUpload}
           className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-xs font-medium hover:bg-gray-50 transition-colors"
         >
           <Upload className="w-3.5 h-3.5" /> Upload new
         </button>
       </div>
+      {pdfError && (
+        <div className="px-4 py-1.5 bg-red-50 border-b border-red-100 text-xs text-red-600 flex-shrink-0">
+          {pdfError}
+        </div>
+      )}
 
       {/* Grid */}
       <div ref={scrollRef} className="flex-1 overflow-auto bg-white">
@@ -1295,14 +1340,16 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
 
           <thead>
             <tr style={{ height: HEADER_H }}>
-              <th colSpan={leftColSpan} className={stickyHeader}
-                style={{ position: "sticky", left: 0, top: 0, zIndex: 30, textAlign: "left" }} />
               <th className={stickyHeader}
-                style={{ position: "sticky", left: dynamicTotalLeft, top: 0, zIndex: 30 }} />
+                style={{ position: "sticky", willChange: "transform", left: 0, top: 0, zIndex: 30 }} />
+              <th className={stickyHeader}
+                style={{ position: "sticky", willChange: "transform", left: channelLeft, top: 0, zIndex: 30, textAlign: "left" }} />
+              <th colSpan={customColumns.length + 1} className={stickyHeader}
+                style={{ position: "sticky", willChange: "transform", top: 0, zIndex: 30, textAlign: "left" }} />
               {monthGroups.map(mg => (
                 <th key={`${mg.month}-${mg.year}`} colSpan={mg.count}
                   className="border border-gray-300 bg-gray-700 text-white text-xs font-bold uppercase tracking-wider text-center"
-                  style={{ position: "sticky", top: 0, zIndex: 2 }}>
+                  style={{ position: "sticky", willChange: "transform", top: 0, zIndex: 2 }}>
                   {mg.month} {mg.year !== planYear ? mg.year : ""}
                 </th>
               ))}
@@ -1310,32 +1357,29 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
 
             <tr style={{ height: HEADER_H }}>
               <th className={stickyHeader}
-                style={{ position: "sticky", left: 0, top: HEADER_H, zIndex: 20 }} />
+                style={{ position: "sticky", willChange: "transform", left: 0, top: HEADER_H, zIndex: 20 }} />
               <th className={stickyHeader}
-                style={{ position: "sticky", left: channelLeft, top: HEADER_H, zIndex: 20, textAlign: "left" }}>
+                style={{ position: "sticky", willChange: "transform", left: channelLeft, top: HEADER_H, zIndex: 20, textAlign: "left" }}>
                 CHANNEL
               </th>
-              {customColumns.map((col, ci) => {
-                const colLeft = COL_WIDTHS.del + COL_WIDTHS.channel + ci * CUSTOM_COL_W;
-                return (
-                  <th key={col.id}
-                    className={`${stickyHeader} group/colhdr`}
-                    style={{ position: "sticky", left: colLeft, top: HEADER_H, zIndex: 20, width: CUSTOM_COL_W }}>
-                    <div className="flex items-center justify-between gap-1">
-                      <span className="truncate">{col.name}</span>
-                      <button
-                        onClick={() => deleteCustomColumn(col.id)}
-                        className="opacity-0 group-hover/colhdr:opacity-100 text-gray-400 hover:text-red-400 transition-all flex-shrink-0"
-                        title="Remove column"
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                    </div>
-                  </th>
-                );
-              })}
+              {customColumns.map(col => (
+                <th key={col.id}
+                  className={`${stickyHeader} group/colhdr`}
+                  style={{ position: "sticky", willChange: "transform", top: HEADER_H, zIndex: 20, width: CUSTOM_COL_W }}>
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="truncate">{col.name}</span>
+                    <button
+                      onClick={() => deleteCustomColumn(col.id)}
+                      className="opacity-0 group-hover/colhdr:opacity-100 text-gray-400 hover:text-red-400 transition-all flex-shrink-0"
+                      title="Remove column"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                </th>
+              ))}
               <th className={stickyHeader}
-                style={{ position: "sticky", left: dynamicTotalLeft, top: HEADER_H, zIndex: 20 }}>
+                style={{ position: "sticky", willChange: "transform", top: HEADER_H, zIndex: 20 }}>
                 <div className="flex items-center gap-1">
                   <button
                     onClick={() => setShowAddColumn(true)}
@@ -1350,7 +1394,7 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
               {weeks.map(w => (
                 <th key={w.weekStart}
                   className="border border-gray-300 bg-gray-800 text-white text-xs font-medium text-center whitespace-nowrap"
-                  style={{ position: "sticky", top: HEADER_H, zIndex: 2 }}>
+                  style={{ position: "sticky", willChange: "transform", top: HEADER_H, zIndex: 2 }}>
                   {w.label}
                 </th>
               ))}
@@ -1365,7 +1409,7 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
                 <tr key={row.id} style={{ height: ROW_H }} className="group">
                   <td
                     className={`${stickyBase} text-center align-middle`}
-                    style={{ position: "sticky", left: 0, zIndex: 10 }}
+                    style={{ position: "sticky", willChange: "transform", left: 0, zIndex: 10 }}
                   >
                     <button
                       onClick={() => deleteRow(row.id)}
@@ -1389,29 +1433,24 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
                       }}
                       className={`${stickyBase} text-center align-middle`}
                       style={{
-                        position: "sticky",
+                        position: "sticky", willChange: "transform",
                         left: channelLeft,
                         zIndex: 10,
                         ...(row.isOrganic ? { background: 'repeating-linear-gradient(-45deg, #f5f3ff, #f5f3ff 8px, #ede9fe 8px, #ede9fe 16px)' } : {}),
                       }}
                     />
                   )}
-                  {customColumns.map((col, ci) => {
-                    const colLeft = COL_WIDTHS.del + COL_WIDTHS.channel + ci * CUSTOM_COL_W;
-                    return (
-                      <EditableCell
-                        key={col.id}
-                        value={row.customFields?.[col.id] ?? ""}
-                        onChange={val => updateCustomField(row.id, col.id, val)}
-                        className={`${stickyBase} text-left align-middle`}
-                        style={{ position: "sticky", left: colLeft, zIndex: 10 }}
-                      />
-                    );
-                  })}
+                  {customColumns.map(col => (
+                    <EditableCell
+                      key={col.id}
+                      value={row.customFields?.[col.id] ?? ""}
+                      onChange={val => updateCustomField(row.id, col.id, val)}
+                      className={`${stickyBase} text-left align-middle`}
+                    />
+                  ))}
                   {(!row.flightGroupId || row.isMasterRow) && (
                     <td
                       className={`${stickyBase} text-right align-middle font-medium`}
-                      style={{ position: "sticky", left: dynamicTotalLeft, zIndex: 10 }}
                       rowSpan={row.isMasterRow ? (flightGroups.get(row.flightGroupId!)?.length ?? 1) : 1}
                     >
                       {rowTotal > 0 ? fmt(rowTotal) : ""}
@@ -1428,7 +1467,6 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
                 fee={fee}
                 weekCount={weeks.length}
                 stickyBase={stickyBase}
-                totalOffset={dynamicTotalLeft}
                 leftColSpan={leftColSpan}
                 onUpdateName={name => updateFee(fee.id, { name })}
                 onUpdateAmount={amount => updateFee(fee.id, { amount })}
@@ -1443,13 +1481,11 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
                   <td
                     colSpan={leftColSpan}
                     className={`${stickyBase} bg-amber-100 border-amber-200 font-bold text-amber-900`}
-                    style={{ position: "sticky", left: 0, zIndex: 10 }}
                   >
                     TOTAL NON-MEDIA FEES
                   </td>
                   <td
                     className={`${stickyBase} text-right bg-amber-100 border-amber-200 font-bold text-amber-900`}
-                    style={{ position: "sticky", left: dynamicTotalLeft, zIndex: 10 }}
                   >
                     {feesTotal > 0 ? fmt(feesTotal) : <span className="text-amber-400">—</span>}
                   </td>
@@ -1463,29 +1499,26 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
               <td
                 colSpan={leftColSpan}
                 className="border border-dashed border-blue-100 bg-white"
-                style={{ position: "sticky", left: 0, zIndex: 10 }}
               >
                 <button
                   onClick={addBlankRow}
-                  className="flex items-center gap-1.5 px-2 text-xs text-gray-300 hover:text-blue-500 font-medium transition-colors w-full py-1"
+                  className="flex items-center gap-1.5 px-2 text-xs text-black hover:text-blue-500 font-medium transition-colors w-full py-1"
                 >
                   <Plus className="w-3 h-3" /> Add channel
                 </button>
               </td>
               <td
                 className="border border-dashed border-blue-100 bg-white"
-                style={{ position: "sticky", left: dynamicTotalLeft, zIndex: 10, width: COL_WIDTHS.total, minWidth: COL_WIDTHS.total }}
+                style={{ width: COL_WIDTHS.total, minWidth: COL_WIDTHS.total }}
               />
               <td colSpan={weeks.length} className="border border-dashed border-blue-100 bg-white" />
             </tr>
 
             <tr style={{ height: ROW_H + 4 }}>
-              <td colSpan={leftColSpan} className="border border-gray-700 px-2 py-2 text-xs font-bold bg-gray-800 text-white uppercase tracking-wide"
-                style={{ position: "sticky", left: 0, zIndex: 10 }}>
+              <td colSpan={leftColSpan} className="border border-gray-700 px-2 py-2 text-xs font-bold bg-gray-800 text-white uppercase tracking-wide">
                 {fees.length > 0 ? "TOTAL MEDIA PLAN" : "TOTAL"}
               </td>
-              <td className="border border-gray-700 px-2 py-2 text-right bg-gray-800 text-white font-bold text-sm"
-                style={{ position: "sticky", left: dynamicTotalLeft, zIndex: 10 }}>
+              <td className="border border-gray-700 px-2 py-2 text-right bg-gray-800 text-white font-bold text-sm">
                 {grandTotal > 0 ? fmt(grandTotal) : "$0"}
               </td>
               {monthGroups.map((mg, i) => (

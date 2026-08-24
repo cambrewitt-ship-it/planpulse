@@ -21,12 +21,14 @@
 'use client';
 
 import Link from 'next/link';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { MediaPlanChannel } from '@/components/legacy-plan-builder/media-plan-grid';
 import { UploadWizard } from '@/components/sandbox/upload-wizard';
 import { PlanGrid } from '@/components/sandbox/plan-grid';
 import type { SandboxPlan, Week, PlanRow, Flight } from '@/components/sandbox/types';
 import { FLIGHT_COLORS } from '@/components/sandbox/types';
-import { useParams, useRouter } from 'next/navigation';
+import { createBlankSandboxPlan } from '@/lib/media-plan/sandbox-sync';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { getClientById, getMediaPlans, getPlanById, updateClient, updateClientLogoUrl } from '@/lib/db/plans';
 import { fetchCachedAnalyticsData, SpendDataPoint } from '@/lib/api/analytics-data-integration';
@@ -61,6 +63,7 @@ import { type GanttClient, type GanttChannel } from '@/components/agency/GanttCa
 import { FullscreenGanttView, type GanttAPMarker } from '@/components/agency/FullscreenGanttView';
 import { ClientIntelTab } from '@/components/dashboard-v2/client-intel-tab';
 import ClientChatPanel from '@/components/dashboard-v2/client-chat-panel';
+import MediaPlanChatPanel from '@/components/dashboard-v2/media-plan-chat-panel';
 
 interface Client {
   id: string;
@@ -128,6 +131,7 @@ function getChannelDisplayNameFromPlatform(platform?: string): string {
 export default function DashboardV2() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const clientId = params.id as string;
 
   const [client, setClient] = useState<Client | null>(null);
@@ -160,8 +164,36 @@ export default function DashboardV2() {
   const [loadingAnalytics, setLoadingAnalytics] = useState(false);
   const [isRefreshingData, setIsRefreshingData] = useState(false);
   const [exportToast, setExportToast] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'overview' | 'media-plan' | 'client-hub'>('overview');
+  const [viewMode, setViewMode] = useState<'overview' | 'media-plan' | 'client-hub'>(() => {
+    return searchParams.get('view') === 'media-plan' ? 'media-plan' : 'overview';
+  });
   const [adminNeedsConfig, setAdminNeedsConfig] = useState(false);
+  // Bumped only when the Media Plan Editor agent injects a plan (not on the grid's
+  // own edits) — PlanGrid only reads its `plan` prop on mount, so an external write
+  // needs a remount (via `key`) to actually show up in the grid.
+  const [externalPlanRevision, setExternalPlanRevision] = useState(0);
+  // One-shot prefill from the /agency "Edit Media Plan" launcher — the starter
+  // text is stashed in sessionStorage (not the URL) to avoid encoding/length limits.
+  const [mediaPlanChatPrefill, setMediaPlanChatPrefill] = useState<string | null>(null);
+  // Whether the Media Plan Editor chat panel is open alongside the grid — starts
+  // closed so the grid gets full width; the "AI Planner Agent" button (or any
+  // hand-off that wants the agent's attention, like a prefill or screenshot) opens it.
+  const [mediaPlanChatOpen, setMediaPlanChatOpen] = useState(false);
+  useEffect(() => {
+    if (searchParams.get('mpPrefill') !== '1') return;
+    try {
+      const stashed = sessionStorage.getItem('planpulse_mp_agent_prefill');
+      sessionStorage.removeItem('planpulse_mp_agent_prefill');
+      if (stashed) {
+        setMediaPlanChatPrefill(stashed);
+        setMediaPlanChatOpen(true);
+      }
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // Screenshot picked from the Upload Wizard's "AI Agent Planner" entry point,
+  // handed off to the Media Plan Editor chat panel to auto-run once it mounts.
+  const [pendingAgentScreenshot, setPendingAgentScreenshot] = useState<{ base64: string; mimeType: string; preview: string; name: string } | null>(null);
 
   // Eagerly check if any connected platform is missing saved accounts
   useEffect(() => {
@@ -426,6 +458,24 @@ export default function DashboardV2() {
 
   const handleClientPlanLoaded = (loaded: SandboxPlan) => {
     handleClientPlanChange(loaded);
+  };
+
+  // Used by the Media Plan Editor chat panel: PlanGrid only reads its `plan` prop
+  // on mount, so an agent-driven write needs a remount (via the externalPlanRevision
+  // key) to actually show up live — unlike the grid's own edits, which flow back
+  // through onPlanChange without ever needing to remount.
+  const handleAgentPlanApplied = (plan: SandboxPlan) => {
+    handleClientPlanChange(plan);
+    setExternalPlanRevision(v => v + 1);
+  };
+
+  // "Upload a screenshot of your Media Plan" on the empty-plan screen — starts a
+  // blank plan (same shape as "Start from scratch") so the grid + chat panel mount,
+  // then hands the image to the chat panel to auto-run the vision extraction.
+  const handleScreenshotSelectedFromWizard = (image: { base64: string; mimeType: string; preview: string; name: string }) => {
+    handleClientPlanLoaded(createBlankSandboxPlan());
+    setPendingAgentScreenshot(image);
+    setMediaPlanChatOpen(true);
   };
 
   const handleClientPlanUpload = () => {
@@ -1927,9 +1977,18 @@ export default function DashboardV2() {
   const handleAIActionComplete = useCallback((tool: string) => {
     if (tool === 'complete_action_point') {
       setActionPointsRefetchTrigger(prev => prev + 1);
-    } else if (['update_media_plan_budget', 'update_manual_spend', 'toggle_ooh_checklist'].includes(tool)) {
+    } else if (['update_media_plan_budget', 'update_media_plan_flight', 'update_manual_spend', 'toggle_ooh_checklist'].includes(tool)) {
       loadMediaPlanBuilderData();
     }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Same as handleAIActionComplete, but for the Media Plan Editor chat panel: that
+  // panel sits next to a *mounted* PlanGrid, which — unlike the Overview tab — won't
+  // pick up a fresh clientSandboxPlan on its own, so this also bumps the remount key.
+  const handleMediaPlanAgentAction = useCallback(async (tool: string) => {
+    if (!['update_media_plan_budget', 'update_media_plan_flight', 'set_media_plan_channels'].includes(tool)) return;
+    await loadMediaPlanBuilderData();
+    setExternalPlanRevision(v => v + 1);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDeleteChannel = (channelId: string) => {
@@ -2649,34 +2708,85 @@ export default function DashboardV2() {
 
             {/* ── Media Plan view ── */}
             {viewMode === 'media-plan' && sandboxPlanHydrated && (
-              clientSandboxPlan ? (
-                // PlanGrid: container height drives the grid — outerStyle overrides h-screen
-                // so the inner scroll area reaches exactly the container bottom (totals visible)
-                <div style={{ height: 'calc(100vh - 180px)', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {sandboxPlanSaveError && (
-                    <div style={{
-                      flexShrink: 0, padding: '8px 14px', borderRadius: 10,
-                      background: '#FEF2F2', border: '1px solid #FCA5A5', color: '#B91C1C',
-                      fontSize: 13, fontFamily: "'DM Sans', system-ui, sans-serif",
-                    }}>
-                      {sandboxPlanSaveError}
-                    </div>
-                  )}
-                  <div style={{ flex: 1, minHeight: 0, borderRadius: 12, border: '1px solid rgba(232,228,220,0.7)', boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', overflow: 'hidden' }}>
-                    <PlanGrid
-                      plan={clientSandboxPlan}
-                      onPlanChange={handleClientPlanChange}
-                      onUpload={handleClientPlanUpload}
-                      outerStyle={{ height: '100%' }}
+              // Container height drives the grid — outerStyle overrides h-screen so the
+              // inner scroll area reaches exactly the container bottom (totals visible).
+              // The Media Plan Editor chat panel is always mounted here (even when
+              // collapsed, via `display: none`) so its conversation survives toggling —
+              // only its layout width/visibility changes with mediaPlanChatOpen.
+              <div style={{ height: 'calc(100vh - 180px)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {sandboxPlanSaveError && (
+                  <div style={{
+                    flexShrink: 0, padding: '8px 14px', borderRadius: 10,
+                    background: '#FEF2F2', border: '1px solid #FCA5A5', color: '#B91C1C',
+                    fontSize: 13, fontFamily: "'DM Sans', system-ui, sans-serif",
+                  }}>
+                    {sandboxPlanSaveError}
+                  </div>
+                )}
+                <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: 0 }}>
+                  <div style={{
+                    flex: '0 0 32%', minWidth: 280, maxWidth: 420, marginRight: 12,
+                    display: mediaPlanChatOpen ? 'flex' : 'none', flexDirection: 'column',
+                  }}>
+                    <MediaPlanChatPanel
+                      clientId={clientId}
+                      clientName={client?.name || ''}
+                      currentPlan={clientSandboxPlan}
+                      onPlanApplied={handleAgentPlanApplied}
+                      onWriteAction={handleMediaPlanAgentAction}
+                      starterMessage={mediaPlanChatPrefill}
+                      onStarterConsumed={() => setMediaPlanChatPrefill(null)}
+                      autoAttachImage={pendingAgentScreenshot}
+                      onAutoAttachConsumed={() => setPendingAgentScreenshot(null)}
+                      height="100%"
                     />
                   </div>
+
+                  {/* Arrow toggle — sits on the chat panel's right edge; same button
+                      expands/collapses depending on mediaPlanChatOpen. Collapsed state
+                      carries a text label so it's an obvious call-to-action, not just
+                      a bare icon. */}
+                  <div style={{ flexShrink: 0, marginRight: 12, display: 'flex', alignItems: 'center' }}>
+                    <button
+                      onClick={() => setMediaPlanChatOpen(v => !v)}
+                      title={mediaPlanChatOpen ? 'Collapse AI Planner Agent' : 'Open AI Planner Agent'}
+                      style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                        width: mediaPlanChatOpen ? 20 : 'auto',
+                        height: 48, padding: mediaPlanChatOpen ? 0 : '0 14px',
+                        borderRadius: 8, whiteSpace: 'nowrap',
+                        border: '0.5px solid #D5D0C5', background: '#FDFCF8',
+                        color: '#1C1917', cursor: 'pointer',
+                        fontSize: 13, fontWeight: 500, fontFamily: "'DM Sans', system-ui, sans-serif",
+                        boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+                      }}
+                    >
+                      {mediaPlanChatOpen ? (
+                        <ChevronLeft className="w-4 h-4" />
+                      ) : (
+                        <>
+                          <ChevronRight className="w-4 h-4" />
+                          Open AI Planner Agent
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  <div style={{ flex: '1 1 auto', minWidth: 0, borderRadius: 12, border: '1px solid rgba(232,228,220,0.7)', boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', overflow: clientSandboxPlan ? 'hidden' : 'auto' }}>
+                    {clientSandboxPlan ? (
+                      <PlanGrid
+                        key={externalPlanRevision}
+                        plan={clientSandboxPlan}
+                        onPlanChange={handleClientPlanChange}
+                        onUpload={handleClientPlanUpload}
+                        outerStyle={{ height: '100%' }}
+                      />
+                    ) : (
+                      <UploadWizard onPlanLoaded={handleClientPlanLoaded} onScreenshotSelected={handleScreenshotSelectedFromWizard} />
+                    )}
+                  </div>
                 </div>
-              ) : (
-                // UploadWizard: no height cap so all steps/buttons are reachable
-                <div style={{ borderRadius: 12, border: '1px solid rgba(232,228,220,0.7)', boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', overflow: 'hidden' }}>
-                  <UploadWizard onPlanLoaded={handleClientPlanLoaded} />
-                </div>
-              )
+              </div>
             )}
 
             {/* ── Client Hub view (Admin + Client Intel) ── */}

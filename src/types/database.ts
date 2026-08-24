@@ -1469,6 +1469,28 @@ export interface Database {
           };
           Relationships: [];
         };
+        media_plan_builder_leads: {
+          Row: {
+            id: string;
+            name: string | null;
+            email: string;
+            source: string;
+            created_at: string;
+          };
+          Insert: {
+            id?: string;
+            name?: string | null;
+            email: string;
+            source?: string;
+            created_at?: string;
+          };
+          Update: {
+            name?: string | null;
+            email?: string;
+            source?: string;
+          };
+          Relationships: [];
+        };
       };
       Views: { [_ in never]: never };
       Functions: { [_ in never]: never };

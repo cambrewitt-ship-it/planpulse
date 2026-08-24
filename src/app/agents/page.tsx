@@ -126,6 +126,7 @@ const TOOL_DESCRIPTIONS: Record<string, string> = {
   create_client: 'Onboard a new client into the platform',
   create_action_point: 'Add a new recurring health check or setup task',
   update_media_plan_budget: 'Adjust a channel budget for a specific month',
+  update_media_plan_flight: 'Set a channel budget for a specific W/C date range (flight)',
   set_media_plan_channels: 'Replace the full media plan from a description',
   generate_invoice: 'Generate an invoice for a client by date range',
   generate_report: 'Generate a performance report for a client',

@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { RefreshCw, ChevronDown, ChevronRight, ExternalLink, Bot, X, ReceiptText, BarChart2, CalendarRange, ListChecks, ClipboardList, TrendingUp, FileText, PenLine, Users, Zap, Target, Plus } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
@@ -195,11 +196,12 @@ const AGENT_FLOWS: Record<string, {
   },
   media_plan_editor: {
     startMessage: 'Edit Media Plan',
-    steps: ['pick_client', 'pick_channel'],
-    buildPrompt: p => p.channel === 'All channels'
-      ? `Show me the full media plan for ${p.clientName} so I can review and update it`
-      : `Show me the ${p.channel} budget for ${p.clientName} so I can update it`,
-    stepLabel: s => s === 'pick_client' ? 'Which client?' : 'Which channel?',
+    // Just the client — picking it hands off straight to that client's Media Plan
+    // tab (see the special-cased redirect in handleWizardChip below), where the
+    // grid and the Media Plan Editor chat panel sit side by side.
+    steps: ['pick_client'],
+    buildPrompt: p => `Let's edit the media plan for ${p.clientName}.`,
+    stepLabel: () => 'Which client?',
   },
   action_points_manager: {
     startMessage: 'Review Action Points',
@@ -377,6 +379,7 @@ interface AgencyChatProps {
 }
 
 export const AgencyChat = forwardRef<AgencyChatHandle, AgencyChatProps>(function AgencyChat({ notesSlot }, ref) {
+  const router = useRouter();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -784,6 +787,7 @@ export const AgencyChat = forwardRef<AgencyChatHandle, AgencyChatProps>(function
       create_action_point: 'Adding new action point…',
       create_client: 'Creating new client…',
       update_media_plan_budget: 'Updating media plan budget…',
+      update_media_plan_flight: 'Updating media plan flight…',
       get_live_meta_campaigns: 'Fetching live Meta campaigns…',
       generate_invoice: 'Generating invoice…',
       generate_report: 'Generating report…',
@@ -885,6 +889,17 @@ export const AgencyChat = forwardRef<AgencyChatHandle, AgencyChatProps>(function
     const agentSlug = agent.template_slug ?? agent.name.toLowerCase().replace(/\s+/g, '_');
 
     if (nextIndex >= steps.length) {
+      const agentSlugForFlow = agent.template_slug ?? agent.name.toLowerCase().replace(/\s+/g, '_');
+      if (agentSlugForFlow === 'media_plan_editor' && newParams.clientId) {
+        // Hand off to the client's own Media Plan tab instead of running the
+        // conversation here — the grid + Media Plan Editor chat panel live there.
+        const prompt = flow?.buildPrompt(newParams) ?? chip.label;
+        try { sessionStorage.setItem('planpulse_mp_agent_prefill', prompt); } catch {}
+        setWizardState(null);
+        setMessages(prev => [...prev, userMsg]);
+        router.push(`/clients/${newParams.clientId}/dashboard?view=media-plan&mpPrefill=1`);
+        return;
+      }
       // Last step — build full prompt and fire the real API call
       const prompt = flow?.buildPrompt(newParams) ?? chip.label;
       setWizardState(null);

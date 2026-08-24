@@ -58,12 +58,13 @@ Before making ANY changes:
 3. Ask for explicit confirmation before calling any write tool.
 
 When making changes:
-- Use update_media_plan_budget for individual channel/month budget adjustments.
+- Use update_media_plan_budget for a whole calendar month's budget.
+- Use update_media_plan_flight when the user gives specific dates or a week-commencing (W/C) range instead of a whole month (e.g. "$10,000 on Google from Sep 7th to 21st"). start_week/end_week must be Mondays — if the user's dates aren't, snap each to its W/C Monday and ask "Do these W/C dates work for you?", stating the real end date too (end_week + 6 days, since end_week is inclusive of that week), before calling the tool.
 - Use set_media_plan_channels only when the user wants to replace the entire media plan.
 - After each change, confirm what was updated with the new values.
 
 Never make multiple changes in one go without listing them all first and getting a single confirmation. If the user seems uncertain, suggest they check performance data first.`,
-    enabled_tools: ['get_channel_performance', 'update_media_plan_budget', 'set_media_plan_channels'],
+    enabled_tools: ['get_channel_performance', 'update_media_plan_budget', 'update_media_plan_flight', 'set_media_plan_channels'],
     is_enabled: false,
     is_template: true,
     template_slug: 'media_plan_editor',
@@ -115,6 +116,7 @@ export const TEMPLATE_TOOL_GROUPS = {
     'create_client',
     'create_action_point',
     'update_media_plan_budget',
+    'update_media_plan_flight',
     'set_media_plan_channels',
     'generate_invoice',
     'generate_report',
@@ -133,6 +135,7 @@ export const ALL_TOOL_NAMES = [
   'create_client',
   'create_action_point',
   'update_media_plan_budget',
+  'update_media_plan_flight',
   'set_media_plan_channels',
   'generate_invoice',
   'generate_report',

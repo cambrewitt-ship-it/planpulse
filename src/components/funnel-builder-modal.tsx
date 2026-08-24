@@ -27,6 +27,7 @@ import {
   CommandGroup,
   CommandInput,
   CommandItem,
+  CommandList,
 } from '@/components/ui/command';
 import {
   Popover,
@@ -340,63 +341,65 @@ function SortableStageRow({
                       value={metaEventSearch}
                       onValueChange={setMetaEventSearch}
                     />
-                    <CommandEmpty>
-                      <div className="p-2 text-sm">
-                        {isLoadingMetaEvents ? (
-                          <p className="text-slate-500">Loading events...</p>
-                        ) : metaEventSearch ? (
-                          <div>
-                            <p className="text-slate-600 mb-2">No matching events found in stored data.</p>
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              className="w-full"
-                              onClick={() => {
-                                onUpdate(index, { eventName: metaEventSearch });
+                    <CommandList>
+                      <CommandEmpty>
+                        <div className="p-2 text-sm">
+                          {isLoadingMetaEvents ? (
+                            <p className="text-slate-500">Loading events...</p>
+                          ) : metaEventSearch ? (
+                            <div>
+                              <p className="text-slate-600 mb-2">No matching events found in stored data.</p>
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                className="w-full"
+                                onClick={() => {
+                                  onUpdate(index, { eventName: metaEventSearch });
+                                  setIsMetaEventPopoverOpen(false);
+                                }}
+                              >
+                                Use custom: &ldquo;{metaEventSearch}&rdquo;
+                              </Button>
+                            </div>
+                          ) : (
+                            <p className="text-slate-500">
+                              {metaConversionEvents.length === 0
+                                ? 'No stored conversion events yet — sync Meta spend first, or type a custom event name'
+                                : 'Start typing to search'}
+                            </p>
+                          )}
+                        </div>
+                      </CommandEmpty>
+                      <CommandGroup>
+                        {metaConversionEvents
+                          .filter(e => e.name.toLowerCase().includes(metaEventSearch.toLowerCase()))
+                          .slice(0, 50)
+                          .map((event) => (
+                            <CommandItem
+                              key={event.name}
+                              value={event.name}
+                              onSelect={(currentValue) => {
+                                onUpdate(index, { eventName: currentValue });
+                                setMetaEventSearch(currentValue);
                                 setIsMetaEventPopoverOpen(false);
                               }}
                             >
-                              Use custom: &ldquo;{metaEventSearch}&rdquo;
-                            </Button>
-                          </div>
-                        ) : (
-                          <p className="text-slate-500">
-                            {metaConversionEvents.length === 0
-                              ? 'No stored conversion events yet — sync Meta spend first, or type a custom event name'
-                              : 'Start typing to search'}
-                          </p>
-                        )}
-                      </div>
-                    </CommandEmpty>
-                    <CommandGroup>
-                      {metaConversionEvents
-                        .filter(e => e.name.toLowerCase().includes(metaEventSearch.toLowerCase()))
-                        .slice(0, 50)
-                        .map((event) => (
-                          <CommandItem
-                            key={event.name}
-                            value={event.name}
-                            onSelect={(currentValue) => {
-                              onUpdate(index, { eventName: currentValue });
-                              setMetaEventSearch(currentValue);
-                              setIsMetaEventPopoverOpen(false);
-                            }}
-                          >
-                            <Check
-                              className={cn(
-                                'mr-2 h-4 w-4',
-                                stage.eventName === event.name ? 'opacity-100' : 'opacity-0'
-                              )}
-                            />
-                            <div className="flex-1">
-                              <div className="font-medium text-xs">{event.name}</div>
-                              <div className="text-xs text-slate-500">
-                                {event.count.toLocaleString()} total actions
+                              <Check
+                                className={cn(
+                                  'mr-2 h-4 w-4',
+                                  stage.eventName === event.name ? 'opacity-100' : 'opacity-0'
+                                )}
+                              />
+                              <div className="flex-1">
+                                <div className="font-medium text-xs">{event.name}</div>
+                                <div className="text-xs text-slate-500">
+                                  {event.count.toLocaleString()} total actions
+                                </div>
                               </div>
-                            </div>
-                          </CommandItem>
-                        ))}
-                    </CommandGroup>
+                            </CommandItem>
+                          ))}
+                      </CommandGroup>
+                    </CommandList>
                   </Command>
                 </PopoverContent>
               </Popover>
@@ -431,56 +434,58 @@ function SortableStageRow({
                       value={eventSearch}
                       onValueChange={setEventSearch}
                     />
-                    <CommandEmpty>
-                      <div className="p-2 text-sm">
-                        {isLoadingEvents ? (
-                          <p className="text-slate-500">Loading events...</p>
-                        ) : eventSearch ? (
-                          <div>
-                            <p className="text-slate-600 mb-2">No matching events found in top 50.</p>
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              className="w-full"
-                              onClick={() => {
-                                onUpdate(index, { eventName: eventSearch });
-                                setIsEventPopoverOpen(false);
-                              }}
-                            >
-                              Use custom event: "{eventSearch}"
-                            </Button>
-                          </div>
-                        ) : (
-                          <p className="text-slate-500">Start typing to search or enter custom event</p>
-                        )}
-                      </div>
-                    </CommandEmpty>
-                    <CommandGroup>
-                      {filteredEvents.slice(0, 50).map((event) => (
-                        <CommandItem
-                          key={event.name}
-                          value={event.name}
-                          onSelect={(currentValue) => {
-                            onUpdate(index, { eventName: currentValue });
-                            setEventSearch(currentValue);
-                            setIsEventPopoverOpen(false);
-                          }}
-                        >
-                          <Check
-                            className={cn(
-                              "mr-2 h-4 w-4",
-                              stage.eventName === event.name ? "opacity-100" : "opacity-0"
-                            )}
-                          />
-                          <div className="flex-1">
-                            <div className="font-medium">{event.name}</div>
-                            <div className="text-xs text-slate-500">
-                              {event.count.toLocaleString()} events in last 30 days
+                    <CommandList>
+                      <CommandEmpty>
+                        <div className="p-2 text-sm">
+                          {isLoadingEvents ? (
+                            <p className="text-slate-500">Loading events...</p>
+                          ) : eventSearch ? (
+                            <div>
+                              <p className="text-slate-600 mb-2">No matching events found in top 50.</p>
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                className="w-full"
+                                onClick={() => {
+                                  onUpdate(index, { eventName: eventSearch });
+                                  setIsEventPopoverOpen(false);
+                                }}
+                              >
+                                Use custom event: "{eventSearch}"
+                              </Button>
                             </div>
-                          </div>
-                        </CommandItem>
-                      ))}
-                    </CommandGroup>
+                          ) : (
+                            <p className="text-slate-500">Start typing to search or enter custom event</p>
+                          )}
+                        </div>
+                      </CommandEmpty>
+                      <CommandGroup>
+                        {filteredEvents.slice(0, 50).map((event) => (
+                          <CommandItem
+                            key={event.name}
+                            value={event.name}
+                            onSelect={(currentValue) => {
+                              onUpdate(index, { eventName: currentValue });
+                              setEventSearch(currentValue);
+                              setIsEventPopoverOpen(false);
+                            }}
+                          >
+                            <Check
+                              className={cn(
+                                "mr-2 h-4 w-4",
+                                stage.eventName === event.name ? "opacity-100" : "opacity-0"
+                              )}
+                            />
+                            <div className="flex-1">
+                              <div className="font-medium">{event.name}</div>
+                              <div className="text-xs text-slate-500">
+                                {event.count.toLocaleString()} events in last 30 days
+                              </div>
+                            </div>
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
                   </Command>
                 </PopoverContent>
               </Popover>

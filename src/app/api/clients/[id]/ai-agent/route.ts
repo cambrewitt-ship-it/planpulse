@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { createClient } from '@/lib/supabase/server';
+import { channelsToSandboxPlan, patchSandboxPlanFlightBudget, upsertSandboxPlanFlight, snapToWeekCommencing } from '@/lib/media-plan/sandbox-sync';
 
 export const maxDuration = 60;
 
@@ -45,7 +46,7 @@ const CLIENT_AGENT_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'update_media_plan_budget',
-    description: "Update a channel's planned budget for a specific month in this client's media plan.",
+    description: "Update a channel's planned budget for one whole calendar month in this client's media plan. Use only when the request is genuinely month-scoped. If the user gives a specific date range or week-commencing (W/C) span instead (e.g. \"$10,000 on Google from Sep 7th to 21st\"), use update_media_plan_flight instead.",
     input_schema: {
       type: 'object',
       properties: {
@@ -54,6 +55,24 @@ const CLIENT_AGENT_TOOLS: Anthropic.Tool[] = [
         new_budget: { type: 'number', description: 'New planned budget in dollars.' },
       },
       required: ['channel_name', 'month', 'new_budget'],
+    },
+  },
+  {
+    name: 'update_media_plan_flight',
+    description: "Set a channel's budget for a specific week-commencing (W/C) date range — a single flight/burst — rather than a whole calendar month. Use whenever the user gives specific dates or a W/C range. start_week and end_week should both be Mondays; if the user's dates aren't Mondays, snap each to its week-commencing Monday yourself and ask the user to confirm those W/C dates work — stating the real end date too (end_week + 6 days, since end_week is inclusive) — before calling this tool. An existing flight on this channel that overlaps the given range is replaced; otherwise a new flight is added.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        channel_name: { type: 'string', description: 'Channel to update (e.g. "Meta Ads", "Google Ads").' },
+        start_week: { type: 'string', description: 'Week-commencing start date, YYYY-MM-DD, must be a Monday.' },
+        end_week: { type: 'string', description: 'Week-commencing end date, YYYY-MM-DD, must be a Monday. Inclusive — flight runs through end_week + 6 days.' },
+        budget: { type: 'number', description: 'Total budget for this flight, in dollars.' },
+        monthly_spend: {
+          type: 'object',
+          description: 'How the total budget splits across calendar months the flight touches, as { "YYYY-M": amount }, distributed proportionally by weeks-in-month. Must sum to exactly `budget`.',
+        },
+      },
+      required: ['channel_name', 'start_week', 'end_week', 'budget', 'monthly_spend'],
     },
   },
   {
@@ -349,7 +368,7 @@ async function toolUpdateMediaPlanBudget(clientId: string, input: { channel_name
 
   const { data: mediaPlan } = await supabase
     .from('client_media_plan_builder')
-    .select('client_id, channels')
+    .select('client_id, channels, sandbox_plan')
     .eq('client_id', clientId)
     .maybeSingle();
 
@@ -376,9 +395,15 @@ async function toolUpdateMediaPlanBudget(clientId: string, input: { channel_name
   flights[0].monthlySpend[input.month] = input.new_budget;
   channels[channelIdx] = { ...channel, flights };
 
+  // The visible grid renders from sandbox_plan, not channels — keep both in sync.
+  const budgetDelta = input.new_budget - Number(oldBudget);
+  const updatedSandboxPlan = mediaPlan.sandbox_plan
+    ? patchSandboxPlanFlightBudget(mediaPlan.sandbox_plan as any, channel.channelName, input.month, budgetDelta)
+    : channelsToSandboxPlan(channels);
+
   const { error: updateError } = await supabase
     .from('client_media_plan_builder')
-    .update({ channels })
+    .update({ channels, sandbox_plan: updatedSandboxPlan })
     .eq('client_id', clientId);
 
   if (updateError) return { error: 'Failed to save budget update', details: updateError.message };
@@ -390,6 +415,81 @@ async function toolUpdateMediaPlanBudget(clientId: string, input: { channel_name
     month: input.month,
     previous_budget: oldBudget,
     new_budget: input.new_budget,
+  };
+}
+
+async function toolUpdateMediaPlanFlight(
+  clientId: string,
+  input: { channel_name: string; start_week: string; end_week: string; budget: number; monthly_spend: Record<string, number> }
+) {
+  const supabase = await createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.user) return { error: 'Unauthorized' };
+
+  const { data: mediaPlan } = await supabase
+    .from('client_media_plan_builder')
+    .select('client_id, channels, sandbox_plan')
+    .eq('client_id', clientId)
+    .maybeSingle();
+
+  if (!mediaPlan) return { error: 'No media plan found. Create one in the app first.' };
+
+  const startWeek = snapToWeekCommencing(input.start_week);
+  const endWeek = snapToWeekCommencing(input.end_week);
+
+  const channels: any[] = JSON.parse(JSON.stringify(mediaPlan.channels || []));
+  const channelIdx = channels.findIndex((ch: any) =>
+    ch.channelName?.toLowerCase().includes(input.channel_name.toLowerCase())
+  );
+
+  if (channelIdx === -1) {
+    return {
+      error: `Channel "${input.channel_name}" not found`,
+      available_channels: channels.map((ch: any) => ch.channelName).filter(Boolean),
+    };
+  }
+
+  const channel = channels[channelIdx];
+  const flights: any[] = [...(channel.flights || [])];
+  const startMs = new Date(startWeek).getTime();
+  const endMs = new Date(endWeek).getTime();
+  const overlapIdx = flights.findIndex((f: any) => {
+    const fStart = new Date(f.startWeek).getTime();
+    const fEnd = new Date(f.endWeek).getTime();
+    return fStart <= endMs && fEnd >= startMs;
+  });
+
+  const newFlight = { id: overlapIdx >= 0 ? flights[overlapIdx].id : `flight-${Date.now()}`, startWeek, endWeek, monthlySpend: input.monthly_spend };
+  if (overlapIdx >= 0) flights[overlapIdx] = newFlight;
+  else flights.push(newFlight);
+
+  const totalBudget = flights.reduce((s: number, f: any) => {
+    const monthValues: number[] = Object.values(f.monthlySpend || {});
+    return s + monthValues.reduce((a, b) => a + Number(b), 0);
+  }, 0);
+  channels[channelIdx] = { ...channel, flights, totalBudget };
+
+  const updatedSandboxPlan = upsertSandboxPlanFlight(
+    mediaPlan.sandbox_plan as any,
+    channel.channelName,
+    { startWeek, endWeek, budget: input.budget },
+    { isOrganic: channel.channelCategory === 'organic_social', detail: channel.channelSubType }
+  );
+
+  const { error: updateError } = await supabase
+    .from('client_media_plan_builder')
+    .update({ channels, sandbox_plan: updatedSandboxPlan })
+    .eq('client_id', clientId);
+
+  if (updateError) return { error: 'Failed to save flight update', details: updateError.message };
+
+  return {
+    success: true,
+    message: `Set ${channel.channelName} to $${Number(input.budget).toLocaleString()} for W/C ${startWeek} – ${endWeek}`,
+    channel: channel.channelName,
+    start_week: startWeek,
+    end_week: endWeek,
+    budget: input.budget,
   };
 }
 
@@ -527,7 +627,8 @@ You are focused exclusively on this client. You have access to their intelligenc
 
 **Available actions:**
 - complete_action_point — tick off tasks in their To-Do list
-- update_media_plan_budget — adjust a channel's planned budget for a specific month
+- update_media_plan_budget — adjust a channel's planned budget for a whole calendar month
+- update_media_plan_flight — set a channel's budget for a specific week-commencing (W/C) date range instead of a whole month. Use this whenever the user gives specific dates or a W/C range (e.g. "$10,000 on Google from Sep 7th to 21st"), not update_media_plan_budget. start_week/end_week must be Mondays — if the user's dates aren't, snap each to its week-commencing Monday and ask "Do these W/C dates work for you?", stating the real end date too (end_week + 6 days, since end_week is inclusive of that week), before calling the tool. Compute monthly_spend proportionally by weeks-in-month across the range.
 - update_manual_spend — update the actual spend figure on a non-digital channel (OOH, Organic Social, EDM, etc.)
 - toggle_ooh_checklist — tick/untick OOH production milestones
 
@@ -612,6 +713,8 @@ Be concise, professional, and action-oriented. Use bullet points and bold text. 
               result = await toolCompleteActionPoint(clientId, input);
             } else if (block.name === 'update_media_plan_budget') {
               result = await toolUpdateMediaPlanBudget(clientId, input);
+            } else if (block.name === 'update_media_plan_flight') {
+              result = await toolUpdateMediaPlanFlight(clientId, input);
             } else if (block.name === 'update_manual_spend') {
               result = await toolUpdateManualSpend(clientId, input);
             } else if (block.name === 'toggle_ooh_checklist') {
@@ -620,7 +723,7 @@ Be concise, professional, and action-oriented. Use bullet points and bold text. 
               result = { error: `Unknown tool: ${block.name}` };
             }
 
-            const writableTools = ['complete_action_point', 'update_media_plan_budget', 'update_manual_spend', 'toggle_ooh_checklist'];
+            const writableTools = ['complete_action_point', 'update_media_plan_budget', 'update_media_plan_flight', 'update_manual_spend', 'toggle_ooh_checklist'];
             if (writableTools.includes(block.name) && result?.success) {
               send({ type: 'action', tool: block.name, data: result });
             }

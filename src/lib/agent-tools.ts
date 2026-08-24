@@ -120,7 +120,7 @@ export const TOOL_DEFINITIONS: Anthropic.Tool[] = [
   },
   {
     name: 'update_media_plan_budget',
-    description: "Update a channel's planned budget for a specific month in a client's media plan. Use when the user wants to adjust, change, or set a budget for a channel. Month must be in YYYY-MM format (e.g. \"2026-06\" for June 2026).",
+    description: "Update a channel's planned budget for one whole calendar month in a client's media plan. Use only when the user's request is genuinely month-scoped (e.g. \"set Google's June budget to $5,000\"). If the user gives a specific date range or week-commencing (W/C) span instead (e.g. \"$10,000 on Google from Sep 7th to 21st\"), use update_media_plan_flight instead — do not force a date-range request into a monthly bucket. Month must be in YYYY-MM format (e.g. \"2026-06\" for June 2026).",
     input_schema: {
       type: 'object',
       properties: {
@@ -142,6 +142,40 @@ export const TOOL_DEFINITIONS: Anthropic.Tool[] = [
         },
       },
       required: ['client_name', 'channel_name', 'month', 'new_budget'],
+    },
+  },
+  {
+    name: 'update_media_plan_flight',
+    description: "Set a channel's budget for a specific week-commencing (W/C) date range — a single flight/burst — rather than a whole calendar month. Use this whenever the user gives specific dates or a W/C range (e.g. \"$10,000 on Google from W/C Sep 7th to Sep 28th\"). start_week and end_week should both be Mondays (week-commencing dates); if the user's dates aren't Mondays, snap each to its week-commencing Monday yourself and ask the user to confirm those W/C dates work before calling this tool (state the resulting real end date too: end_week + 6 days, since end_week is inclusive of that whole week). If an existing flight on this channel overlaps the given range, it will be replaced (dates + budget updated); otherwise a new flight is added alongside the channel's existing flights.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        client_name: {
+          type: 'string',
+          description: 'The client name (partial match is fine).',
+        },
+        channel_name: {
+          type: 'string',
+          description: 'The channel to update (e.g. "Meta", "Google Ads", "LinkedIn").',
+        },
+        start_week: {
+          type: 'string',
+          description: 'Week-commencing start date, YYYY-MM-DD, must be a Monday.',
+        },
+        end_week: {
+          type: 'string',
+          description: 'Week-commencing end date, YYYY-MM-DD, must be a Monday. Inclusive — the flight runs through the Sunday of this week (end_week + 6 days).',
+        },
+        budget: {
+          type: 'number',
+          description: 'Total budget for this flight, in dollars.',
+        },
+        monthly_spend: {
+          type: 'object',
+          description: 'How the total budget splits across calendar months the flight touches, as { "YYYY-M": amount }. Distribute proportionally by the number of weeks in each month across start_week to end_week inclusive — the same way you would for set_media_plan_channels. Values must sum to exactly `budget`. If the flight sits entirely within one month, this is just { "YYYY-M": budget }.',
+        },
+      },
+      required: ['client_name', 'channel_name', 'start_week', 'end_week', 'budget', 'monthly_spend'],
     },
   },
   {
@@ -308,7 +342,7 @@ export const TOOL_DEFINITIONS: Anthropic.Tool[] = [
 ];
 
 // Subset used by the Teams bot: read tools + safe write tools only
-// Excludes create_client and update_media_plan_budget (too high-risk for bot commands)
+// Excludes create_client and update_media_plan_budget/update_media_plan_flight (too high-risk for bot commands)
 export const BOT_TOOL_DEFINITIONS: Anthropic.Tool[] = TOOL_DEFINITIONS.filter(
-  t => !['create_client', 'update_media_plan_budget', 'get_live_meta_campaigns', 'get_client_intelligence'].includes(t.name)
+  t => !['create_client', 'update_media_plan_budget', 'update_media_plan_flight', 'get_live_meta_campaigns', 'get_client_intelligence'].includes(t.name)
 );

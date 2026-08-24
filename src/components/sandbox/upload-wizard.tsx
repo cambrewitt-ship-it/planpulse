@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useState } from "react";
-import { FileSpreadsheet, CheckCircle, AlertCircle, Loader2, ArrowRight } from "lucide-react";
+import { FileSpreadsheet, CheckCircle, AlertCircle, Loader2, ArrowRight, Sparkles } from "lucide-react";
 import type { SandboxPlan, PlanRow } from "./types";
 
 type Step = "drop" | "sheet" | "year" | "parsing" | "review" | "error";
@@ -33,6 +33,16 @@ const YEAR_OPTIONS = [CURRENT_YEAR - 1, CURRENT_YEAR, CURRENT_YEAR + 1, CURRENT_
 
 interface Props {
   onPlanLoaded: (plan: SandboxPlan) => void;
+  // Optional — when provided, shows an "Upload a screenshot" entry point alongside
+  // the Excel drop zone. The wizard itself doesn't parse the image; it just hands
+  // the raw file off to the caller, which routes it through the Media Plan Editor
+  // agent's vision pipeline instead of the Excel parser.
+  onScreenshotSelected?: (image: { base64: string; mimeType: string; preview: string; name: string }) => void;
+  // Override the drop screen's heading/subtitle — used by the standalone
+  // /media-plan-builder tool to show its own title & description instead of
+  // the generic copy shown when this wizard is embedded in the client dashboard.
+  title?: string;
+  description?: string;
 }
 
 function formatBudget(n: number): string {
@@ -192,7 +202,7 @@ function SpreadsheetDiagram() {
   );
 }
 
-export function UploadWizard({ onPlanLoaded }: Props) {
+export function UploadWizard({ onPlanLoaded, onScreenshotSelected, title, description }: Props) {
   const [step, setStep] = useState<Step>("drop");
   const [errorMsg, setErrorMsg] = useState("");
   const [parsedPlan, setParsedPlan] = useState<SandboxPlan | null>(null);
@@ -299,6 +309,18 @@ export function UploadWizard({ onPlanLoaded }: Props) {
     e.target.value = "";
   }, [handleFileSelected]);
 
+  const handleScreenshotInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !onScreenshotSelected) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result as string;
+      onScreenshotSelected({ base64: dataUrl.split(",")[1], mimeType: file.type, preview: dataUrl, name: file.name });
+    };
+    reader.readAsDataURL(file);
+  }, [onScreenshotSelected]);
+
   const handleYearConfirm = useCallback(() => {
     if (pendingScratch) {
       const year = selectedYear;
@@ -350,8 +372,8 @@ export function UploadWizard({ onPlanLoaded }: Props) {
       <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50 p-8">
         <div className="w-full max-w-lg">
           <div className="text-center mb-8">
-            <h1 className="text-2xl font-bold text-gray-900">Media Plan</h1>
-            <p className="text-gray-500 mt-1 text-sm">Upload an existing Excel plan or start from scratch</p>
+            <h1 className="text-2xl font-bold text-gray-900">{title ?? "Media Plan"}</h1>
+            <p className="text-gray-500 mt-1 text-sm">{description ?? "Upload an existing Excel plan or start from scratch"}</p>
           </div>
 
           <label
@@ -386,6 +408,17 @@ export function UploadWizard({ onPlanLoaded }: Props) {
           >
             Start from scratch (blank plan)
           </button>
+
+          {onScreenshotSelected && (
+            <label className="mt-3 w-full py-3 px-4 border border-blue-200 rounded-xl bg-blue-50 hover:bg-blue-100 transition-colors cursor-pointer flex flex-col items-center gap-0.5 text-center">
+              <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" className="hidden" onChange={handleScreenshotInput} />
+              <span className="flex items-center gap-1.5 text-sm font-medium text-blue-700">
+                <Sparkles className="w-3.5 h-3.5" />
+                Upload a screenshot of your Media Plan
+              </span>
+              <span className="text-xs text-blue-500">Use our AI Agent Planner</span>
+            </label>
+          )}
         </div>
       </div>
     );
