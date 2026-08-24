@@ -920,7 +920,7 @@ export default function AdPlatformConnector({ clientId, onConfigNeeded }: AdPlat
 
       {/* Connection Modal */}
       {openModal && (
-        <Dialog open={!!openModal} onOpenChange={(open) => !open && setOpenModal(null)}>
+        <Dialog modal={false} open={!!openModal} onOpenChange={(open) => !open && setOpenModal(null)}>
           <DialogContent className="max-w-2xl font-[family-name:var(--font-inter)] relative">
             {/* Focusable anchor so focus can be restored here after Nango OAuth popup closes */}
             <div ref={modalFocusRef} tabIndex={-1} className="outline-none" />
