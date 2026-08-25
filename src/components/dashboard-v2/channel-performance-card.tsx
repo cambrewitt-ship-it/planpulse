@@ -63,6 +63,12 @@ export interface ChannelCardProps {
     isMultiMonth?: boolean;
     campaigns?: Array<{ id: string; name: string }>;
     metaCampaignIds?: string[];
+    /** Campaign IDs linked to this specific card (Meta or Google) — pre-selects the campaign filter by default. */
+    linkedCampaignIds?: string[];
+    /** Raw channel name (e.g. "Google Ads"), undecorated — used to compose a short title. */
+    channelBaseName?: string;
+    /** Raw media-plan line label (e.g. "Performance Max — Video – 15", 6"; ..."), undecorated. */
+    lineName?: string;
     rawSpendPoints?: any[];
   };
   selectedMonth?: Date;
@@ -87,6 +93,20 @@ export interface ChannelCardProps {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+// A media-plan line's `detail` cell can be a long run-on of specs (formats,
+// sizes, CTA, metric...). Build a short "Platform - Line" title from the
+// first clause instead of letting the raw string overflow the card.
+function buildCardTitle(channel: { name: string; platform: string; channelBaseName?: string; lineName?: string }): string {
+  const base = channel.channelBaseName ?? channel.name;
+  if (!channel.lineName) return base;
+  const platformShort = channel.platform === 'google-ads' ? 'Google' : channel.platform === 'meta-ads' ? 'Meta' : base;
+  const parts = channel.lineName.split(/\s*[—;]\s*/).map(s => s.trim()).filter(Boolean);
+  const lineHead = parts[0] ?? channel.lineName;
+  const maxLen = 30;
+  const truncatedLine = lineHead.length > maxLen ? `${lineHead.slice(0, maxLen).trimEnd()}…` : lineHead;
+  return `${platformShort} - ${truncatedLine}`;
+}
 
 function fmt(value: number, style: 'currency' | 'percent' | 'decimal' = 'decimal', digits = 0): string {
   if (style === 'currency') {
@@ -283,11 +303,13 @@ function PacingBar({
   plannedSpend,
   plannedLabel,
   status,
+  runRate,
 }: {
   currentSpend: number;
   plannedSpend: number;
   plannedLabel?: string;
   status: ChannelCardProps['channel']['status'];
+  runRate?: { actual: number; required: number } | null;
 }) {
   const spendRatio = plannedSpend > 0 ? (currentSpend / plannedSpend) * 100 : 0;
   const fillPct    = Math.min(100, spendRatio);
@@ -317,6 +339,14 @@ function PacingBar({
         <span>{fmt(currentSpend, 'currency', 0)} spent</span>
         <span>{fmt(plannedSpend, 'currency', 0)}{plannedLabel ? ` ${plannedLabel}` : ' planned'}</span>
       </div>
+      {runRate && (
+        <div className="flex justify-between text-base pt-0.5">
+          <span className="text-gray-400">Run rate</span>
+          <span className={runRate.actual > runRate.required ? 'text-red-600 font-medium' : 'text-gray-500 font-medium'}>
+            <strong>{fmt(runRate.actual, 'currency', 0)}</strong>/day actual vs <strong>{fmt(runRate.required, 'currency', 0)}</strong>/day planned
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -553,6 +583,7 @@ const ACTION_TYPE_LABELS: Record<string, string> = {
   'offsite_conversion.fb_pixel_lead':                  'Pixel Leads',
   'offsite_conversion.fb_pixel_view_content':          'Content Views',
   'offsite_conversion.fb_pixel_search':                'Searches',
+  'offsite_conversion.fb_pixel_submit_application':    'Submit Application',
   'link_click':                                        'Link Clicks',
   'landing_page_view':                                 'Landing Page Views',
   'post_engagement':                                   'Post Engagement',
@@ -603,7 +634,10 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
     try {
       const saved = localStorage.getItem(`channel-campaigns-${clientId}-${channel.id ?? channel.name}`);
       if (saved) return new Set(JSON.parse(saved) as string[]);
-      // No saved selection — pre-select onboarding campaigns if configured, otherwise default to All Campaigns
+      // No saved selection — pre-select onboarding/linked campaigns if configured, otherwise default to All Campaigns
+      if (channel.linkedCampaignIds?.length) {
+        return new Set(channel.linkedCampaignIds);
+      }
       if (channel.metaCampaignIds?.length) {
         return new Set(channel.metaCampaignIds);
       }
@@ -661,7 +695,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
     const selected = allSelected ? campaigns : campaigns.filter(c => selectedCampaignIds.has(c.id));
     if (selected.length === 0) return 'ALL CAMPAIGNS';
     if (selected.length === 1) return selected[0].name.toUpperCase();
-    return `${selected[0].name.toUpperCase()} + ${selected.length - 1} MORE`;
+    return `${selected.length} CAMPAIGNS SELECTED`;
   })();
 
   const convEventStorageKey = `conv-event-${clientId ?? ''}-${channel.id ?? channel.name}`;
@@ -923,6 +957,8 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
     const now = new Date();
     // Use midnight-normalized today so date comparisons don't flicker by time of day
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const todayStr = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
 
     let periodStartStr: string;
     let periodEndStr: string;
@@ -947,7 +983,19 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
     if (today > periodEnd) return null;
 
     const totalDays = Math.max(1, differenceInDays(periodEnd, periodStart) + 1);
-    const daysElapsed = Math.max(1, Math.min(totalDays, differenceInDays(today, periodStart) + 1));
+
+    // Anchor the burn rate to the first day spend actually started, not the period
+    // start — a flight that begins mid-period would otherwise dilute the daily rate
+    // with zero-spend days and make the projection barely move past current spend.
+    let spendStartDate = periodStart;
+    for (const p of filteredSpendChartData) {
+      if (p.date < periodStartStr || p.date > periodEndStr) continue;
+      if (typeof p.actualSpend === 'number' && p.actualSpend > 0) {
+        spendStartDate = parseISO(p.date);
+        break;
+      }
+    }
+    const daysElapsed = Math.max(1, Math.min(totalDays, differenceInDays(today, spendStartDate) + 1));
 
     // When the analytics range ends today the natural daysRemaining is 0, which
     // gives a useless forecast. Extend the horizon to end-of-current-month so
@@ -960,16 +1008,37 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
     const daysRemaining = Math.max(0, differenceInDays(forecastEnd, today));
     if (daysRemaining === 0) return null;
 
+    // Actual run rate: real average daily spend since spend began.
     const dailyBurnRate = spend / daysElapsed;
+
+    // Required run rate: read off the *local slope* of the planned-spend curve
+    // around today, rather than planned-total ÷ days-in-selected-view. The
+    // curve (channel.chartData) is already anchored to the flight's real
+    // start date and its pace can change from month to month (e.g. spending
+    // more aggressively later on), so a flat average over whatever timeframe
+    // happens to be selected on the dashboard is both mis-anchored and
+    // insensitive to those pacing changes — the slope isn't.
+    let requiredDailyRate = planned / totalDays;
+    const anchorIdx = filteredSpendChartData.findIndex(p => p.date >= todayStr);
+    if (anchorIdx !== -1) {
+      const before = anchorIdx > 0 ? filteredSpendChartData[anchorIdx - 1] : filteredSpendChartData[anchorIdx];
+      const afterIdx = anchorIdx < filteredSpendChartData.length - 1 ? anchorIdx + 1 : anchorIdx;
+      const after = filteredSpendChartData[afterIdx];
+      const dayGap = differenceInDays(parseISO(after.date), parseISO(before.date));
+      const spendGap = after.plannedSpend - before.plannedSpend;
+      if (dayGap > 0 && spendGap > 0) {
+        requiredDailyRate = spendGap / dayGap;
+      }
+    }
+
     const projectedEndSpend = spend + dailyBurnRate * daysRemaining;
     const overspendAmount = projectedEndSpend - planned;
     const overspendPct = (overspendAmount / planned) * 100;
 
-    const pad = (n: number) => String(n).padStart(2, '0');
     const forecastEndStr = `${forecastEnd.getFullYear()}-${pad(forecastEnd.getMonth() + 1)}-${pad(forecastEnd.getDate())}`;
 
-    return { projectedEndSpend, overspendAmount, overspendPct, dailyBurnRate, daysRemaining, forecastEndStr };
-  }, [isNoneSelected, filteredMetrics.spend, channel.plannedSpend, dateRange, selectedMonth]);
+    return { projectedEndSpend, overspendAmount, overspendPct, dailyBurnRate, requiredDailyRate, daysRemaining, forecastEndStr };
+  }, [isNoneSelected, filteredMetrics.spend, channel.plannedSpend, dateRange, selectedMonth, filteredSpendChartData]);
 
   // Benchmark / preset derived values
   // Only show benchmark comparisons for rate/cost-per metrics (CTR, CPC, CPM, CPA, ROAS, etc.) —
@@ -1233,14 +1302,14 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
               <div className="row-start-1 col-start-2 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   {(channel.platform === 'google-ads' || channel.platform === 'meta-ads' || (channel.campaigns && channel.campaigns.length > 0)) ? (
-                    <div ref={campaignDropdownRef} className="relative min-w-0 flex-shrink-0">
+                    <div ref={campaignDropdownRef} className="relative min-w-0">
                       <button
                         onClick={() => setCampaignDropdownOpen(v => !v)}
-                        className="flex flex-col items-start gap-0 text-left min-w-0"
+                        className="flex flex-col items-start gap-0 text-left min-w-0 max-w-full"
                       >
-                        <div className="flex items-center gap-1">
-                          <h3 className="text-base font-bold" style={{ color: '#1C1917', fontFamily: "'Inter', system-ui, sans-serif" }}>
-                            {channel.name.toUpperCase()}
+                        <div className="flex items-center gap-1 min-w-0 max-w-full">
+                          <h3 className="text-base font-bold truncate min-w-0" title={channel.name} style={{ color: '#1C1917', fontFamily: "'Inter', system-ui, sans-serif" }}>
+                            {buildCardTitle(channel).toUpperCase()}
                             {campaignSubtitle && (
                               <span className="text-gray-500"> — {campaignSubtitle}</span>
                             )}
@@ -1365,6 +1434,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                       plannedSpend={displayPlanned}
                       plannedLabel={plannedLabel}
                       status={channel.status}
+                      runRate={overspendForecast ? { actual: overspendForecast.dailyBurnRate, required: overspendForecast.requiredDailyRate } : null}
                     />
                   );
                 })()}

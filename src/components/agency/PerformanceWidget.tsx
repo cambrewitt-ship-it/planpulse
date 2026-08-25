@@ -81,6 +81,7 @@ const META_DEFAULT_EVENTS: Array<{ name: string; count: number }> = [
   { name: 'offsite_conversion.fb_pixel_view_content', count: 0 },
   { name: 'offsite_conversion.fb_pixel_contact', count: 0 },
   { name: 'offsite_conversion.fb_pixel_schedule', count: 0 },
+  { name: 'offsite_conversion.fb_pixel_submit_application', count: 0 },
   { name: 'mobile_app_install', count: 0 },
   { name: 'app_custom_event.fb_mobile_purchase', count: 0 },
   { name: 'app_custom_event.fb_mobile_add_to_cart', count: 0 },
@@ -170,6 +171,7 @@ const META_ACTION_LABELS: Record<string, string> = {
   'offsite_conversion.fb_pixel_search':                'Searches',
   'offsite_conversion.fb_pixel_contact':               'Contact',
   'offsite_conversion.fb_pixel_schedule':              'Schedule',
+  'offsite_conversion.fb_pixel_submit_application':    'Submit Application',
   'link_click':                                        'Link Clicks',
   'landing_page_view':                                 'Landing Page Views',
   'post_engagement':                                   'Post Engagement',
@@ -286,6 +288,14 @@ function ConfigModal({ clientId, initialConfig, goals, campaigns, ga4Events, met
   const needsConversionEvent =
     (editConfig.metricSource === 'ga4' && !editConfig.ga4EventName && ga4Events.length > 0) ||
     (showMetaEvents && !editConfig.metaActionType && mergedMetaEvents.length > 0);
+
+  // Real ad/GA4 rows exist for this client — platforms are connected and syncing,
+  // even if the widget currently has nothing to show (no goal/target, or no
+  // conversions in the lookback window). Distinguishes that from an actual
+  // "never connected anything" state, which is the only case the Connect
+  // Platforms CTA is relevant for.
+  const platformsHaveData = campaigns.length > 0 || metaEvents.length > 0 || ga4Events.length > 0 || googleAdsConversionActions.length > 0;
+  const missingTarget = !primaryGoal?.target_value;
 
   async function handleSave() {
     setSaving(true);
@@ -543,8 +553,8 @@ function ConfigModal({ clientId, initialConfig, goals, campaigns, ga4Events, met
           </div>
         )}
 
-        {/* Connect Platforms — shown when no data is available */}
-        {!hasData && onConnect && (
+        {/* Empty state — copy depends on which gate actually failed */}
+        {!hasData && !platformsHaveData && onConnect && (
           <div style={{ marginBottom: 16, padding: '12px 14px', borderRadius: 10, background: 'rgba(249,115,22,0.06)', border: '1px solid rgba(249,115,22,0.25)' }}>
             <p style={{ fontSize: 12, color: '#7c2d12', marginBottom: 8, fontWeight: 500 }}>
               No performance data yet. Connect your ad platforms to start tracking.
@@ -555,6 +565,20 @@ function ConfigModal({ clientId, initialConfig, goals, campaigns, ga4Events, met
             >
               Connect Platforms
             </button>
+          </div>
+        )}
+        {!hasData && platformsHaveData && missingTarget && (
+          <div style={{ marginBottom: 16, padding: '12px 14px', borderRadius: 10, background: 'rgba(74,101,128,0.06)', border: '1px solid rgba(74,101,128,0.25)' }}>
+            <p style={{ fontSize: 12, color: '#2e4257', fontWeight: 500 }}>
+              Set a target value above to start tracking performance against this goal.
+            </p>
+          </div>
+        )}
+        {!hasData && platformsHaveData && !missingTarget && (
+          <div style={{ marginBottom: 16, padding: '12px 14px', borderRadius: 10, background: 'rgba(74,101,128,0.06)', border: '1px solid rgba(74,101,128,0.25)' }}>
+            <p style={{ fontSize: 12, color: '#2e4257', fontWeight: 500 }}>
+              No conversions recorded in the current window yet — performance will appear once they come in.
+            </p>
           </div>
         )}
 

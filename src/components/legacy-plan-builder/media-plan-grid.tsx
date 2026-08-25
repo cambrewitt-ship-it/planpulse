@@ -105,6 +105,24 @@ export interface MediaPlanChannel {
   metaCampaignName?: string | null;
   metaCampaignIds?: string[];
   metaCampaignNames?: string[];
+  // Per-line breakdown (one entry per media-plan row/campaign sharing this
+  // channel name) — used to render one performance card per line instead of
+  // one merged card per channel. Absent/length<=1 means "render as one card".
+  campaignLines?: MediaPlanCampaignLine[];
+}
+
+export interface MediaPlanCampaignLine {
+  id: string;              // `${channelName}::${row.flightGroupId ?? row.id}`
+  name?: string;            // display label, from row.detail / row.audience / row.funnel
+  flights: MediaFlight[];   // this line's own flights only (not merged with siblings)
+  metaCampaignId?: string;
+  metaCampaignName?: string | null;
+  metaCampaignIds?: string[];
+  metaCampaignNames?: string[];
+  googleCampaignId?: string;
+  googleCampaignName?: string | null;
+  googleCampaignIds?: string[];
+  googleCampaignNames?: string[];
 }
 
 const generateChannelId = (): string => {

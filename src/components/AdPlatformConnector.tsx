@@ -379,6 +379,11 @@ export default function AdPlatformConnector({ clientId, onConfigNeeded }: AdPlat
       return;
     }
 
+    if (newCustomerId.includes('-')) {
+      setAccountMessage({ type: 'error', text: 'Please remove the dashes (-) from the Customer ID.' });
+      return;
+    }
+
     setIsSavingAccount(true);
     setAccountMessage(null);
 
@@ -1088,14 +1093,14 @@ export default function AdPlatformConnector({ clientId, onConfigNeeded }: AdPlat
                           <Input
                             id="customerId"
                             type="text"
-                            placeholder="123-456-7890"
+                            placeholder="1234567890"
                             value={newCustomerId}
                             onChange={(e) => setNewCustomerId(e.target.value)}
                             className="mt-1"
                             disabled={isSavingAccount}
                           />
                           <p className="text-sm text-gray-500 mt-1">
-                            Find your Customer ID in Google Ads (top right corner, 10-digit number)
+                            Find your Customer ID in Google Ads (top right corner, 10-digit number). Enter it without dashes.
                           </p>
                         </div>
 

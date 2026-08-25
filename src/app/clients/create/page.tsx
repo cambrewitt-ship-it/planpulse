@@ -28,7 +28,7 @@ import {
   Plus,
   Trash2,
 } from 'lucide-react';
-import { MediaPlanChannel, MediaFlight } from '@/components/legacy-plan-builder/media-plan-grid';
+import { MediaPlanChannel, MediaFlight, MediaPlanCampaignLine } from '@/components/legacy-plan-builder/media-plan-grid';
 import { UploadWizard } from '@/components/sandbox/upload-wizard';
 import { PlanGrid } from '@/components/sandbox/plan-grid';
 import type { SandboxPlan } from '@/components/sandbox/types';
@@ -157,6 +157,7 @@ const META_DEFAULT_EVENTS: Array<{ name: string; count: number }> = [
   { name: 'offsite_conversion.fb_pixel_view_content', count: 0 },
   { name: 'offsite_conversion.fb_pixel_contact', count: 0 },
   { name: 'offsite_conversion.fb_pixel_schedule', count: 0 },
+  { name: 'offsite_conversion.fb_pixel_submit_application', count: 0 },
   { name: 'mobile_app_install', count: 0 },
   { name: 'link_click', count: 0 },
 ];
@@ -181,6 +182,7 @@ const META_ACTION_LABELS: Record<string, string> = {
   'offsite_conversion.fb_pixel_view_content':          'Content Views',
   'offsite_conversion.fb_pixel_contact':               'Contact',
   'offsite_conversion.fb_pixel_schedule':              'Schedule',
+  'offsite_conversion.fb_pixel_submit_application':    'Submit Application',
   'link_click':                                        'Link Clicks',
   'mobile_app_install':                                'App Installs',
 };
@@ -371,6 +373,10 @@ export default function CreateClientPage() {
       const seen = new Set<string>();
       const rows: LinkableRow[] = [];
       for (const row of sandboxPlan.rows) {
+        // Slave rows (isMasterRow === false) share a flight/budget block with an
+        // earlier master row (see api/sandbox/parse) — they don't own an
+        // independent line, so only master/standalone rows are linkable here.
+        if (row.isMasterRow === false) continue;
         const channelRaw = (row.channel ?? '').trim();
         const funnelRaw = (row.funnel ?? '').trim();
         // Fall back to funnel if channel is empty (can happen when the parser assigns channels to the funnel column)
@@ -378,7 +384,11 @@ export default function CreateClientPage() {
         if (!channelName) continue;
         if (!LINKABLE_KWS.some((kw) => channelName.toLowerCase().includes(kw))) continue;
         const detail = (row.detail ?? '').trim();
-        const rowId = `${channelName}::${detail}`;
+        // Line identity matches the dashboard's per-line grouping (dashboard
+        // page.tsx sandbox→channel sync) so linked campaigns end up on the
+        // right card there.
+        const lineKey = row.flightGroupId ?? row.id;
+        const rowId = `${channelName}::${lineKey}`;
         if (seen.has(rowId)) continue;
         seen.add(rowId);
         const matchingChannel = channels.find((ch) => (ch.channelName ?? '').trim() === channelName);
@@ -972,25 +982,70 @@ export default function CreateClientPage() {
     if (!clientId) return;
     setCampaignsSaving(true);
     try {
-      const channelCampaignsAgg: Record<string, string[]> = {};
+      // Group each row's selected campaign IDs by (channelId, platform) — rows
+      // are per-line, so a channel with two Google Ads rows keeps its two
+      // selections separate instead of merging into one set.
+      const metaByChannel: Record<string, string[]> = {};
+      const rowIdsById: Record<string, string[]> = {};
+      const rowsByChannelId = new Map<string, LinkableRow[]>();
       for (const row of linkableRows) {
-        const ids = channelCampaignMap[row.id] ?? [];
-        if (!channelCampaignsAgg[row.channelId]) channelCampaignsAgg[row.channelId] = [];
-        channelCampaignsAgg[row.channelId].push(...ids);
-      }
-      const updatedChannels = channels.map((ch) => {
-        const campaignIds = (channelCampaignsAgg[ch.id] ?? []).filter(Boolean);
-        if (campaignIds.length > 0) {
-          const campaigns = metaCampaigns.filter((c) => campaignIds.includes(c.id));
-          return {
-            ...ch,
-            metaCampaignId: campaignIds[0],
-            metaCampaignName: campaigns[0]?.name ?? null,
-            metaCampaignIds: campaignIds,
-            metaCampaignNames: campaigns.map((c) => c.name),
-          };
+        const ids = (channelCampaignMap[row.id] ?? []).filter(Boolean);
+        rowIdsById[row.id] = ids;
+        if (!rowsByChannelId.has(row.channelId)) rowsByChannelId.set(row.channelId, []);
+        rowsByChannelId.get(row.channelId)!.push(row);
+        if (row.platform === 'meta' && ids.length > 0) {
+          if (!metaByChannel[row.channelId]) metaByChannel[row.channelId] = [];
+          metaByChannel[row.channelId].push(...ids);
         }
-        return ch;
+      }
+
+      const updatedChannels = channels.map((ch) => {
+        const metaIds = (metaByChannel[ch.id] ?? []).filter(Boolean);
+        const metaMatches = metaCampaigns.filter((c) => metaIds.includes(c.id));
+        const rowsForChannel = rowsByChannelId.get(ch.id) ?? [];
+
+        // Per-line breakdown: one campaignLines entry per linkable row for this
+        // channel, carrying that row's own campaign selection. `flights` is a
+        // placeholder here — the dashboard's sandbox→channel sync recomputes it
+        // (matching this same row id) the first time the client's dashboard loads.
+        const campaignLines: MediaPlanCampaignLine[] = rowsForChannel.map((row) => {
+          const ids = rowIdsById[row.id] ?? [];
+          const prevLine = ch.campaignLines?.find((l) => l.id === row.id);
+          if (row.platform === 'meta') {
+            const matches = metaCampaigns.filter((c) => ids.includes(c.id));
+            return {
+              id: row.id,
+              name: row.detail || prevLine?.name,
+              flights: prevLine?.flights ?? [],
+              metaCampaignId: ids[0],
+              metaCampaignName: matches[0]?.name ?? null,
+              metaCampaignIds: ids,
+              metaCampaignNames: matches.map((c) => c.name),
+            };
+          }
+          const matches = googleCampaigns.filter((c) => ids.includes(c.id));
+          return {
+            id: row.id,
+            name: row.detail || prevLine?.name,
+            flights: prevLine?.flights ?? [],
+            googleCampaignId: ids[0],
+            googleCampaignName: matches[0]?.name ?? null,
+            googleCampaignIds: ids,
+            googleCampaignNames: matches.map((c) => c.name),
+          };
+        });
+
+        if (metaIds.length === 0 && campaignLines.length === 0) return ch;
+        return {
+          ...ch,
+          ...(metaIds.length > 0 ? {
+            metaCampaignId: metaIds[0],
+            metaCampaignName: metaMatches[0]?.name ?? null,
+            metaCampaignIds: metaIds,
+            metaCampaignNames: metaMatches.map((c) => c.name),
+          } : {}),
+          ...(campaignLines.length > 0 ? { campaignLines } : {}),
+        };
       });
       await fetch(`/api/clients/${clientId}/media-plan-builder`, {
         method: 'POST',

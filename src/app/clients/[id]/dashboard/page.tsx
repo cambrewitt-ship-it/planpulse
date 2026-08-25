@@ -22,7 +22,7 @@
 
 import Link from 'next/link';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { MediaPlanChannel } from '@/components/legacy-plan-builder/media-plan-grid';
+import { MediaPlanChannel, MediaPlanCampaignLine } from '@/components/legacy-plan-builder/media-plan-grid';
 import { UploadWizard } from '@/components/sandbox/upload-wizard';
 import { PlanGrid } from '@/components/sandbox/plan-grid';
 import type { SandboxPlan, Week, PlanRow, Flight } from '@/components/sandbox/types';
@@ -498,6 +498,11 @@ export default function DashboardV2() {
 
     const MS_PER_WEEK = 7 * 24 * 60 * 60 * 1000;
     const channelMap = new Map<string, { subType?: string; isOrganic: boolean; flightMap: Map<string, any> }>();
+    // channelName -> lineKey -> per-line (unmerged) flights + display name.
+    // lineKey = row.flightGroupId ?? row.id — rows sharing a flightGroupId are
+    // funnel-stage splits of ONE budget line (see api/sandbox/parse) and must
+    // collapse into a single line, not one line per row.
+    const lineMap = new Map<string, Map<string, { name?: string; flightMap: Map<string, any> }>>();
 
     for (const row of clientSandboxPlan.rows) {
       const key = row.channel?.trim();
@@ -511,10 +516,22 @@ export default function DashboardV2() {
           channelMap.get(key)!.flightMap.set(f.id, f);
         }
       }
+
+      const lineKey = row.flightGroupId ?? row.id;
+      if (!lineMap.has(key)) lineMap.set(key, new Map());
+      const channelLines = lineMap.get(key)!;
+      if (!channelLines.has(lineKey)) {
+        channelLines.set(lineKey, { name: row.detail?.trim() || row.audience?.trim() || row.funnel?.trim() || undefined, flightMap: new Map() });
+      }
+      for (const f of (row.flights ?? [])) {
+        if (f.startWeek && f.endWeek && !channelLines.get(lineKey)!.flightMap.has(f.id)) {
+          channelLines.get(lineKey)!.flightMap.set(f.id, f);
+        }
+      }
     }
 
-    const converted: MediaPlanChannel[] = Array.from(channelMap.entries()).map(([channelName, { subType, isOrganic, flightMap }]) => {
-      const mediaFlights = Array.from(flightMap.values())
+    const buildMediaFlights = (flightMap: Map<string, any>) =>
+      Array.from(flightMap.values())
         .filter((f: any) => f.startWeek && f.endWeek)
         .map((sbFlight: any) => {
           const startDate = new Date(sbFlight.startWeek);
@@ -531,8 +548,36 @@ export default function DashboardV2() {
           return { id: `sb-${sbFlight.id}`, startWeek: startDate, endWeek: endDate, monthlySpend, color: sbFlight.color, weeklyBudget };
         });
 
+    const converted: MediaPlanChannel[] = Array.from(channelMap.entries()).map(([channelName, { subType, isOrganic, flightMap }]) => {
+      const mediaFlights = buildMediaFlights(flightMap);
+
       const totalBudget = mediaFlights.reduce((sum: number, f: any) =>
         sum + Object.values(f.monthlySpend as Record<string, number>).reduce((a, b) => a + b, 0), 0);
+
+      // Carry forward previously-saved per-line campaign linkage so re-running
+      // this sync (e.g. after an AI chat edit) doesn't wipe out saved links.
+      const prevChannel = mediaPlanBuilderChannels.find(c => c.channelName === channelName);
+      const prevLinesById = new Map((prevChannel?.campaignLines ?? []).map(l => [l.id, l]));
+      const linesForChannel = lineMap.get(channelName);
+      const campaignLines: MediaPlanCampaignLine[] = linesForChannel
+        ? Array.from(linesForChannel.entries()).map(([lineKey, { name, flightMap: lFlightMap }]) => {
+            const lineId = `${channelName}::${lineKey}`;
+            const prevLine = prevLinesById.get(lineId);
+            return {
+              id: lineId,
+              name,
+              flights: buildMediaFlights(lFlightMap),
+              metaCampaignId: prevLine?.metaCampaignId,
+              metaCampaignName: prevLine?.metaCampaignName,
+              metaCampaignIds: prevLine?.metaCampaignIds,
+              metaCampaignNames: prevLine?.metaCampaignNames,
+              googleCampaignId: prevLine?.googleCampaignId,
+              googleCampaignName: prevLine?.googleCampaignName,
+              googleCampaignIds: prevLine?.googleCampaignIds,
+              googleCampaignNames: prevLine?.googleCampaignNames,
+            };
+          })
+        : [];
 
       return {
         id: `sandbox-${channelName.replace(/\s+/g, '-').toLowerCase()}`,
@@ -543,6 +588,7 @@ export default function DashboardV2() {
         totalBudget,
         flights: mediaFlights,
         ...(isOrganic ? { channelCategory: 'organic_social' } : {}),
+        ...(campaignLines.length > 0 ? { campaignLines } : {}),
       };
     });
 
@@ -1421,67 +1467,21 @@ export default function DashboardV2() {
       return issues;
     };
 
-    return (mediaPlanBuilderChannels as any[]).flatMap((ch: any): any => {
-      // Detect channel category
-      const category = ch.channelCategory || getChannelCategory(ch.channelName);
-
-      // Skip fee channels entirely — no card should be shown
-      if (category === 'fee') return [];
-
-      // Return special card data for non-digital channels
-      if (category === 'organic_social') {
-        return {
-          type: 'organic_social' as const,
-          channel: ch,
-        };
-      }
-      
-      if (category === 'edm') {
-        return {
-          type: 'edm' as const,
-          channel: ch,
-        };
-      }
-      
-      if (category === 'ooh') {
-        return {
-          type: 'ooh' as const,
-          channel: ch,
-        };
-      }
-
-      if (category === 'display_native') {
-        return {
-          type: 'display_native' as const,
-          channel: ch,
-        };
-      }
-
-      if (category === 'other') {
-        return {
-          type: 'other' as const,
-          channel: ch,
-        };
-      }
-
-      // Only Meta and Google get the full ChannelPerformanceCard with spend pacing graphs.
-      // All other paid digital channels (LinkedIn, TikTok, etc.) use OtherChannelCard.
-      const platform = getPlatformForChannel(ch.channelName);
-      if (platform !== 'meta-ads' && platform !== 'google-ads') {
-        return [{
-          type: 'other' as const,
-          channel: ch,
-        }];
-      }
-
-      // Paid digital (Meta / Google) - existing logic
+    const buildPaidDigitalCard = (
+      ch: any,
+      platform: 'meta-ads' | 'google-ads',
+      line: MediaPlanCampaignLine | undefined,
+      useLineIdentity: boolean,
+    ): any => {
       const chPlatform = platform;
       const keyword    = ch.channelName.toLowerCase().split(' ')[0];
+      const flightsForCalc = line?.flights ?? ch.flights;
+      const chartSourceChannel = line ? { ...ch, flights: flightsForCalc } : ch;
 
       // ── Chart data: compute first so multi-month totals can be derived ────
       const chartData = isMultiMonth
-        ? generateChannelChartDataForRange(ch, analyticsDateRange.startDate, analyticsDateRange.endDate, channelMonthSpendData as any[], commission)
-        : generateChannelChartData(ch, selectedMonth, channelMonthSpendData as any[], commission);
+        ? generateChannelChartDataForRange(chartSourceChannel, analyticsDateRange.startDate, analyticsDateRange.endDate, channelMonthSpendData as any[], commission)
+        : generateChannelChartData(chartSourceChannel, selectedMonth, channelMonthSpendData as any[], commission);
 
       // ── Spend totals ─────────────────────────────────────────────────────
       // Multi-month: read cumulative totals from the final chart data point so
@@ -1501,7 +1501,7 @@ export default function DashboardV2() {
       } else {
         const paddedKey   = format(selectedMonth, 'yyyy-MM');
         const unpaddedKey = `${selectedMonth.getFullYear()}-${selectedMonth.getMonth() + 1}`;
-        grossPlannedSpend = ch.flights.reduce((sum, f) => {
+        grossPlannedSpend = flightsForCalc.reduce((sum, f) => {
           const raw = f.monthlySpend[paddedKey] ?? f.monthlySpend[unpaddedKey] ?? 0;
           return sum + raw;
         }, 0);
@@ -1575,10 +1575,27 @@ export default function DashboardV2() {
         cursor = addDays(cursor, 1);
       }
 
+      // ── Per-line campaign linkage — falls back to the channel-level Meta
+      // fields when no line is given (0/1-line channels, backward compatible).
+      const linkedCampaignIds: string[] = (() => {
+        if (platform === 'meta-ads') {
+          if (line) return line.metaCampaignIds?.length ? line.metaCampaignIds : (line.metaCampaignId ? [line.metaCampaignId] : []);
+          const chIds: string[] = (ch as any).metaCampaignIds ?? [];
+          return chIds.length ? chIds : ((ch as any).metaCampaignId ? [(ch as any).metaCampaignId] : []);
+        }
+        if (platform === 'google-ads' && line) {
+          return line.googleCampaignIds?.length ? line.googleCampaignIds : (line.googleCampaignId ? [line.googleCampaignId] : []);
+        }
+        return [];
+      })();
+
+      const cardId   = useLineIdentity && line ? `${ch.id}::${line.id}` : String(ch.id ?? ch.channelName);
+      const cardName = useLineIdentity && line?.name ? `${ch.channelName} — ${line.name}` : ch.channelName;
+
       return {
         type: 'paid_digital' as const,
-        id:               String(ch.id ?? ch.channelName),
-        name:             ch.channelName,
+        id:               cardId,
+        name:             cardName,
         format:           ch.format || undefined,
         platform,
         status:           determineStatus(currentSpend, plannedSpend),
@@ -1617,38 +1634,107 @@ export default function DashboardV2() {
         isMultiMonth,
         campaigns: (() => {
           const seen = new Map<string, string>();
-          // Seed with campaigns saved during onboarding so they always appear,
-          // even before spend data has been synced for the first time.
-          const savedIds: string[] = (ch as any).metaCampaignIds ?? [];
-          const savedNames: string[] = (ch as any).metaCampaignNames ?? [];
-          savedIds.forEach((id: string, i: number) => {
-            if (id) seen.set(id, savedNames[i] ?? id);
+          const placeholderIds = new Set<string>();
+          // Seed with linked campaigns so they always appear, even before
+          // spend data has been synced for the first time.
+          linkedCampaignIds.forEach((id: string) => {
+            if (id) { seen.set(id, id); placeholderIds.add(id); }
           });
-          if (!savedIds.length && (ch as any).metaCampaignId) {
-            seen.set((ch as any).metaCampaignId, (ch as any).metaCampaignName ?? (ch as any).metaCampaignId);
-          }
           // Merge in any additional campaigns found in actual spend data.
           chMetricPoints.forEach((p: any) => {
-            if (p.campaignId && p.campaignName && !seen.has(p.campaignId)) {
+            if (p.campaignId && p.campaignName && (!seen.has(p.campaignId) || placeholderIds.has(p.campaignId))) {
               seen.set(p.campaignId, p.campaignName);
+              placeholderIds.delete(p.campaignId);
             }
           });
           // Merge in ALL campaigns from the account (matches what onboarding shows).
           if (chPlatform === 'meta-ads') {
             allMetaCampaigns.forEach(c => {
-              if (!seen.has(c.id)) seen.set(c.id, c.name);
+              if (!seen.has(c.id) || placeholderIds.has(c.id)) { seen.set(c.id, c.name); placeholderIds.delete(c.id); }
             });
           }
           if (chPlatform === 'google-ads') {
             allGoogleAdsCampaigns.forEach(c => {
-              if (!seen.has(c.id)) seen.set(c.id, c.name);
+              if (!seen.has(c.id) || placeholderIds.has(c.id)) { seen.set(c.id, c.name); placeholderIds.delete(c.id); }
             });
           }
           return Array.from(seen.entries()).map(([id, name]) => ({ id, name }));
         })(),
-        metaCampaignIds: (ch as any).metaCampaignIds ?? [],
+        metaCampaignIds: platform === 'meta-ads' ? linkedCampaignIds : ((ch as any).metaCampaignIds ?? []),
+        linkedCampaignIds,
         rawSpendPoints: chMetricPoints,
+        channelFlights: flightsForCalc,
+        // Raw (undecorated) name pieces so the card can compose a short title
+        // itself instead of parsing them back out of `name`.
+        channelBaseName: ch.channelName,
+        lineName: line?.name,
       };
+    };
+
+    return (mediaPlanBuilderChannels as any[]).flatMap((ch: any): any => {
+      // Detect channel category
+      const category = ch.channelCategory || getChannelCategory(ch.channelName);
+
+      // Skip fee channels entirely — no card should be shown
+      if (category === 'fee') return [];
+
+      // Return special card data for non-digital channels
+      if (category === 'organic_social') {
+        return {
+          type: 'organic_social' as const,
+          channel: ch,
+        };
+      }
+      
+      if (category === 'edm') {
+        return {
+          type: 'edm' as const,
+          channel: ch,
+        };
+      }
+      
+      if (category === 'ooh') {
+        return {
+          type: 'ooh' as const,
+          channel: ch,
+        };
+      }
+
+      if (category === 'display_native') {
+        return {
+          type: 'display_native' as const,
+          channel: ch,
+        };
+      }
+
+      if (category === 'other') {
+        return {
+          type: 'other' as const,
+          channel: ch,
+        };
+      }
+
+      // Only Meta and Google get the full ChannelPerformanceCard with spend pacing graphs.
+      // All other paid digital channels (LinkedIn, TikTok, etc.) use OtherChannelCard.
+      const platform = getPlatformForChannel(ch.channelName);
+      if (platform !== 'meta-ads' && platform !== 'google-ads') {
+        return [{
+          type: 'other' as const,
+          channel: ch,
+        }];
+      }
+
+      // Paid digital (Meta / Google): fan out into one card per campaign line
+      // when the channel has more than one (e.g. two "Google Ads" rows for two
+      // different campaigns). A single line (or none, for channels synced
+      // before per-line tracking existed) renders as one channel-level card
+      // with backward-compatible id/name so existing localStorage-persisted
+      // campaign selections keep working.
+      const lines: MediaPlanCampaignLine[] = ch.campaignLines ?? [];
+      if (lines.length > 1) {
+        return lines.map((line) => buildPaidDigitalCard(ch, platform as 'meta-ads' | 'google-ads', line, true));
+      }
+      return buildPaidDigitalCard(ch, platform as 'meta-ads' | 'google-ads', lines[0], false);
     }).sort((a, b) => channelSortOrder(a) - channelSortOrder(b));
   }, [mediaPlanBuilderChannels, channelMonthSpendData, spendApiErrors, selectedMonth, commission, analyticsDateRange.startDate, analyticsDateRange.endDate, allMetaCampaigns, allGoogleAdsCampaigns]);
 
@@ -2657,12 +2743,15 @@ export default function DashboardV2() {
                         }
 
                         // Paid digital - existing card
+                        // Cards fanned out per campaign line carry their own `channelFlights`
+                        // (step 3); fall back to the whole-channel lookup for single-card channels.
                         const normalizeChannelName = (name: string) => name.toLowerCase().trim();
                         const channelData = mediaPlanBuilderChannels.find(
                           (mbCh: any) => normalizeChannelName(mbCh.channelName) === normalizeChannelName(ch.name)
                         );
-                        const earliestStartDate = channelData?.flights?.length > 0
-                          ? new Date(Math.min(...channelData.flights.map((f: any) => new Date(f.startWeek).getTime())))
+                        const cardFlights = ch.channelFlights ?? channelData?.flights ?? [];
+                        const earliestStartDate = cardFlights.length > 0
+                          ? new Date(Math.min(...cardFlights.map((f: any) => new Date(f.startWeek).getTime())))
                           : null;
 
                         return (
@@ -2677,7 +2766,7 @@ export default function DashboardV2() {
                               clientId={clientId}
                               planView={planView}
                               channelStartDate={earliestStartDate}
-                              channelFlights={channelData?.flights ?? []}
+                              channelFlights={cardFlights}
                               refetchTrigger={actionPointsRefetchTrigger}
                               benchmarks={allBenchmarks}
                               presets={allPresets}
