@@ -2,6 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { Nango } from '@nangohq/node';
 import { toNangoPlatform } from '@/lib/platform-mapping';
+import { nzHour } from '@/lib/timezone';
+
+// Runs daily at 6am NZ time, ahead of the 8am NZ daily-briefing so connection
+// status is fresh when that briefing goes out. Vercel cron only supports a
+// fixed UTC schedule (this route fires every hour — see vercel.json), so the
+// actual "is it time yet" check happens here against NZ wall-clock time to
+// stay correct across the NZDT/NZST transitions.
+const TARGET_NZ_HOUR = 6;
 
 function isAuthorised(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
@@ -69,6 +77,10 @@ async function markConnectionStatus(
 export async function GET(req: NextRequest) {
   if (!isAuthorised(req)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  if (nzHour() !== TARGET_NZ_HOUR) {
+    return NextResponse.json({ ok: true, checked: 0, expired: 0, skipped: true, reason: 'not 6am NZ time' });
   }
 
   const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '');

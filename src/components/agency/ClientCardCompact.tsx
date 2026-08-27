@@ -5,6 +5,7 @@ import { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react
 import { useRouter } from 'next/navigation';
 import type { ClientCardData } from '@/app/api/agency/clients/route';
 import { PerformanceWidget, type PerfData } from './PerformanceWidget';
+import { nzToday, formatNZ } from '@/lib/timezone';
 
 interface AccountManager {
   id: string;
@@ -102,21 +103,21 @@ function getMediaPlanProgress(channels: { startDate: string | null; endDate: str
   if (!starts.length || !ends.length) return null;
   const earliest = [...starts].sort()[0];
   const latest = [...ends].sort().reverse()[0];
-  const today = new Date();
+  const today = new Date(`${nzToday()}T00:00:00Z`);
   const startD = new Date(earliest);
   const endD = new Date(latest);
   if (startD >= endD) return null;
   const progress = today < startD ? 0 : today > endD ? 1 : (today.getTime() - startD.getTime()) / (endD.getTime() - startD.getTime());
-  const fmt = (d: Date) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  const fmt = (d: Date) => formatNZ(d, { day: 'numeric', month: 'short' }, 'en-GB');
   return { progress, startLabel: fmt(startD), endLabel: fmt(endD) };
 }
 
 // ── Month elapsed % for pacing marker ─────────────────────────────────────
 
 function getMonthElapsed(): number {
-  const now = new Date();
-  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-  return Math.min(1, now.getDate() / daysInMonth);
+  const [y, m, d] = nzToday().split('-').map(Number);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  return Math.min(1, d / daysInMonth);
 }
 
 // ── Action points colour ───────────────────────────────────────────────────

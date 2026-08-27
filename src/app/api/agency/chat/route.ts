@@ -5,6 +5,7 @@ import { TOOL_DEFINITIONS } from '@/lib/agent-tools';
 import { buildAuditSummary, buildOutputLinks, TOOL_LABELS, WRITE_TOOLS } from '@/lib/agent-audit';
 import type { AgentAuditStep, AgentOutputLink } from '@/lib/agent-audit';
 import { channelsToSandboxPlan, patchSandboxPlanFlightBudget, upsertSandboxPlanFlight, snapToWeekCommencing } from '@/lib/media-plan/sandbox-sync';
+import { nzToday, nzDateKeyOffset, nzStartOfMonth, formatNZ } from '@/lib/timezone';
 
 export const maxDuration = 60;
 
@@ -22,13 +23,16 @@ You help the team with:
 You can also take actions:
 - Complete action points: Mark tasks as done for specific clients using complete_action_point
 - Create new clients: Add new clients to the platform using create_client
-- Update budgets: Adjust channel budgets in media plans for a whole calendar month using update_media_plan_budget, or for a specific week-commencing (W/C) date range / flight using update_media_plan_flight
-- Load a full media plan: Set all channels, flights, and budgets for a client from a description or pasted data using set_media_plan_channels
+- Update budgets: Adjust channel budgets in media plans for a whole calendar month using update_media_plan_budget, or for a specific week-commencing (W/C) date range / flight using update_media_plan_flight — this also works for a channel that isn't in the plan yet, or a totally empty plan; it creates the channel automatically rather than erroring.
+- Load several channels at once: Replace a client's ENTIRE plan from a pasted/described multi-channel list using set_media_plan_channels. Only for multi-channel loads or an explicit "replace/start over" request — never for a single channel, even a brand-new one (use update_media_plan_flight for that).
+- View live Meta campaigns: Fetch current campaign data directly from the Meta Ads API using get_live_meta_campaigns
 
 Budget edit tool choice — this matters, don't default to the monthly tool out of habit:
 - The user gives a whole month ("set June to $5,000") → update_media_plan_budget.
-- The user gives specific dates or a W/C range ("$10,000 on Google from Sep 7th to 21st", "week commencing the 7th through the 28th") → update_media_plan_flight. start_week/end_week must be Mondays; if the user's dates aren't Mondays, snap each to its week-commencing Monday yourself, then ask "Do these W/C dates work for you?" — stating both the snapped start/end W/C dates AND the real end date (end_week + 6 days, since end_week is inclusive of that whole week) — before calling the tool. Compute monthly_spend the same proportional-by-weeks-in-month way you would for set_media_plan_channels.
-- View live Meta campaigns: Fetch current campaign data directly from the Meta Ads API using get_live_meta_campaigns
+- The user gives ANY specific dates, or says "w/c" / "week commencing" ("$10,000 on Google from Sep 7th to 21st", "week commencing the 7th through the 28th", "100 on meta during w/c 31 Aug until 6 Sep") → update_media_plan_flight, even if the range falls mostly or entirely within one calendar month. "w/c" always means the flight tool. start_week/end_week must be Mondays — snap each to its week-commencing Monday yourself (don't ask first, just do it and state the snapped W/C range plus the real end date, end_week + 6 days, in your confirmation afterwards). Compute monthly_spend proportionally by weeks-in-month across the range.
+- No year given in the dates → use the plan year stated in the conversation's client-context message. Never assume today's real-world year and never ask — it's already in context.
+
+Default to adding, without asking for confirmation first, whenever: the client's plan is empty, the channel mentioned isn't already in the plan, or the user's message says "add" (or similar). Just call the write tool. Only ask first if budget or dates are genuinely missing, or the change would overwrite an existing flight/budget with different numbers the user didn't ask to change.
 
 Client health indicators:
 - Red: Significant issues (spend variance >15%, overdue setup tasks)
@@ -46,15 +50,16 @@ When asked about channel performance, spend, metrics, or pacing — always use g
 
 Multi-step workflow patterns:
 - "Onboard [client]": Use create_client to create them, then ask for their media plan details (channels, budgets, dates). Once provided, call set_media_plan_channels to load the plan immediately. Then explain next steps (connect ad accounts, assign account manager).
-- "Load plan for [client]" / user pastes plan data: Call set_media_plan_channels with the extracted channels. If key details (dates, budgets) are missing, ask for them first.
+- "Load plan for [client]" / user pastes a full multi-channel plan: Call set_media_plan_channels with the extracted channels. If key details (dates, budgets) are missing, ask for them first.
+- Single channel/flight mentioned, or the user says "add" (e.g. "facebook ads, $3000 31 aug to 21 sep"): call update_media_plan_flight directly, whether or not that channel is already in the plan. Never ask "add or replace the whole plan?" — update_media_plan_flight is always additive and safe.
 - "Health check [client]": Use get_channel_performance + get_action_points, identify issues, offer to complete tasks that are resolved
 - "End of month review": Use get_daily_briefing + get_channel_performance for all clients, synthesise and flag issues
 - "Sort out tasks for [client]": Use get_action_points to list overdue items, then use complete_action_point for any the user confirms are done
 - When completing action points for multiple items, you can call complete_action_point multiple times in parallel
 
-Always confirm what you've done after taking a write action. If a request is ambiguous (e.g. multiple clients or action points match), ask for clarification before acting.
+After a write action, confirm what happened in 1-2 short lines — channel, budget, dates. No restating the request back, no walls of text. If a request is ambiguous (e.g. multiple clients or action points match), ask for clarification before acting.
 
-Be concise, professional, and actionable. Use bullet points and bold text to make responses scannable.
+Be concise, professional, and actionable. Use bullet points and bold text to make responses scannable, not paragraphs.
 
 Client Intelligence: When working on a specific client, call get_client_intelligence to fetch their campaign brief, goals, handover notes, and documents. Prepend this context to your analysis so your responses are grounded in the client's actual objectives and commitments.`;
 
@@ -78,8 +83,8 @@ async function toolGetActionPoints(request: NextRequest, clientNameFilter?: stri
   const data = await callInternalApi('/api/agency/action-points', request);
   if (data.error) return data;
 
-  const today = new Date().toISOString().split('T')[0];
-  const in7Days = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
+  const today = nzToday();
+  const in7Days = nzDateKeyOffset(7);
 
   let clients: any[] = data.clients ?? [];
 
@@ -177,8 +182,8 @@ async function toolGetDailyBriefing(request: NextRequest) {
   const overpacing = clients.filter((c: any) => c.spend_variance_pct !== null && c.spend_variance_pct > 15);
   const underpacing = clients.filter((c: any) => c.spend_variance_pct !== null && c.spend_variance_pct < -15);
 
-  const today = new Date().toISOString().split('T')[0];
-  const in7Days = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
+  const today = nzToday();
+  const in7Days = nzDateKeyOffset(7);
 
   const launchingSoon = clients.flatMap((c: any) =>
     (c.channels ?? [])
@@ -233,8 +238,8 @@ async function toolGetChannelPerformance(
   const { data: { session } } = await supabase.auth.getSession();
   if (!session?.user) return { error: 'Unauthorized' };
 
-  const today = new Date().toISOString().split('T')[0];
-  const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
+  const today = nzToday();
+  const monthStart = nzStartOfMonth();
   const startDate = input.start_date || monthStart;
   const endDate = input.end_date || today;
 
@@ -623,57 +628,63 @@ async function toolUpdateMediaPlanBudget(
     .eq('client_id', client.id)
     .maybeSingle();
 
-  if (!mediaPlan) {
-    return { error: `No media plan found for ${client.name}. Create one in the app first.` };
-  }
-
-  const channels: any[] = JSON.parse(JSON.stringify(mediaPlan.channels || []));
+  const channels: any[] = JSON.parse(JSON.stringify(mediaPlan?.channels || []));
 
   // Find the matching channel
   const channelIdx = channels.findIndex((ch: any) =>
     ch.channelName?.toLowerCase().includes(input.channel_name.toLowerCase())
   );
 
-  if (channelIdx === -1) {
-    return {
-      error: `Channel "${input.channel_name}" not found in ${client.name}'s media plan`,
-      available_channels: channels.map((ch: any) => ch.channelName).filter(Boolean),
-    };
-  }
+  // No matching channel (including a totally empty/nonexistent plan) — create it,
+  // same as update_media_plan_flight, so a brand-new channel never hard-errors here.
+  const isNewChannel = channelIdx === -1;
+  const channel = isNewChannel
+    ? { id: `channel-${Date.now()}`, channelName: input.channel_name, customChannelName: '', format: '', totalBudget: 0, percentOfInvestment: 0, flights: [] as any[] }
+    : channels[channelIdx];
 
-  const channel = channels[channelIdx];
   const flights: any[] = channel.flights || [];
-
-  if (!flights.length) {
-    return { error: `No flights found for ${channel.channelName}. Add flight dates in the media plan builder first.` };
+  const isNewFlight = !flights.length;
+  const startWeek = snapToWeekCommencing(`${input.month}-01`);
+  const endWeek = snapToWeekCommencing(monthEndISO(input.month));
+  if (isNewFlight) {
+    // No flights yet on this channel — create one spanning just this month so the
+    // budget has somewhere to land, instead of erroring.
+    flights.push({ id: `flight-${Date.now()}`, startWeek, endWeek, monthlySpend: {}, color: getHex(channel.channelName) });
   }
 
   // Update the primary (first) flight's monthlySpend
   const oldBudget = flights[0].monthlySpend?.[input.month] ?? 0;
   if (!flights[0].monthlySpend) flights[0].monthlySpend = {};
   flights[0].monthlySpend[input.month] = input.new_budget;
-  channels[channelIdx] = { ...channel, flights };
+  const updatedChannel = { ...channel, flights };
+  if (isNewChannel) channels.push(updatedChannel);
+  else channels[channelIdx] = updatedChannel;
 
   // The visible grid renders from sandbox_plan, not channels — keep both in sync
   // so the edit actually shows up, instead of only updating the hidden column.
   const budgetDelta = input.new_budget - Number(oldBudget);
-  const updatedSandboxPlan = mediaPlan.sandbox_plan
+  const updatedSandboxPlan = (!isNewChannel && !isNewFlight && mediaPlan?.sandbox_plan)
     ? patchSandboxPlanFlightBudget(mediaPlan.sandbox_plan as any, channel.channelName, input.month, budgetDelta)
-    : channelsToSandboxPlan(channels);
+    : upsertSandboxPlanFlight(
+        (mediaPlan?.sandbox_plan as any) ?? null,
+        channel.channelName,
+        { startWeek, endWeek, budget: input.new_budget },
+        { isOrganic: channel.channelCategory === 'organic_social', detail: channel.channelSubType }
+      );
 
   const { error: updateError } = await supabase
     .from('client_media_plan_builder')
-    .update({ channels, sandbox_plan: updatedSandboxPlan })
-    .eq('client_id', client.id);
+    .upsert({ client_id: client.id, channels, sandbox_plan: updatedSandboxPlan }, { onConflict: 'client_id' });
 
   if (updateError) return { error: 'Failed to save budget update', details: updateError.message };
 
   return {
     success: true,
-    message: `Updated ${channel.channelName} budget for ${input.month}: $${Number(oldBudget).toLocaleString()} → $${Number(input.new_budget).toLocaleString()} for ${client.name}`,
+    message: `${isNewChannel || isNewFlight ? 'Added' : 'Updated'} ${channel.channelName} budget for ${input.month}: $${Number(oldBudget).toLocaleString()} → $${Number(input.new_budget).toLocaleString()} for ${client.name}`,
     client: client.name,
     client_id: client.id,
     channel: channel.channelName,
+    is_new_channel: isNewChannel,
     month: input.month,
     previous_budget: oldBudget,
     new_budget: input.new_budget,
@@ -713,26 +724,22 @@ async function toolUpdateMediaPlanFlight(
     .eq('client_id', client.id)
     .maybeSingle();
 
-  if (!mediaPlan) {
-    return { error: `No media plan found for ${client.name}. Create one in the app first.` };
-  }
-
   const startWeek = snapToWeekCommencing(input.start_week);
   const endWeek = snapToWeekCommencing(input.end_week);
 
-  const channels: any[] = JSON.parse(JSON.stringify(mediaPlan.channels || []));
+  const channels: any[] = JSON.parse(JSON.stringify(mediaPlan?.channels || []));
   const channelIdx = channels.findIndex((ch: any) =>
     ch.channelName?.toLowerCase().includes(input.channel_name.toLowerCase())
   );
 
-  if (channelIdx === -1) {
-    return {
-      error: `Channel "${input.channel_name}" not found in ${client.name}'s media plan`,
-      available_channels: channels.map((ch: any) => ch.channelName).filter(Boolean),
-    };
-  }
+  // No matching channel (including a totally empty/nonexistent plan) — add it as a
+  // new channel rather than erroring, so a single-channel "add" never has to fall
+  // back to the destructive set_media_plan_channels replace path.
+  const isNewChannel = channelIdx === -1;
+  const channel = isNewChannel
+    ? { id: `channel-${Date.now()}`, channelName: input.channel_name, customChannelName: '', format: '', totalBudget: 0, percentOfInvestment: 0, flights: [] as any[] }
+    : channels[channelIdx];
 
-  const channel = channels[channelIdx];
   const flights: any[] = [...(channel.flights || [])];
   const startMs = new Date(startWeek).getTime();
   const endMs = new Date(endWeek).getTime();
@@ -742,7 +749,7 @@ async function toolUpdateMediaPlanFlight(
     return fStart <= endMs && fEnd >= startMs;
   });
 
-  const newFlight = { id: overlapIdx >= 0 ? flights[overlapIdx].id : `flight-${Date.now()}`, startWeek, endWeek, monthlySpend: input.monthly_spend };
+  const newFlight = { id: overlapIdx >= 0 ? flights[overlapIdx].id : `flight-${Date.now()}`, startWeek, endWeek, monthlySpend: input.monthly_spend, color: getHex(channel.channelName) };
   if (overlapIdx >= 0) flights[overlapIdx] = newFlight;
   else flights.push(newFlight);
 
@@ -750,10 +757,12 @@ async function toolUpdateMediaPlanFlight(
     const monthValues: number[] = Object.values(f.monthlySpend || {});
     return s + monthValues.reduce((a, b) => a + Number(b), 0);
   }, 0);
-  channels[channelIdx] = { ...channel, flights, totalBudget };
+  const updatedChannel = { ...channel, flights, totalBudget };
+  if (isNewChannel) channels.push(updatedChannel);
+  else channels[channelIdx] = updatedChannel;
 
   const updatedSandboxPlan = upsertSandboxPlanFlight(
-    mediaPlan.sandbox_plan as any,
+    (mediaPlan?.sandbox_plan as any) ?? null,
     channel.channelName,
     { startWeek, endWeek, budget: input.budget },
     { isOrganic: channel.channelCategory === 'organic_social', detail: channel.channelSubType }
@@ -761,17 +770,17 @@ async function toolUpdateMediaPlanFlight(
 
   const { error: updateError } = await supabase
     .from('client_media_plan_builder')
-    .update({ channels, sandbox_plan: updatedSandboxPlan })
-    .eq('client_id', client.id);
+    .upsert({ client_id: client.id, channels, sandbox_plan: updatedSandboxPlan }, { onConflict: 'client_id' });
 
   if (updateError) return { error: 'Failed to save flight update', details: updateError.message };
 
   return {
     success: true,
-    message: `Set ${channel.channelName} to $${Number(input.budget).toLocaleString()} for W/C ${startWeek} – ${endWeek} for ${client.name}`,
+    message: `${isNewChannel ? 'Added' : 'Set'} ${channel.channelName} to $${Number(input.budget).toLocaleString()} for W/C ${startWeek} – ${endWeek} for ${client.name}`,
     client: client.name,
     client_id: client.id,
     channel: channel.channelName,
+    is_new_channel: isNewChannel,
     start_week: startWeek,
     end_week: endWeek,
     budget: input.budget,
@@ -910,6 +919,13 @@ function snapToEndOfWeek(dateStr: string): string {
   return d.toISOString();
 }
 
+/** Last calendar day of a "YYYY-MM" month, as "YYYY-MM-DD". */
+function monthEndISO(month: string): string {
+  const [y, m] = month.split('-').map(Number);
+  const d = new Date(y, m, 0); // day 0 of next month = last day of this month
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 const CHANNEL_HEX_COLORS: Record<string, string> = {
   'meta ads': '#3B82F6', 'google ads': '#EF4444', 'display ads': '#06B6D4',
   'native ads': '#14B8A6', 'linkedin ads': '#6366F1', 'tiktok ads': '#6B7280',
@@ -967,11 +983,11 @@ async function toolSetMediaPlanChannels(
     }));
 
     if (flights.length === 0) {
-      const now = new Date();
+      const nowYear = nzToday().slice(0, 4);
       flights.push({
         id: `flight-${Date.now()}-${idx}-0`,
-        startWeek: snapToMonday(`${now.getFullYear()}-01-01`),
-        endWeek: snapToEndOfWeek(`${now.getFullYear()}-12-31`),
+        startWeek: snapToMonday(`${nowYear}-01-01`),
+        endWeek: snapToEndOfWeek(`${nowYear}-12-31`),
         monthlySpend: {},
         color: hex,
       });
@@ -1126,7 +1142,7 @@ async function toolGetClientIntelligence(
     if (brief.target_audience) lines.push(`Target Audience: ${brief.target_audience}`);
     if (brief.brief_body) lines.push(`Brief: ${brief.brief_body}`);
     const lockStatus = brief.is_locked
-      ? `Locked — locked by ${brief.locked_by_name ?? 'Team member'} on ${brief.locked_at ? new Date(brief.locked_at).toLocaleDateString('en-AU') : 'unknown date'}`
+      ? `Locked — locked by ${brief.locked_by_name ?? 'Team member'} on ${brief.locked_at ? formatNZ(new Date(brief.locked_at), {}, 'en-AU') : 'unknown date'}`
       : 'Draft';
     lines.push(`Brief Status: ${lockStatus}`);
     lines.push('');
@@ -1207,7 +1223,7 @@ async function toolGetClientIntelligence(
     lines.push('Handover Notes & Client Intel:');
     for (const n of allNotes) {
       const typeLabel = n.note_type === 'handover' ? 'Handover' : n.note_type === 'client_intel' ? 'Client Intel' : 'General';
-      const date = new Date(n.created_at).toLocaleDateString('en-AU');
+      const date = formatNZ(new Date(n.created_at), {}, 'en-AU');
       lines.push(`[${typeLabel}] ${n.author_name} (${date}): ${n.note_body}`);
     }
     lines.push('');
@@ -1411,6 +1427,7 @@ export async function POST(request: NextRequest) {
               summary: buildAuditSummary(block.name, input, result),
               timestamp: new Date().toISOString(),
               is_write: WRITE_TOOLS.includes(block.name),
+              is_error: !!result?.error,
             };
             auditSteps.push(auditStep);
             send({ type: 'audit_step', step: auditStep });

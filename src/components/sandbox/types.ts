@@ -46,6 +46,11 @@ export interface SandboxPlan {
   fees?: FeeRow[];
   customColumns?: CustomColumn[];
   updatedAt: string;
+  objective?: string;      // shown in the PDF export's stats row, blank if unset
+  agencyName?: string;     // PDF footer / logo placeholder caption
+  clientName?: string;     // PDF footer / logo placeholder caption
+  agencyLogoUrl?: string;  // PDF header logo (left) — blank placeholder box if unset
+  clientLogoUrl?: string;  // PDF header logo (right) — blank placeholder box if unset
 }
 
 export const FLIGHT_COLORS = [

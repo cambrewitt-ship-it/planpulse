@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase/client';
 import { MediaChannel } from '@/types/media-plan';
 import { MediaPlan, Channel, Database } from '@/types/database';
 import { addWeeks, format, parseISO } from 'date-fns';
+import { formatNZ } from '@/lib/timezone';
 
 export async function getClients() {
   const { data: { user } } = await supabase.auth.getUser();
@@ -145,7 +146,7 @@ export async function createMediaPlan(
     .from('media_plans')
     .insert({
       client_id: clientId,
-      name: `Media Plan - ${format(new Date(), 'MMMM yyyy')}`,
+      name: `Media Plan - ${formatNZ(new Date(), { month: 'long', year: 'numeric' })}`,
       start_date: format(planStart, 'yyyy-MM-dd'),
       end_date: format(planEnd, 'yyyy-MM-dd'),
       total_budget: totalBudget * 100, // Convert to cents

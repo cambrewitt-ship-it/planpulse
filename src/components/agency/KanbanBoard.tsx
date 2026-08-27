@@ -7,6 +7,7 @@ import { Facebook, Search, Linkedin, Music, Radio, X, Check, Clock, CalendarDays
 import { DndContext, DragOverlay, PointerSensor, closestCenter, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import type { AgencyClientActionPoints } from '@/app/api/agency/action-points/route';
 import { getChannelLogo } from '@/lib/utils/channel-icons';
+import { nzToday, nzDateKeyOffset } from '@/lib/timezone';
 
 interface AccountManager {
   id: string;
@@ -782,9 +783,7 @@ interface DelayChannelModalProps {
 }
 
 function DelayChannelModal({ clientId, clientName, channelType, overdueCount, onClose, onDelayed }: DelayChannelModalProps) {
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const defaultDate = tomorrow.toISOString().split('T')[0];
+  const defaultDate = nzDateKeyOffset(1);
 
   const [newStartDate, setNewStartDate] = useState(defaultDate);
   const [saving, setSaving] = useState(false);
@@ -869,7 +868,7 @@ function DelayChannelModal({ clientId, clientName, channelType, overdueCount, on
           <input
             type="date"
             value={newStartDate}
-            min={new Date().toISOString().split('T')[0]}
+            min={nzToday()}
             onChange={e => setNewStartDate(e.target.value)}
             style={{
               width: '100%', fontSize: 12, padding: '6px 10px',

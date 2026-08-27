@@ -15,6 +15,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import { nzToday } from '@/lib/timezone';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -369,15 +370,14 @@ interface AgencyCalendarProps {
 }
 
 export function AgencyCalendar({ clients = [] }: AgencyCalendarProps) {
-  const now = new Date();
-  const [year, setYear] = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth() + 1); // 1-indexed
+  const todayStr = nzToday();
+  const [todayYear, todayMonth] = todayStr.split('-').map(Number);
+  const [year, setYear] = useState(todayYear);
+  const [month, setMonth] = useState(todayMonth); // 1-indexed
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedDay, setSelectedDay] = useState<{ date: Date; events: CalendarEvent[] } | null>(null);
-
-  const todayStr = toDateStr(now);
 
   // Build client map for colors and initials
   const clientMap = useMemo(() => {

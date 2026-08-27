@@ -338,6 +338,7 @@ export function generateMonthDataFromWeeklyPlans(
 
   // ── Build cumulative chart data ───────────────────────────────────────────
   const hasLiveSpendData = (liveData?.length ?? 0) > 0;
+  const todayKey = format(today, 'yyyy-MM-dd');
 
   let cumulativeActual  = 0;
   let cumulativePlanned = 0;
@@ -355,9 +356,12 @@ export function generateMonthDataFromWeeklyPlans(
     const actualDaySpend = liveSpendByDate.get(dateKey) ?? 0;
     cumulativeActual += actualDaySpend * 100; // dollars → cents for accumulation
 
+    // Future days carry no actual spend yet — leave them null so the card's
+    // projection logic (and the chart) can distinguish "actual" from
+    // "haven't happened", instead of flat-lining the running total forward.
     return {
       date:          dateKey,
-      actualSpend:   hasLiveSpendData ? cumulativeActual / 100 : null,
+      actualSpend:   hasLiveSpendData && dateKey <= todayKey ? cumulativeActual / 100 : null,
       plannedSpend:  cumulativePlanned,
       projectedSpend: null,
       projected:     false,

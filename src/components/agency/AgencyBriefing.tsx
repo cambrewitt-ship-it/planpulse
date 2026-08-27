@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import type { ClientCardData } from '@/app/api/agency/clients/route';
 import type { AgencyActionPoint, AgencyClientActionPoints } from '@/app/api/agency/action-points/route';
+import { nzToday, nzDateKeyOffset, formatNZ } from '@/lib/timezone';
 
 interface BriefingItem {
   type: 'overdue' | 'overpacing' | 'underpacing' | 'channel-launch' | 'all-clear';
@@ -20,12 +21,8 @@ interface AgencyBriefingProps {
   clients: ClientCardData[];
 }
 
-function toDateStr(date: Date): string {
-  return date.toISOString().split('T')[0];
-}
-
 function formatDate(date: Date): string {
-  return date.toLocaleDateString('en-GB', { weekday: 'short' });
+  return formatNZ(date, { weekday: 'short' }, 'en-GB');
 }
 
 export function AgencyBriefing({ clients }: AgencyBriefingProps) {
@@ -41,7 +38,7 @@ export function AgencyBriefing({ clients }: AgencyBriefingProps) {
         if (!res.ok) return;
         const data = await res.json() as { clients: AgencyClientActionPoints[] };
         
-        const today = toDateStr(new Date());
+        const today = nzToday();
         const overdue: AgencyActionPoint[] = [];
         
         for (const client of data.clients || []) {
@@ -103,11 +100,8 @@ export function AgencyBriefing({ clients }: AgencyBriefingProps) {
     }
 
     // 4. Channels launching within 7 days
-    const today = new Date();
-    const in7Days = new Date(today);
-    in7Days.setDate(today.getDate() + 7);
-    const todayStr = toDateStr(today);
-    const in7DaysStr = toDateStr(in7Days);
+    const todayStr = nzToday();
+    const in7DaysStr = nzDateKeyOffset(7);
 
     for (const client of clients) {
       for (const channel of client.channels) {

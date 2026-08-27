@@ -3,23 +3,22 @@
 import { useEffect, useState } from 'react';
 import { COLOR, FONT_BODY } from './tokens';
 import type { ConversionPlatform } from '@/lib/client-hub/get-hub-data';
+import { nzToday, nzDateKeyOffset, nzStartOfMonth, nzStartOfQuarter } from '@/lib/timezone';
 
 export type DateRange = { start: string; end: string };
 
-const isoDate = (d: Date): string => d.toISOString().slice(0, 10);
-
 const PRESETS: Array<{ key: string; label: string; range: () => DateRange | null }> = [
   { key: 'campaign', label: 'Campaign to date', range: () => null },
-  { key: '7d', label: 'Last 7 days', range: () => ({ start: isoDate(new Date(Date.now() - 6 * 86400000)), end: isoDate(new Date()) }) },
-  { key: '30d', label: 'Last 30 days', range: () => ({ start: isoDate(new Date(Date.now() - 29 * 86400000)), end: isoDate(new Date()) }) },
-  { key: '90d', label: 'Last 90 days', range: () => ({ start: isoDate(new Date(Date.now() - 89 * 86400000)), end: isoDate(new Date()) }) },
+  { key: '7d', label: 'Last 7 days', range: () => ({ start: nzDateKeyOffset(-6), end: nzToday() }) },
+  { key: '30d', label: 'Last 30 days', range: () => ({ start: nzDateKeyOffset(-29), end: nzToday() }) },
+  { key: '90d', label: 'Last 90 days', range: () => ({ start: nzDateKeyOffset(-89), end: nzToday() }) },
   {
     key: 'mtd', label: 'Month to date',
-    range: () => { const n = new Date(); return { start: isoDate(new Date(n.getFullYear(), n.getMonth(), 1)), end: isoDate(n) }; },
+    range: () => ({ start: nzStartOfMonth(), end: nzToday() }),
   },
   {
     key: 'qtd', label: 'Quarter to date',
-    range: () => { const n = new Date(); const q = Math.floor(n.getMonth() / 3); return { start: isoDate(new Date(n.getFullYear(), q * 3, 1)), end: isoDate(n) }; },
+    range: () => ({ start: nzStartOfQuarter(), end: nzToday() }),
   },
   { key: 'custom', label: 'Custom range', range: () => null },
 ];

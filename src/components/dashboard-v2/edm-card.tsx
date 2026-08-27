@@ -7,9 +7,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { MediaPlanChannel } from '@/components/legacy-plan-builder/media-plan-grid';
 import type { EdmActual } from '@/types/database';
-import { format, subDays } from 'date-fns';
+import { format } from 'date-fns';
 import InlineActionPoints from './inline-action-points';
 import ManualSpendSlider from './manual-spend-slider';
+import { nzToday, nzDateKeyOffset } from '@/lib/timezone';
 
 interface EdmCardProps {
   channel: MediaPlanChannel;
@@ -41,7 +42,8 @@ function calculateOnTrackStatus(sendFrequency: string | undefined, actuals: EdmA
     return { status: 'not-set', message: 'Frequency not set' };
   }
 
-  const thirtyDaysAgo = subDays(new Date(), 30);
+  const [ty, tm, td] = nzDateKeyOffset(-30).split('-').map(Number);
+  const thirtyDaysAgo = new Date(ty, tm - 1, td);
   const recentSends = actuals.filter(a => {
     const sendDate = new Date(a.send_date);
     return sendDate >= thirtyDaysAgo && a.channel_name === channelName;
@@ -93,7 +95,7 @@ export default function EdmCard({ channel, clientId, actuals, onUpdateChannel, h
     onUpdateChannel?.(channel.id, { manualActualSpend: val });
   }
   const [showLogForm, setShowLogForm] = useState(false);
-  const [sendDate, setSendDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [sendDate, setSendDate] = useState(nzToday());
   const [subject, setSubject] = useState('');
 
   const channelActuals = actuals
@@ -124,7 +126,7 @@ export default function EdmCard({ channel, clientId, actuals, onUpdateChannel, h
       }
 
       // Reset form
-      setSendDate(format(new Date(), 'yyyy-MM-dd'));
+      setSendDate(nzToday());
       setSubject('');
       setShowLogForm(false);
       
@@ -233,7 +235,7 @@ export default function EdmCard({ channel, clientId, actuals, onUpdateChannel, h
                 <Button
                   onClick={() => {
                     setShowLogForm(false);
-                    setSendDate(format(new Date(), 'yyyy-MM-dd'));
+                    setSendDate(nzToday());
                     setSubject('');
                   }}
                   variant="outline"

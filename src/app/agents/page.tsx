@@ -96,6 +96,7 @@ function IconPicker({ value, onChange }: { value: string; onChange: (v: string) 
 import type { UserAgent, AgentRun, AgentAuditStep, AgentOutputLink } from '@/types/database';
 import { TEMPLATE_TOOL_GROUPS, AGENT_TEMPLATE_SEEDS, ALL_TOOL_NAMES } from '@/lib/agent-templates';
 import { TOOL_LABELS } from '@/lib/agent-audit';
+import { formatNZ } from '@/lib/timezone';
 
 function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -178,7 +179,7 @@ function RunsTable({ runs }: { runs: AgentRun[] }) {
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 12, color: '#1C1917', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{run.user_message}</div>
             <div style={{ fontSize: 11, color: '#8A8578' }}>
-              {new Date(run.started_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+              {formatNZ(new Date(run.started_at), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }, 'en-AU')}
               {' · '}{run.audit_trail?.length ?? 0} steps
             </div>
           </div>

@@ -7,6 +7,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { subDays, format, eachDayOfInterval, parseISO } from 'date-fns';
+import { nzToday } from '@/lib/timezone';
 
 type MetaAction = { action_type: string; value: string };
 
@@ -66,7 +67,7 @@ export async function computePerfSeries(
   const { metric, metaActionType = null, googleConversionAction = null } = options;
   const filterCampaignIds = options.campaignIds ?? [];
   const filterPlatforms = options.platforms ?? [];
-  const today = options.today ?? new Date();
+  const today = options.today ?? parseISO(nzToday());
   const windowDays = options.windowDays ?? 30;
 
   const todayStr = format(today, 'yyyy-MM-dd');

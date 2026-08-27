@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { format } from 'date-fns';
 import { FileDown } from 'lucide-react';
+import { nzToday, nzStartOfMonth, nzDateKeyOffset } from '@/lib/timezone';
 import {
   Dialog,
   DialogContent,
@@ -37,13 +38,14 @@ interface InvoiceChannel {
 
 export function InvoiceModal({ isOpen, onClose, clientId, clientName, onGenerated }: InvoiceModalProps) {
   const [dateRange, setDateRange] = useState(() => {
-    const today = new Date();
-    const lastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-    const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0);
-    return {
-      startDate: format(lastMonth, 'yyyy-MM-dd'),
-      endDate: format(lastMonthEnd, 'yyyy-MM-dd'),
-    };
+    const [y, m] = nzStartOfMonth().split('-').map(Number);
+    const lastMonthDate = new Date(Date.UTC(y, m - 2, 1));
+    const ly = lastMonthDate.getUTCFullYear();
+    const lm = lastMonthDate.getUTCMonth();
+    const startDate = `${ly}-${String(lm + 1).padStart(2, '0')}-01`;
+    const lastDay = new Date(Date.UTC(ly, lm + 1, 0));
+    const endDate = `${lastDay.getUTCFullYear()}-${String(lastDay.getUTCMonth() + 1).padStart(2, '0')}-${String(lastDay.getUTCDate()).padStart(2, '0')}`;
+    return { startDate, endDate };
   });
 
   const [spendData, setSpendData] = useState<SpendDataPoint[]>([]);
@@ -56,7 +58,7 @@ export function InvoiceModal({ isOpen, onClose, clientId, clientName, onGenerate
   const [agencySettings, setAgencySettings] = useState<Record<string, any>>({});
 
   // Per-invoice fields
-  const todayStr = format(new Date(), 'yyyy-MM-dd');
+  const todayStr = nzToday();
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [issueDate, setIssueDate] = useState(todayStr);
   const [dueDate, setDueDate] = useState(todayStr);
@@ -71,9 +73,7 @@ export function InvoiceModal({ isOpen, onClose, clientId, clientName, onGenerate
       .then((d: Record<string, any>) => {
         setAgencySettings(d ?? {});
         const dueDays = d?.invoice_due_days ?? 14;
-        const due = new Date();
-        due.setDate(due.getDate() + dueDays);
-        setDueDate(format(due, 'yyyy-MM-dd'));
+        setDueDate(nzDateKeyOffset(dueDays));
       })
       .catch(() => {});
   }, [isOpen]);

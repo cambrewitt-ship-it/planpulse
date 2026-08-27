@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { Nango } from '@nangohq/node';
-import { format, startOfYear } from 'date-fns';
 import { syncGoogleAdsSpend } from '@/lib/ads/google-ads-live';
 import { syncMetaAdsSpend } from '@/lib/ads/meta-ads-live';
 import { syncGA4Data } from '@/lib/ads/ga4-live';
 import { SIX_HOURS_MS } from '@/lib/ads/sync-status';
+import { nzToday, nzStartOfYear } from '@/lib/timezone';
 
 /**
  * Refreshes any ad spend / GA4 connection whose cache has gone stale
@@ -64,9 +64,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: true, refreshed: 0, failed: 0 });
   }
 
-  const today = new Date();
-  const startDate = format(startOfYear(today), 'yyyy-MM-dd');
-  const endDate = format(today, 'yyyy-MM-dd');
+  const startDate = nzStartOfYear();
+  const endDate = nzToday();
 
   let refreshed = 0;
   let failed = 0;

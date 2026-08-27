@@ -6,6 +6,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ClientHealthStatus, HealthStatus } from '@/types/database';
+import { nzToday, nzDateKeyOffset } from '@/lib/timezone';
 
 // ============================================================================
 // TYPES
@@ -104,15 +105,12 @@ export async function getActionPointStatsForClient(
     ).length;
 
     // Count SET UP tasks that are overdue and not completed
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const today = nzToday();
 
     const overdueIncomplete = actionPoints.filter((ap: any) => {
       if (completionMap.get(ap.id) === true) return false;
       if (!ap.due_date) return false;
-      const due = new Date(ap.due_date);
-      due.setHours(0, 0, 0, 0);
-      return due < today;
+      return String(ap.due_date).slice(0, 10) < today;
     }).length;
 
     return { total, completed, overdueIncomplete };
@@ -183,14 +181,8 @@ export async function getActualSpendForClient(
   endDate?: string
 ): Promise<number> {
   try {
-    const end = endDate || new Date().toISOString().split('T')[0];
-    const start =
-      startDate ||
-      (() => {
-        const d = new Date();
-        d.setDate(d.getDate() - 30);
-        return d.toISOString().split('T')[0];
-      })();
+    const end = endDate || nzToday();
+    const start = startDate || nzDateKeyOffset(-30);
 
     const { data } = await supabase
       .from('ad_performance_metrics')

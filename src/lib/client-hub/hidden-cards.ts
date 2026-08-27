@@ -11,6 +11,9 @@ export type HiddenCards = Record<string, string[]>;
 /** Registry of sections that expose individually hideable cards, and their valid card keys. */
 export const CARD_REGISTRY: Record<string, string[]> = {
   demographics: ['age', 'gender', 'country'],
+  googleAdsPerformance: ['adGroups', 'budgetSplit', 'insight'],
+  googleAdsInsights: ['searchTerms', 'region', 'deviceDonut', 'dayOfWeekDonut', 'ageDonut', 'genderDonut'],
+  metaPaidAds: ['commentsVsReactions', 'costPerEngagement', 'pageLikesVsEngagements', 'topAds'],
 };
 
 export function isCardHidden(hiddenCards: HiddenCards | null | undefined, sectionKey: string, cardKey: string): boolean {

@@ -6,7 +6,7 @@ const MS_PER_WEEK = 7 * 24 * 60 * 60 * 1000;
 
 function toMonday(d: Date): Date {
   const day = d.getDay();
-  const diff = day === 0 ? 1 : 1 - day;
+  const diff = day === 0 ? -6 : 1 - day;
   const out = new Date(d);
   out.setDate(d.getDate() + diff);
   out.setHours(0, 0, 0, 0);

@@ -1008,8 +1008,24 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
     const daysRemaining = Math.max(0, differenceInDays(forecastEnd, today));
     if (daysRemaining === 0) return null;
 
-    // Actual run rate: real average daily spend since spend began.
-    const dailyBurnRate = spend / daysElapsed;
+    // Actual run rate: slope of the actual-spend line over the trailing window
+    // (last 7 days of data, or fewer if less history exists), not a flat
+    // lifetime average — a lifetime average drags for days after a pacing
+    // change (e.g. budget bump, campaign pause) instead of reflecting it.
+    const RECENT_TREND_WINDOW_DAYS = 7;
+    let dailyBurnRate = spend / daysElapsed;
+    const actualPointsInPeriod = filteredSpendChartData.filter(
+      p => p.date >= periodStartStr && p.date <= periodEndStr && typeof p.actualSpend === 'number'
+    );
+    if (actualPointsInPeriod.length >= 2) {
+      const lastPoint = actualPointsInPeriod[actualPointsInPeriod.length - 1];
+      const windowStartIdx = Math.max(0, actualPointsInPeriod.length - 1 - RECENT_TREND_WINDOW_DAYS);
+      const windowStartPoint = actualPointsInPeriod[windowStartIdx];
+      const daySpan = differenceInDays(parseISO(lastPoint.date), parseISO(windowStartPoint.date));
+      if (daySpan > 0) {
+        dailyBurnRate = (lastPoint.actualSpend! - windowStartPoint.actualSpend!) / daySpan;
+      }
+    }
 
     // Required run rate: read off the *local slope* of the planned-spend curve
     // around today, rather than planned-total ÷ days-in-selected-view. The

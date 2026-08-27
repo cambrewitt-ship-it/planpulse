@@ -3,6 +3,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { nzToday, nzDateKeyOffset } from '@/lib/timezone';
 
 interface AgencyMetrics {
   totalClients: number;
@@ -67,10 +68,8 @@ export async function GET(request: NextRequest) {
     }
 
     // 4. Total actual spend from ad_performance_metrics (last 30 days)
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    const startDate = thirtyDaysAgo.toISOString().split('T')[0];
-    const endDate = new Date().toISOString().split('T')[0];
+    const startDate = nzDateKeyOffset(-30);
+    const endDate = nzToday();
 
     const { data: spendRows } = await supabase
       .from('ad_performance_metrics')
@@ -86,7 +85,7 @@ export async function GET(request: NextRequest) {
     //    We aggregate across all clients via client_action_point_completions + action_points
 
     // Get all action points that have a due_date
-    const today = new Date().toISOString().split('T')[0];
+    const today = nzToday();
 
     const { data: allActionPoints } = await supabase
       .from('action_points')

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient as createSupabaseAdmin } from '@supabase/supabase-js';
 import { getClientHubData } from '@/lib/client-hub/get-hub-data';
 import { rateLimit } from '@/lib/rate-limit';
-import { normalizeSectionOrder } from '@/lib/client-hub/section-meta';
+import { normalizeSectionOrder, SECTION_KEYS } from '@/lib/client-hub/section-meta';
 
 type Params = { params: Promise<{ token: string }> | { token: string } };
 
@@ -10,10 +10,7 @@ async function resolveToken(params: Params['params']): Promise<string> {
   return (await Promise.resolve(params)).token;
 }
 
-const DEFAULT_SECTIONS: Record<string, boolean> = {
-  snapshot: true, cpaTrend: true, charts: true, funnels: true, costPerMetric: true, trends: true, demographics: true, pacing: true, goals: true,
-  brief: true, notes: true, documents: true, spend: true, creatives: true,
-};
+const DEFAULT_SECTIONS: Record<string, boolean> = Object.fromEntries(SECTION_KEYS.map(k => [k, true]));
 
 /**
  * Public, token-gated hub read. Uses the service-role client because this

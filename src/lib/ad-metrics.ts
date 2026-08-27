@@ -256,6 +256,321 @@ export async function saveGoogleDemographics(
 }
 
 /**
+ * Save Google Ads ad-group/day breakdown rows. Genuine daily time series —
+ * upserted like ad_performance_metrics, not delete-then-insert.
+ */
+export async function saveGoogleAdGroupMetrics(
+  userId: string,
+  clientId: string,
+  rows: Array<{
+    accountId: string;
+    campaignId: string;
+    campaignName: string;
+    adGroupId: string;
+    adGroupName: string;
+    date: string;
+    impressions: number;
+    clicks: number;
+    ctr: number;
+    averageCpc: number;
+    spend: number;
+  }>,
+  supabaseClient?: AnySupabase,
+) {
+  const supabase = supabaseClient ?? await createClient();
+
+  const toInsert = rows.map(r => ({
+    user_id: userId,
+    client_id: clientId,
+    account_id: r.accountId,
+    campaign_id: r.campaignId,
+    campaign_name: r.campaignName,
+    ad_group_id: r.adGroupId,
+    ad_group_name: r.adGroupName,
+    date: r.date,
+    impressions: r.impressions,
+    clicks: r.clicks,
+    ctr: r.ctr,
+    average_cpc: r.averageCpc,
+    spend: r.spend,
+    updated_at: new Date().toISOString(),
+  }));
+
+  const { data, error } = await supabase
+    .from('google_ads_ad_group_metrics')
+    .upsert(toInsert, { onConflict: 'user_id,client_id,account_id,ad_group_id,date', ignoreDuplicates: false })
+    .select();
+
+  if (error) {
+    console.error('Error saving Google Ads ad group metrics:', error);
+    throw new Error(`Failed to save ad group metrics: ${error.message}`);
+  }
+  return data;
+}
+
+/**
+ * Save Google Ads campaign budget snapshot rows. Current-state grain, not a
+ * time series — deletes all existing rows for this client/account before
+ * inserting, so each sync makes the table exactly reflect "as of last sync"
+ * rather than accumulating history.
+ */
+export async function saveGoogleCampaignBudgets(
+  userId: string,
+  clientId: string,
+  rows: Array<{
+    accountId: string;
+    campaignId: string;
+    campaignName: string;
+    budgetId: string;
+    dailyBudgetMicros: number;
+    explicitlyShared: boolean;
+  }>,
+  supabaseClient?: AnySupabase,
+) {
+  const supabase = supabaseClient ?? await createClient();
+  const accountIds = [...new Set(rows.map(r => r.accountId))];
+
+  await supabase
+    .from('google_ads_campaign_budgets')
+    .delete()
+    .eq('user_id', userId)
+    .eq('client_id', clientId)
+    .in('account_id', accountIds);
+
+  const toInsert = rows.map(r => ({
+    user_id: userId,
+    client_id: clientId,
+    account_id: r.accountId,
+    campaign_id: r.campaignId,
+    campaign_name: r.campaignName,
+    budget_id: r.budgetId,
+    daily_budget_micros: r.dailyBudgetMicros,
+    explicitly_shared: r.explicitlyShared,
+    synced_at: new Date().toISOString(),
+  }));
+
+  const { data, error } = await supabase.from('google_ads_campaign_budgets').insert(toInsert).select();
+
+  if (error) {
+    console.error('Error saving Google Ads campaign budgets:', error);
+    throw new Error(`Failed to save campaign budgets: ${error.message}`);
+  }
+  return data;
+}
+
+/**
+ * Save Google Ads search impression share rows. Genuine daily time series —
+ * upserted like ad_performance_metrics, not delete-then-insert.
+ */
+export async function saveGoogleSearchImpressionShare(
+  userId: string,
+  clientId: string,
+  rows: Array<{
+    accountId: string;
+    campaignId: string;
+    campaignName: string;
+    date: string;
+    searchImpressionShare: number | null;
+  }>,
+  supabaseClient?: AnySupabase,
+) {
+  const supabase = supabaseClient ?? await createClient();
+
+  const toInsert = rows.map(r => ({
+    user_id: userId,
+    client_id: clientId,
+    account_id: r.accountId,
+    campaign_id: r.campaignId,
+    campaign_name: r.campaignName,
+    date: r.date,
+    search_impression_share: r.searchImpressionShare,
+  }));
+
+  const { data, error } = await supabase
+    .from('google_ads_search_impression_share')
+    .upsert(toInsert, { onConflict: 'user_id,client_id,account_id,campaign_id,date', ignoreDuplicates: false })
+    .select();
+
+  if (error) {
+    console.error('Error saving Google Ads search impression share:', error);
+    throw new Error(`Failed to save search impression share: ${error.message}`);
+  }
+  return data;
+}
+
+/**
+ * Save Google Ads search term report rows. Period-scoped snapshot, not a
+ * time series — deletes all existing rows for this client/account before
+ * inserting, so each sync reflects only the last-synced period.
+ */
+export async function saveGoogleSearchTerms(
+  userId: string,
+  clientId: string,
+  rows: Array<{ accountId: string; campaignId: string; campaignName: string; searchTerm: string; impressions: number; clicks: number; ctr: number }>,
+  periodStart: string,
+  periodEnd: string,
+  supabaseClient?: AnySupabase,
+) {
+  const supabase = supabaseClient ?? await createClient();
+  const accountIds = [...new Set(rows.map(r => r.accountId))];
+
+  await supabase.from('google_ads_search_terms').delete().eq('user_id', userId).eq('client_id', clientId).in('account_id', accountIds);
+
+  const toInsert = rows.map(r => ({
+    user_id: userId,
+    client_id: clientId,
+    account_id: r.accountId,
+    campaign_id: r.campaignId,
+    campaign_name: r.campaignName,
+    search_term: r.searchTerm,
+    impressions: r.impressions,
+    clicks: r.clicks,
+    ctr: r.ctr,
+    period_start: periodStart,
+    period_end: periodEnd,
+    synced_at: new Date().toISOString(),
+  }));
+
+  const { data, error } = await supabase.from('google_ads_search_terms').insert(toInsert).select();
+  if (error) {
+    console.error('Error saving Google Ads search terms:', error);
+    throw new Error(`Failed to save search terms: ${error.message}`);
+  }
+  return data;
+}
+
+/**
+ * Save Google Ads region breakdown rows. Period-scoped snapshot — same
+ * delete-then-insert pattern as saveGoogleSearchTerms.
+ */
+export async function saveGoogleGeoBreakdown(
+  userId: string,
+  clientId: string,
+  rows: Array<{
+    accountId: string; campaignId: string; campaignName: string; regionCriterionId: string; regionName: string | null;
+    impressions: number; clicks: number; ctr: number; averageCpc: number;
+  }>,
+  periodStart: string,
+  periodEnd: string,
+  supabaseClient?: AnySupabase,
+) {
+  const supabase = supabaseClient ?? await createClient();
+  const accountIds = [...new Set(rows.map(r => r.accountId))];
+
+  await supabase.from('google_ads_geo_breakdown').delete().eq('user_id', userId).eq('client_id', clientId).in('account_id', accountIds);
+
+  const toInsert = rows.map(r => ({
+    user_id: userId,
+    client_id: clientId,
+    account_id: r.accountId,
+    campaign_id: r.campaignId,
+    campaign_name: r.campaignName,
+    region_criterion_id: r.regionCriterionId,
+    region_name: r.regionName,
+    impressions: r.impressions,
+    clicks: r.clicks,
+    ctr: r.ctr,
+    average_cpc: r.averageCpc,
+    period_start: periodStart,
+    period_end: periodEnd,
+    synced_at: new Date().toISOString(),
+  }));
+
+  const { data, error } = await supabase.from('google_ads_geo_breakdown').insert(toInsert).select();
+  if (error) {
+    console.error('Error saving Google Ads geo breakdown:', error);
+    throw new Error(`Failed to save geo breakdown: ${error.message}`);
+  }
+  return data;
+}
+
+/**
+ * Save Google Ads device breakdown rows. Period-scoped snapshot — same
+ * delete-then-insert pattern as saveGoogleSearchTerms.
+ */
+export async function saveGoogleDeviceBreakdown(
+  userId: string,
+  clientId: string,
+  rows: Array<{ accountId: string; campaignId: string; campaignName: string; device: string; date: string; impressions: number; clicks: number }>,
+  periodStart: string,
+  periodEnd: string,
+  supabaseClient?: AnySupabase,
+) {
+  const supabase = supabaseClient ?? await createClient();
+  const accountIds = [...new Set(rows.map(r => r.accountId))];
+
+  await supabase.from('google_ads_device_breakdown').delete().eq('user_id', userId).eq('client_id', clientId).in('account_id', accountIds);
+
+  const toInsert = rows.map(r => ({
+    user_id: userId,
+    client_id: clientId,
+    account_id: r.accountId,
+    campaign_id: r.campaignId,
+    campaign_name: r.campaignName,
+    device: r.device,
+    date: r.date,
+    impressions: r.impressions,
+    clicks: r.clicks,
+    period_start: periodStart,
+    period_end: periodEnd,
+    synced_at: new Date().toISOString(),
+  }));
+
+  const { data, error } = await supabase.from('google_ads_device_breakdown').insert(toInsert).select();
+  if (error) {
+    console.error('Error saving Google Ads device breakdown:', error);
+    throw new Error(`Failed to save device breakdown: ${error.message}`);
+  }
+  return data;
+}
+
+/**
+ * Save Meta ad-level engagement rows. Period-scoped snapshot, not a time
+ * series — deletes all existing rows for this client/account before
+ * inserting, so each sync reflects only the last-synced period.
+ */
+export async function saveMetaAdEngagement(
+  userId: string,
+  clientId: string,
+  rows: Array<{
+    accountId: string; campaignId: string; campaignName: string; adId: string; adName: string;
+    impressions: number; spend: number; engagements: number; actions?: Array<{ action_type: string; value: string }>;
+  }>,
+  periodStart: string,
+  periodEnd: string,
+  supabaseClient?: AnySupabase,
+) {
+  const supabase = supabaseClient ?? await createClient();
+  const accountIds = [...new Set(rows.map(r => r.accountId))];
+
+  await supabase.from('meta_ad_engagement').delete().eq('user_id', userId).eq('client_id', clientId).in('account_id', accountIds);
+
+  const toInsert = rows.map(r => ({
+    user_id: userId,
+    client_id: clientId,
+    account_id: r.accountId,
+    campaign_id: r.campaignId,
+    campaign_name: r.campaignName,
+    ad_id: r.adId,
+    ad_name: r.adName,
+    impressions: r.impressions,
+    spend: r.spend,
+    engagements: r.engagements,
+    actions: r.actions && r.actions.length > 0 ? r.actions : null,
+    period_start: periodStart,
+    period_end: periodEnd,
+    synced_at: new Date().toISOString(),
+  }));
+
+  const { data, error } = await supabase.from('meta_ad_engagement').insert(toInsert).select();
+  if (error) {
+    console.error('Error saving Meta ad engagement:', error);
+    throw new Error(`Failed to save ad engagement: ${error.message}`);
+  }
+  return data;
+}
+
+/**
  * Get ad performance metrics for a user/client within a date range
  */
 export async function getAdMetrics(

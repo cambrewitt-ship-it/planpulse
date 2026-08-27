@@ -7,7 +7,11 @@
  * palette in tokens.ts.
  */
 
-import { COLOR, FONT_BODY, fmtDate } from './tokens';
+import {
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell,
+  PieChart, Pie, AreaChart, Area,
+} from 'recharts';
+import { COLOR, FONT_HEAD, FONT_BODY, fmtDate } from './tokens';
 
 export const axisTickStyle = { fontFamily: FONT_BODY, fontSize: 11.5, fill: COLOR.muted };
 export const gridProps = { stroke: COLOR.divider, vertical: false };
@@ -102,3 +106,109 @@ export function HubLegend({ entries }: { entries: HubLegendEntry[] }) {
 
 /** Palette for series that don't already have a semantic color (e.g. channelColor). */
 export const SERIES_COLORS = [COLOR.accent, '#5B6B4E', '#6B645C', COLOR.goodBright, COLOR.caution] as const;
+
+// ── Horizontal bar chart ─────────────────────────────────────────────────────
+
+export interface HorizontalBarChartProps<T> {
+  data: T[];
+  labelKey: keyof T;
+  valueKey: keyof T;
+  height: number;
+  /** Formats the value for the bar label and tooltip; defaults to a plain number. */
+  formatValue?: (v: number) => string;
+  labelWidth?: number;
+  colors?: readonly string[];
+  emptyMessage?: string;
+}
+
+/** Generic horizontal bar chart — one bar per row, labeled on the right. Used by demographics and any ranked breakdown (region, device, etc). */
+export function HorizontalBarChart<T>({
+  data, labelKey, valueKey, height, formatValue = (v) => String(v), labelWidth = 70, colors = SERIES_COLORS, emptyMessage = 'No data yet.',
+}: HorizontalBarChartProps<T>) {
+  if (data.length === 0) return <div style={{ fontSize: 13, color: COLOR.muted, padding: '20px 0', textAlign: 'center' }}>{emptyMessage}</div>;
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      {/* recharts' data prop is loosely typed; the public API above stays type-safe via keyof T */}
+      <BarChart data={data as unknown as Record<string, unknown>[]} layout="vertical" margin={{ top: 0, right: 44, left: 0, bottom: 0 }}>
+        <CartesianGrid {...gridProps} horizontal={false} />
+        <XAxis type="number" hide />
+        <YAxis type="category" dataKey={labelKey as string} tick={axisTickStyle} axisLine={false} tickLine={false} width={labelWidth} />
+        <Tooltip content={<HubTooltip formatValue={(entry) => formatValue(Number(entry.value ?? 0))} />} cursor={{ fill: COLOR.divider }} />
+        <Bar dataKey={valueKey as string} name="Value" radius={[0, 4, 4, 0]} maxBarSize={18} label={{ position: 'right', formatter: (v: number) => formatValue(v), fill: COLOR.ink, fontFamily: FONT_HEAD, fontSize: 12 }}>
+          {data.map((_, i) => <Cell key={i} fill={colors[i % colors.length]} />)}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+// ── Donut chart ──────────────────────────────────────────────────────────────
+
+export interface HubDonutDatum {
+  name: string;
+  value: number;
+}
+
+export interface HubDonutProps {
+  data: HubDonutDatum[];
+  /** Assigns a color per slice by index; defaults to cycling SERIES_COLORS. */
+  colorFn?: (d: HubDonutDatum, i: number) => string;
+  size?: number;
+  formatValue?: (v: number) => string;
+  /** Optional content rendered in the donut's center (e.g. a total). */
+  centerLabel?: string;
+  centerValue?: string;
+}
+
+/** Generic donut chart with an optional center label — used for spend-by-channel, top-ads-by-engagement, device/day-of-week breakdowns, etc. */
+export function HubDonut({ data, colorFn, size = 150, formatValue = (v) => String(v), centerLabel, centerValue }: HubDonutProps) {
+  const resolveColor = colorFn ?? ((_: HubDonutDatum, i: number) => SERIES_COLORS[i % SERIES_COLORS.length]);
+  return (
+    <div style={{ position: 'relative', width: size, height: size, margin: '0 auto' }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <PieChart>
+          <Pie data={data as unknown as Record<string, unknown>[]} dataKey="value" nameKey="name" innerRadius={size * 0.327} outerRadius={size * 0.5} startAngle={90} endAngle={-270} stroke="none">
+            {data.map((d, i) => <Cell key={i} fill={resolveColor(d, i)} />)}
+          </Pie>
+          <Tooltip content={<HubTooltip formatValue={(entry) => formatValue(Number(entry.value ?? 0))} />} />
+        </PieChart>
+      </ResponsiveContainer>
+      {(centerLabel || centerValue) && (
+        <div style={{ position: 'absolute', inset: size * 0.173, borderRadius: '50%', pointerEvents: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+          {centerValue && <div style={{ fontFamily: FONT_HEAD, fontSize: 19 }}>{centerValue}</div>}
+          {centerLabel && <div style={{ fontSize: 10.5, color: COLOR.muted }}>{centerLabel}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Sparkline ────────────────────────────────────────────────────────────────
+
+export interface SparklineProps<T> {
+  data: T[];
+  dataKey: keyof T;
+  color?: string;
+  height?: number;
+}
+
+/** Minimal inline trend chart with no axes/grid/tooltip chrome — used in compact KPI tiles. */
+export function Sparkline<T>({ data, dataKey, color = COLOR.accent, height = 32 }: SparklineProps<T>) {
+  if (data.length === 0) return null;
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <AreaChart data={data as unknown as Record<string, unknown>[]} margin={{ top: 2, right: 2, left: 2, bottom: 2 }}>
+        <Area
+          type="monotone"
+          dataKey={dataKey as string}
+          stroke={color}
+          strokeWidth={1.5}
+          fill={color}
+          fillOpacity={0.12}
+          dot={false}
+          isAnimationActive={false}
+        />
+      </AreaChart>
+    </ResponsiveContainer>
+  );
+}

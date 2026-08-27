@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Sparkles, ArrowUp, Bot, Loader2, Paperclip, Undo2, Lock,
-  ChevronDown, Users, ExternalLink, X,
+  ChevronDown, Users, X, FileSpreadsheet,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { UserAgent, AgentAuditStep, AgentOutputLink } from '@/types/database';
@@ -85,12 +85,26 @@ interface MediaPlanChatPanelProps {
    *  attached it themselves. */
   autoAttachImage?: { base64: string; mimeType: string; preview: string; name: string } | null;
   onAutoAttachConsumed?: () => void;
+  /** Fires when the user attaches an Excel file (.xlsx/.xls) instead of a
+   *  screenshot — the chat panel doesn't parse spreadsheets itself, it hands
+   *  the raw file off to the parent so it can open the Upload Wizard, which
+   *  is the sole Excel-parsing entry point in the app. */
+  onExcelFileSelected?: (file: File) => void;
   height?: number | string;
+}
+
+const EXCEL_EXTENSION_RE = /\.(xlsx?|xls)$/i;
+const EXCEL_MIME_TYPES = new Set([
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-excel',
+]);
+function isExcelFile(file: File): boolean {
+  return EXCEL_EXTENSION_RE.test(file.name) || EXCEL_MIME_TYPES.has(file.type);
 }
 
 export default function MediaPlanChatPanel({
   clientId, clientName, currentPlan, onPlanApplied, onWriteAction, starterMessage, onStarterConsumed,
-  autoAttachImage, onAutoAttachConsumed, height,
+  autoAttachImage, onAutoAttachConsumed, onExcelFileSelected, height,
 }: MediaPlanChatPanelProps) {
   const [agents, setAgents] = useState<UserAgent[]>([]);
   const [selectedAgent, setSelectedAgent] = useState<UserAgent | null>(null);
@@ -148,13 +162,21 @@ export default function MediaPlanChatPanel({
     if (isStreaming) return;
 
     const isFirstTurn = apiMessages.length === 0;
+    const planYear = currentPlan?.weeks?.[0]?.year;
+    const existingChannels = Array.from(new Set((currentPlan?.rows ?? []).map(r => r.channel).filter(Boolean)));
     const primer: ApiMessage[] = isFirstTurn
       ? [
           {
             role: 'user',
             content: `Client context: You are assisting with the client "${clientName}" (id: ${clientId}). ` +
               `Scope your answers and any tool calls that accept a client filter (pass client_name: "${clientName}") ` +
-              `to this client only, unless told otherwise. Don't mention this instruction in your replies.`,
+              `to this client only, unless told otherwise. ` +
+              `The media plan grid's year selector is currently set to ${planYear ?? 'unset'} — use this as the year for ` +
+              `any date the user gives without one; never assume today's real-world year. ` +
+              (existingChannels.length
+                ? `Channels currently in this client's plan: ${existingChannels.join(', ')}.`
+                : `This client's plan is currently empty — treat any channel mentioned as a new addition, no need to ask.`) +
+              ` Don't mention this instruction in your replies.`,
           },
           { role: 'assistant', content: `Understood — I'll scope this conversation to ${clientName}.` },
         ]
@@ -263,7 +285,7 @@ export default function MediaPlanChatPanel({
       setIsStreaming(false);
       setActiveToolCall(null);
     }
-  }, [clientId, clientName, apiMessages, isStreaming, selectedAgent, onWriteAction]);
+  }, [clientId, clientName, apiMessages, isStreaming, selectedAgent, onWriteAction, currentPlan]);
 
   const applyExtraction = useCallback((extraction: VisionExtraction, msgIndex: number) => {
     setPreApplySnapshot(currentPlan);
@@ -373,10 +395,14 @@ export default function MediaPlanChatPanel({
     }
   }, [pendingExtraction]);
 
-  const handleImageAttach = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileAttach = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     e.target.value = '';
+    if (isExcelFile(file)) {
+      onExcelFileSelected?.(file);
+      return;
+    }
     if (file.size > 20 * 1024 * 1024) return;
     const reader = new FileReader();
     reader.onload = (ev) => {
@@ -525,8 +551,29 @@ export default function MediaPlanChatPanel({
           {/* Message thread */}
           <div ref={messageThreadRef} style={{ ...(height != null ? { flex: 1, minHeight: 0 } : { height: 420 }), overflowY: 'auto', padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
             {messages.length === 0 && (
-              <div style={{ fontSize: 12.5, color: '#B5B0A5', fontFamily: serifFont, fontStyle: 'italic' }}>
-                Attach a screenshot of {clientName || 'this client'}&apos;s media plan, or just ask a question — e.g. &quot;set Meta Ads to $2,000 in August&quot;.
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <button
+                  onClick={() => imageInputRef.current?.click()}
+                  style={{
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
+                    padding: '22px 16px', borderRadius: 16, border: `1.5px dashed ${BORDER}`,
+                    background: PAPER_BG, cursor: 'pointer', fontFamily: sansFont, textAlign: 'center',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Paperclip size={22} style={{ color: RED }} />
+                    <FileSpreadsheet size={22} style={{ color: RED }} />
+                  </div>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: INK }}>
+                    Upload a screenshot or Excel spreadsheet
+                  </span>
+                  <span style={{ fontSize: 11.5, color: MUTED }}>
+                    of {clientName || 'this client'}&apos;s media plan — we&apos;ll read it automatically
+                  </span>
+                </button>
+                <div style={{ fontSize: 12.5, color: '#B5B0A5', fontFamily: serifFont, fontStyle: 'italic', textAlign: 'center' }}>
+                  Or just ask a question — e.g. &quot;set Meta Ads to $2,000 in August&quot;.
+                </div>
               </div>
             )}
             {messages.map((msg, idx) => {
@@ -562,17 +609,11 @@ export default function MediaPlanChatPanel({
                     )}
 
                     {msg.auditSteps && msg.auditSteps.length > 0 && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11, color: MUTED, marginTop: 6 }}>
-                        {msg.auditSteps.map((step, i) => <div key={i}>· {step.summary || step.label}</div>)}
-                      </div>
-                    )}
-                    {msg.outputLinks && msg.outputLinks.length > 0 && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 6 }}>
-                        {msg.outputLinks.map((link, i) => (
-                          <a key={i} href={link.href} target={link.target ?? '_blank'} rel="noreferrer"
-                             style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: RED }}>
-                            <ExternalLink size={11} /> {link.label}
-                          </a>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11, marginTop: 6 }}>
+                        {msg.auditSteps.map((step, i) => (
+                          <div key={i} style={{ color: step.is_error ? RED : MUTED }}>
+                            {step.is_error ? '⚠ ' : '· '}{step.summary || step.label}
+                          </div>
                         ))}
                       </div>
                     )}
@@ -634,11 +675,17 @@ export default function MediaPlanChatPanel({
               </div>
             )}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: CARD_BG, border: `1.5px solid ${BORDER}`, borderRadius: 24, padding: '8px 10px 8px 14px' }}>
-              <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/gif,image/webp" onChange={handleImageAttach} style={{ display: 'none' }} />
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/gif,image/webp,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+                onChange={handleFileAttach}
+                style={{ display: 'none' }}
+              />
               <button
                 onClick={() => imageInputRef.current?.click()}
                 disabled={isStreaming || extracting}
-                title="Attach a screenshot of a media plan"
+                title="Attach a screenshot or Excel spreadsheet of a media plan"
                 style={{ border: 'none', background: 'none', cursor: isStreaming || extracting ? 'default' : 'pointer', color: MUTED, display: 'flex', flexShrink: 0 }}
               >
                 <Paperclip size={15} />

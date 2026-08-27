@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { sendTeamsDailyBriefing, type ClientBriefingRow } from '@/lib/teams';
+import { nzHour, nzDayOfWeek } from '@/lib/timezone';
+
+// Sent weekdays at 8am NZ time. Vercel cron only runs on a fixed UTC schedule
+// (see vercel.json — this route fires every hour), so the actual "is it time
+// yet" decision happens here against NZ wall-clock time, keeping it correct
+// across the NZDT/NZST daylight-saving transitions instead of drifting an
+// hour twice a year.
+const TARGET_NZ_HOUR = 8;
 
 function isAuthorised(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
@@ -11,6 +19,12 @@ function isAuthorised(req: NextRequest): boolean {
 export async function GET(req: NextRequest) {
   if (!isAuthorised(req)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const now = new Date();
+  const weekday = nzDayOfWeek(now); // 0 = Sun .. 6 = Sat
+  if (nzHour(now) !== TARGET_NZ_HOUR || weekday === 0 || weekday === 6) {
+    return NextResponse.json({ ok: true, sent: 0, skipped: true, reason: 'not 8am NZ time on a weekday' });
   }
 
   const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '');

@@ -1,10 +1,11 @@
 "use client";
 
 import React, { useState, useCallback, useEffect, useRef, useMemo } from "react";
-import { Plus, Trash2, Upload, Download, X, Check, Edit2, ChevronDown, Loader2 } from "lucide-react";
+import { Plus, Trash2, Upload, Download, X, Check, Edit2, ChevronDown, Loader2, Calendar } from "lucide-react";
 import type { SandboxPlan, PlanRow, Flight, Week, FeeRow, CustomColumn } from "./types";
 import { FLIGHT_COLORS } from "./types";
 import { getChannelLogo, PRESET_CHANNELS } from "@/lib/utils/channel-icons";
+import { nzToday } from "@/lib/timezone";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -14,6 +15,7 @@ const WEEK_W = 72;
 const WEEK_W_MIN = 28;
 const WEEK_W_MAX = 120;
 const WEEK_W_STEP = 8;
+const WEEK_W_DEFAULT = Math.round(WEEK_W * 0.78); // starting zoom = 78%
 const ROW_H = 38;
 const HEADER_H = 32;
 
@@ -713,18 +715,35 @@ interface Props {
   onPlanChange: (plan: SandboxPlan) => void;
   onUpload: () => void;
   outerStyle?: React.CSSProperties;
+  // Hidden in the create-client flow — PDF export isn't relevant during onboarding.
+  showDownloadPdf?: boolean;
 }
 
-export function PlanGrid({ plan, onPlanChange, onUpload, outerStyle }: Props) {
+export function PlanGrid({ plan, onPlanChange, onUpload, outerStyle, showDownloadPdf = true }: Props) {
   const [rows, setRows] = useState<PlanRow[]>(plan.rows);
   const [libraryChannels, setLibraryChannels] = useState<LibraryChannel[]>([]);
   const [weeks, setWeeks] = useState<Week[]>(() => {
-    const year = plan.weeks[0]?.year ?? new Date().getFullYear();
-    return generateWeeksForYear(year, Math.max(52, plan.weeks.length));
+    const baseYear = plan.weeks[0]?.year ?? new Date().getFullYear();
+    // Flights can land in a different calendar year than the plan's earliest week
+    // (e.g. a plan spanning a year boundary) — generating only baseYear's weeks
+    // would silently leave those flights with nowhere to render. Widen the
+    // generated range to cover every year any row's flights actually touch.
+    let minYear = baseYear;
+    let maxYear = baseYear;
+    for (const row of plan.rows) {
+      for (const f of row.flights) {
+        const startYear = new Date(f.startWeek).getFullYear();
+        const endYear = new Date(f.endWeek).getFullYear();
+        if (!Number.isNaN(startYear)) { minYear = Math.min(minYear, startYear); maxYear = Math.max(maxYear, startYear); }
+        if (!Number.isNaN(endYear)) { minYear = Math.min(minYear, endYear); maxYear = Math.max(maxYear, endYear); }
+      }
+    }
+    const yearSpan = maxYear - minYear + 1;
+    return generateWeeksForYear(minYear, Math.max(52 * yearSpan, plan.weeks.length));
   });
   const [fees, setFees] = useState<FeeRow[]>(plan.fees ?? []);
   const [customColumns, setCustomColumns] = useState<CustomColumn[]>(plan.customColumns ?? []);
-  const [weekWidth, setWeekWidth] = useState(WEEK_W);
+  const [weekWidth, setWeekWidth] = useState(WEEK_W_DEFAULT);
   const [showAddColumn, setShowAddColumn] = useState(false);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
@@ -757,19 +776,77 @@ export function PlanGrid({ plan, onPlanChange, onUpload, outerStyle }: Props) {
   const totalLeftColsWidth = dynamicTotalLeft + COL_WIDTHS.total; // pixel offset where weeks begin
   const leftColSpan = 2 + customColumns.length; // DEL + CHANNEL + custom cols
 
-  const planYear = weeks[0]?.year ?? new Date().getFullYear();
+  const todayStr = nzToday();
+  const planYear = weeks[0]?.year ?? Number(todayStr.slice(0, 4));
   const yearOptions = Array.from({ length: 7 }, (_, i) => new Date().getFullYear() - 2 + i);
 
-  // Scroll to today's week on mount if the plan year matches the current year
-  useEffect(() => {
+  // Finds the week column that contains today, or -1 if today falls outside
+  // the range of weeks currently loaded (e.g. plan year doesn't match).
+  const findTodayWeekIdx = useCallback((weeksList: Week[]) => {
+    const first = weeksList[0];
+    const last = weeksList[weeksList.length - 1];
+    if (!first || !last) return -1;
+    if (todayStr < first.weekStart) return -1;
+    const lastEnd = new Date(last.weekStart);
+    lastEnd.setUTCDate(lastEnd.getUTCDate() + 7);
+    if (todayStr >= lastEnd.toISOString().slice(0, 10)) return -1;
+    return weeksList.reduce((best, w, i) => (w.weekStart <= todayStr ? i : best), -1);
+  }, [todayStr]);
+
+  const scrollToTodayPending = useRef(false);
+
+  const scrollToToday = useCallback((weeksList: Week[], weekW: number, behavior: ScrollBehavior = 'smooth') => {
     if (!scrollRef.current) return;
-    const today = new Date().toISOString().slice(0, 10);
-    if (planYear !== new Date().getFullYear()) return;
-    const todayIdx = weeks.reduce((best, w, i) => (w.weekStart <= today ? i : best), -1);
-    if (todayIdx < 0) return;
-    scrollRef.current.scrollLeft = todayIdx * WEEK_W;
+    const idx = findTodayWeekIdx(weeksList);
+    if (idx < 0) return;
+    scrollRef.current.scrollTo({ left: idx * weekW, behavior });
+  }, [findTodayWeekIdx]);
+
+  // Scroll to today's week on mount, switching to the current year first if
+  // the persisted plan was left showing a stale year (e.g. last saved while
+  // scrolled to a different year) — otherwise this silently no-ops and the
+  // grid opens scrolled all the way to January.
+  useEffect(() => {
+    const currentYear = Number(todayStr.slice(0, 4));
+    if (planYear !== currentYear) {
+      scrollToTodayPending.current = true;
+      handleYearChange(currentYear);
+    } else {
+      scrollToToday(weeks, weekWidth, 'auto');
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // run once on mount only
+
+  // "Today" button — jumps to the current year first if the plan isn't showing
+  // it yet, then scrolls once the new weeks have been generated.
+  const goToToday = useCallback(() => {
+    const currentYear = Number(todayStr.slice(0, 4));
+    if (planYear !== currentYear) {
+      scrollToTodayPending.current = true;
+      handleYearChange(currentYear);
+    } else {
+      scrollToToday(weeks, weekWidth);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [planYear, weeks, weekWidth, scrollToToday, todayStr]);
+
+  useEffect(() => {
+    if (!scrollToTodayPending.current) return;
+    scrollToTodayPending.current = false;
+    scrollToToday(weeks, weekWidth);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [weeks]);
+
+  // Absolute pixel offset (from the left edge of the table) of the vertical
+  // "today" line, or null when today falls outside the plan's date range.
+  const todayLineOffset = useMemo(() => {
+    const idx = findTodayWeekIdx(weeks);
+    if (idx < 0) return null;
+    const weekStart = new Date(weeks[idx].weekStart);
+    const today = new Date(todayStr);
+    const dayOffset = Math.round((today.getTime() - weekStart.getTime()) / (24 * 60 * 60 * 1000));
+    return totalLeftColsWidth + idx * weekWidth + (Math.min(6, Math.max(0, dayOffset)) / 7) * weekWidth;
+  }, [weeks, weekWidth, todayStr, findTodayWeekIdx, totalLeftColsWidth]);
 
   // Sync rows + weeks + fees + customColumns to parent
   useEffect(() => {
@@ -1241,7 +1318,7 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
   return (
     <div className="flex flex-col h-screen bg-gray-100" style={outerStyle}>
       {/* Toolbar */}
-      <div className="flex items-center gap-3 px-4 py-2.5 bg-white border-b border-gray-200 shadow-sm flex-shrink-0">
+      <div className="flex flex-wrap items-center gap-3 px-4 py-2.5 bg-white border-b border-gray-200 shadow-sm flex-shrink-0">
         <div>
           <span className="font-semibold text-gray-900 text-sm">{plan.title}</span>
           {plan.asAtLabel && <span className="ml-2 text-xs text-gray-400">{plan.asAtLabel}</span>}
@@ -1260,6 +1337,14 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
             {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
           </select>
         </div>
+
+        <button
+          onClick={goToToday}
+          className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-xs font-medium hover:bg-gray-50 transition-colors"
+          title="Jump to today"
+        >
+          <Calendar className="w-3.5 h-3.5" /> Today
+        </button>
 
         {/* Zoom */}
         <div className="flex items-center gap-0.5 border border-gray-200 rounded-lg overflow-hidden">
@@ -1302,15 +1387,17 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
           <Plus className="w-3.5 h-3.5" /> Add row
         </button>
         <FeeMenu onAdd={addFee} />
-        <button
-          onClick={handleDownloadPdf}
-          disabled={isDownloadingPdf}
-          title={pdfError ?? undefined}
-          className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-xs font-medium hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-        >
-          {isDownloadingPdf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-          {isDownloadingPdf ? 'Generating…' : 'Download PDF'}
-        </button>
+        {showDownloadPdf && (
+          <button
+            onClick={handleDownloadPdf}
+            disabled={isDownloadingPdf}
+            title={pdfError ?? undefined}
+            className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-xs font-medium hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {isDownloadingPdf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+            {isDownloadingPdf ? 'Generating…' : 'Download PDF'}
+          </button>
+        )}
         <button
           onClick={onUpload}
           className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-xs font-medium hover:bg-gray-50 transition-colors"
@@ -1326,6 +1413,7 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
 
       {/* Grid */}
       <div ref={scrollRef} className="flex-1 overflow-auto bg-white">
+        <div style={{ position: "relative", width: `${totalLeftColsWidth + weeks.length * weekWidth}px` }}>
         <table
           className="border-separate border-spacing-0"
           style={{ tableLayout: "fixed", minWidth: `${totalLeftColsWidth + weeks.length * weekWidth}px` }}
@@ -1530,6 +1618,14 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
             </tr>
           </tbody>
         </table>
+        {todayLineOffset !== null && (
+          <div
+            className="pointer-events-none absolute top-0 bottom-0"
+            style={{ left: todayLineOffset, width: 2, background: "#ef4444", zIndex: 1 }}
+            title="Today"
+          />
+        )}
+        </div>
       </div>
 
       {showBudgetPrompt && pendingDrag && dragEndPos && (

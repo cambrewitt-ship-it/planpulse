@@ -4,6 +4,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { nzToday } from '@/lib/timezone';
 
 export interface AgencyActionPoint {
   id: string;
@@ -111,7 +112,7 @@ export async function GET(request: NextRequest) {
 
     // Helper to determine channel status
     function channelStatus(startDate: string | null, endDate: string | null): 'live' | 'upcoming' | 'ended' {
-      const today = toDateStr(new Date());
+      const today = nzToday();
       if (!startDate) return 'upcoming';
       if (endDate && endDate < today) return 'ended';
       if (startDate <= today) return 'live';
@@ -127,7 +128,7 @@ export async function GET(request: NextRequest) {
     // Null means the channel has no future flights, so SET UP should be suppressed.
     const channelSetUpStartDates = new Map<string, Map<string, string | null>>();
 
-    const today = toDateStr(new Date());
+    const today = nzToday();
 
     for (const plan of allMediaPlans || []) {
       const channels = new Set<string>();
@@ -282,9 +283,7 @@ export async function GET(request: NextRequest) {
       const daysBefore = ap.days_before_live_due;
       if (daysBefore === null || daysBefore === undefined) return null;
 
-      const startDate = new Date(channelStartDate);
-      startDate.setDate(startDate.getDate() - daysBefore);
-      return startDate.toISOString().split('T')[0];
+      return msToDateStr(dateStrToMs(channelStartDate) - daysBefore * 24 * 60 * 60 * 1000);
     }
 
     // 5. For each client, determine outstanding action points per channel

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { MoreHorizontal, Trash2 } from 'lucide-react';
+import { MoreHorizontal, Trash2, EyeOff } from 'lucide-react';
 import type { MediaPlanChannel } from '@/components/legacy-plan-builder/media-plan-grid';
 
 const CHANNEL_TYPES: { value: NonNullable<MediaPlanChannel['channelCategory']>; label: string }[] = [
@@ -28,9 +28,10 @@ interface Props {
   channel: MediaPlanChannel;
   onUpdate: (channelId: string, updates: Partial<MediaPlanChannel>) => void;
   onDelete: (channelId: string) => void;
+  onHide?: () => void;
 }
 
-export function ChannelManageMenu({ channel, onUpdate, onDelete }: Props) {
+export function ChannelManageMenu({ channel, onUpdate, onDelete, onHide }: Props) {
   const currentType = channel.channelCategory ?? 'paid_digital';
 
   const [open, setOpen]               = useState(false);
@@ -165,6 +166,19 @@ export function ChannelManageMenu({ channel, onUpdate, onDelete }: Props) {
             >
               Save Changes
             </button>
+
+            {/* ── Hide ── */}
+            {onHide && (
+              <div className="border-t border-gray-100 pt-2">
+                <button
+                  onClick={() => { onHide(); setOpen(false); }}
+                  className="w-full flex items-center gap-2 px-2.5 py-1.5 text-sm text-gray-600 hover:bg-gray-50 rounded-lg transition-colors"
+                >
+                  <EyeOff size={13} />
+                  Hide card
+                </button>
+              </div>
+            )}
 
             {/* ── Delete ── */}
             <div className="border-t border-gray-100 pt-2">

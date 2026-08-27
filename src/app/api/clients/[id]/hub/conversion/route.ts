@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { SECTION_KEYS } from '@/lib/client-hub/section-meta';
 
 type Params = { params: Promise<{ id: string }> | { id: string } };
 
@@ -7,10 +8,7 @@ async function resolveId(params: Params['params']): Promise<string> {
   return (await Promise.resolve(params)).id;
 }
 
-const DEFAULT_SECTIONS = {
-  snapshot: true, charts: true, pacing: true, goals: true,
-  brief: true, notes: true, documents: true, spend: true,
-};
+const DEFAULT_SECTIONS: Record<string, boolean> = Object.fromEntries(SECTION_KEYS.map(k => [k, true]));
 
 const VALID_CONVERSION_PLATFORMS = ['meta-ads', 'google-ads', 'ga4'];
 

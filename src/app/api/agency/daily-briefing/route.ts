@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { createClient } from '@/lib/supabase/server';
+import { nzToday, nzDateKeyOffset } from '@/lib/timezone';
 
 export const maxDuration = 30;
 
@@ -26,8 +27,8 @@ export async function GET(request: NextRequest) {
     const clients: any[] = clientsData.clients ?? [];
     const apClients: any[] = apData.clients ?? [];
 
-    const today = new Date().toISOString().split('T')[0];
-    const in7Days = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
+    const today = nzToday();
+    const in7Days = nzDateKeyOffset(7);
 
     const redClients = clients.filter((c: any) => c.health?.status === 'red').map((c: any) => c.name);
     const amberClients = clients.filter((c: any) => c.health?.status === 'amber').map((c: any) => c.name);

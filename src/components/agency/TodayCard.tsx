@@ -4,6 +4,7 @@
 import { useState, useEffect } from 'react';
 import type { ClientCardData } from '@/app/api/agency/clients/route';
 import { getChannelLogo } from '@/lib/utils/channel-icons';
+import { toNZDateString, nzDayOfWeek, formatNZTime } from '@/lib/timezone';
 
 function clientInitials(name: string): string {
   return name.split(' ').map(w => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
@@ -18,10 +19,11 @@ interface TodayCardProps {
 }
 
 export function TodayCard({ clients, today }: TodayCardProps) {
-  const todayStr = today.toISOString().split('T')[0];
-  const day = today.getDate();
-  const month = MONTH_NAMES[today.getMonth()];
-  const dayName = DAY_NAMES[today.getDay()];
+  const todayStr = toNZDateString(today);
+  const [, todayMonthNum, todayDay] = todayStr.split('-').map(Number);
+  const day = todayDay;
+  const month = MONTH_NAMES[todayMonthNum - 1];
+  const dayName = DAY_NAMES[nzDayOfWeek(today)];
 
   // Clients with at least one live channel (startDate <= today && endDate >= today)
   const activeClients = clients
@@ -36,7 +38,7 @@ export function TodayCard({ clients, today }: TodayCardProps) {
     const id = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(id);
   }, []);
-  const timeStr = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const timeStr = formatNZTime(now);
 
   const sansFont = "'DM Sans', system-ui, sans-serif";
 

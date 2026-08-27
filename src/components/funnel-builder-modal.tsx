@@ -35,6 +35,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { FunnelStage, FunnelConfig, CombinedMetric } from '@/lib/types/funnel';
+import { nzToday, nzDateKeyOffset } from '@/lib/timezone';
 import {
   DndContext,
   closestCenter,
@@ -759,10 +760,10 @@ export function FunnelBuilderModal({
     initialConfig?.campaignIds || []
   );
   const [startDate, setStartDate] = useState(
-    initialConfig?.dateRange.startDate || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+    initialConfig?.dateRange.startDate || nzDateKeyOffset(-30)
   );
   const [endDate, setEndDate] = useState(
-    initialConfig?.dateRange.endDate || new Date().toISOString().split('T')[0]
+    initialConfig?.dateRange.endDate || nzToday()
   );
   const [stages, setStages] = useState<StageConfig[]>(
     initialConfig?.stages || []
@@ -787,16 +788,16 @@ export function FunnelBuilderModal({
       setFunnelName(initialConfig.name || '');
       setSelectedChannelIds(initialConfig.channelIds || []);
       setSelectedCampaignIds(initialConfig.campaignIds || []);
-      setStartDate(initialConfig.dateRange?.startDate || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
-      setEndDate(initialConfig.dateRange?.endDate || new Date().toISOString().split('T')[0]);
+      setStartDate(initialConfig.dateRange?.startDate || nzDateKeyOffset(-30));
+      setEndDate(initialConfig.dateRange?.endDate || nzToday());
       setStages(initialConfig.stages || []);
     } else {
       // Reset to defaults when creating new funnel
       setFunnelName('');
       setSelectedChannelIds([]);
       setSelectedCampaignIds([]);
-      setStartDate(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
-      setEndDate(new Date().toISOString().split('T')[0]);
+      setStartDate(nzDateKeyOffset(-30));
+      setEndDate(nzToday());
       setStages([]);
     }
     setErrors([]);

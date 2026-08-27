@@ -65,9 +65,9 @@ function AuditTrail({ steps }: { steps: AgentAuditStep[] }) {
         <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
           {steps.map((step, i) => (
             <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 6, paddingLeft: 2 }}>
-              <div style={{ width: 6, height: 6, borderRadius: '50%', background: step.is_write ? '#CC785C' : '#A0998F', flexShrink: 0, marginTop: 4 }} />
+              <div style={{ width: 6, height: 6, borderRadius: '50%', background: step.is_error ? '#C0392B' : step.is_write ? '#CC785C' : '#A0998F', flexShrink: 0, marginTop: 4 }} />
               <div>
-                <div style={{ fontSize: 11, fontWeight: 600, color: '#3C3732' }}>{step.label}</div>
+                <div style={{ fontSize: 11, fontWeight: 600, color: step.is_error ? '#C0392B' : '#3C3732' }}>{step.label}{step.is_error ? ' — failed' : ''}</div>
                 <div style={{ fontSize: 10.5, color: '#8A8578', lineHeight: 1.4 }}>{step.summary}</div>
               </div>
             </div>

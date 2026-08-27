@@ -33,6 +33,12 @@ export const WRITE_TOOLS = [
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function buildAuditSummary(toolName: string, input: any, result: any): string {
+  // Every case below describes what the call attempted, built from `input` — that
+  // reads as a success statement even when the tool actually failed. Check for an
+  // error result first so a failed write is never displayed as if it happened.
+  if (result?.error) {
+    return typeof result.error === 'string' ? result.error : `${TOOL_LABELS[toolName] ?? toolName} failed`;
+  }
   try {
     switch (toolName) {
       case 'get_daily_briefing': {

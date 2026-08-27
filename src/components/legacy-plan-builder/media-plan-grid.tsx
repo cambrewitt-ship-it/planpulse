@@ -21,6 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { nzToday, nzDayOfWeek } from "@/lib/timezone";
 
 interface WeekRange {
   weekStart: Date;
@@ -629,7 +630,7 @@ function tsvToMediaPlanChannels(result: TSVParseResult): MediaPlanChannel[] {
 
 function parsedToMediaPlanChannels(parsed: ParsedChannel[], gridYear?: number): MediaPlanChannel[] {
   const total = parsed.reduce((s, c) => s + (c.totalBudget || 0), 0);
-  const currentYear = gridYear ?? new Date().getFullYear();
+  const currentYear = gridYear ?? Number(nzToday().slice(0, 4));
   const yearStart = firstMondayOfYear(currentYear);
   const yearEnd   = lastMondayOfYear(currentYear);
 
@@ -846,7 +847,7 @@ export function MediaPlanGrid({ channels: externalChannels, onChannelsChange, co
   const setCommission = onCommissionChange ?? setInternalCommission;
   
   // Year navigation state (default to current year)
-  const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
+  const [selectedYear, setSelectedYear] = useState<number>(() => Number(nzToday().slice(0, 4)));
 
   // Zoom: column width in px (default 40, range 20–60)
   const [cellWidth, setCellWidth] = useState<number>(40);
@@ -1041,8 +1042,9 @@ export function MediaPlanGrid({ channels: externalChannels, onChannelsChange, co
   
   // Calculate current week commencing (Monday of current week)
   const getCurrentWeekCommencing = (): Date => {
-    const today = new Date();
-    const dayOfWeek = today.getDay(); // 0 = Sunday, 1 = Monday, etc.
+    const [ty, tm, td] = nzToday().split('-').map(Number);
+    const today = new Date(ty, tm - 1, td);
+    const dayOfWeek = nzDayOfWeek(); // 0 = Sunday, 1 = Monday, etc.
     const daysToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
     const currentWeekStart = new Date(today);
     currentWeekStart.setDate(today.getDate() + daysToMonday);
@@ -1064,8 +1066,7 @@ export function MediaPlanGrid({ channels: externalChannels, onChannelsChange, co
   // Calculate current day of week position (0 = Sunday, 1 = Monday, etc.)
   // Monday should be at left (0px), Sunday at right (~34px)
   const getCurrentDayPosition = (): number => {
-    const today = new Date();
-    const dayOfWeek = today.getDay(); // 0 = Sunday, 1 = Monday, etc.
+    const dayOfWeek = nzDayOfWeek(); // 0 = Sunday, 1 = Monday, etc.
     // Map: Monday (1) = 0, Tuesday (2) = 1, ..., Sunday (0) = 6
     const dayIndex = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
     // Position within the column (distribute across 7 days)

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { isClientOwnedByUser } from '@/lib/client-hub/assert-ownership';
+import { SECTION_KEYS } from '@/lib/client-hub/section-meta';
 
 type Params = { params: Promise<{ id: string }> | { id: string } };
 
@@ -8,12 +9,9 @@ async function resolveId(params: Params['params']): Promise<string> {
   return (await Promise.resolve(params)).id;
 }
 
-const DEFAULT_SECTIONS: Record<string, boolean> = {
-  snapshot: true, cpaTrend: true, charts: true, funnels: true, costPerMetric: true, trends: true, demographics: true, pacing: true, goals: true,
-  brief: true, notes: true, documents: true, spend: true, creatives: true,
-};
+const DEFAULT_SECTIONS: Record<string, boolean> = Object.fromEntries(SECTION_KEYS.map(k => [k, true]));
 
-const VALID_KEYS = Object.keys(DEFAULT_SECTIONS);
+const VALID_KEYS = SECTION_KEYS;
 
 // PATCH — flip one section's client-visibility flag. Body: { key, visible }
 export async function PATCH(req: NextRequest, { params }: Params) {

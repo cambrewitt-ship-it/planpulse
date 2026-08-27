@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { format, subDays, subMonths, startOfMonth, endOfMonth, startOfYear, isValid } from 'date-fns';
+import { format, isValid } from 'date-fns';
+import { nzToday, nzDateKeyOffset, nzStartOfMonth, nzStartOfYear } from '@/lib/timezone';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Calendar, ChevronDown } from 'lucide-react';
@@ -26,60 +27,63 @@ const PRESETS: PresetOption[] = [
   {
     label: 'Last 7 days',
     getValue: () => ({
-      startDate: format(subDays(new Date(), 7), 'yyyy-MM-dd'),
-      endDate: format(new Date(), 'yyyy-MM-dd'),
+      startDate: nzDateKeyOffset(-7),
+      endDate: nzToday(),
     }),
   },
   {
     label: 'Last 14 days',
     getValue: () => ({
-      startDate: format(subDays(new Date(), 14), 'yyyy-MM-dd'),
-      endDate: format(new Date(), 'yyyy-MM-dd'),
+      startDate: nzDateKeyOffset(-14),
+      endDate: nzToday(),
     }),
   },
   {
     label: 'Last 30 days',
     getValue: () => ({
-      startDate: format(subDays(new Date(), 30), 'yyyy-MM-dd'),
-      endDate: format(new Date(), 'yyyy-MM-dd'),
+      startDate: nzDateKeyOffset(-30),
+      endDate: nzToday(),
     }),
   },
   {
     label: 'Last 60 days',
     getValue: () => ({
-      startDate: format(subDays(new Date(), 60), 'yyyy-MM-dd'),
-      endDate: format(new Date(), 'yyyy-MM-dd'),
+      startDate: nzDateKeyOffset(-60),
+      endDate: nzToday(),
     }),
   },
   {
     label: 'Last 90 days',
     getValue: () => ({
-      startDate: format(subDays(new Date(), 90), 'yyyy-MM-dd'),
-      endDate: format(new Date(), 'yyyy-MM-dd'),
+      startDate: nzDateKeyOffset(-90),
+      endDate: nzToday(),
     }),
   },
   {
     label: 'This month',
     getValue: () => ({
-      startDate: format(startOfMonth(new Date()), 'yyyy-MM-dd'),
-      endDate: format(new Date(), 'yyyy-MM-dd'),
+      startDate: nzStartOfMonth(),
+      endDate: nzToday(),
     }),
   },
   {
     label: 'Last month',
     getValue: () => {
-      const lastMonth = subMonths(new Date(), 1);
-      return {
-        startDate: format(startOfMonth(lastMonth), 'yyyy-MM-dd'),
-        endDate: format(endOfMonth(lastMonth), 'yyyy-MM-dd'),
-      };
+      const [y, m] = nzStartOfMonth().split('-').map(Number);
+      const lastMonthDate = new Date(Date.UTC(y, m - 2, 1));
+      const ly = lastMonthDate.getUTCFullYear();
+      const lm = lastMonthDate.getUTCMonth();
+      const startDate = `${ly}-${String(lm + 1).padStart(2, '0')}-01`;
+      const lastDay = new Date(Date.UTC(ly, lm + 1, 0));
+      const endDate = `${lastDay.getUTCFullYear()}-${String(lastDay.getUTCMonth() + 1).padStart(2, '0')}-${String(lastDay.getUTCDate()).padStart(2, '0')}`;
+      return { startDate, endDate };
     },
   },
   {
     label: 'YTD',
     getValue: () => ({
-      startDate: format(startOfYear(new Date()), 'yyyy-MM-dd'),
-      endDate: format(new Date(), 'yyyy-MM-dd'),
+      startDate: nzStartOfYear(),
+      endDate: nzToday(),
     }),
   },
 ];

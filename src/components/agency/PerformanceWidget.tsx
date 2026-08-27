@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { format, subDays, startOfMonth, endOfMonth, subMonths, startOfYear } from 'date-fns';
+import { nzToday, nzDateKeyOffset, nzStartOfMonth, nzStartOfYear } from '@/lib/timezone';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -208,22 +208,28 @@ function GearIcon({ size = 12 }: { size?: number }) {
 const TIMEFRAME_PRESETS: Array<{ label: string; getValue: () => DateRange }> = [
   {
     label: '30 days',
-    getValue: () => ({ startDate: format(subDays(new Date(), 30), 'yyyy-MM-dd'), endDate: format(new Date(), 'yyyy-MM-dd') }),
+    getValue: () => ({ startDate: nzDateKeyOffset(-30), endDate: nzToday() }),
   },
   {
     label: 'This month',
-    getValue: () => ({ startDate: format(startOfMonth(new Date()), 'yyyy-MM-dd'), endDate: format(new Date(), 'yyyy-MM-dd') }),
+    getValue: () => ({ startDate: nzStartOfMonth(), endDate: nzToday() }),
   },
   {
     label: 'Last month',
     getValue: () => {
-      const lastMonth = subMonths(new Date(), 1);
-      return { startDate: format(startOfMonth(lastMonth), 'yyyy-MM-dd'), endDate: format(endOfMonth(lastMonth), 'yyyy-MM-dd') };
+      const [y, m] = nzStartOfMonth().split('-').map(Number);
+      const lastMonthDate = new Date(Date.UTC(y, m - 2, 1));
+      const ly = lastMonthDate.getUTCFullYear();
+      const lm = lastMonthDate.getUTCMonth();
+      const startDate = `${ly}-${String(lm + 1).padStart(2, '0')}-01`;
+      const lastDay = new Date(Date.UTC(ly, lm + 1, 0));
+      const endDate = `${lastDay.getUTCFullYear()}-${String(lastDay.getUTCMonth() + 1).padStart(2, '0')}-${String(lastDay.getUTCDate()).padStart(2, '0')}`;
+      return { startDate, endDate };
     },
   },
   {
     label: 'YTD',
-    getValue: () => ({ startDate: format(startOfYear(new Date()), 'yyyy-MM-dd'), endDate: format(new Date(), 'yyyy-MM-dd') }),
+    getValue: () => ({ startDate: nzStartOfYear(), endDate: nzToday() }),
   },
 ];
 
@@ -676,8 +682,7 @@ export function PerformanceWidget({
     if (config.ga4EventName) params.set('ga4EventName', config.ga4EventName);
     if (config.metaActionType) params.set('metaActionType', config.metaActionType);
     if (config.googleAdsConversionAction) params.set('googleAdsConversionAction', config.googleAdsConversionAction);
-    const now = new Date();
-    params.set('clientDate', `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`);
+    params.set('clientDate', nzToday());
 
     fetch(`/api/clients/${clientId}/goals?${params}`)
       .then(r => r.ok ? r.json() : null)
@@ -729,9 +734,9 @@ export function PerformanceWidget({
       let cur7Spend = 0, cur7Imp = 0, cur7Clicks = 0, cur7Conv = 0;
       let yest7Spend = 0, yest7Imp = 0, yest7Clicks = 0, yest7Conv = 0;
       for (let d = 0; d < 7; d++) {
-        const curRow = dateMap.get(format(subDays(new Date(), d), 'yyyy-MM-dd'));
+        const curRow = dateMap.get(nzDateKeyOffset(-d));
         if (curRow) { cur7Spend += curRow.spend; cur7Imp += curRow.impressions; cur7Clicks += curRow.clicks; cur7Conv += curRow.conversions; }
-        const yestRow = dateMap.get(format(subDays(new Date(), d + 1), 'yyyy-MM-dd'));
+        const yestRow = dateMap.get(nzDateKeyOffset(-(d + 1)));
         if (yestRow) { yest7Spend += yestRow.spend; yest7Imp += yestRow.impressions; yest7Clicks += yestRow.clicks; yest7Conv += yestRow.conversions; }
       }
       const cur7Val = metricFromDayRow({ spend: cur7Spend, impressions: cur7Imp, clicks: cur7Clicks, conversions: cur7Conv }, primaryGoal.metric);

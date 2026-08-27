@@ -6,6 +6,7 @@ import InlineActionPoints from './inline-action-points';
 import { MediaPlanChannel } from '@/components/legacy-plan-builder/media-plan-grid';
 import { supabase } from '@/lib/supabase/client';
 import ManualSpendSlider from './manual-spend-slider';
+import { nzToday } from '@/lib/timezone';
 
 interface Note {
   id: string;
@@ -32,11 +33,16 @@ function genId() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
+function todayLocalMidnight(): Date {
+  const [y, m, d] = nzToday().split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
 function formatDueDate(dateStr: string | null): string {
   if (!dateStr) return '';
   const [y, m, d] = dateStr.split('-').map(Number);
   const date = new Date(y, m - 1, d);
-  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const today = todayLocalMidnight();
   const diff = Math.ceil((date.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
   if (diff < 0) return `${Math.abs(diff)}d overdue`;
   if (diff === 0) return 'Today';
@@ -49,7 +55,7 @@ function dueDateColor(dateStr: string | null): string {
   if (!dateStr) return '#B5B0A5';
   const [y, m, d] = dateStr.split('-').map(Number);
   const date = new Date(y, m - 1, d);
-  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const today = todayLocalMidnight();
   const diff = Math.ceil((date.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
   if (diff < 0 || diff <= 2) return '#A0442A';
   if (diff <= 6) return '#B07030';

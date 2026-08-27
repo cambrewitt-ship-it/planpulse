@@ -19,6 +19,9 @@ import type { ConversionPlatform } from '@/lib/client-hub/get-hub-data';
 import { TrendBuilderSection } from './trend-builder-section';
 import { CreativesSection } from './creatives-section';
 import { DemographicsSection } from './demographics-section';
+import { GoogleAdsPerformanceSection } from './google-ads-performance-section';
+import { GoogleAdsInsightsSection } from './google-ads-insights-section';
+import { MetaPaidAdsSection } from './meta-paid-ads-section';
 import { FunnelSection } from './funnel-section';
 import { CostPerSection } from './cost-per-section';
 import { CpaTrendSection } from './cpa-trend-section';
@@ -398,6 +401,30 @@ export function ClientHubView({
                   <div key={key} id="section-demographics" style={{ marginBottom: 44, ...sectionOutline('demographics') }}>
                     {isHidden('demographics') && <HiddenBadge />}
                     <DemographicsSection clientId={data.client.id} token={publicToken} editable={editMode} />
+                  </div>
+                );
+
+              case 'googleAdsPerformance':
+                return !show('googleAdsPerformance') ? null : (
+                  <div key={key} id="section-googleAdsPerformance" style={{ marginBottom: 44, ...sectionOutline('googleAdsPerformance') }}>
+                    {isHidden('googleAdsPerformance') && <HiddenBadge />}
+                    <GoogleAdsPerformanceSection clientId={data.client.id} token={publicToken} editable={editMode} />
+                  </div>
+                );
+
+              case 'googleAdsInsights':
+                return !show('googleAdsInsights') ? null : (
+                  <div key={key} id="section-googleAdsInsights" style={{ marginBottom: 44, ...sectionOutline('googleAdsInsights') }}>
+                    {isHidden('googleAdsInsights') && <HiddenBadge />}
+                    <GoogleAdsInsightsSection clientId={data.client.id} token={publicToken} editable={editMode} />
+                  </div>
+                );
+
+              case 'metaPaidAds':
+                return !show('metaPaidAds') ? null : (
+                  <div key={key} id="section-metaPaidAds" style={{ marginBottom: 44, ...sectionOutline('metaPaidAds') }}>
+                    {isHidden('metaPaidAds') && <HiddenBadge />}
+                    <MetaPaidAdsSection clientId={data.client.id} token={publicToken} editable={editMode} />
                   </div>
                 );
 

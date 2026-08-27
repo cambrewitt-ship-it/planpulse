@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { FileSpreadsheet, CheckCircle, AlertCircle, Loader2, ArrowRight, Sparkles } from "lucide-react";
 import type { SandboxPlan, PlanRow } from "./types";
 
@@ -43,6 +43,11 @@ interface Props {
   // the generic copy shown when this wizard is embedded in the client dashboard.
   title?: string;
   description?: string;
+  // When provided, the wizard skips the drop screen and immediately processes
+  // this file — used when an Excel file is handed off from elsewhere (e.g. the
+  // Media Plan Editor chat's attachment button) so the wizard opens straight
+  // into sheet/year selection instead of asking the user to drop it again.
+  initialFile?: File | null;
 }
 
 function formatBudget(n: number): string {
@@ -202,7 +207,7 @@ function SpreadsheetDiagram() {
   );
 }
 
-export function UploadWizard({ onPlanLoaded, onScreenshotSelected, title, description }: Props) {
+export function UploadWizard({ onPlanLoaded, onScreenshotSelected, title, description, initialFile }: Props) {
   const [step, setStep] = useState<Step>("drop");
   const [errorMsg, setErrorMsg] = useState("");
   const [parsedPlan, setParsedPlan] = useState<SandboxPlan | null>(null);
@@ -295,6 +300,18 @@ export function UploadWizard({ onPlanLoaded, onScreenshotSelected, title, descri
       setStep("year");
     }
   }, [probeSheets]);
+
+  // Auto-process a file handed in from outside (e.g. the chat's attachment
+  // button) — same effect as if the user had just dropped it on the drop
+  // screen. Guarded by identity so it only fires once per distinct file.
+  const processedInitialFileRef = useRef<File | null>(null);
+  useEffect(() => {
+    if (initialFile && processedInitialFileRef.current !== initialFile) {
+      processedInitialFileRef.current = initialFile;
+      handleFileSelected(initialFile);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialFile]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();

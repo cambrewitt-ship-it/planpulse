@@ -6,6 +6,7 @@
 import { useMemo, useRef, useEffect, useState, useCallback } from 'react';
 import { Radio } from 'lucide-react';
 import { getChannelLogo } from '@/lib/utils/channel-icons';
+import { nzToday } from '@/lib/timezone';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -155,10 +156,7 @@ export function GanttCalendar({
 }: GanttCalendarProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const todayStr = useMemo(() => {
-    const d = new Date();
-    return msToStr(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-  }, []);
+  const todayStr = useMemo(() => nzToday(), []);
 
   // Compute the continuous date range: 1 month back to 12 months forward,
   // extended to cover all channel start/end dates.

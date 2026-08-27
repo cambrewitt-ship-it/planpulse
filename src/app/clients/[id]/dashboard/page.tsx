@@ -21,7 +21,7 @@
 'use client';
 
 import Link from 'next/link';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Eye, X } from 'lucide-react';
 import { MediaPlanChannel, MediaPlanCampaignLine } from '@/components/legacy-plan-builder/media-plan-grid';
 import { UploadWizard } from '@/components/sandbox/upload-wizard';
 import { PlanGrid } from '@/components/sandbox/plan-grid';
@@ -32,7 +32,7 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { getClientById, getMediaPlans, getPlanById, updateClient, updateClientLogoUrl } from '@/lib/db/plans';
 import { fetchCachedAnalyticsData, SpendDataPoint } from '@/lib/api/analytics-data-integration';
-import { addDays, format, parseISO, startOfMonth, endOfMonth, startOfYear } from 'date-fns';
+import { addDays, format, parseISO, startOfMonth, endOfMonth } from 'date-fns';
 import { calculateHealthScore, type HealthScoreResult } from '@/lib/utils/health-score';
 import { calculatePerformanceHealth, type PerformanceHealthResult } from '@/lib/calculate-performance-health';
 import {
@@ -64,6 +64,13 @@ import { FullscreenGanttView, type GanttAPMarker } from '@/components/agency/Ful
 import { ClientIntelTab } from '@/components/dashboard-v2/client-intel-tab';
 import ClientChatPanel from '@/components/dashboard-v2/client-chat-panel';
 import MediaPlanChatPanel from '@/components/dashboard-v2/media-plan-chat-panel';
+import { nzToday, nzDateKeyOffset, nzStartOfMonth, nzStartOfYear, formatNZ } from '@/lib/timezone';
+
+/** Local-midnight Date for "today" as it falls on the NZ calendar. */
+function nzTodayLocalMidnight(): Date {
+  const [y, m, d] = nzToday().split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
 
 interface Client {
   id: string;
@@ -152,6 +159,24 @@ export default function DashboardV2() {
   const [isEditingClientNotes, setIsEditingClientNotes] = useState(false);
   const [editingClientNotes, setEditingClientNotes] = useState('');
   const [notesCollapsed, setNotesCollapsed] = useState(false);
+  const [hiddenChannelCards, setHiddenChannelCards] = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set();
+    try {
+      const saved = localStorage.getItem(`hidden-channel-cards-${params.id}`);
+      if (saved) return new Set(JSON.parse(saved));
+    } catch {}
+    return new Set();
+  });
+
+  const toggleChannelCardHidden = (cardKey: string) => {
+    setHiddenChannelCards(prev => {
+      const next = new Set(prev);
+      if (next.has(cardKey)) next.delete(cardKey);
+      else next.add(cardKey);
+      try { localStorage.setItem(`hidden-channel-cards-${clientId}`, JSON.stringify([...next])); } catch {}
+      return next;
+    });
+  };
   const [notesActiveTab, setNotesActiveTab] = useState<'notes' | 'todo'>('todo');
   const [noteFiles, setNoteFiles] = useState<{ id: string; name: string }[]>([{ id: 'default', name: 'General' }]);
   const [activeFileId, setActiveFileId] = useState<string>('default');
@@ -194,6 +219,10 @@ export default function DashboardV2() {
   // Screenshot picked from the Upload Wizard's "AI Agent Planner" entry point,
   // handed off to the Media Plan Editor chat panel to auto-run once it mounts.
   const [pendingAgentScreenshot, setPendingAgentScreenshot] = useState<{ base64: string; mimeType: string; preview: string; name: string } | null>(null);
+  // Excel file attached via the chat panel — opens the Upload Wizard as a modal
+  // (pre-loaded with this file) since the wizard is otherwise only mounted when
+  // there's no plan yet, but the chat panel is available even once a plan exists.
+  const [pendingExcelFile, setPendingExcelFile] = useState<File | null>(null);
 
   // Eagerly check if any connected platform is missing saved accounts
   useEffect(() => {
@@ -241,7 +270,7 @@ export default function DashboardV2() {
   const [ganttSelectedDay, setGanttSelectedDay] = useState<number | null>(null);
   const [showFullscreenGantt, setShowFullscreenGantt] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState<Date>(() => {
-    if (typeof window === 'undefined') return new Date();
+    if (typeof window === 'undefined') return nzTodayLocalMidnight();
     try {
       const saved = localStorage.getItem(`dashboard-v2-selected-month-${params.id}`);
       if (saved) {
@@ -249,7 +278,7 @@ export default function DashboardV2() {
         if (!isNaN(d.getTime())) return d;
       }
     } catch {}
-    return new Date();
+    return nzTodayLocalMidnight();
   });
   const [actionPointsStats, setActionPointsStats] = useState<{ totalAll: number; completedAll: number; trafficLightColor: string; loading: boolean }>({ totalAll: 0, completedAll: 0, trafficLightColor: 'bg-gray-400', loading: true });
   const [allActionPoints, setAllActionPoints] = useState<any[]>([]);
@@ -276,6 +305,13 @@ export default function DashboardV2() {
   // Tracks when the user explicitly cleared the plan via "Upload new" so the reverse
   // sync from DB channels doesn't immediately re-populate it before they can upload.
   const sandboxPlanExplicitlyClearedRef = useRef(false);
+  // Layers the client's own logo/name onto the plan so the PDF export's header
+  // can show it — kept separate from clientSandboxPlan itself so saves/onPlanChange
+  // round-trips don't have to carry client branding fields back and forth.
+  const clientSandboxPlanForGrid = useMemo(() => {
+    if (!clientSandboxPlan) return clientSandboxPlan;
+    return { ...clientSandboxPlan, clientLogoUrl: client?.logo_url ?? undefined, clientName: client?.name };
+  }, [clientSandboxPlan, client?.logo_url, client?.name]);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [allMetaCampaigns, setAllMetaCampaigns] = useState<Array<{ id: string; name: string }>>([]);
@@ -294,22 +330,16 @@ export default function DashboardV2() {
       return saved ? JSON.parse(saved) : [];
     } catch { return []; }
   });
-  const [analyticsDateRange, setAnalyticsDateRange] = useState(() => {
-    const today = new Date();
-    return {
-      startDate: format(startOfYear(today), 'yyyy-MM-dd'),
-      endDate: format(today, 'yyyy-MM-dd'),
-    };
-  });
+  const [analyticsDateRange, setAnalyticsDateRange] = useState(() => ({
+    startDate: nzStartOfMonth(),
+    endDate: nzToday(),
+  }));
   // Timeframe for the hero Spend / Plan Timeline cards — set via the settings
   // wheel on the CPA graph, independent of the Channel Performance / Results timeframe.
-  const [heroDateRange, setHeroDateRange] = useState(() => {
-    const today = new Date();
-    return {
-      startDate: format(startOfYear(today), 'yyyy-MM-dd'),
-      endDate: format(today, 'yyyy-MM-dd'),
-    };
-  });
+  const [heroDateRange, setHeroDateRange] = useState(() => ({
+    startDate: nzStartOfYear(),
+    endDate: nzToday(),
+  }));
   const [allBenchmarks, setAllBenchmarks] = useState<ChannelBenchmark[]>([]);
   const [allPresets, setAllPresets] = useState<MetricPreset[]>([]);
   const [clientChannelPresets, setClientChannelPresets] = useState<ClientChannelPreset[]>([]);
@@ -436,7 +466,7 @@ export default function DashboardV2() {
     return () => clearTimeout(timer);
   }, [clientId, totalActualSpend]);
 
-  // Note: analyticsDateRange defaults to YTD (Jan 1 – today) on each load
+  // Note: analyticsDateRange defaults to this month (1st – today) on each load
 
   // Optimistically hydrate from the local cache first so the grid paints
   // instantly; loadMediaPlanBuilderData() below overwrites this with the
@@ -452,8 +482,12 @@ export default function DashboardV2() {
 
   const handleClientPlanChange = (updated: SandboxPlan) => {
     sandboxPlanExplicitlyClearedRef.current = false;
-    setClientSandboxPlan(updated);
-    try { localStorage.setItem(`planpulse_sandbox_plan_${clientId}`, JSON.stringify(updated)); } catch {}
+    // clientLogoUrl/clientName are re-derived live from `client` on every render
+    // (see clientSandboxPlanForGrid) — drop them here so they never get baked
+    // into the persisted plan JSON and go stale.
+    const core: SandboxPlan = { ...updated, clientLogoUrl: undefined, clientName: undefined };
+    setClientSandboxPlan(core);
+    try { localStorage.setItem(`planpulse_sandbox_plan_${clientId}`, JSON.stringify(core)); } catch {}
   };
 
   const handleClientPlanLoaded = (loaded: SandboxPlan) => {
@@ -476,6 +510,13 @@ export default function DashboardV2() {
     handleClientPlanLoaded(createBlankSandboxPlan());
     setPendingAgentScreenshot(image);
     setMediaPlanChatOpen(true);
+  };
+
+  // Excel file attached via the chat panel's attachment button — open the
+  // Upload Wizard as a modal, pre-loaded with the file, since the chat panel
+  // can't parse spreadsheets itself.
+  const handleExcelFileSelectedFromChat = (file: File) => {
+    setPendingExcelFile(file);
   };
 
   const handleClientPlanUpload = () => {
@@ -613,7 +654,7 @@ export default function DashboardV2() {
 
     const toMon = (d: Date): Date => {
       const day = d.getDay();
-      const diff = day === 0 ? 1 : 1 - day;
+      const diff = day === 0 ? -6 : 1 - day;
       const out = new Date(d);
       out.setDate(d.getDate() + diff);
       out.setHours(0, 0, 0, 0);
@@ -1060,7 +1101,7 @@ export default function DashboardV2() {
       ch.flights.flatMap(f => [f.startWeek, f.endWeek])
     ).filter(Boolean) as Date[];
     if (!allDates.length) return null;
-    const now = new Date();
+    const now = nzTodayLocalMidnight();
     const start = new Date(Math.min(...allDates.map(d => d.getTime())));
     const end   = new Date(Math.max(...allDates.map(d => d.getTime())));
     const totalDays   = Math.max(1, Math.ceil((end.getTime()   - start.getTime()) / 86400000));
@@ -1209,7 +1250,7 @@ export default function DashboardV2() {
       if (!refDateStr) return null;
 
       const startMs = new Date(refDateStr).getTime();
-      const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+      const todayStart = nzTodayLocalMidnight();
       const todayMs = todayStart.getTime();
       const intervalMs = intervalDays * 86400000;
 
@@ -1374,7 +1415,7 @@ export default function DashboardV2() {
       0,
       Math.min(100, (campaignDates.daysElapsed / campaignDates.totalDays) * 100),
     );
-    const now = Date.now();
+    const now = nzTodayLocalMidnight().getTime();
     const daysUntilStart = campaignDates.start.getTime() > now
       ? Math.ceil((campaignDates.start.getTime() - now) / 86400000)
       : 0;
@@ -1414,7 +1455,7 @@ export default function DashboardV2() {
 
   // Calculate current week commencing (Monday of current week)
   const currentWeekCommencing = useMemo(() => {
-    const today = new Date();
+    const today = nzTodayLocalMidnight();
     const monday = startOfWeek(today, { weekStartsOn: 1 });
     return format(monday, 'yyyy-MM-dd');
   }, []);
@@ -1437,7 +1478,7 @@ export default function DashboardV2() {
   const channelCards = useMemo(() => {
     if (!mediaPlanBuilderChannels.length) return [];
 
-    const now = new Date();
+    const now = nzTodayLocalMidnight();
 
     // Detect whether the analytics range spans more than one calendar month.
     const rangeStart   = parseISO(analyticsDateRange.startDate);
@@ -1738,16 +1779,28 @@ export default function DashboardV2() {
     }).sort((a, b) => channelSortOrder(a) - channelSortOrder(b));
   }, [mediaPlanBuilderChannels, channelMonthSpendData, spendApiErrors, selectedMonth, commission, analyticsDateRange.startDate, analyticsDateRange.endDate, allMetaCampaigns, allGoogleAdsCampaigns]);
 
+  // Stable per-card key used for DOM ids (scroll-to-channel), the manage
+  // menu's "Hide card" action, and the hidden-channel-cards localStorage set.
+  const getChannelCardKey = useCallback((ch: any, idx: number): string => {
+    if (ch.type === 'organic_social') return `organic-${ch.channel.id}`;
+    if (ch.type === 'edm') return `edm-${ch.channel.id}`;
+    if (ch.type === 'ooh') return `ooh-${ch.channel.id}`;
+    if (ch.type === 'display_native') return `display-native-${ch.channel.id}`;
+    if (ch.type === 'other') return `other-${ch.channel.id}`;
+    return `paid-${idx}-${ch.name}`;
+  }, []);
+
   const liveChannels = useMemo(() =>
     channelCards.map((ch: any, idx: number) => {
-      if (ch.type === 'organic_social') return { id: `channel-card-organic-${ch.channel.id}`, name: ch.channel.channelName ?? 'Organic Social', type: ch.type, hasSpend: false };
-      if (ch.type === 'edm') return { id: `channel-card-edm-${ch.channel.id}`, name: ch.channel.channelName ?? 'EDM', type: ch.type, hasSpend: false };
-      if (ch.type === 'ooh') return { id: `channel-card-ooh-${ch.channel.id}`, name: ch.channel.channelName ?? 'OOH', type: ch.type, hasSpend: false };
-      if (ch.type === 'display_native') return { id: `channel-card-display-native-${ch.channel.id}`, name: ch.channel.channelName ?? 'Display & Native', type: ch.type, hasSpend: false };
-      if (ch.type === 'other') return { id: `channel-card-other-${ch.channel.id}`, name: ch.channel.channelName ?? 'Other', type: ch.type, hasSpend: (ch.currentSpend ?? 0) > 0 };
-      return { id: `channel-card-paid-${idx}-${ch.name}`, name: ch.name, type: ch.type, platform: ch.platform, hasSpend: (ch.currentSpend ?? 0) > 0 };
+      const id = `channel-card-${getChannelCardKey(ch, idx)}`;
+      if (ch.type === 'organic_social') return { id, name: ch.channel.channelName ?? 'Organic Social', type: ch.type, hasSpend: false };
+      if (ch.type === 'edm') return { id, name: ch.channel.channelName ?? 'EDM', type: ch.type, hasSpend: false };
+      if (ch.type === 'ooh') return { id, name: ch.channel.channelName ?? 'OOH', type: ch.type, hasSpend: false };
+      if (ch.type === 'display_native') return { id, name: ch.channel.channelName ?? 'Display & Native', type: ch.type, hasSpend: false };
+      if (ch.type === 'other') return { id, name: ch.channel.channelName ?? 'Other', type: ch.type, hasSpend: (ch.currentSpend ?? 0) > 0 };
+      return { id, name: ch.name, type: ch.type, platform: ch.platform, hasSpend: (ch.currentSpend ?? 0) > 0 };
     })
-  , [channelCards]);
+  , [channelCards, getChannelCardKey]);
 
   const handleChannelClick = useCallback((channelId: string) => {
     if (viewMode !== 'overview') {
@@ -1772,7 +1825,7 @@ export default function DashboardV2() {
         return sum + channelTotal;
       }, 0);
 
-      const now = new Date();
+      const now = nzTodayLocalMidnight();
       const allDates = mediaPlanBuilderChannels.flatMap(ch =>
         ch.flights.flatMap(f => [f.startWeek, f.endWeek])
       ).filter(Boolean) as Date[];
@@ -1833,7 +1886,7 @@ export default function DashboardV2() {
     if (item.completed) return 'completed';
     const dueDate = item.due_date ? new Date(item.due_date) : null;
     if (!dueDate) return 'this-week';
-    const now = new Date();
+    const now = nzTodayLocalMidnight();
     const daysUntilDue = Math.ceil((dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
     if (daysUntilDue <= 2) return 'urgent';
     return 'this-week';
@@ -1843,8 +1896,7 @@ export default function DashboardV2() {
   // SET UP points are suppressed when the matched channel has an active flight, and re-anchored
   // to the next upcoming flight's start date when in a gap between flights.
   const enrichedActionPoints = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const today = nzTodayLocalMidnight();
     const todayMs = today.getTime();
 
     const channelHasActiveFlight = (flights: { startWeek: Date | string; endWeek: Date | string }[]): boolean =>
@@ -2657,17 +2709,26 @@ export default function DashboardV2() {
                           ? mediaPlanBuilderChannels.find((mbCh: any) => String(mbCh.id ?? mbCh.channelName) === ch.id)
                           : (ch as any).channel as MediaPlanChannel | undefined;
 
+                        const cardKey = getChannelCardKey(ch, idx);
+
                         const manageMenu = rawChannel ? (
                           <ChannelManageMenu
                             channel={rawChannel}
                             onUpdate={handleUpdateChannel}
                             onDelete={handleDeleteChannel}
+                            onHide={() => toggleChannelCardHidden(cardKey)}
                           />
                         ) : null;
 
+                        // Hidden cards are collapsed to a small strip and moved
+                        // below the visible cards, rather than rendered in place.
+                        if (hiddenChannelCards.has(cardKey)) {
+                          return null;
+                        }
+
                         if (ch.type === 'organic_social') {
                           return (
-                            <div key={`organic-${ch.channel.id}`} id={`channel-card-organic-${ch.channel.id}`}>
+                            <div key={cardKey} id={`channel-card-${cardKey}`}>
                               <OrganicSocialCard
                                 channel={ch.channel}
                                 clientId={clientId}
@@ -2683,7 +2744,7 @@ export default function DashboardV2() {
 
                         if (ch.type === 'edm') {
                           return (
-                            <div key={`edm-${ch.channel.id}`} id={`channel-card-edm-${ch.channel.id}`}>
+                            <div key={cardKey} id={`channel-card-${cardKey}`}>
                               <EdmCard
                                 channel={ch.channel}
                                 clientId={clientId}
@@ -2697,7 +2758,7 @@ export default function DashboardV2() {
 
                         if (ch.type === 'ooh') {
                           return (
-                            <div key={`ooh-${ch.channel.id}`} id={`channel-card-ooh-${ch.channel.id}`}>
+                            <div key={cardKey} id={`channel-card-${cardKey}`}>
                               <OohCard
                                 channel={ch.channel}
                                 clientId={clientId}
@@ -2710,7 +2771,7 @@ export default function DashboardV2() {
 
                         if (ch.type === 'display_native') {
                           return (
-                            <div key={`display-native-${ch.channel.id}`} id={`channel-card-display-native-${ch.channel.id}`}>
+                            <div key={cardKey} id={`channel-card-${cardKey}`}>
                               <DisplayNativeCard
                                 channel={ch.channel}
                                 clientId={clientId}
@@ -2729,7 +2790,7 @@ export default function DashboardV2() {
                             ? new Date(Math.min(...channelData.flights.map((f: any) => new Date(f.startWeek).getTime())))
                             : null;
                           return (
-                            <div key={`other-${ch.channel.id}`} id={`channel-card-other-${ch.channel.id}`}>
+                            <div key={cardKey} id={`channel-card-${cardKey}`}>
                               <OtherChannelCard
                                 channel={ch.channel}
                                 clientId={clientId}
@@ -2755,7 +2816,7 @@ export default function DashboardV2() {
                           : null;
 
                         return (
-                          <div key={`paid-${idx}-${ch.name}`} id={`channel-card-paid-${idx}-${ch.name}`}>
+                          <div key={cardKey} id={`channel-card-${cardKey}`}>
                             <ChannelPerformanceCard
                               channel={ch}
                               selectedMonth={selectedMonth}
@@ -2783,6 +2844,33 @@ export default function DashboardV2() {
                           </div>
                         );
                       })}
+
+                      {/* ── Hidden channel cards: collapsed strips, always at the bottom ── */}
+                      {channelCards.some((ch, idx) => hiddenChannelCards.has(getChannelCardKey(ch, idx))) && (
+                        <div className="space-y-2 pt-2">
+                          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider px-1">Hidden cards</p>
+                          {channelCards.map((ch, idx) => {
+                            const cardKey = getChannelCardKey(ch, idx);
+                            if (!hiddenChannelCards.has(cardKey)) return null;
+                            const cardLabel = ch.type === 'paid_digital' ? ch.name : (ch as any).channel.channelName;
+                            return (
+                              <div
+                                key={cardKey}
+                                className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5"
+                              >
+                                <span className="text-sm font-medium text-gray-400">{cardLabel}</span>
+                                <button
+                                  onClick={() => toggleChannelCardHidden(cardKey)}
+                                  className="flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 px-2 py-1 rounded-md hover:bg-gray-100 transition-colors"
+                                >
+                                  <Eye size={13} />
+                                  Show card
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   </div>
                 ) : (
@@ -2827,6 +2915,7 @@ export default function DashboardV2() {
                       onStarterConsumed={() => setMediaPlanChatPrefill(null)}
                       autoAttachImage={pendingAgentScreenshot}
                       onAutoAttachConsumed={() => setPendingAgentScreenshot(null)}
+                      onExcelFileSelected={handleExcelFileSelectedFromChat}
                       height="100%"
                     />
                   </div>
@@ -2862,10 +2951,10 @@ export default function DashboardV2() {
                   </div>
 
                   <div style={{ flex: '1 1 auto', minWidth: 0, borderRadius: 12, border: '1px solid rgba(232,228,220,0.7)', boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', overflow: clientSandboxPlan ? 'hidden' : 'auto' }}>
-                    {clientSandboxPlan ? (
+                    {clientSandboxPlanForGrid ? (
                       <PlanGrid
                         key={externalPlanRevision}
-                        plan={clientSandboxPlan}
+                        plan={clientSandboxPlanForGrid}
                         onPlanChange={handleClientPlanChange}
                         onUpload={handleClientPlanUpload}
                         outerStyle={{ height: '100%' }}
@@ -2874,6 +2963,43 @@ export default function DashboardV2() {
                       <UploadWizard onPlanLoaded={handleClientPlanLoaded} onScreenshotSelected={handleScreenshotSelectedFromWizard} />
                     )}
                   </div>
+                </div>
+              </div>
+            )}
+
+            {/* Excel file attached via the chat panel — the wizard is normally only
+                mounted when there's no plan yet, so once a plan exists we surface it
+                as a modal instead, pre-loaded with the file. */}
+            {pendingExcelFile && (
+              <div
+                style={{
+                  position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(28,25,23,0.5)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+                }}
+                onClick={() => setPendingExcelFile(null)}
+              >
+                <div
+                  style={{
+                    position: 'relative', width: '100%', maxWidth: 900, maxHeight: '90vh', overflowY: 'auto',
+                    borderRadius: 16, background: '#fff', boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+                  }}
+                  onClick={e => e.stopPropagation()}
+                >
+                  <button
+                    onClick={() => setPendingExcelFile(null)}
+                    title="Close"
+                    style={{
+                      position: 'absolute', top: 14, right: 14, zIndex: 1, width: 30, height: 30,
+                      borderRadius: '50%', border: '1px solid #E5E1D8', background: '#fff', cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#5C5450',
+                    }}
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                  <UploadWizard
+                    initialFile={pendingExcelFile}
+                    onPlanLoaded={(plan) => { handleClientPlanLoaded(plan); setPendingExcelFile(null); }}
+                  />
                 </div>
               </div>
             )}
@@ -2906,7 +3032,7 @@ export default function DashboardV2() {
                         const start = inv.dateRange.startDate;
                         const end = inv.dateRange.endDate;
                         const label = `${start} → ${end}`;
-                        const generated = new Date(inv.generatedAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
+                        const generated = formatNZ(new Date(inv.generatedAt), { day: 'numeric', month: 'short', year: 'numeric' }, 'en-US');
                         return (
                           <div key={inv.id} style={{
                             display: 'flex', alignItems: 'center', justifyContent: 'space-between',

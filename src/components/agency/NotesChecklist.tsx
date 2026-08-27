@@ -3,6 +3,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '@/lib/supabase/client';
+import { nzToday } from '@/lib/timezone';
 
 interface Note {
   id: string;
@@ -20,12 +21,16 @@ const LOCAL_KEY = (userId: string) => `agency_notes_${userId}`;
 const FREE_TEXT_KEY = (userId: string, scope: string) => `agency_notes_freetext_${userId}_${scope}`;
 const MODE_KEY = (userId: string, scope: string) => `agency_notes_mode_${userId}_${scope}`;
 
+function todayLocalMidnight(): Date {
+  const [y, m, d] = nzToday().split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
 function formatDueDate(dateStr: string | null): string {
   if (!dateStr) return '';
   const [y, m, d] = dateStr.split('-').map(Number);
   const note = new Date(y, m - 1, d);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const today = todayLocalMidnight();
   const diff = Math.ceil((note.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
   if (diff < 0) return `${Math.abs(diff)}d overdue`;
   if (diff === 0) return 'Today';
@@ -38,8 +43,7 @@ function dueDateColor(dateStr: string | null): string {
   if (!dateStr) return '#B5B0A5';
   const [y, m, d] = dateStr.split('-').map(Number);
   const note = new Date(y, m - 1, d);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const today = todayLocalMidnight();
   const diff = Math.ceil((note.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
   if (diff < 0) return '#A0442A';
   if (diff <= 2) return '#A0442A';

@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import type { Database, ClientWithHealth, HealthStatus } from '@/types/database';
 import { calculateClientHealth, getActionPointStatsForClient } from '@/lib/health/calculations';
+import { nzToday, nzDateKeyOffset, nzStartOfYear } from '@/lib/timezone';
 
 export interface ClientChannelFlight {
   startDate: string;
@@ -34,13 +35,9 @@ export interface ClientCardData extends ClientWithHealth {
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
-function toDateStr(date: Date): string {
-  return date.toISOString().split('T')[0];
-}
-
-/** Determine channel status relative to today */
+/** Determine channel status relative to today (NZ time) */
 function channelStatus(startDate: string | null, endDate: string | null): 'live' | 'upcoming' | 'ended' {
-  const today = toDateStr(new Date());
+  const today = nzToday();
   if (!startDate) return 'upcoming';
   if (endDate && endDate < today) return 'ended';
   if (startDate <= today) return 'live';
@@ -105,8 +102,8 @@ export async function GET(request: NextRequest) {
     }
 
     // ── Fetch all action points with due dates ────────────────────────────────
-    const today = toDateStr(new Date());
-    const in3Days = toDateStr(new Date(Date.now() + 3 * 24 * 60 * 60 * 1000));
+    const today = nzToday();
+    const in3Days = nzDateKeyOffset(3);
 
     const { data: allActionPoints } = await supabase
       .from('action_points')
@@ -133,8 +130,8 @@ export async function GET(request: NextRequest) {
 
     // ── Fetch actual spend per client for the specified date range ─────────
     // Default to YTD (Jan 1 – today) to match the dashboard's default date range
-    const dateRangeStart = startDateParam || toDateStr(new Date(new Date().getFullYear(), 0, 1));
-    const dateRangeEnd = endDateParam || toDateStr(new Date());
+    const dateRangeStart = startDateParam || nzStartOfYear();
+    const dateRangeEnd = endDateParam || nzToday();
     const { data: spendRows } = await supabase
       .from('ad_performance_metrics')
       .select('client_id, spend, campaign_id, date, platform, account_id')

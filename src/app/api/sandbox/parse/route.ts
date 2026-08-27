@@ -25,7 +25,7 @@ function isoDate(d: Date): string {
 
 function toMonday(d: Date): Date {
   const day = d.getDay();
-  const diff = day === 0 ? 1 : 1 - day;
+  const diff = day === 0 ? -6 : 1 - day;
   const out = new Date(d);
   out.setDate(d.getDate() + diff);
   out.setHours(0, 0, 0, 0);

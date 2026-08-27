@@ -14,6 +14,13 @@ import { RefreshCw, Plus, X, Edit2, Check, Trash2, ChevronLeft, ChevronRight, Ch
 import { MediaChannelEnhancedView } from '@/components/ui/media-channel-enhanced-view';
 import { TimeFrame } from '@/lib/types/media-plan';
 import { DateRangePicker } from '@/components/ui/date-range-picker';
+import { nzToday } from '@/lib/timezone';
+
+/** Local-midnight Date for "today" as it falls on the NZ calendar. */
+function nzTodayLocalMidnight(): Date {
+  const [y, m, d] = nzToday().split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
 
 interface ActionPoint {
   id: string;
@@ -101,7 +108,7 @@ export default function MediaChannelCard({ channel, onToggleAction, onActualSpen
     if (channel.spendData && channel.spendData.length > 0) {
       return startOfMonth(parseISO(channel.spendData[0].date));
     }
-    return new Date();
+    return nzTodayLocalMidnight();
   });
 
   // Date range state for filtering
@@ -343,9 +350,7 @@ export default function MediaChannelCard({ channel, onToggleAction, onActualSpen
 
   // Calculate projection using linear regression on last N days
   const calculateProjection = (data: SpendData[]): SpendData[] => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const todayKey = format(today, 'yyyy-MM-dd');
+    const todayKey = nzToday();
     
     const actualData = data.filter(d => d.actualSpend !== null && !d.projected && d.date <= todayKey);
     if (actualData.length < 2) {
@@ -392,9 +397,8 @@ export default function MediaChannelCard({ channel, onToggleAction, onActualSpen
   };
 
   // Filter data to show only the selected date range
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const todayKey = format(today, 'yyyy-MM-dd');
+  const todayKey = nzToday();
+  const today = nzTodayLocalMidnight();
   const selectedMonthStart = startOfMonth(selectedMonth);
   const selectedMonthEnd = endOfMonth(selectedMonth);
   const selectedMonthStartKey = dateRange.startDate;
@@ -828,8 +832,7 @@ export default function MediaChannelCard({ channel, onToggleAction, onActualSpen
 
   // Calculate month progress (percentage through the selected month)
   const daysInSelectedMonth = eachDayOfInterval({ start: selectedMonthStart, end: selectedMonthEnd }).length;
-  const currentDate = new Date();
-  currentDate.setHours(0, 0, 0, 0);
+  const currentDate = nzTodayLocalMidnight();
   
   let monthProgress = 0;
   if (selectedMonthStart <= currentDate && currentDate <= selectedMonthEnd) {
@@ -1079,8 +1082,7 @@ export default function MediaChannelCard({ channel, onToggleAction, onActualSpen
                                 variant="outline"
                                 className={`text-xs ${
                                   (() => {
-                                    const today = new Date();
-                                    today.setHours(0, 0, 0, 0);
+                                    const today = nzTodayLocalMidnight();
                                     const dueDate = new Date(action.due_date);
                                     dueDate.setHours(0, 0, 0, 0);
                                     const daysUntil = Math.ceil((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
@@ -1091,8 +1093,7 @@ export default function MediaChannelCard({ channel, onToggleAction, onActualSpen
                                 }`}
                               >
                                 {(() => {
-                                  const today = new Date();
-                                  today.setHours(0, 0, 0, 0);
+                                  const today = nzTodayLocalMidnight();
                                   const dueDate = new Date(action.due_date);
                                   dueDate.setHours(0, 0, 0, 0);
                                   const daysUntil = Math.ceil((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));

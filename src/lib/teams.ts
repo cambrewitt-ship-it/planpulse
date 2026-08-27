@@ -1,3 +1,5 @@
+import { formatNZWeekdayDate } from '@/lib/timezone';
+
 type Fact = { name: string; value: string };
 
 interface AlertOptions {
@@ -69,7 +71,7 @@ export async function sendTeamsDailyBriefing(clients: ClientBriefingRow[], appUr
 
   const sections: object[] = [
     {
-      activityTitle: `**Agency Daily Briefing — ${new Date().toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' })}**`,
+      activityTitle: `**Agency Daily Briefing — ${formatNZWeekdayDate(new Date())}**`,
       activityText: `${clients.length} active clients · ${totalOverdue} overdue task${totalOverdue !== 1 ? 's' : ''}`,
       facts: [{ name: 'Health overview', value: statusLine }],
     },

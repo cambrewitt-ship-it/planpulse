@@ -1202,6 +1202,9 @@ export interface Database {
             trend_widget: Record<string, string>;
             cpa_trend_widget: Record<string, string | null>;
             hidden_cards: Record<string, string[]>;
+            meta_paid_action_type: string | null;
+            meta_paid_metric_label: string;
+            meta_paid_chart_config: Record<string, string> | null;
             updated_at: string;
           };
           Insert: {
@@ -1215,6 +1218,9 @@ export interface Database {
             trend_widget?: Record<string, string>;
             cpa_trend_widget?: Record<string, string | null>;
             hidden_cards?: Record<string, string[]>;
+            meta_paid_action_type?: string | null;
+            meta_paid_metric_label?: string;
+            meta_paid_chart_config?: Record<string, string> | null;
             updated_at?: string;
           };
           Update: {
@@ -1228,6 +1234,9 @@ export interface Database {
             trend_widget?: Record<string, string>;
             cpa_trend_widget?: Record<string, string | null>;
             hidden_cards?: Record<string, string[]>;
+            meta_paid_action_type?: string | null;
+            meta_paid_metric_label?: string;
+            meta_paid_chart_config?: Record<string, string> | null;
             updated_at?: string;
           };
           Relationships: [];
@@ -1603,6 +1612,7 @@ export interface AgentAuditStep {
   summary: string;
   timestamp: string;
   is_write: boolean;
+  is_error?: boolean;
 }
 
 export interface AgentOutputLink {

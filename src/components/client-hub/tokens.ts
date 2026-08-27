@@ -22,6 +22,9 @@ export const COLOR = {
   goodBright: 'oklch(0.62 0.2 145)',
   caution: 'oklch(0.68 0.19 80)',
   hiddenOutline: '#C9BEA9',
+  /** Used only for AI-generated insight callouts — the rest of the palette is warm-neutral/terracotta by design. */
+  info: 'oklch(0.5 0.14 250)',
+  infoBg: '#E6EDF7',
 } as const;
 
 export const CHANNEL_HUES: Record<string, number> = {

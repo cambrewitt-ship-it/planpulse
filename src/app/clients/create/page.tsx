@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient as createDbClient, updateClientLogoUrl } from '@/lib/db/plans';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -15,12 +15,8 @@ import {
   ArrowRight,
   Check,
   Building2,
-  BarChart2,
   Target,
-  FileText,
   Wifi,
-  List,
-  GitBranch,
   Upload,
   X,
   CheckCircle2,
@@ -35,10 +31,11 @@ import type { SandboxPlan } from '@/components/sandbox/types';
 import MediaPlanChatPanel from '@/components/dashboard-v2/media-plan-chat-panel';
 import { createBlankSandboxPlan } from '@/lib/media-plan/sandbox-sync';
 import Image from 'next/image';
+import { nzToday, nzDateKeyOffset } from '@/lib/timezone';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type Step = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+type Step = 1 | 2 | 3;
 type PlatformId = 'facebook' | 'google-ads' | 'google-analytics' | 'linkedin' | 'tiktok';
 
 interface Platform {
@@ -107,13 +104,9 @@ interface IntelDocument {
 // ── Static data ───────────────────────────────────────────────────────────────
 
 const STEPS: { num: Step; label: string; icon: React.ElementType }[] = [
-  { num: 1, label: 'Details', icon: Building2 },
-  { num: 2, label: 'Plan', icon: BarChart2 },
-  { num: 3, label: 'Connect', icon: Wifi },
-  { num: 4, label: 'Accounts', icon: List },
-  { num: 5, label: 'Campaigns', icon: GitBranch },
-  { num: 6, label: 'Goal', icon: Target },
-  { num: 7, label: 'Intel', icon: FileText },
+  { num: 1, label: 'Details & Plan', icon: Building2 },
+  { num: 2, label: 'Connect & Accounts', icon: Wifi },
+  { num: 3, label: 'Goal & Intel', icon: Target },
 ];
 
 const PLATFORMS: Platform[] = [
@@ -261,11 +254,19 @@ export default function CreateClientPage() {
   const [externalPlanRevision, setExternalPlanRevision] = useState(0);
   // Screenshot picked from the Upload Wizard's "AI Agent Planner" entry point.
   const [pendingAgentScreenshot, setPendingAgentScreenshot] = useState<{ base64: string; mimeType: string; preview: string; name: string } | null>(null);
+  // Excel file attached via the chat panel — opens the Upload Wizard as a modal
+  // (pre-loaded with this file) since the wizard is otherwise only mounted when
+  // there's no plan yet, but the chat panel is available even once a plan exists.
+  const [pendingExcelFile, setPendingExcelFile] = useState<File | null>(null);
+  // Purely visual — shown dimmed behind a lock overlay before the client exists,
+  // so the grid + chat panel are visible (not interactive) instead of hidden.
+  const previewPlan = useMemo(() => createBlankSandboxPlan(), []);
 
   // ── Step 6: Performance Goal ──
   const [goalMetric, setGoalMetric] = useState('');
   const [goalTarget, setGoalTarget] = useState('');
   const [goalSaving, setGoalSaving] = useState(false);
+  const [goalSaved, setGoalSaved] = useState(false);
   const [goalMetricSource, setGoalMetricSource] = useState<'ad' | 'meta' | 'google-ads' | 'ga4'>('meta');
   const [goalGoogleAdsConversionAction, setGoalGoogleAdsConversionAction] = useState('');
   const [goalMetaActionType, setGoalMetaActionType] = useState('');
@@ -414,8 +415,7 @@ export default function CreateClientPage() {
   };
 
   const handleCreateClient = async () => {
-    if (!clientName.trim()) return;
-    if (clientId) { setStep(2); return; }
+    if (!clientName.trim() || clientId) return;
     setCreating(true);
     try {
       const client = await createDbClient(clientName.trim());
@@ -444,7 +444,6 @@ export default function CreateClientPage() {
         } catch {}
       }
       setClientId(newId);
-      setStep(2);
     } catch {
       alert('Error creating client. Please try again.');
     } finally {
@@ -514,6 +513,14 @@ export default function CreateClientPage() {
       const plan: SandboxPlan = JSON.parse(raw);
       setSandboxPlan(plan);
       setChannels(sandboxPlanToChannels(plan));
+    } else {
+      // Skip the upload wizard's cover screen on first visit — start with a
+      // blank plan so the grid is visible immediately. Users can still switch
+      // to an Excel/screenshot upload via the grid's "Upload new" button.
+      const blank = createBlankSandboxPlan();
+      setSandboxPlan(blank);
+      setChannels(sandboxPlanToChannels(blank));
+      try { localStorage.setItem(`planpulse_sandbox_plan_${clientId}`, JSON.stringify(blank)); } catch {}
     }
     setSandboxPlanHydrated(true);
   }, [clientId]);
@@ -536,6 +543,25 @@ export default function CreateClientPage() {
     setExternalPlanRevision((v) => v + 1);
   };
 
+  // Conversational tool calls (update_media_plan_flight etc.) write straight to
+  // the server, bypassing this page's localStorage-backed `sandboxPlan` state —
+  // unlike a screenshot Apply (handleAgentPlanApplied), there's no plan object
+  // handed back client-side. Re-fetch the server copy so the grid actually
+  // reflects what the chat just wrote, same as the dashboard's equivalent.
+  const handleMediaPlanAgentAction = async (tool: string) => {
+    if (!['update_media_plan_budget', 'update_media_plan_flight', 'set_media_plan_channels'].includes(tool)) return;
+    if (!clientId) return;
+    try {
+      const res = await fetch(`/api/clients/${clientId}/media-plan-builder`);
+      if (!res.ok) return;
+      const result = await res.json();
+      if (result.data?.sandboxPlan) {
+        handleSandboxPlanChange(result.data.sandboxPlan);
+        setExternalPlanRevision((v) => v + 1);
+      }
+    } catch {}
+  };
+
   // "Upload a screenshot of your Media Plan" — starts a blank plan so the grid +
   // chat panel mount, then hands the image to the chat panel to auto-run the
   // vision extraction, exactly as on the client dashboard's Media Plan tab.
@@ -544,12 +570,19 @@ export default function CreateClientPage() {
     setPendingAgentScreenshot(image);
   };
 
+  // Excel file attached via the chat panel's attachment button — open the
+  // Upload Wizard as a modal, pre-loaded with the file, since the chat panel
+  // can't parse spreadsheets itself.
+  const handleExcelFileSelectedFromChat = (file: File) => {
+    setPendingExcelFile(file);
+  };
+
   // ── Step 3 handlers: Performance Goal ────────────────────────────────────────
 
   const handleSaveGoal = async () => {
-    if (!clientId) { setStep(7); return; }
-    if (!goalMetric || !goalTarget) { setStep(7); return; }
+    if (!clientId || !goalMetric || !goalTarget) return;
     setGoalSaving(true);
+    setGoalSaved(false);
     try {
       await fetch(`/api/clients/${clientId}/goals`, {
         method: 'POST',
@@ -571,9 +604,9 @@ export default function CreateClientPage() {
           googleAdsConversionAction: goalGoogleAdsConversionAction === '__custom__' ? '' : goalGoogleAdsConversionAction,
         }));
       } catch {}
+      setGoalSaved(true);
     } catch {}
     setGoalSaving(false);
-    setStep(7);
   };
 
   // ── Step 4 handlers: Client Intel Hub ────────────────────────────────────────
@@ -612,7 +645,7 @@ export default function CreateClientPage() {
   // ── Step 5 handlers: Connect Platforms ───────────────────────────────────────
 
   useEffect(() => {
-    if (step === 3 && clientId) fetchConnectionStatus();
+    if (step === 2 && clientId) fetchConnectionStatus();
   }, [step, clientId]);
 
   const fetchConnectionStatus = async () => {
@@ -630,6 +663,15 @@ export default function CreateClientPage() {
             if (id in next) next[id] = c.status === 'active';
           });
           return next;
+        });
+        // Already-connected platforms (e.g. revisiting this step) should have
+        // their accounts loaded automatically, same as a fresh connect does.
+        conns.forEach((c) => {
+          if (c.status !== 'active') return;
+          const id = c.platform === 'meta-ads' ? 'facebook' : c.platform;
+          if (id === 'facebook') discoverMetaAccounts();
+          if (id === 'google-ads') discoverGadsAccounts();
+          if (id === 'google-analytics') discoverGaAccounts();
         });
       }
     } catch {}
@@ -676,14 +718,9 @@ export default function CreateClientPage() {
   };
 
   const anyConnected = Object.values(connectionStatus).some(Boolean);
-
-  // When advancing from Step 3 to Step 4, load accounts for connected platforms
-  const handleAdvanceToStep4 = async () => {
-    setStep(4);
-    if (connectionStatus.facebook) discoverMetaAccounts();
-    if (connectionStatus['google-ads']) discoverGadsAccounts();
-    if (connectionStatus['google-analytics']) discoverGaAccounts();
-  };
+  // Gates the "Link Campaigns" section — mirrors the Meta account save
+  // requirement so campaign linking can't be attempted before accounts exist.
+  const accountsReady = anyConnected && (!connectionStatus.facebook || metaSaved);
 
   // ── Step 6: Meta Ads ──────────────────────────────────────────────────────────
 
@@ -929,8 +966,9 @@ export default function CreateClientPage() {
   // ── Step 7 handlers ───────────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (step === 5 && (connectionStatus.facebook || connectionStatus['google-ads'])) loadCampaigns();
-  }, [step]);
+    if (step === 2 && accountsReady && (connectionStatus.facebook || connectionStatus['google-ads'])) loadCampaigns();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, accountsReady]);
 
   useEffect(() => {
     if (!openCampaignDropdown) return;
@@ -1054,12 +1092,12 @@ export default function CreateClientPage() {
       });
     } catch {}
     setCampaignsSaving(false);
-    setStep(6);
+    setStep(3);
   };
 
   // Set a sensible default metric source when entering the performance goal step
   useEffect(() => {
-    if (step !== 6) return;
+    if (step !== 3) return;
     setGoalMetricSource(
       connectionStatus.facebook ? 'meta'
       : connectionStatus['google-ads'] ? 'google-ads'
@@ -1067,13 +1105,13 @@ export default function CreateClientPage() {
     );
   }, [step]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Step 6: fetch spend data then poll for conversion events ──────────────────
+  // ── Step 3: fetch spend data then poll for conversion events ──────────────────
   // ad_performance_metrics (where events come from) is only populated when the
   // spend fetch APIs are called. We trigger those here for connected platforms so
   // the events appear with real counts without requiring a dashboard visit first.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (step !== 6 || !clientId) return;
+    if (step !== 3 || !clientId) return;
     let stopped = false;
     let timer: ReturnType<typeof setTimeout>;
     let polls = 0;
@@ -1105,9 +1143,8 @@ export default function CreateClientPage() {
 
     // Trigger spend data fetch so ad_performance_metrics gets populated for this client.
     // Fire-and-forget — polling below will pick up the data once it lands.
-    const today = new Date();
-    const endDate = today.toISOString().split('T')[0];
-    const startDate = new Date(today.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const endDate = nzToday();
+    const startDate = nzDateKeyOffset(-90);
     if (connectionStatus.facebook) {
       fetch('/api/ads/meta/fetch-spend', {
         method: 'POST',
@@ -1126,7 +1163,7 @@ export default function CreateClientPage() {
     setGoalEventsSyncing(true);
     poll();
     return () => { stopped = true; clearTimeout(timer); };
-  }, [step, clientId]); // connectionStatus captured at mount; won't change after Step 3
+  }, [step, clientId]); // connectionStatus captured at mount; won't change after Step 2
 
   // ── Render ─────────────────────────────────────────────────────────────────────
 
@@ -1177,95 +1214,186 @@ export default function CreateClientPage() {
 
         {/* ── Step 1: Client Details ─────────────────────────────────────────── */}
         {step === 1 && (
-          <Card className="max-w-lg mx-auto" style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18 }}>
-            <CardHeader>
-              <CardTitle>Client Details</CardTitle>
-              <CardDescription>Name your client and add their logo</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="grid gap-2">
-                <Label htmlFor="client-name">Client Name *</Label>
-                <Input
-                  id="client-name"
-                  value={clientName}
-                  onChange={(e) => setClientName(e.target.value)}
-                  placeholder="Enter client name"
-                  onKeyDown={(e) => e.key === 'Enter' && handleCreateClient()}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label>Logo (optional)</Label>
-                {logoPreview ? (
-                  <div className="relative w-24 h-24 rounded-lg overflow-hidden border border-gray-200 group">
-                    <Image src={logoPreview} alt="Logo preview" fill style={{ objectFit: 'contain' }} className="p-2" />
-                    <button onClick={() => { setLogoFile(null); setLogoPreview(null); if (fileInputRef.current) fileInputRef.current.value = ''; }} className="absolute top-1 right-1 bg-white rounded-full p-0.5 shadow opacity-0 group-hover:opacity-100 transition-opacity">
-                      <X className="h-3 w-3 text-gray-600" />
+          <div className="space-y-6">
+            <Card className="max-w-lg mx-auto" style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18 }}>
+              <CardHeader>
+                <CardTitle>Client Details</CardTitle>
+                <CardDescription>Name your client and add their logo</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="grid gap-2">
+                  <Label htmlFor="client-name">Client Name *</Label>
+                  <Input
+                    id="client-name"
+                    value={clientName}
+                    onChange={(e) => setClientName(e.target.value)}
+                    placeholder="Enter client name"
+                    disabled={!!clientId}
+                    onKeyDown={(e) => e.key === 'Enter' && handleCreateClient()}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label>Logo (optional)</Label>
+                  {logoPreview ? (
+                    <div className="relative w-24 h-24 rounded-lg overflow-hidden border border-gray-200 group">
+                      <Image src={logoPreview} alt="Logo preview" fill style={{ objectFit: 'contain' }} className="p-2" />
+                      {!clientId && (
+                        <button onClick={() => { setLogoFile(null); setLogoPreview(null); if (fileInputRef.current) fileInputRef.current.value = ''; }} className="absolute top-1 right-1 bg-white rounded-full p-0.5 shadow opacity-0 group-hover:opacity-100 transition-opacity">
+                          <X className="h-3 w-3 text-gray-600" />
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <button onClick={() => fileInputRef.current?.click()} disabled={!!clientId} className="w-24 h-24 rounded-lg border-2 border-dashed border-gray-300 flex flex-col items-center justify-center gap-1 text-gray-400 hover:border-blue-400 hover:text-blue-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                      <Upload className="h-5 w-5" />
+                      <span className="text-xs">Upload</span>
                     </button>
+                  )}
+                  <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleLogoSelect} disabled={!!clientId} />
+                  <p className="text-xs text-red-600">Only 1:1 (square) images are accepted.</p>
+                </div>
+                {!clientId ? (
+                  <div className="flex gap-2 pt-2">
+                    <Button onClick={handleCreateClient} disabled={creating || !clientName.trim()} className="flex-1">
+                      {creating ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Creating...</> : <>Create Client<ArrowRight className="h-4 w-4 ml-2" /></>}
+                    </Button>
+                    <Link href="/dashboard"><Button variant="outline">Cancel</Button></Link>
                   </div>
                 ) : (
-                  <button onClick={() => fileInputRef.current?.click()} className="w-24 h-24 rounded-lg border-2 border-dashed border-gray-300 flex flex-col items-center justify-center gap-1 text-gray-400 hover:border-blue-400 hover:text-blue-400 transition-colors">
-                    <Upload className="h-5 w-5" />
-                    <span className="text-xs">Upload</span>
-                  </button>
+                  <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg p-3">
+                    <CheckCircle2 className="h-4 w-4" />
+                    Client created — add your media plan below
+                  </div>
                 )}
-                <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleLogoSelect} />
-                <p className="text-xs text-red-600">Only 1:1 (square) images are accepted.</p>
-              </div>
-              <div className="flex gap-2 pt-2">
-                <Button onClick={handleCreateClient} disabled={creating || !clientName.trim()} className="flex-1">
-                  {creating ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Creating...</> : <>Next: Media Plan<ArrowRight className="h-4 w-4 ml-2" /></>}
-                </Button>
-                <Link href="/dashboard"><Button variant="outline">Cancel</Button></Link>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+              </CardContent>
+            </Card>
 
-        {/* ── Step 2: Media Plan Builder ─────────────────────────────────────── */}
-        {step === 2 && clientId && sandboxPlanHydrated && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-xl font-semibold">Media Plan Builder</h2>
-                <p className="text-sm text-gray-500 mt-1">Upload or build your media plan</p>
-              </div>
-              <Button onClick={async () => { await saveChannelsToApi(channels); setStep(3); }}>
-                Continue<ArrowRight className="h-4 w-4 ml-2" />
-              </Button>
-            </div>
-            {sandboxPlan ? (
-              <div style={{ height: 'calc(100vh - 220px)', display: 'flex', gap: 12 }}>
-                <div style={{ flex: '0 0 32%', minWidth: 280, maxWidth: 420 }}>
-                  <MediaPlanChatPanel
-                    clientId={clientId}
-                    clientName={clientName}
-                    currentPlan={sandboxPlan}
-                    onPlanApplied={handleAgentPlanApplied}
-                    autoAttachImage={pendingAgentScreenshot}
-                    onAutoAttachConsumed={() => setPendingAgentScreenshot(null)}
-                    height="100%"
-                  />
+            {/* ── Media Plan Builder ────────────────────────────────────────── */}
+            {clientId && sandboxPlanHydrated ? (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-xl font-semibold">Media Plan Builder</h2>
+                    <p className="text-sm text-gray-500 mt-1">Upload or build your media plan</p>
+                  </div>
+                  <Button onClick={async () => { await saveChannelsToApi(channels); setStep(2); }}>
+                    Continue<ArrowRight className="h-4 w-4 ml-2" />
+                  </Button>
                 </div>
-                <div style={{ flex: '1 1 68%', minWidth: 0, borderRadius: 12, border: '1px solid rgba(232,228,220,0.7)', boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', overflow: 'hidden' }}>
-                  <PlanGrid
-                    key={externalPlanRevision}
-                    plan={sandboxPlan}
-                    onPlanChange={handleSandboxPlanChange}
-                    onUpload={handleSandboxPlanUpload}
-                    outerStyle={{ height: '100%' }}
-                  />
-                </div>
+                {sandboxPlan ? (
+                  <div style={{ height: 'calc(100vh - 420px)', minHeight: 420, display: 'flex', gap: 12 }}>
+                    <div style={{ flex: '0 0 32%', minWidth: 280, maxWidth: 420 }}>
+                      <MediaPlanChatPanel
+                        clientId={clientId}
+                        clientName={clientName}
+                        currentPlan={sandboxPlan}
+                        onPlanApplied={handleAgentPlanApplied}
+                        onWriteAction={handleMediaPlanAgentAction}
+                        autoAttachImage={pendingAgentScreenshot}
+                        onAutoAttachConsumed={() => setPendingAgentScreenshot(null)}
+                        onExcelFileSelected={handleExcelFileSelectedFromChat}
+                        height="100%"
+                      />
+                    </div>
+                    <div style={{ flex: '1 1 68%', minWidth: 0, borderRadius: 12, border: '1px solid rgba(232,228,220,0.7)', boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', overflow: 'hidden' }}>
+                      <PlanGrid
+                        key={externalPlanRevision}
+                        plan={sandboxPlan}
+                        onPlanChange={handleSandboxPlanChange}
+                        onUpload={handleSandboxPlanUpload}
+                        outerStyle={{ height: '100%' }}
+                        showDownloadPdf={false}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ borderRadius: 12, border: '1px solid rgba(232,228,220,0.7)', boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', overflow: 'hidden' }}>
+                    <UploadWizard onPlanLoaded={handleSandboxPlanLoaded} onScreenshotSelected={handleScreenshotSelectedFromWizard} />
+                  </div>
+                )}
+
+                {/* Excel file attached via the chat panel — the wizard is normally only
+                    mounted when there's no plan yet, so once a plan exists we surface it
+                    as a modal instead, pre-loaded with the file. */}
+                {pendingExcelFile && (
+                  <div
+                    style={{
+                      position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(28,25,23,0.5)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+                    }}
+                    onClick={() => setPendingExcelFile(null)}
+                  >
+                    <div
+                      style={{
+                        position: 'relative', width: '100%', maxWidth: 900, maxHeight: '90vh', overflowY: 'auto',
+                        borderRadius: 16, background: '#fff', boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+                      }}
+                      onClick={e => e.stopPropagation()}
+                    >
+                      <button
+                        onClick={() => setPendingExcelFile(null)}
+                        title="Close"
+                        style={{
+                          position: 'absolute', top: 14, right: 14, zIndex: 1, width: 30, height: 30,
+                          borderRadius: '50%', border: '1px solid #E5E1D8', background: '#fff', cursor: 'pointer',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#5C5450',
+                        }}
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                      <UploadWizard
+                        initialFile={pendingExcelFile}
+                        onPlanLoaded={(plan) => { handleSandboxPlanLoaded(plan); setPendingExcelFile(null); }}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
-              <div style={{ borderRadius: 12, border: '1px solid rgba(232,228,220,0.7)', boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', overflow: 'hidden' }}>
-                <UploadWizard onPlanLoaded={handleSandboxPlanLoaded} onScreenshotSelected={handleScreenshotSelectedFromWizard} />
+              // Not yet available (no client created) — show the same layout dimmed
+              // behind a lock overlay instead of hiding it outright.
+              <div className="relative">
+                <div className="absolute inset-0 z-10 flex items-center justify-center rounded-2xl bg-white/70">
+                  <span className="text-sm text-gray-500 font-medium px-4 py-2 bg-white border border-gray-200 rounded-full shadow-sm">
+                    Create the client to unlock
+                  </span>
+                </div>
+                <div className="space-y-4 pointer-events-none opacity-40">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h2 className="text-xl font-semibold">Media Plan Builder</h2>
+                      <p className="text-sm text-gray-500 mt-1">Upload or build your media plan</p>
+                    </div>
+                    <Button disabled>Continue<ArrowRight className="h-4 w-4 ml-2" /></Button>
+                  </div>
+                  <div style={{ height: 'calc(100vh - 420px)', minHeight: 420, display: 'flex', gap: 12 }}>
+                    <div style={{ flex: '0 0 32%', minWidth: 280, maxWidth: 420 }}>
+                      <MediaPlanChatPanel
+                        clientId=""
+                        clientName={clientName || 'New client'}
+                        currentPlan={previewPlan}
+                        onPlanApplied={() => {}}
+                        height="100%"
+                      />
+                    </div>
+                    <div style={{ flex: '1 1 68%', minWidth: 0, borderRadius: 12, border: '1px solid rgba(232,228,220,0.7)', boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', overflow: 'hidden' }}>
+                      <PlanGrid
+                        plan={previewPlan}
+                        onPlanChange={() => {}}
+                        onUpload={() => {}}
+                        outerStyle={{ height: '100%' }}
+                        showDownloadPdf={false}
+                      />
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
           </div>
         )}
 
-        {/* ── Step 6: Performance Goal ───────────────────────────────────────── */}
-        {step === 6 && clientId && (() => {
+        {/* ── Step 3: Performance Goal & Client Intel Hub ─────────────────────── */}
+        {step === 3 && clientId && (() => {
           const mergedMetaEvents = [
             ...goalAvailableMetaEvents,
             ...META_DEFAULT_EVENTS.filter(d => !goalAvailableMetaEvents.some(e => e.name === d.name)),
@@ -1278,7 +1406,8 @@ export default function CreateClientPage() {
           const showGoogleAdsConversion = goalMetricSource === 'google-ads' && connectionStatus['google-ads'];
           const showGa4Events = goalMetricSource === 'ga4';
           return (
-            <Card className="max-w-lg mx-auto" style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18 }}>
+            <div className="max-w-xl mx-auto space-y-6">
+            <Card style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18 }}>
               <CardHeader>
                 <CardTitle>Performance Goal</CardTitle>
                 <CardDescription>Set your primary KPI and the conversion event to measure against</CardDescription>
@@ -1457,33 +1586,25 @@ export default function CreateClientPage() {
                   >
                     {goalSaving
                       ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving…</>
-                      : <>Save Goal & Continue<ArrowRight className="h-4 w-4 ml-2" /></>
+                      : <>Save Goal<ArrowRight className="h-4 w-4 ml-2" /></>
                     }
                   </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={goToDashboard}
-                    className="w-full bg-white text-gray-500 border-gray-200 hover:bg-gray-50"
-                  >
-                    Set Up in Dashboard Later
-                  </Button>
+                  {goalSaved && !goalSaving && (
+                    <p className="text-xs text-green-700 flex items-center gap-1.5">
+                      <CheckCircle2 className="h-3.5 w-3.5" />Goal saved
+                    </p>
+                  )}
                 </div>
               </CardContent>
             </Card>
-          );
-        })()}
 
-        {/* ── Step 7: Client Intel Hub (optional final step) ─────────────────── */}
-        {step === 7 && clientId && (
-          <div className="max-w-xl mx-auto space-y-4">
-            <div>
-              <h2 className="text-xl font-semibold">Client Intel Hub</h2>
-              <p className="text-sm text-gray-500 mt-1">Upload documents for this client's intel hub — briefs, contracts, brand guidelines, and more. This step is optional.</p>
-            </div>
-
+            {/* ── Client Intel Hub (optional) ─────────────────────────────────── */}
             <Card style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18 }}>
-              <CardContent className="pt-6 space-y-4">
+              <CardHeader>
+                <CardTitle>Client Intel Hub</CardTitle>
+                <CardDescription>Upload briefs, contracts, brand guidelines, and more. This is optional.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
 
                 {/* File type selector */}
                 <div className="grid gap-2">
@@ -1557,19 +1678,24 @@ export default function CreateClientPage() {
             <Button onClick={goToDashboard} className="w-full">
               Finish Setup<Check className="h-4 w-4 ml-2" />
             </Button>
-          </div>
-        )}
+            </div>
+          );
+        })()}
 
-        {/* ── Step 3: Connect Platforms ──────────────────────────────────────── */}
-        {step === 3 && clientId && (
-          <div className="max-w-xl mx-auto space-y-4">
+        {/* ── Step 2: Connect Platforms, Load Accounts & Link Campaigns ───────── */}
+        {step === 2 && clientId && (
+          <div className="max-w-2xl mx-auto space-y-6">
             <div>
-              <h2 className="text-xl font-semibold">Connect Ad Platforms</h2>
-              <p className="text-sm text-gray-500 mt-1">Connect whichever platforms you run ads on for this client</p>
+              <h2 className="text-xl font-semibold">Connect & Configure Accounts</h2>
+              <p className="text-sm text-gray-500 mt-1">Connect ad platforms, select accounts, and link campaigns</p>
             </div>
 
             <Card style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18 }}>
-              <CardContent className="pt-6 space-y-3">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Connect Ad Platforms</CardTitle>
+                <CardDescription>Connect whichever platforms you run ads on for this client</CardDescription>
+              </CardHeader>
+              <CardContent className="pt-0 space-y-3">
                 {isCheckingConnections ? (
                   <div className="flex items-center justify-center py-8">
                     <Loader2 className="h-7 w-7 animate-spin text-gray-400" />
@@ -1602,7 +1728,11 @@ export default function CreateClientPage() {
                             <Button
                               size="sm"
                               variant="outline"
-                              onClick={() => handleConnectPlatform(platform.id)}
+                              onClick={() => handleConnectPlatform(platform.id, () => {
+                                if (platform.id === 'facebook') discoverMetaAccounts();
+                                if (platform.id === 'google-ads') discoverGadsAccounts();
+                                if (platform.id === 'google-analytics') discoverGaAccounts();
+                              })}
                               disabled={!!connectingPlatform}
                               className="text-xs"
                             >
@@ -1617,29 +1747,18 @@ export default function CreateClientPage() {
               </CardContent>
             </Card>
 
-            <Button
-              onClick={handleAdvanceToStep4}
-              disabled={isCheckingConnections}
-              className="w-full"
-            >
-              Continue to Load Accounts<ArrowRight className="h-4 w-4 ml-2" />
-            </Button>
-          </div>
-        )}
-
-        {/* ── Step 4: Configure Accounts ─────────────────────────────────────── */}
-        {step === 4 && (
-          <div className="max-w-2xl mx-auto space-y-5">
+            {/* ── Load Ad Accounts — locked until a platform is connected ────── */}
             <div>
-              <h2 className="text-xl font-semibold">Load Ad Accounts</h2>
-              <p className="text-sm text-gray-500 mt-1">Select the accounts you want to track for this client</p>
-            </div>
-
-            {!anyConnected && (
-              <div className="p-4 rounded-xl border border-amber-200 bg-amber-50 text-sm text-amber-800">
-                No platforms connected yet. Go back to connect a platform first.
-              </div>
-            )}
+              <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">Load Ad Accounts</h3>
+              <div className="relative">
+                {!anyConnected && (
+                  <div className="absolute inset-0 z-10 flex items-center justify-center rounded-2xl bg-white/70">
+                    <span className="text-sm text-gray-500 font-medium px-4 py-2 bg-white border border-gray-200 rounded-full shadow-sm">
+                      Connect a platform to unlock
+                    </span>
+                  </div>
+                )}
+                <div className={`space-y-5 ${!anyConnected ? 'pointer-events-none opacity-40' : ''}`}>
 
             {/* Meta Ads section */}
             {connectionStatus.facebook && (
@@ -1878,31 +1997,25 @@ export default function CreateClientPage() {
               </Card>
             )}
 
-            {/* Continue button */}
-            <Button
-              onClick={() => connectionStatus.facebook ? setStep(5) : setStep(6)}
-              disabled={connectionStatus.facebook ? !metaSaved : false}
-              className={`w-full ${connectionStatus.facebook && !metaSaved ? 'bg-white text-gray-400 border border-gray-200 hover:bg-white' : ''}`}
-            >
-              {connectionStatus.facebook ? (
-                <>Continue to Link Campaigns<ArrowRight className="h-4 w-4 ml-2" /></>
-              ) : (
-                <>Continue<ArrowRight className="h-4 w-4 ml-2" /></>
-              )}
-            </Button>
-          </div>
-        )}
-
-        {/* ── Step 5: Link Campaigns ─────────────────────────────────────────── */}
-        {step === 5 && (
-          <div className="max-w-2xl mx-auto space-y-4">
-            <div>
-              <h2 className="text-xl font-semibold">Link Campaigns</h2>
-              <p className="text-sm text-gray-500 mt-1">Assign campaigns to your Meta and Google channels</p>
+                </div>
+              </div>
             </div>
 
-            <Card style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18 }}>
-              <CardContent className="pt-6 space-y-4">
+            {/* ── Link Campaigns — locked until accounts are configured ────────── */}
+            <div className="relative">
+              {!accountsReady && (
+                <div className="absolute inset-0 z-10 flex items-center justify-center rounded-2xl bg-white/70">
+                  <span className="text-sm text-gray-500 font-medium px-4 py-2 bg-white border border-gray-200 rounded-full shadow-sm">
+                    {anyConnected ? 'Save your accounts to unlock' : 'Connect a platform to unlock'}
+                  </span>
+                </div>
+              )}
+              <Card className={!accountsReady ? 'pointer-events-none opacity-40' : ''} style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18 }}>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Link Campaigns</CardTitle>
+                <CardDescription>Assign campaigns to your Meta and Google channels</CardDescription>
+              </CardHeader>
+              <CardContent className="pt-0 space-y-4">
                 {campaignsLoading ? (
                   <div className="flex flex-col items-center justify-center py-14 gap-3">
                     <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
@@ -2037,19 +2150,25 @@ export default function CreateClientPage() {
                       </div>
                       );
                     })}
-                    <Button onClick={saveCampaigns} disabled={campaignsSaving} className="w-full mt-2">
-                      {campaignsSaving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving&hellip;</> : <>Next<ArrowRight className="h-4 w-4 ml-2" /></>}
-                    </Button>
                   </div>
                 )}
               </CardContent>
-            </Card>
+              </Card>
+            </div>
+
+            <Button
+              onClick={saveCampaigns}
+              disabled={campaignsSaving || (connectionStatus.facebook && !metaSaved)}
+              className="w-full"
+            >
+              {campaignsSaving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving&hellip;</> : <>Continue<ArrowRight className="h-4 w-4 ml-2" /></>}
+            </Button>
           </div>
         )}
 
       </div>
 
-      {/* ── Google Ads account modal (triggered after OAuth connect in Step 6) ── */}
+      {/* ── Google Ads account modal (triggered after OAuth connect in Step 2) ── */}
       {showGadsModal && (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
         <div className="w-full max-w-md mx-4 rounded-2xl shadow-2xl p-6 space-y-5" style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)' }}>

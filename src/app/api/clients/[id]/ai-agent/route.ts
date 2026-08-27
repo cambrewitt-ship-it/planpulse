@@ -1,7 +1,8 @@
 import { NextRequest } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { createClient } from '@/lib/supabase/server';
-import { channelsToSandboxPlan, patchSandboxPlanFlightBudget, upsertSandboxPlanFlight, snapToWeekCommencing } from '@/lib/media-plan/sandbox-sync';
+import { patchSandboxPlanFlightBudget, upsertSandboxPlanFlight, snapToWeekCommencing } from '@/lib/media-plan/sandbox-sync';
+import { nzToday, nzDateKeyOffset, nzStartOfMonth, formatNZ } from '@/lib/timezone';
 
 export const maxDuration = 60;
 
@@ -46,7 +47,7 @@ const CLIENT_AGENT_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'update_media_plan_budget',
-    description: "Update a channel's planned budget for one whole calendar month in this client's media plan. Use only when the request is genuinely month-scoped. If the user gives a specific date range or week-commencing (W/C) span instead (e.g. \"$10,000 on Google from Sep 7th to 21st\"), use update_media_plan_flight instead.",
+    description: "Update a channel's planned budget for one whole calendar month in this client's media plan. Use only when the request is genuinely month-scoped. If the user gives ANY specific dates, a date range, or says \"w/c\" / \"week commencing\" (e.g. \"$10,000 on Google from Sep 7th to 21st\", \"100 on meta during w/c 31 Aug until 6 Sep\"), use update_media_plan_flight instead — even if the range falls mostly within one month. Works even if the channel isn't in the plan yet or the plan is empty — it creates the channel automatically rather than erroring.",
     input_schema: {
       type: 'object',
       properties: {
@@ -59,7 +60,7 @@ const CLIENT_AGENT_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'update_media_plan_flight',
-    description: "Set a channel's budget for a specific week-commencing (W/C) date range — a single flight/burst — rather than a whole calendar month. Use whenever the user gives specific dates or a W/C range. start_week and end_week should both be Mondays; if the user's dates aren't Mondays, snap each to its week-commencing Monday yourself and ask the user to confirm those W/C dates work — stating the real end date too (end_week + 6 days, since end_week is inclusive) — before calling this tool. An existing flight on this channel that overlaps the given range is replaced; otherwise a new flight is added.",
+    description: "Set a channel's budget for a specific week-commencing (W/C) date range — a single flight/burst — rather than a whole calendar month. Use whenever the user gives specific dates or a W/C range, including when the channel isn't in the plan yet or the plan is empty — this tool creates the channel automatically and never errors on an unrecognised channel name. start_week and end_week should both be Mondays; if the user's dates aren't Mondays, snap each to its week-commencing Monday yourself. An existing flight on this channel that overlaps the given range is replaced; otherwise a new flight is added.",
     input_schema: {
       type: 'object',
       properties: {
@@ -175,7 +176,7 @@ async function toolGetClientIntelligence(clientId: string, req: NextRequest) {
   if (allNotes.length > 0) {
     lines.push('Handover Notes & Intel:');
     for (const n of allNotes) {
-      const date = new Date(n.created_at).toLocaleDateString('en-AU');
+      const date = formatNZ(new Date(n.created_at), {}, 'en-AU');
       lines.push(`  [${n.note_type ?? 'general'}] ${n.author_name} (${date}): ${n.note_body}`);
     }
     lines.push('');
@@ -215,9 +216,8 @@ async function toolGetChannelPerformance(clientId: string, input: { start_date?:
   const { data: { session } } = await supabase.auth.getSession();
   if (!session?.user) return { error: 'Unauthorized' };
 
-  const now = new Date();
-  const start_date = input.start_date ?? new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-  const end_date = input.end_date ?? now.toISOString().split('T')[0];
+  const start_date = input.start_date ?? nzStartOfMonth();
+  const end_date = input.end_date ?? nzToday();
 
   const [metricsRes, mediaPlanRes] = await Promise.all([
     supabase.from('ad_performance_metrics')
@@ -304,8 +304,8 @@ async function toolGetActionPoints(clientId: string, req: NextRequest) {
   const data = await callInternal('/api/agency/action-points', req);
   if (data.error) return data;
 
-  const today = new Date().toISOString().split('T')[0];
-  const in7Days = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
+  const today = nzToday();
+  const in7Days = nzDateKeyOffset(7);
 
   const clientEntry = (data.clients ?? []).find((c: any) => c.clientId === clientId);
   if (!clientEntry) return { total: 0, overdue: [], due_soon: [], upcoming: [] };
@@ -372,50 +372,68 @@ async function toolUpdateMediaPlanBudget(clientId: string, input: { channel_name
     .eq('client_id', clientId)
     .maybeSingle();
 
-  if (!mediaPlan) return { error: 'No media plan found. Create one in the app first.' };
-
-  const channels: any[] = JSON.parse(JSON.stringify(mediaPlan.channels || []));
+  const channels: any[] = JSON.parse(JSON.stringify(mediaPlan?.channels || []));
   const channelIdx = channels.findIndex((ch: any) =>
     ch.channelName?.toLowerCase().includes(input.channel_name.toLowerCase())
   );
 
-  if (channelIdx === -1) {
-    return {
-      error: `Channel "${input.channel_name}" not found`,
-      available_channels: channels.map((ch: any) => ch.channelName).filter(Boolean),
-    };
-  }
+  // No matching channel (including a totally empty/nonexistent plan) — create it,
+  // same as update_media_plan_flight, so a brand-new channel never hard-errors here.
+  const isNewChannel = channelIdx === -1;
+  const channel = isNewChannel
+    ? { id: `channel-${Date.now()}`, channelName: input.channel_name, customChannelName: '', format: '', totalBudget: 0, percentOfInvestment: 0, flights: [] as any[] }
+    : channels[channelIdx];
 
-  const channel = channels[channelIdx];
   const flights: any[] = channel.flights || [];
-  if (!flights.length) return { error: `No flights found for ${channel.channelName}` };
+  const isNewFlight = !flights.length;
+  const startWeek = snapToWeekCommencing(`${input.month}-01`);
+  const endWeek = snapToWeekCommencing(monthEndISO(input.month));
+  if (isNewFlight) {
+    // No flights yet on this channel — create one spanning just this month so the
+    // budget has somewhere to land, instead of erroring.
+    flights.push({ id: `flight-${Date.now()}`, startWeek, endWeek, monthlySpend: {} });
+  }
 
   const oldBudget = flights[0].monthlySpend?.[input.month] ?? 0;
   if (!flights[0].monthlySpend) flights[0].monthlySpend = {};
   flights[0].monthlySpend[input.month] = input.new_budget;
-  channels[channelIdx] = { ...channel, flights };
+  const updatedChannel = { ...channel, flights };
+  if (isNewChannel) channels.push(updatedChannel);
+  else channels[channelIdx] = updatedChannel;
 
   // The visible grid renders from sandbox_plan, not channels — keep both in sync.
   const budgetDelta = input.new_budget - Number(oldBudget);
-  const updatedSandboxPlan = mediaPlan.sandbox_plan
+  const updatedSandboxPlan = (!isNewChannel && !isNewFlight && mediaPlan?.sandbox_plan)
     ? patchSandboxPlanFlightBudget(mediaPlan.sandbox_plan as any, channel.channelName, input.month, budgetDelta)
-    : channelsToSandboxPlan(channels);
+    : upsertSandboxPlanFlight(
+        (mediaPlan?.sandbox_plan as any) ?? null,
+        channel.channelName,
+        { startWeek, endWeek, budget: input.new_budget },
+        { isOrganic: channel.channelCategory === 'organic_social', detail: channel.channelSubType }
+      );
 
   const { error: updateError } = await supabase
     .from('client_media_plan_builder')
-    .update({ channels, sandbox_plan: updatedSandboxPlan })
-    .eq('client_id', clientId);
+    .upsert({ client_id: clientId, channels, sandbox_plan: updatedSandboxPlan }, { onConflict: 'client_id' });
 
   if (updateError) return { error: 'Failed to save budget update', details: updateError.message };
 
   return {
     success: true,
-    message: `Updated ${channel.channelName} budget for ${input.month}: $${Number(oldBudget).toLocaleString()} → $${Number(input.new_budget).toLocaleString()}`,
+    message: `${isNewChannel || isNewFlight ? 'Added' : 'Updated'} ${channel.channelName} budget for ${input.month}: $${Number(oldBudget).toLocaleString()} → $${Number(input.new_budget).toLocaleString()}`,
     channel: channel.channelName,
+    is_new_channel: isNewChannel,
     month: input.month,
     previous_budget: oldBudget,
     new_budget: input.new_budget,
   };
+}
+
+/** Last calendar day of a "YYYY-MM" month, as "YYYY-MM-DD". */
+function monthEndISO(month: string): string {
+  const [y, m] = month.split('-').map(Number);
+  const d = new Date(y, m, 0); // day 0 of next month = last day of this month
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 async function toolUpdateMediaPlanFlight(
@@ -432,24 +450,22 @@ async function toolUpdateMediaPlanFlight(
     .eq('client_id', clientId)
     .maybeSingle();
 
-  if (!mediaPlan) return { error: 'No media plan found. Create one in the app first.' };
-
   const startWeek = snapToWeekCommencing(input.start_week);
   const endWeek = snapToWeekCommencing(input.end_week);
 
-  const channels: any[] = JSON.parse(JSON.stringify(mediaPlan.channels || []));
+  const channels: any[] = JSON.parse(JSON.stringify(mediaPlan?.channels || []));
   const channelIdx = channels.findIndex((ch: any) =>
     ch.channelName?.toLowerCase().includes(input.channel_name.toLowerCase())
   );
 
-  if (channelIdx === -1) {
-    return {
-      error: `Channel "${input.channel_name}" not found`,
-      available_channels: channels.map((ch: any) => ch.channelName).filter(Boolean),
-    };
-  }
+  // No matching channel (including a totally empty/nonexistent plan) — add it as a
+  // new channel rather than erroring, so a single-channel "add" never needs a
+  // separate replace-the-whole-plan tool.
+  const isNewChannel = channelIdx === -1;
+  const channel = isNewChannel
+    ? { id: `channel-${Date.now()}`, channelName: input.channel_name, customChannelName: '', format: '', totalBudget: 0, percentOfInvestment: 0, flights: [] as any[] }
+    : channels[channelIdx];
 
-  const channel = channels[channelIdx];
   const flights: any[] = [...(channel.flights || [])];
   const startMs = new Date(startWeek).getTime();
   const endMs = new Date(endWeek).getTime();
@@ -467,10 +483,12 @@ async function toolUpdateMediaPlanFlight(
     const monthValues: number[] = Object.values(f.monthlySpend || {});
     return s + monthValues.reduce((a, b) => a + Number(b), 0);
   }, 0);
-  channels[channelIdx] = { ...channel, flights, totalBudget };
+  const updatedChannel = { ...channel, flights, totalBudget };
+  if (isNewChannel) channels.push(updatedChannel);
+  else channels[channelIdx] = updatedChannel;
 
   const updatedSandboxPlan = upsertSandboxPlanFlight(
-    mediaPlan.sandbox_plan as any,
+    (mediaPlan?.sandbox_plan as any) ?? null,
     channel.channelName,
     { startWeek, endWeek, budget: input.budget },
     { isOrganic: channel.channelCategory === 'organic_social', detail: channel.channelSubType }
@@ -478,15 +496,15 @@ async function toolUpdateMediaPlanFlight(
 
   const { error: updateError } = await supabase
     .from('client_media_plan_builder')
-    .update({ channels, sandbox_plan: updatedSandboxPlan })
-    .eq('client_id', clientId);
+    .upsert({ client_id: clientId, channels, sandbox_plan: updatedSandboxPlan }, { onConflict: 'client_id' });
 
   if (updateError) return { error: 'Failed to save flight update', details: updateError.message };
 
   return {
     success: true,
-    message: `Set ${channel.channelName} to $${Number(input.budget).toLocaleString()} for W/C ${startWeek} – ${endWeek}`,
+    message: `${isNewChannel ? 'Added' : 'Set'} ${channel.channelName} to $${Number(input.budget).toLocaleString()} for W/C ${startWeek} – ${endWeek}`,
     channel: channel.channelName,
+    is_new_channel: isNewChannel,
     start_week: startWeek,
     end_week: endWeek,
     budget: input.budget,
@@ -627,10 +645,12 @@ You are focused exclusively on this client. You have access to their intelligenc
 
 **Available actions:**
 - complete_action_point — tick off tasks in their To-Do list
-- update_media_plan_budget — adjust a channel's planned budget for a whole calendar month
-- update_media_plan_flight — set a channel's budget for a specific week-commencing (W/C) date range instead of a whole month. Use this whenever the user gives specific dates or a W/C range (e.g. "$10,000 on Google from Sep 7th to 21st"), not update_media_plan_budget. start_week/end_week must be Mondays — if the user's dates aren't, snap each to its week-commencing Monday and ask "Do these W/C dates work for you?", stating the real end date too (end_week + 6 days, since end_week is inclusive of that week), before calling the tool. Compute monthly_spend proportionally by weeks-in-month across the range.
+- update_media_plan_budget — adjust a channel's planned budget for a whole calendar month, only when no specific dates are given at all. Also creates the channel automatically if it's not in the plan yet.
+- update_media_plan_flight — set a channel's budget for a specific week-commencing (W/C) date range instead of a whole month. Use this whenever the user gives ANY specific dates or says "w/c" / "week commencing" (e.g. "$10,000 on Google from Sep 7th to 21st", "facebook ads, $3000 31 aug to 21 sep", "100 on meta during w/c 31 Aug until 6 Sep") — not update_media_plan_budget, even if the range falls entirely within one month. "w/c" always means this tool. Use it even if the channel isn't in the plan yet or the plan is completely empty, it creates the channel automatically rather than erroring. start_week/end_week must be Mondays — snap each to its week-commencing Monday yourself (don't ask first), and state the snapped W/C range plus the real end date (end_week + 6 days, since end_week is inclusive) in your confirmation afterwards. Compute monthly_spend proportionally by weeks-in-month across the range. If no year is given, use the plan year from the conversation's client context — never assume today's real-world year, never ask.
 - update_manual_spend — update the actual spend figure on a non-digital channel (OOH, Organic Social, EDM, etc.)
 - toggle_ooh_checklist — tick/untick OOH production milestones
+
+Default to adding, without asking for confirmation first, whenever: the plan is empty, the channel mentioned isn't already in it, or the user's message says "add". Just call the write tool — only ask first if budget or dates are genuinely missing, or you'd be overwriting an existing flight/budget with different numbers the user didn't ask to change. After a write action, confirm what happened in 1-2 short lines — no restating the request, no walls of text.
 
 **Never output narration, preamble, or commentary before or between tool calls** (e.g. never say things like "I'll pull the latest data first" or "Let me check that"). The interface already shows the user a loading indicator while tools run. Call whatever tools you need with no text output at all, and only write prose once you're producing your actual answer.
 

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getClientHubData } from '@/lib/client-hub/get-hub-data';
 import { isClientOwnedByUser } from '@/lib/client-hub/assert-ownership';
-import { normalizeSectionOrder } from '@/lib/client-hub/section-meta';
+import { normalizeSectionOrder, SECTION_KEYS } from '@/lib/client-hub/section-meta';
 
 type Params = { params: Promise<{ id: string }> | { id: string } };
 
@@ -10,10 +10,7 @@ async function resolveId(params: Params['params']): Promise<string> {
   return (await Promise.resolve(params)).id;
 }
 
-const DEFAULT_SECTIONS = {
-  snapshot: true, cpaTrend: true, charts: true, funnels: true, costPerMetric: true, trends: true, demographics: true, pacing: true, goals: true,
-  brief: true, notes: true, documents: true, spend: true, creatives: true,
-};
+const DEFAULT_SECTIONS: Record<string, boolean> = Object.fromEntries(SECTION_KEYS.map(k => [k, true]));
 
 // GET — full hub data bag + section visibility + share-link status, for the agency edit view
 // Optional ?start=YYYY-MM-DD&end=YYYY-MM-DD overrides the default reporting period.

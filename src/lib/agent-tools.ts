@@ -120,7 +120,7 @@ export const TOOL_DEFINITIONS: Anthropic.Tool[] = [
   },
   {
     name: 'update_media_plan_budget',
-    description: "Update a channel's planned budget for one whole calendar month in a client's media plan. Use only when the user's request is genuinely month-scoped (e.g. \"set Google's June budget to $5,000\"). If the user gives a specific date range or week-commencing (W/C) span instead (e.g. \"$10,000 on Google from Sep 7th to 21st\"), use update_media_plan_flight instead — do not force a date-range request into a monthly bucket. Month must be in YYYY-MM format (e.g. \"2026-06\" for June 2026).",
+    description: "Update a channel's planned budget for one whole calendar month in a client's media plan. Use only when the user's request is genuinely month-scoped (e.g. \"set Google's June budget to $5,000\"). If the user gives ANY specific dates, a date range, or says \"w/c\" / \"week commencing\" (e.g. \"$10,000 on Google from Sep 7th to 21st\", \"100 on meta during w/c 31 Aug until 6 Sep\"), use update_media_plan_flight instead — do not force a date-range request into a monthly bucket just because it happens to fall mostly within one month. Works even if the channel isn't in the plan yet or the plan is empty — it creates the channel (and a flight spanning the given month) automatically rather than erroring. Month must be in YYYY-MM format (e.g. \"2026-06\" for June 2026).",
     input_schema: {
       type: 'object',
       properties: {
@@ -146,7 +146,7 @@ export const TOOL_DEFINITIONS: Anthropic.Tool[] = [
   },
   {
     name: 'update_media_plan_flight',
-    description: "Set a channel's budget for a specific week-commencing (W/C) date range — a single flight/burst — rather than a whole calendar month. Use this whenever the user gives specific dates or a W/C range (e.g. \"$10,000 on Google from W/C Sep 7th to Sep 28th\"). start_week and end_week should both be Mondays (week-commencing dates); if the user's dates aren't Mondays, snap each to its week-commencing Monday yourself and ask the user to confirm those W/C dates work before calling this tool (state the resulting real end date too: end_week + 6 days, since end_week is inclusive of that whole week). If an existing flight on this channel overlaps the given range, it will be replaced (dates + budget updated); otherwise a new flight is added alongside the channel's existing flights.",
+    description: "Set a channel's budget for a specific week-commencing (W/C) date range — a single flight/burst — rather than a whole calendar month. Use this whenever the user gives specific dates or a W/C range (e.g. \"$10,000 on Google from W/C Sep 7th to Sep 28th\"), including when the channel isn't in the plan yet or the plan is empty — this tool creates the channel automatically and never errors on an unrecognised channel name. start_week and end_week should both be Mondays (week-commencing dates); if the user's dates aren't Mondays, snap each to its week-commencing Monday yourself. If an existing flight on this channel overlaps the given range, it will be replaced (dates + budget updated); otherwise a new flight is added alongside the channel's existing flights.",
     input_schema: {
       type: 'object',
       properties: {
@@ -264,7 +264,7 @@ export const TOOL_DEFINITIONS: Anthropic.Tool[] = [
   // ── Media plan onboarding (Tier 1 write) ─────────────────────────────────────
   {
     name: 'set_media_plan_channels',
-    description: "Set (replace) the full media plan for a client from a natural-language description or pasted data. Use when the user describes their plan verbally or pastes channel/budget/date details into chat. Replaces any existing channels for that client.",
+    description: "Replace the ENTIRE media plan for a client with multiple channels at once — e.g. onboarding a new client with several channels, or the user pastes/describes a full plan. Deletes any channel not included in this call. Never use this to add or update a single channel, even a brand-new one that isn't in the plan yet — use update_media_plan_flight for that instead, it creates missing channels automatically without touching anything else.",
     input_schema: {
       type: 'object',
       properties: {
