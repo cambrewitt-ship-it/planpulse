@@ -1520,9 +1520,12 @@ export default function DashboardV2() {
       const chartSourceChannel = line ? { ...ch, flights: flightsForCalc } : ch;
 
       // ── Chart data: compute first so multi-month totals can be derived ────
+      // Planned-spend line should only be discounted by commission when the
+      // Net view is selected; the actual-spend line is never commission-adjusted.
+      const chartCommission = planView === 'net' ? commission : 0;
       const chartData = isMultiMonth
-        ? generateChannelChartDataForRange(chartSourceChannel, analyticsDateRange.startDate, analyticsDateRange.endDate, channelMonthSpendData as any[], commission)
-        : generateChannelChartData(chartSourceChannel, selectedMonth, channelMonthSpendData as any[], commission);
+        ? generateChannelChartDataForRange(chartSourceChannel, analyticsDateRange.startDate, analyticsDateRange.endDate, channelMonthSpendData as any[], chartCommission)
+        : generateChannelChartData(chartSourceChannel, selectedMonth, channelMonthSpendData as any[], chartCommission);
 
       // ── Spend totals ─────────────────────────────────────────────────────
       // Multi-month: read cumulative totals from the final chart data point so
@@ -1534,8 +1537,14 @@ export default function DashboardV2() {
       let grossPlannedSpend: number;
 
       if (isMultiMonth && chartData.length > 0) {
-        const lastPoint       = chartData[chartData.length - 1];
-        const lastActualPoint = [...chartData].reverse().find(p => p.actualSpend !== null && typeof p.actualSpend === 'number');
+        // Header/pacing-bar totals must reflect the real commission regardless
+        // of which view the graph itself is currently rendering — reuse chartData
+        // when it was already built with the real commission, otherwise recompute.
+        const summaryChartData = chartCommission === commission
+          ? chartData
+          : generateChannelChartDataForRange(chartSourceChannel, analyticsDateRange.startDate, analyticsDateRange.endDate, channelMonthSpendData as any[], commission);
+        const lastPoint       = summaryChartData[summaryChartData.length - 1];
+        const lastActualPoint = [...summaryChartData].reverse().find(p => p.actualSpend !== null && typeof p.actualSpend === 'number');
         currentSpend = lastActualPoint?.actualSpend ?? 0;
         plannedSpend = lastPoint.plannedSpend;
         grossPlannedSpend = commission > 0 ? plannedSpend * 100 / (100 - commission) : plannedSpend;
@@ -1777,7 +1786,7 @@ export default function DashboardV2() {
       }
       return buildPaidDigitalCard(ch, platform as 'meta-ads' | 'google-ads', lines[0], false);
     }).sort((a, b) => channelSortOrder(a) - channelSortOrder(b));
-  }, [mediaPlanBuilderChannels, channelMonthSpendData, spendApiErrors, selectedMonth, commission, analyticsDateRange.startDate, analyticsDateRange.endDate, allMetaCampaigns, allGoogleAdsCampaigns]);
+  }, [mediaPlanBuilderChannels, channelMonthSpendData, spendApiErrors, selectedMonth, commission, planView, analyticsDateRange.startDate, analyticsDateRange.endDate, allMetaCampaigns, allGoogleAdsCampaigns]);
 
   // Stable per-card key used for DOM ids (scroll-to-channel), the manage
   // menu's "Hide card" action, and the hidden-channel-cards localStorage set.
