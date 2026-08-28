@@ -310,8 +310,18 @@ export function generateMonthDataFromWeeklyPlans(
       if (date >= flightStart && date <= flightEnd) {
         const dayNumber        = Math.floor((date.getTime() - flightStart.getTime()) / 86400000) + 1;
         plannedSpendByDate.set(dateKey, (dayNumber / activeDays) * monthBudgetInDollars);
-      } else if (date > flightEnd) {
-        const daysPast   = Math.floor((date.getTime() - flightEnd.getTime()) / 86400000);
+      } else if (date > flightEnd && date <= monthEnd) {
+        // Weekly-plan boundaries (Monday-based) can land a few days short of
+        // the calendar month end. The full month budget is already committed
+        // by flightEnd, so hold flat here instead of over-extrapolating —
+        // otherwise the planned line overshoots the actual entered budget
+        // before the month is even over.
+        plannedSpendByDate.set(dateKey, monthBudgetInDollars);
+      } else if (date > monthEnd) {
+        // Beyond the calendar month: continue the established daily pace as
+        // a forward-looking projection (used by the 30-day lookahead window),
+        // anchored from the true month end rather than flightEnd.
+        const daysPast   = Math.floor((date.getTime() - monthEnd.getTime()) / 86400000);
         const dailyRate  = monthBudgetInDollars / activeDays;
         plannedSpendByDate.set(dateKey, monthBudgetInDollars + dailyRate * daysPast);
       }
