@@ -548,6 +548,76 @@ function AddColumnModal({ onAdd, onClose }: { onAdd: (name: string) => void; onC
   );
 }
 
+function ExportPlanModal({ plan, isDownloading, error, onConfirm, onClose }: {
+  plan: SandboxPlan;
+  isDownloading: boolean;
+  error: string | null;
+  onConfirm: (edits: { title: string; asAtLabel: string; objective: string }) => void;
+  onClose: () => void;
+}) {
+  const [title, setTitle] = useState(plan.title);
+  const [asAtLabel, setAsAtLabel] = useState(plan.asAtLabel);
+  const [objective, setObjective] = useState(plan.objective ?? "");
+
+  const confirm = () => onConfirm({ title: title.trim(), asAtLabel: asAtLabel.trim(), objective: objective.trim() });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
+      <div className="bg-white rounded-2xl shadow-2xl p-6 w-[26rem]">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-semibold text-gray-900">Edit before export</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="w-4 h-4" /></button>
+        </div>
+
+        <label className="block text-xs font-medium text-gray-500 mb-1">Title</label>
+        <input
+          autoFocus
+          value={title}
+          onChange={e => setTitle(e.target.value)}
+          onKeyDown={e => { if (e.key === "Escape") onClose(); }}
+          placeholder="Media Plan"
+          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 mb-3"
+        />
+
+        <label className="block text-xs font-medium text-gray-500 mb-1">As-at label</label>
+        <input
+          value={asAtLabel}
+          onChange={e => setAsAtLabel(e.target.value)}
+          onKeyDown={e => { if (e.key === "Escape") onClose(); }}
+          placeholder="As at 30 Aug 2026"
+          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 mb-3"
+        />
+
+        <label className="block text-xs font-medium text-gray-500 mb-1">Objective</label>
+        <textarea
+          value={objective}
+          onChange={e => setObjective(e.target.value)}
+          onKeyDown={e => { if (e.key === "Escape") onClose(); }}
+          placeholder="e.g. Drive qualified leads for Q4 launch"
+          rows={2}
+          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 mb-4 resize-none"
+        />
+
+        {error && <div className="mb-3 text-xs text-red-600">{error}</div>}
+
+        <div className="flex gap-2">
+          <button
+            onClick={confirm}
+            disabled={isDownloading}
+            className="flex-1 flex items-center justify-center gap-1.5 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isDownloading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+            {isDownloading ? 'Generating…' : 'Save & download PDF'}
+          </button>
+          <button onClick={onClose} className="py-2.5 px-4 border border-gray-200 text-gray-600 rounded-xl text-sm hover:bg-gray-50">
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Fee row renderer ──────────────────────────────────────────────────────────
 
 const FEE_SUGGESTIONS = [
@@ -717,9 +787,13 @@ interface Props {
   outerStyle?: React.CSSProperties;
   // Hidden in the create-client flow — PDF export isn't relevant during onboarding.
   showDownloadPdf?: boolean;
+  // Hidden on the client dashboard's Media Plan Editor tab — that page's chat
+  // panel already offers screenshot/Excel upload via its attach button, so a
+  // second entry point here is redundant.
+  showUploadNew?: boolean;
 }
 
-export function PlanGrid({ plan, onPlanChange, onUpload, outerStyle, showDownloadPdf = true }: Props) {
+export function PlanGrid({ plan, onPlanChange, onUpload, outerStyle, showDownloadPdf = true, showUploadNew = true }: Props) {
   const [rows, setRows] = useState<PlanRow[]>(plan.rows);
   const [libraryChannels, setLibraryChannels] = useState<LibraryChannel[]>([]);
   const [weeks, setWeeks] = useState<Week[]>(() => {
@@ -747,6 +821,7 @@ export function PlanGrid({ plan, onPlanChange, onUpload, outerStyle, showDownloa
   const [showAddColumn, setShowAddColumn] = useState(false);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
+  const [showExportModal, setShowExportModal] = useState(false);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [resizeState, setResizeState] = useState<ResizeState | null>(null);
   const [editingFlight, setEditingFlight] = useState<EditingFlight | null>(null);
@@ -1281,14 +1356,15 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
 
   // ── PDF export ────────────────────────────────────────────────────────────
 
-  const handleDownloadPdf = useCallback(async () => {
+  const handleDownloadPdf = useCallback(async (planOverride?: SandboxPlan) => {
+    const planToExport = planOverride ?? plan;
     setIsDownloadingPdf(true);
     setPdfError(null);
     try {
       const res = await fetch('/api/sandbox/pdf', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plan: { ...plan, rows, weeks, fees, customColumns } }),
+        body: JSON.stringify({ plan: { ...planToExport, rows, weeks, fees, customColumns } }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -1298,17 +1374,31 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${(plan.title || 'Media_Plan').replace(/\s+/g, '_')}.pdf`;
+      a.download = `${(planToExport.title || 'Media_Plan').replace(/\s+/g, '_')}.pdf`;
       document.body.appendChild(a);
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
+      setShowExportModal(false);
     } catch (err) {
       setPdfError(err instanceof Error ? err.message : 'Failed to generate PDF');
     } finally {
       setIsDownloadingPdf(false);
     }
   }, [plan, rows, weeks, fees, customColumns]);
+
+  const handleExportConfirm = useCallback((edits: { title: string; asAtLabel: string; objective: string }) => {
+    const updatedPlan: SandboxPlan = {
+      ...plan,
+      rows, weeks, fees, customColumns,
+      title: edits.title || plan.title,
+      asAtLabel: edits.asAtLabel,
+      objective: edits.objective || undefined,
+      updatedAt: new Date().toISOString(),
+    };
+    onPlanChange(updatedPlan);
+    handleDownloadPdf(updatedPlan);
+  }, [plan, rows, weeks, fees, customColumns, onPlanChange, handleDownloadPdf]);
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -1389,7 +1479,7 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
         <FeeMenu onAdd={addFee} />
         {showDownloadPdf && (
           <button
-            onClick={handleDownloadPdf}
+            onClick={() => setShowExportModal(true)}
             disabled={isDownloadingPdf}
             title={pdfError ?? undefined}
             className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-xs font-medium hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
@@ -1398,12 +1488,14 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
             {isDownloadingPdf ? 'Generating…' : 'Download PDF'}
           </button>
         )}
-        <button
-          onClick={onUpload}
-          className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-xs font-medium hover:bg-gray-50 transition-colors"
-        >
-          <Upload className="w-3.5 h-3.5" /> Upload new
-        </button>
+        {showUploadNew && (
+          <button
+            onClick={onUpload}
+            className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-xs font-medium hover:bg-gray-50 transition-colors"
+          >
+            <Upload className="w-3.5 h-3.5" /> Upload new
+          </button>
+        )}
       </div>
       {pdfError && (
         <div className="px-4 py-1.5 bg-red-50 border-b border-red-100 text-xs text-red-600 flex-shrink-0">
@@ -1647,6 +1739,16 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
         <AddColumnModal
           onAdd={name => addCustomColumn(name)}
           onClose={() => setShowAddColumn(false)}
+        />
+      )}
+
+      {showExportModal && (
+        <ExportPlanModal
+          plan={plan}
+          isDownloading={isDownloadingPdf}
+          error={pdfError}
+          onConfirm={handleExportConfirm}
+          onClose={() => setShowExportModal(false)}
         />
       )}
     </div>

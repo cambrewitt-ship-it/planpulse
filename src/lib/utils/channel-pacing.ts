@@ -13,8 +13,6 @@
 import {
   format,
   eachDayOfInterval,
-  startOfMonth,
-  endOfMonth,
   parseISO,
   isWithinInterval,
   startOfWeek,
@@ -22,6 +20,51 @@ import {
   differenceInWeeks,
 } from 'date-fns';
 import type { MediaPlanChannel } from '@/components/legacy-plan-builder/media-plan-grid';
+
+// ---------------------------------------------------------------------------
+// Week-commencing <-> month bucketing
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns the 'yyyy-MM' bucket a Mon-Sun week belongs to, keyed by whichever
+ * month holds the majority (>=4) of its 7 days — equivalently, the month
+ * containing the week's Thursday. Mirrors the media plan grid's own column
+ * assignment (src/components/sandbox/plan-grid.tsx generateWeeksForYear,
+ * src/lib/media-plan/sandbox-sync.ts buildWeeksForRange) so a week's budget
+ * always lands in the same month column the grid displays it under.
+ */
+export function getWeekMonthKey(weekStartMonday: Date): string {
+  const thursday = new Date(weekStartMonday);
+  thursday.setDate(thursday.getDate() + 3);
+  return format(thursday, 'yyyy-MM');
+}
+
+/**
+ * Returns the week-commencing-aligned start/end for a calendar month,
+ * matching the grid's column boundaries (e.g. Aug 2026 -> 3 Aug .. 30 Aug):
+ * start is the Monday of the first week whose majority of days fall in this
+ * month; end is the day before the Monday of the first week whose majority
+ * of days fall in the next month.
+ */
+export function getWeekAlignedMonthRange(monthDate: Date): { start: Date; end: Date } {
+  const firstWeekMonday = (year: number, monthIdx0: number): Date => {
+    const firstOfMonth = new Date(year, monthIdx0, 1);
+    const dow = firstOfMonth.getDay();
+    const monday = new Date(firstOfMonth);
+    monday.setDate(firstOfMonth.getDate() + (dow === 0 ? -6 : 1 - dow));
+    const thursday = new Date(monday);
+    thursday.setDate(monday.getDate() + 3);
+    if (thursday.getMonth() !== monthIdx0) monday.setDate(monday.getDate() + 7);
+    monday.setHours(0, 0, 0, 0);
+    return monday;
+  };
+  const y = monthDate.getFullYear();
+  const m = monthDate.getMonth();
+  const start = firstWeekMonday(y, m);
+  const end = firstWeekMonday(m === 11 ? y + 1 : y, m === 11 ? 0 : m + 1);
+  end.setDate(end.getDate() - 1);
+  return { start, end };
+}
 
 // ---------------------------------------------------------------------------
 // Channel-name helpers
@@ -144,14 +187,14 @@ export function buildWeeklyPlansFromFlights(
     const weeksByMonth: Record<string, Date[]> = {};
     for (let i = 0; i < numWeeks; i++) {
       const weekStart = addWeeks(startMonday, i);
-      const monthKey  = format(weekStart, 'yyyy-MM');
+      const monthKey  = getWeekMonthKey(weekStart);
       (weeksByMonth[monthKey] ??= []).push(weekStart);
     }
 
     let weekNumber = 1;
     for (let i = 0; i < numWeeks; i++) {
       const weekStart   = addWeeks(startMonday, i);
-      const monthKey    = format(weekStart, 'yyyy-MM');
+      const monthKey    = getWeekMonthKey(weekStart);
       const unpaddedKey = monthKey.replace(/-0+(\d)$/, '-$1');
 
       const monthlySpend  = flight.monthlySpend[monthKey] ?? flight.monthlySpend[unpaddedKey] ?? 0;
@@ -182,8 +225,7 @@ export function getChannelMonthlyBudgetCents(
   weeklyPlans: WeeklyPlan[],
   selectedMonth: Date,
 ): number {
-  const monthStart = startOfMonth(selectedMonth);
-  const monthEnd   = endOfMonth(selectedMonth);
+  const { start: monthStart, end: monthEnd } = getWeekAlignedMonthRange(selectedMonth);
 
   return weeklyPlans
     .filter(wp => {
@@ -255,8 +297,7 @@ export function generateMonthDataFromWeeklyPlans(
   channelName?: string,
 ): ChannelChartPoint[] {
   const month      = selectedMonth ?? new Date();
-  const monthStart = startOfMonth(month);
-  const monthEnd   = endOfMonth(month);
+  const { start: monthStart, end: monthEnd } = getWeekAlignedMonthRange(month);
   const today      = new Date();
   today.setHours(0, 0, 0, 0);
 
@@ -424,18 +465,22 @@ export function generateChannelChartDataForRange(
   const dailyPlannedByDate = new Map<string, number>();
 
   if (useLinear) {
-    // Group days by calendar month, distribute each month's budget evenly
+    // Group days by the week-commencing-aligned month of their containing
+    // week (not the calendar month), distribute each month's budget evenly
     const monthGroups = new Map<string, { monthStart: Date; days: Date[] }>();
     allDays.forEach(day => {
-      const ms  = startOfMonth(day);
-      const key = format(ms, 'yyyy-MM-dd');
-      if (!monthGroups.has(key)) monthGroups.set(key, { monthStart: ms, days: [] });
+      const weekMonday = startOfWeek(day, { weekStartsOn: 1 });
+      const key = getWeekMonthKey(weekMonday);
+      if (!monthGroups.has(key)) {
+        const [y, m] = key.split('-').map(Number);
+        monthGroups.set(key, { monthStart: new Date(y, m - 1, 1), days: [] });
+      }
       monthGroups.get(key)!.days.push(day);
     });
     monthGroups.forEach(({ monthStart: ms, days }) => {
       const budgetCents    = getChannelMonthlyBudgetCents(weeklyPlans, ms);
-      const monthEndForMs  = endOfMonth(ms);
-      const { flightStart, flightEnd, activeDays } = getFlightActiveWindowInMonth(weeklyPlans, ms, monthEndForMs);
+      const { start: flightWindowStart, end: monthEndForMs } = getWeekAlignedMonthRange(ms);
+      const { flightStart, flightEnd, activeDays } = getFlightActiveWindowInMonth(weeklyPlans, flightWindowStart, monthEndForMs);
       const dailyRate      = (budgetCents / 100) / activeDays;
       days.forEach(day => {
         if (day >= flightStart && day <= flightEnd) {

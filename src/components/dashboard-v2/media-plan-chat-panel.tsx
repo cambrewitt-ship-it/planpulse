@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Sparkles, ArrowUp, Bot, Loader2, Paperclip, Undo2, Lock,
-  ChevronDown, Users, X, FileSpreadsheet,
+  ArrowUp, Bot, Loader2, Paperclip, Undo2, Lock,
+  ChevronDown, Users, FileSpreadsheet,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { UserAgent, AgentAuditStep, AgentOutputLink } from '@/types/database';
@@ -116,7 +116,6 @@ export default function MediaPlanChatPanel({
   const [activeToolCall, setActiveToolCall] = useState<string | null>(null);
   const [extracting, setExtracting] = useState(false);
 
-  const [attachedImage, setAttachedImage] = useState<{ base64: string; mimeType: string; preview: string; name: string } | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
 
   const [pendingExtraction, setPendingExtraction] = useState<VisionExtraction | null>(null);
@@ -314,7 +313,7 @@ export default function MediaPlanChatPanel({
     });
   }, []);
 
-  const runVisionExtract = useCallback(async (image: NonNullable<typeof attachedImage>, caption: string) => {
+  const runVisionExtract = useCallback(async (image: { base64: string; mimeType: string; preview: string; name: string }, caption: string) => {
     const year = currentPlan?.weeks?.[0]?.year;
     setMessages(prev => [
       ...prev,
@@ -404,25 +403,19 @@ export default function MediaPlanChatPanel({
       return;
     }
     if (file.size > 20 * 1024 * 1024) return;
+    const caption = input.trim();
+    setInput('');
     const reader = new FileReader();
     reader.onload = (ev) => {
       const dataUrl = ev.target?.result as string;
-      setAttachedImage({ base64: dataUrl.split(',')[1], mimeType: file.type, preview: dataUrl, name: file.name });
+      runVisionExtract({ base64: dataUrl.split(',')[1], mimeType: file.type, preview: dataUrl, name: file.name }, caption);
     };
     reader.readAsDataURL(file);
   };
 
   function handleSubmit() {
     const text = input.trim();
-    if (isStreaming || extracting) return;
-    if (attachedImage) {
-      const img = attachedImage;
-      setAttachedImage(null);
-      setInput('');
-      runVisionExtract(img, text);
-      return;
-    }
-    if (!text) return;
+    if (isStreaming || extracting || !text) return;
     setInput('');
     if (pendingExtraction) runRevise(text);
     else sendMessage(text);
@@ -487,7 +480,7 @@ export default function MediaPlanChatPanel({
         }}>
           {/* Header */}
           <div style={{ padding: '13px 16px 10px', borderBottom: `1px solid ${BORDER_SOFT}`, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', flexShrink: 0 }}>
-            <Sparkles size={14} style={{ color: RED, flexShrink: 0 }} />
+            <img src="/favicon.ico" alt="" width={20} height={20} style={{ borderRadius: 5, flexShrink: 0 }} />
             <span style={{ fontSize: 15, fontWeight: 600, color: INK, fontFamily: serifFont, flexShrink: 0 }}>
               Media Plan Editor
             </span>
@@ -549,7 +542,7 @@ export default function MediaPlanChatPanel({
           </div>
 
           {/* Message thread */}
-          <div ref={messageThreadRef} style={{ ...(height != null ? { flex: 1, minHeight: 0 } : { height: 420 }), overflowY: 'auto', padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div ref={messageThreadRef} style={{ ...(height != null ? { flex: 1, minHeight: 0 } : { height: 420 }), overflowY: 'auto', padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 10, justifyContent: messages.length === 0 ? 'center' : 'flex-start' }}>
             {messages.length === 0 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 <button
@@ -665,15 +658,6 @@ export default function MediaPlanChatPanel({
 
           {/* Input */}
           <div style={{ padding: '10px 16px 14px', borderTop: `1px solid ${BORDER_SOFT}`, flexShrink: 0 }}>
-            {attachedImage && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, padding: '5px 8px', background: PAPER_BG, borderRadius: 10, border: `1px solid ${BORDER}` }}>
-                <img src={attachedImage.preview} alt="" style={{ width: 32, height: 32, objectFit: 'cover', borderRadius: 6 }} />
-                <span style={{ fontSize: 11.5, color: GRAPHITE, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{attachedImage.name}</span>
-                <button onClick={() => setAttachedImage(null)} style={{ border: 'none', background: 'none', cursor: 'pointer', color: MUTED, display: 'flex' }}>
-                  <X size={14} />
-                </button>
-              </div>
-            )}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: CARD_BG, border: `1.5px solid ${BORDER}`, borderRadius: 24, padding: '8px 10px 8px 14px' }}>
               <input
                 ref={imageInputRef}
@@ -690,10 +674,8 @@ export default function MediaPlanChatPanel({
               >
                 <Paperclip size={15} />
               </button>
-              {isStreaming || extracting ? (
+              {(isStreaming || extracting) && (
                 <Loader2 size={14} style={{ color: MUTED, animation: 'mpChatSpin 1s linear infinite', flexShrink: 0 }} />
-              ) : (
-                <Sparkles size={14} style={{ color: RED, flexShrink: 0 }} />
               )}
               <input
                 value={input}
@@ -710,16 +692,16 @@ export default function MediaPlanChatPanel({
               />
               <button
                 onClick={handleSubmit}
-                disabled={(!input.trim() && !attachedImage) || isStreaming || extracting}
+                disabled={!input.trim() || isStreaming || extracting}
                 style={{
                   width: 30, height: 30, flexShrink: 0,
-                  background: (input.trim() || attachedImage) && !isStreaming && !extracting ? RED : PAPER_BG,
-                  border: (input.trim() || attachedImage) && !isStreaming && !extracting ? 'none' : `1px solid ${BORDER}`,
-                  borderRadius: '50%', cursor: (input.trim() || attachedImage) && !isStreaming && !extracting ? 'pointer' : 'default',
+                  background: input.trim() && !isStreaming && !extracting ? RED : PAPER_BG,
+                  border: input.trim() && !isStreaming && !extracting ? 'none' : `1px solid ${BORDER}`,
+                  borderRadius: '50%', cursor: input.trim() && !isStreaming && !extracting ? 'pointer' : 'default',
                   display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.15s',
                 }}
               >
-                <ArrowUp size={13} style={{ color: (input.trim() || attachedImage) && !isStreaming && !extracting ? CARD_BG : MUTED }} />
+                <ArrowUp size={13} style={{ color: input.trim() && !isStreaming && !extracting ? CARD_BG : MUTED }} />
               </button>
             </div>
           </div>

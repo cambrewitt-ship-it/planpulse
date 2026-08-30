@@ -114,6 +114,7 @@ export const TOUR_SECTIONS: TourSection[] = [
         description:
           'Expandable entries per media channel, covering setup and health-check action points plus creative specs.',
         icon: Layers,
+        media: { type: 'image', src: '/library.png' },
       },
     ],
   },

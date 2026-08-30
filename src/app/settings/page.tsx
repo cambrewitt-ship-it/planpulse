@@ -539,7 +539,7 @@ export default function SettingsPage() {
                         </div>
                         <div className="space-y-2">
                           <Label>Address</Label>
-                          <Input value={agency.agency_address ?? ''} onChange={e => setAgency(p => ({ ...p, agency_address: e.target.value }))} placeholder="104 Oriental Parade, Wellington" />
+                          <Input value={agency.agency_address ?? ''} onChange={e => setAgency(p => ({ ...p, agency_address: e.target.value }))} placeholder="Street address, city" />
                         </div>
                       </div>
                     </CardContent>

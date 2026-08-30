@@ -32,7 +32,7 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { getClientById, getMediaPlans, getPlanById, updateClient, updateClientLogoUrl } from '@/lib/db/plans';
 import { fetchCachedAnalyticsData, SpendDataPoint } from '@/lib/api/analytics-data-integration';
-import { addDays, format, parseISO, startOfMonth, endOfMonth } from 'date-fns';
+import { addDays, format, parseISO } from 'date-fns';
 import { calculateHealthScore, type HealthScoreResult } from '@/lib/utils/health-score';
 import { calculatePerformanceHealth, type PerformanceHealthResult } from '@/lib/calculate-performance-health';
 import {
@@ -40,6 +40,8 @@ import {
   generateChannelChartData,
   generateChannelChartDataForRange,
   getChannelCategory,
+  getWeekMonthKey,
+  getWeekAlignedMonthRange,
 } from '@/lib/utils/channel-pacing';
 import OrganicSocialCard from '@/components/dashboard-v2/organic-social-card';
 import EdmCard from '@/components/dashboard-v2/edm-card';
@@ -96,7 +98,7 @@ const VIEW_MODE_ORDER = ['overview', 'media-plan', 'client-hub'] as const;
 const VIEW_MODE_COLORS: Record<typeof VIEW_MODE_ORDER[number], string> = {
   overview: '#2f3a56',
   'media-plan': '#35586b',
-  'client-hub': '#7A5C8A',
+  'client-hub': '#5B6B80',
 };
 
 function ganttClientColor(id: string): string {
@@ -582,7 +584,7 @@ export default function DashboardV2() {
           const monthlySpend: Record<string, number> = {};
           let week = new Date(startDate);
           while (week <= endDate) {
-            const monthKey = `${week.getFullYear()}-${String(week.getMonth() + 1).padStart(2, '0')}`;
+            const monthKey = getWeekMonthKey(week);
             monthlySpend[monthKey] = (monthlySpend[monthKey] ?? 0) + weeklyBudget;
             week = new Date(week.getTime() + MS_PER_WEEK);
           }
@@ -1557,8 +1559,9 @@ export default function DashboardV2() {
         }, 0);
         plannedSpend = commission > 0 ? grossPlannedSpend * ((100 - commission) / 100) : grossPlannedSpend;
 
-        const monthStartStr = format(startOfMonth(selectedMonth), 'yyyy-MM-dd');
-        const monthEndStr   = format(endOfMonth(selectedMonth),   'yyyy-MM-dd');
+        const { start: monthStartWc, end: monthEndWc } = getWeekAlignedMonthRange(selectedMonth);
+        const monthStartStr = format(monthStartWc, 'yyyy-MM-dd');
+        const monthEndStr   = format(monthEndWc,   'yyyy-MM-dd');
         const chSpendPoints = (channelMonthSpendData as any[]).filter(p => {
           if (!p.date || p.date < monthStartStr || p.date > monthEndStr) return false;
           if (p.platform && p.platform === chPlatform) return true;
@@ -1573,8 +1576,9 @@ export default function DashboardV2() {
       // ── Aggregate performance metrics from spend data ─────────────────────
       const rangeStartStr = analyticsDateRange.startDate;
       const rangeEndStr   = analyticsDateRange.endDate;
-      const monthStartStr = format(startOfMonth(selectedMonth), 'yyyy-MM-dd');
-      const monthEndStr   = format(endOfMonth(selectedMonth),   'yyyy-MM-dd');
+      const { start: metricMonthStartWc, end: metricMonthEndWc } = getWeekAlignedMonthRange(selectedMonth);
+      const monthStartStr = format(metricMonthStartWc, 'yyyy-MM-dd');
+      const monthEndStr   = format(metricMonthEndWc,   'yyyy-MM-dd');
 
       const chMetricPoints = (channelMonthSpendData as any[]).filter(p => {
         if (!p.date) return false;
@@ -2967,6 +2971,7 @@ export default function DashboardV2() {
                         onPlanChange={handleClientPlanChange}
                         onUpload={handleClientPlanUpload}
                         outerStyle={{ height: '100%' }}
+                        showUploadNew={false}
                       />
                     ) : (
                       <UploadWizard onPlanLoaded={handleClientPlanLoaded} onScreenshotSelected={handleScreenshotSelectedFromWizard} />

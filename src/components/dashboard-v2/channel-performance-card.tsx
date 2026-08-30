@@ -6,6 +6,7 @@ import { AlertTriangle, ChevronDown, ExternalLink } from 'lucide-react';
 import InlineActionPoints from './inline-action-points';
 import type { ChannelBenchmark, MetricPreset, ClientChannelPreset } from '@/types/database';
 import { getChannelLogo } from '@/lib/utils/channel-icons';
+import { getWeekAlignedMonthRange } from '@/lib/utils/channel-pacing';
 import {
   LineChart,
   Line,
@@ -1152,13 +1153,14 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
   // For multi-month mode (dateRange provided), trust the pre-scoped chart data.
   let baseChartData = filteredSpendChartData;
   if (!dateRange && selectedMonth instanceof Date) {
-    const targetMonth = selectedMonth.getMonth();
-    const targetYear  = selectedMonth.getFullYear();
-    baseChartData = baseChartData.filter((point) => {
-      const d = new Date(point.date);
-      if (isNaN(d.getTime())) return false;
-      return d.getMonth() === targetMonth && d.getFullYear() === targetYear;
-    });
+    // Compare as 'yyyy-MM-dd' strings (not Date instants) so a UTC-midnight
+    // parse of point.date can't drift a day relative to the local-midnight
+    // wcStart/wcEnd boundaries in timezones ahead of UTC.
+    const isoDate = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const { start: wcStart, end: wcEnd } = getWeekAlignedMonthRange(selectedMonth);
+    const wcStartStr = isoDate(wcStart);
+    const wcEndStr   = isoDate(wcEnd);
+    baseChartData = baseChartData.filter((point) => point.date >= wcStartStr && point.date <= wcEndStr);
   }
 
   // Then trim to the range where we actually have spend values.
