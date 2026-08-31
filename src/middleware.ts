@@ -18,6 +18,43 @@ const PUBLIC_ROUTES = [
   '/api/hub/',
 ];
 
+// Temporary password gate for the public media plan builder (unauthenticated
+// AI endpoints aren't hardened yet) — remove once that's sorted.
+const GATED_ROUTES = [
+  '/media-plan-builder',
+  '/api/sandbox/',
+  '/api/media-plan-agent/',
+  '/api/media-plan-builder/',
+];
+
+const GATE_REALM = 'Media Plan Builder';
+
+function isPasswordGated(pathname: string) {
+  return GATED_ROUTES.some(route => pathname.startsWith(route));
+}
+
+function hasValidGatePassword(req: NextRequest) {
+  const authHeader = req.headers.get('authorization');
+  if (!authHeader?.startsWith('Basic ')) return false;
+
+  let decoded: string;
+  try {
+    decoded = atob(authHeader.slice('Basic '.length));
+  } catch {
+    return false;
+  }
+
+  const password = decoded.slice(decoded.indexOf(':') + 1);
+  return password === (process.env.MEDIA_PLAN_BUILDER_PASSWORD || 'planpulse');
+}
+
+function gateResponse() {
+  return new NextResponse('Authentication required', {
+    status: 401,
+    headers: { 'WWW-Authenticate': `Basic realm="${GATE_REALM}"` },
+  });
+}
+
 // Define API routes that require authentication
 const PROTECTED_API_ROUTES = [
   '/api/ads/',
@@ -31,6 +68,10 @@ const PROTECTED_API_ROUTES = [
 ];
 
 export async function middleware(req: NextRequest) {
+  if (isPasswordGated(req.nextUrl.pathname) && !hasValidGatePassword(req)) {
+    return gateResponse();
+  }
+
   let res = NextResponse.next({ request: req });
 
   const supabase = createServerClient<Database>(

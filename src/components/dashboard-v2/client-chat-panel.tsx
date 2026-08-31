@@ -135,7 +135,7 @@ export default function ClientChatPanel({
     setOutputLinks([]);
   }
 
-  const sendMessage = useCallback(async (userText: string, opts?: { silent?: boolean }) => {
+  const sendMessage = useCallback(async (userText: string, opts?: { silent?: boolean; overviewRequest?: boolean; forceRefresh?: boolean }) => {
     if (isStreaming) return;
 
     const isFirstAgentTurn = selectedAgent !== null && apiMessages.length === 0;
@@ -167,7 +167,10 @@ export default function ClientChatPanel({
       const endpoint = selectedAgent ? '/api/agency/chat' : `/api/clients/${clientId}/ai-agent`;
       const body = selectedAgent
         ? { messages: newApiMessages, agentId: selectedAgent.id }
-        : { messages: newApiMessages };
+        : {
+            messages: newApiMessages,
+            ...(opts?.overviewRequest ? { overviewRequest: true, forceRefresh: !!opts.forceRefresh } : {}),
+          };
 
       const res = await fetch(endpoint, {
         method: 'POST',
@@ -251,17 +254,19 @@ export default function ClientChatPanel({
   // Auto-generate an overview as soon as the panel loads for a client, so the
   // card isn't just an empty prompt box on first view. Runs once per client
   // (keyed off clientId, not just mount) and only against the default assistant.
+  // Server-side 12h cache (client_dashboard_overviews) means this only actually
+  // hits the model if the cache is stale — see /api/clients/[id]/ai-agent.
   useEffect(() => {
     if (!clientId || autoOverviewClientIdRef.current === clientId) return;
     autoOverviewClientIdRef.current = clientId;
-    sendMessage(buildOverviewPrompt(), { silent: true });
+    sendMessage(buildOverviewPrompt(), { silent: true, overviewRequest: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId]);
 
   function handleGenerateSummary() {
     if (isStreaming) return;
     setOverviewTab('internal');
-    sendMessage(buildOverviewPrompt(), { silent: true });
+    sendMessage(buildOverviewPrompt(), { silent: true, overviewRequest: true, forceRefresh: true });
   }
 
   function handleSubmit() {

@@ -1,7 +1,8 @@
 import Link from 'next/link';
+import Image from 'next/image';
 import { Button } from '@/components/ui/button';
 import Footer from '@/components/Footer';
-import { ChannelPerformanceMockup, CPAGaugeMockup, MediaPlanMockup } from '@/components/features/FeatureMockups';
+import { CPAGaugeMockup, MediaPlanMockup } from '@/components/features/FeatureMockups';
 import {
   LayoutDashboard,
   Users,
@@ -242,7 +243,13 @@ export default function FeaturesPage() {
                 Channel performance · spend tracking · CPA monitoring
               </p>
               <div style={{ boxShadow: '0 8px 40px rgba(0,0,0,0.10), 0 2px 8px rgba(0,0,0,0.06)', borderRadius: 16, overflow: 'hidden' }}>
-                <ChannelPerformanceMockup />
+                <Image
+                  src="/channel-performance.png"
+                  alt="Real-time performance dashboard showing pacing, spend variance, and platform metrics"
+                  width={2002}
+                  height={1502}
+                  className="w-full h-auto"
+                />
               </div>
               <div className="grid sm:grid-cols-2 gap-6">
                 <div style={{ boxShadow: '0 4px 24px rgba(0,0,0,0.08)', borderRadius: 16, overflow: 'hidden' }}>

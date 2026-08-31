@@ -3,7 +3,7 @@ import { waitUntil } from '@vercel/functions';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 import Anthropic from '@anthropic-ai/sdk';
-import { BOT_TOOL_DEFINITIONS } from '@/lib/agent-tools';
+import { BOT_TOOL_DEFINITIONS, withCacheControl } from '@/lib/agent-tools';
 import { sendTeamsAlert } from '@/lib/teams';
 
 export const maxDuration = 60;
@@ -515,8 +515,8 @@ async function runClaudeAsync(query: string, userId: string, webhookUrl: string)
       const response = await anthropic.messages.create({
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 512,
-        system: BOT_SYSTEM_PROMPT,
-        tools: BOT_TOOL_DEFINITIONS,
+        system: [{ type: 'text', text: BOT_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
+        tools: withCacheControl(BOT_TOOL_DEFINITIONS),
         messages,
       });
 
@@ -599,8 +599,8 @@ export async function POST(
         const response = await anthropic.messages.create({
           model: 'claude-haiku-4-5-20251001',
           max_tokens: 512,
-          system: BOT_SYSTEM_PROMPT,
-          tools: BOT_TOOL_DEFINITIONS,
+          system: [{ type: 'text', text: BOT_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
+          tools: withCacheControl(BOT_TOOL_DEFINITIONS),
           messages,
         });
         messages.push({ role: 'assistant', content: response.content });

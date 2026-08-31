@@ -11,7 +11,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Marketing Dashboard",
+  title: "PlanPulse",
   description: "Manage your client campaigns efficiently",
   icons: {
     icon: '/favicon.ico',

@@ -346,3 +346,16 @@ export const TOOL_DEFINITIONS: Anthropic.Tool[] = [
 export const BOT_TOOL_DEFINITIONS: Anthropic.Tool[] = TOOL_DEFINITIONS.filter(
   t => !['create_client', 'update_media_plan_budget', 'update_media_plan_flight', 'get_live_meta_campaigns', 'get_client_intelligence'].includes(t.name)
 );
+
+// Marks the last tool in a schema array as an Anthropic prompt-cache breakpoint,
+// so the (large, static) tool schema block is billed once and re-read cheaply
+// on every subsequent round of a tool loop / turn of a conversation, instead of
+// being re-billed as fresh input every single call. Returns a new array —
+// never mutates the shared TOOL_DEFINITIONS/BOT_TOOL_DEFINITIONS constants.
+export function withCacheControl(tools: Anthropic.Tool[]): Anthropic.Tool[] {
+  if (tools.length === 0) return tools;
+  return [
+    ...tools.slice(0, -1),
+    { ...tools[tools.length - 1], cache_control: { type: 'ephemeral' } },
+  ];
+}

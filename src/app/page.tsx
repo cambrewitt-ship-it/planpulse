@@ -13,7 +13,6 @@ import {
   Zap,
   Brain,
   Link2,
-  Gauge,
   Bell,
   ArrowRight,
 } from 'lucide-react';
@@ -127,42 +126,8 @@ export default function Home() {
           </div>
         </section>
 
-        {/* ── Media Plan showcase ── */}
-        <section className="py-20" style={{ background: '#FDFCF8' }}>
-          <div className="container mx-auto px-4">
-            <div className="max-w-6xl mx-auto grid lg:grid-cols-2 gap-12 items-center">
-              <div className="space-y-6">
-                <span
-                  className="inline-block text-xs font-semibold uppercase tracking-widest px-3 py-1 rounded-full"
-                  style={{ background: '#E8EDF2', color: '#4A6580' }}
-                >
-                  Media Planning
-                </span>
-                <h2
-                  className="text-3xl md:text-4xl font-bold leading-tight"
-                  style={{ color: '#1C1917', ...pageFont }}
-                >
-                  Plan every campaign,<br />every channel
-                </h2>
-                <p className="text-base leading-relaxed" style={{ color: '#8A8578' }}>
-                  Build multi-channel media plans with weekly budgets, flight dates, and Gantt timelines. Import from a spreadsheet or build from scratch — then watch actuals sync in automatically.
-                </p>
-                <div className="space-y-3 pt-2">
-                  <FeatureChip icon={<CheckCircle2 className="w-4 h-4" />} label="Paid digital, OOH, radio, email, and more" />
-                  <FeatureChip icon={<CheckCircle2 className="w-4 h-4" />} label="Interactive Gantt view with zoom controls" />
-                  <FeatureChip icon={<CheckCircle2 className="w-4 h-4" />} label="Budget allocation tracked week by week" />
-                  <FeatureChip icon={<CheckCircle2 className="w-4 h-4" />} label="Upload a new plan version any time" />
-                </div>
-              </div>
-              <div style={{ boxShadow: '0 8px 40px rgba(0,0,0,0.10), 0 2px 8px rgba(0,0,0,0.06)', borderRadius: 16, overflow: 'hidden' }}>
-                <MediaPlanMockup />
-              </div>
-            </div>
-          </div>
-        </section>
-
         {/* ── Channel Performance showcase ── */}
-        <section className="py-20" style={{ background: '#F5F3EF' }}>
+        <section className="py-20" style={{ background: '#FDFCF8' }}>
           <div className="container mx-auto px-4">
             <div className="max-w-6xl mx-auto grid lg:grid-cols-2 gap-12 items-center">
               <div className="order-2 lg:order-1" style={{ boxShadow: '0 8px 40px rgba(0,0,0,0.10), 0 2px 8px rgba(0,0,0,0.06)', borderRadius: 16, overflow: 'hidden' }}>
@@ -202,7 +167,7 @@ export default function Home() {
         </section>
 
         {/* ── CPA gauge showcase ── */}
-        <section className="py-20" style={{ background: '#FDFCF8' }}>
+        <section className="py-20" style={{ background: '#F5F3EF' }}>
           <div className="container mx-auto px-4">
             <div className="max-w-6xl mx-auto grid lg:grid-cols-2 gap-12 items-center">
               <div className="space-y-6">
@@ -228,25 +193,48 @@ export default function Home() {
                   <FeatureChip icon={<CheckCircle2 className="w-4 h-4" />} label="Alerts surfaced in AI daily briefing" />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div style={{ boxShadow: '0 4px 24px rgba(0,0,0,0.08)', borderRadius: 16, overflow: 'hidden' }}>
-                  <Image
-                    src="/client-card.png"
-                    alt="Client card showing CPA gauge within target"
-                    width={2696}
-                    height={614}
-                    className="w-full h-auto"
-                  />
+              <div style={{ boxShadow: '0 4px 24px rgba(0,0,0,0.08)', borderRadius: 16, overflow: 'hidden' }}>
+                <Image
+                  src="/client-card.png"
+                  alt="Client card showing CPA gauge within target"
+                  width={2696}
+                  height={614}
+                  className="w-full h-auto"
+                />
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* ── Media Plan showcase ── */}
+        <section className="py-20" style={{ background: '#FDFCF8' }}>
+          <div className="container mx-auto px-4">
+            <div className="max-w-6xl mx-auto grid lg:grid-cols-2 gap-12 items-center">
+              <div className="space-y-6">
+                <span
+                  className="inline-block text-xs font-semibold uppercase tracking-widest px-3 py-1 rounded-full"
+                  style={{ background: '#E8EDF2', color: '#4A6580' }}
+                >
+                  Media Planning
+                </span>
+                <h2
+                  className="text-3xl md:text-4xl font-bold leading-tight"
+                  style={{ color: '#1C1917', ...pageFont }}
+                >
+                  Media planning & buying with Agentic AI
+                </h2>
+                <p className="text-base leading-relaxed" style={{ color: '#8A8578' }}>
+                  Build multi-channel media plans with weekly budgets, flight dates, and Gantt timelines. Import from a spreadsheet or build from scratch — then watch actuals sync in automatically.
+                </p>
+                <div className="space-y-3 pt-2">
+                  <FeatureChip icon={<CheckCircle2 className="w-4 h-4" />} label="Paid digital, OOH, radio, email, and more" />
+                  <FeatureChip icon={<CheckCircle2 className="w-4 h-4" />} label="Interactive Gantt view with zoom controls" />
+                  <FeatureChip icon={<CheckCircle2 className="w-4 h-4" />} label="Budget allocation tracked week by week" />
+                  <FeatureChip icon={<CheckCircle2 className="w-4 h-4" />} label="Upload a new plan version any time" />
                 </div>
-                <div style={{ boxShadow: '0 4px 24px rgba(0,0,0,0.08)', borderRadius: 16, overflow: 'hidden' }}>
-                  <Image
-                    src="/client-card.png"
-                    alt="Client card showing CPA gauge over target"
-                    width={2696}
-                    height={614}
-                    className="w-full h-auto"
-                  />
-                </div>
+              </div>
+              <div style={{ boxShadow: '0 8px 40px rgba(0,0,0,0.10), 0 2px 8px rgba(0,0,0,0.06)', borderRadius: 16, overflow: 'hidden' }}>
+                <MediaPlanMockup />
               </div>
             </div>
           </div>
@@ -266,61 +254,71 @@ export default function Home() {
                 Built end-to-end for marketing agencies — from campaign setup to client reporting.
               </p>
             </div>
-            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5 max-w-5xl mx-auto">
-              <FeatureCard
-                icon={<Gauge className="w-5 h-5" style={{ color: '#4A7C59' }} />}
-                iconBg="#EAF0EB"
-                title="Health Scoring"
-                description="Dynamic scores across pacing, action completion, and performance — customisable weights per client."
-              />
-              <FeatureCard
-                icon={<CheckCircle2 className="w-5 h-5" style={{ color: '#4A6580' }} />}
-                iconBg="#E8EDF2"
-                title="Action Points"
-                description="SET UP and HEALTH CHECK tasks auto-generated from your media plan with recurring due dates."
-              />
-              <FeatureCard
-                icon={<Brain className="w-5 h-5" style={{ color: '#4A6580' }} />}
-                iconBg="#E8EDF2"
-                title="AI Chat Agent"
-                description="Ask questions and get campaign insights in plain English — with full context on every client."
-              />
-              <FeatureCard
-                icon={<Zap className="w-5 h-5" style={{ color: '#4A7C59' }} />}
-                iconBg="#EAF0EB"
-                title="Daily AI Briefing"
-                description="Automated summaries to Teams or email covering overdue tasks, pacing alerts, and upcoming launches."
-              />
-              <FeatureCard
-                icon={<Users className="w-5 h-5" style={{ color: '#4A6580' }} />}
-                iconBg="#E8EDF2"
-                title="Multi-Client Agency View"
-                description="All clients in one dashboard. Filter by account manager, sorted by health score."
-              />
-              <FeatureCard
-                icon={<Target className="w-5 h-5" style={{ color: '#4A6580' }} />}
-                iconBg="#E8EDF2"
-                title="Funnel Analysis"
-                description="Cross-platform conversion funnels with stage-by-stage metrics to find where leads are dropping off."
-              />
-              <FeatureCard
-                icon={<Bell className="w-5 h-5" style={{ color: '#4A7C59' }} />}
-                iconBg="#EAF0EB"
-                title="Anomaly Alerts"
-                description="Automatic flags when performance drifts outside expected ranges — caught before they become costly."
-              />
-              <FeatureCard
-                icon={<Link2 className="w-5 h-5" style={{ color: '#4A6580' }} />}
-                iconBg="#E8EDF2"
-                title="Platform Integrations"
-                description="Native connectors for Google Ads, Meta Ads, and GA4 with automatic spend data sync."
-              />
-              <FeatureCard
-                icon={<CheckCircle2 className="w-5 h-5" style={{ color: '#4A6580' }} />}
-                iconBg="#E8EDF2"
-                title="Playbook & Library"
-                description="Store SOPs, channel specs, brand guidelines, and onboarding docs in a searchable team library."
-              />
+            <div className="flex flex-wrap justify-center gap-5 max-w-5xl mx-auto">
+              <div className="w-full sm:w-[calc(50%-10px)] lg:w-[calc(33.333%-14px)]">
+                <FeatureCard
+                  icon={<CheckCircle2 className="w-5 h-5" style={{ color: '#4A6580' }} />}
+                  iconBg="#E8EDF2"
+                  title="Action Points"
+                  description="SET UP and HEALTH CHECK tasks auto-generated from your media plan with recurring due dates."
+                />
+              </div>
+              <div className="w-full sm:w-[calc(50%-10px)] lg:w-[calc(33.333%-14px)]">
+                <FeatureCard
+                  icon={<Brain className="w-5 h-5" style={{ color: '#4A6580' }} />}
+                  iconBg="#E8EDF2"
+                  title="AI Chat Agent"
+                  description="Ask questions and get campaign insights in plain English — with full context on every client."
+                />
+              </div>
+              <div className="w-full sm:w-[calc(50%-10px)] lg:w-[calc(33.333%-14px)]">
+                <FeatureCard
+                  icon={<Zap className="w-5 h-5" style={{ color: '#4A7C59' }} />}
+                  iconBg="#EAF0EB"
+                  title="Daily AI Briefing"
+                  description="Automated summaries to Teams or email covering overdue tasks, pacing alerts, and upcoming launches."
+                />
+              </div>
+              <div className="w-full sm:w-[calc(50%-10px)] lg:w-[calc(33.333%-14px)]">
+                <FeatureCard
+                  icon={<Users className="w-5 h-5" style={{ color: '#4A6580' }} />}
+                  iconBg="#E8EDF2"
+                  title="Multi-Client Agency View"
+                  description="All clients in one dashboard. Filter by account manager, sorted by health score."
+                />
+              </div>
+              <div className="w-full sm:w-[calc(50%-10px)] lg:w-[calc(33.333%-14px)]">
+                <FeatureCard
+                  icon={<Target className="w-5 h-5" style={{ color: '#4A6580' }} />}
+                  iconBg="#E8EDF2"
+                  title="Funnel Analysis"
+                  description="Cross-platform conversion funnels with stage-by-stage metrics to find where leads are dropping off."
+                />
+              </div>
+              <div className="w-full sm:w-[calc(50%-10px)] lg:w-[calc(33.333%-14px)]">
+                <FeatureCard
+                  icon={<Bell className="w-5 h-5" style={{ color: '#4A7C59' }} />}
+                  iconBg="#EAF0EB"
+                  title="Anomaly Alerts"
+                  description="Automatic flags when performance drifts outside expected ranges — caught before they become costly."
+                />
+              </div>
+              <div className="w-full sm:w-[calc(50%-10px)] lg:w-[calc(33.333%-14px)]">
+                <FeatureCard
+                  icon={<Link2 className="w-5 h-5" style={{ color: '#4A6580' }} />}
+                  iconBg="#E8EDF2"
+                  title="Platform Integrations"
+                  description="Native connectors for Google Ads, Meta Ads, and GA4 with automatic spend data sync."
+                />
+              </div>
+              <div className="w-full sm:w-[calc(50%-10px)] lg:w-[calc(33.333%-14px)]">
+                <FeatureCard
+                  icon={<CheckCircle2 className="w-5 h-5" style={{ color: '#4A6580' }} />}
+                  iconBg="#E8EDF2"
+                  title="Playbook & Library"
+                  description="Store SOPs, channel specs, brand guidelines, and onboarding docs in a searchable team library."
+                />
+              </div>
             </div>
             <div className="text-center mt-10">
               <Link href="/features">

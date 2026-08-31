@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { createClient } from '@/lib/supabase/server';
-import { TOOL_DEFINITIONS } from '@/lib/agent-tools';
+import { TOOL_DEFINITIONS, withCacheControl } from '@/lib/agent-tools';
 import { buildAuditSummary, buildOutputLinks, TOOL_LABELS, WRITE_TOOLS } from '@/lib/agent-audit';
 import type { AgentAuditStep, AgentOutputLink } from '@/lib/agent-audit';
 import { channelsToSandboxPlan, patchSandboxPlanFlightBudget, upsertSandboxPlanFlight, snapToWeekCommencing } from '@/lib/media-plan/sandbox-sync';
@@ -474,15 +474,23 @@ async function toolGetAgencyPlaybooks(
   const { data, error } = await query;
   if (error) return { error: 'Failed to fetch playbooks' };
 
-  const docs = (data ?? []).map(d => ({
-    name: d.file_name,
-    category: d.doc_category,
-    type: d.is_text_doc ? 'text' : 'file',
-    uploaded: d.uploaded_at?.split('T')[0],
-    content: d.text_content ?? '(no extracted text available)',
-  }));
+  const MAX_DOC_CHARS = 3000;
+  const MAX_DOCS = 15;
 
-  return { total: docs.length, documents: docs };
+  const allDocs = data ?? [];
+  const docs = allDocs.slice(0, MAX_DOCS).map(d => {
+    const text = d.text_content ?? '(no extracted text available)';
+    const truncated = text.length > MAX_DOC_CHARS;
+    return {
+      name: d.file_name,
+      category: d.doc_category,
+      type: d.is_text_doc ? 'text' : 'file',
+      uploaded: d.uploaded_at?.split('T')[0],
+      content: truncated ? `${text.slice(0, MAX_DOC_CHARS)}...[truncated]` : text,
+    };
+  });
+
+  return { total: allDocs.length, returned: docs.length, documents: docs };
 }
 
 // ── Write / action tool implementations (Tier 1) ──────────────────────────────
@@ -1351,8 +1359,8 @@ export async function POST(request: NextRequest) {
         while (true) {
           const anthropicStream = anthropic.messages.stream({
             model: 'claude-opus-4-7',
-            system: effectiveSystemPrompt,
-            tools: effectiveTools,
+            system: [{ type: 'text', text: effectiveSystemPrompt, cache_control: { type: 'ephemeral' } }],
+            tools: withCacheControl(effectiveTools),
             messages,
             max_tokens: 2048,
           });

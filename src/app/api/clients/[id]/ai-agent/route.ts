@@ -1,8 +1,10 @@
 import { NextRequest } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/server';
 import { patchSandboxPlanFlightBudget, upsertSandboxPlanFlight, snapToWeekCommencing } from '@/lib/media-plan/sandbox-sync';
 import { nzToday, nzDateKeyOffset, nzStartOfMonth, formatNZ } from '@/lib/timezone';
+import { withCacheControl } from '@/lib/agent-tools';
 
 export const maxDuration = 60;
 
@@ -639,6 +641,12 @@ export async function POST(
 
   const clientName = clientRow.name;
 
+  // client_dashboard_overviews isn't in the generated Database types yet
+  // (new table — types are regenerated separately from migrations), so it's
+  // queried through an untyped handle. Same workaround as generate-insight.ts
+  // uses for client_hub_insights.
+  const untypedSupabase: SupabaseClient = supabase;
+
   const SYSTEM_PROMPT = `You are an AI assistant embedded in the dashboard for client "${clientName}" in PlanPulse.
 
 You are focused exclusively on this client. You have access to their intelligence hub, channel performance, action points, and can take actions to update the dashboard.
@@ -669,9 +677,37 @@ Be concise, professional, and action-oriented. Use bullet points and bold text. 
 
   const body = await request.json();
   const userMessages: Anthropic.MessageParam[] = body.messages ?? [];
+  const overviewRequest = body.overviewRequest === true;
+  const forceRefresh = body.forceRefresh === true;
 
   if (!userMessages.length) {
     return new Response(JSON.stringify({ error: 'No messages provided' }), { status: 400 });
+  }
+
+  // Auto-generated dashboard overview: served from a 12h server-side cache
+  // (shared across every viewer of this client) unless a manual refresh was
+  // requested, so a plain page load never re-runs the opus-4-7 tool loop below.
+  if (overviewRequest && !forceRefresh) {
+    const { data: cached } = await untypedSupabase
+      .from('client_dashboard_overviews')
+      .select('overview_text, generated_at')
+      .eq('client_id', clientId)
+      .maybeSingle();
+
+    if (cached && Date.now() - new Date(cached.generated_at).getTime() < 12 * 60 * 60 * 1000) {
+      const cacheEncoder = new TextEncoder();
+      const cachedStream = new ReadableStream({
+        start(controller) {
+          const send = (data: object) => controller.enqueue(cacheEncoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+          send({ type: 'text', text: cached.overview_text });
+          send({ type: 'done' });
+          controller.close();
+        },
+      });
+      return new Response(cachedStream, {
+        headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' },
+      });
+    }
   }
 
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -688,8 +724,8 @@ Be concise, professional, and action-oriented. Use bullet points and bold text. 
         while (true) {
           const anthropicStream = anthropic.messages.stream({
             model: 'claude-opus-4-7',
-            system: SYSTEM_PROMPT,
-            tools: CLIENT_AGENT_TOOLS,
+            system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
+            tools: withCacheControl(CLIENT_AGENT_TOOLS),
             messages,
             max_tokens: 2048,
           });
@@ -710,6 +746,11 @@ Be concise, professional, and action-oriented. Use bullet points and bold text. 
 
           if (finalMsg.stop_reason !== 'tool_use') {
             if (turnText) send({ type: 'text', text: turnText });
+            if (overviewRequest && turnText) {
+              await untypedSupabase
+                .from('client_dashboard_overviews')
+                .upsert({ client_id: clientId, overview_text: turnText, generated_at: new Date().toISOString() });
+            }
             break;
           }
 
