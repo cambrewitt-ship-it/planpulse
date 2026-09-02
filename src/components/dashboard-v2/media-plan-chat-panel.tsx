@@ -2,12 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ArrowUp, Bot, Loader2, Paperclip, Undo2, Lock,
-  ChevronDown, Users, FileSpreadsheet,
+  ArrowUp, Loader2, Paperclip, Undo2, Lock, FileSpreadsheet,
 } from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
 import type { UserAgent, AgentAuditStep, AgentOutputLink } from '@/types/database';
-import { MarkdownText, TOOL_LABELS, splitOverview } from './ai-shared';
+import { MarkdownText, TOOL_LABELS, splitOverview, sanitizeChatErrorMessage } from './ai-shared';
 import type { SandboxPlan } from '@/components/sandbox/types';
 import { mergeExtractionIntoPlan, type PlanExtraction } from '@/lib/media-plan/sandbox-sync';
 import type { VisionExtraction } from '@/app/api/media-plan-agent/vision-extract/route';
@@ -32,12 +30,6 @@ const dotGrid: React.CSSProperties = {
 };
 
 const font: React.CSSProperties = { fontFamily: sansFont };
-
-const AGENT_ICONS: Record<string, LucideIcon> = { Bot };
-function AgentIcon({ name, size = 14 }: { name?: string | null; size?: number }) {
-  const Icon = (name && AGENT_ICONS[name]) ? AGENT_ICONS[name] : Bot;
-  return <Icon size={size} style={{ color: RED, flexShrink: 0 }} />;
-}
 
 function BouncingDots({ color = '#C4BDB5' }: { color?: string }) {
   return (
@@ -106,9 +98,7 @@ export default function MediaPlanChatPanel({
   clientId, clientName, currentPlan, onPlanApplied, onWriteAction, starterMessage, onStarterConsumed,
   autoAttachImage, onAutoAttachConsumed, onExcelFileSelected, height,
 }: MediaPlanChatPanelProps) {
-  const [agents, setAgents] = useState<UserAgent[]>([]);
-  const [selectedAgent, setSelectedAgent] = useState<UserAgent | null>(null);
-  const [showAgentMenu, setShowAgentMenu] = useState(false);
+  const [mediaPlanAgent, setMediaPlanAgent] = useState<UserAgent | null>(null);
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [apiMessages, setApiMessages] = useState<ApiMessage[]>([]);
@@ -123,39 +113,26 @@ export default function MediaPlanChatPanel({
   const [preApplySnapshot, setPreApplySnapshot] = useState<SandboxPlan | null>(null);
 
   const messageThreadRef = useRef<HTMLDivElement>(null);
-  const agentMenuRef = useRef<HTMLDivElement>(null);
   const starterSentRef = useRef(false);
 
+  // This chat is always the Media Planner Agent — find it once and use it
+  // for every turn, with no user-facing option to switch assistants.
   useEffect(() => {
     fetch('/api/agents')
       .then(res => res.ok ? res.json() : { agents: [] })
       .then(data => {
         const list: UserAgent[] = (data.agents ?? []).filter((a: UserAgent) => a.is_enabled !== false);
-        setAgents(list);
-        const mediaPlanAgent = list.find(a => a.template_slug === 'media_plan_editor')
+        const agent = list.find(a => a.template_slug === 'media_plan_editor')
           ?? list.find(a => /media|editor/i.test(a.name));
-        if (mediaPlanAgent) setSelectedAgent(mediaPlanAgent);
+        if (agent) setMediaPlanAgent(agent);
       })
       .catch(() => {});
   }, []);
 
   useEffect(() => {
-    if (!showAgentMenu) return;
-    function handleClickOutside(e: MouseEvent) {
-      if (agentMenuRef.current && !agentMenuRef.current.contains(e.target as Node)) setShowAgentMenu(false);
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showAgentMenu]);
-
-  useEffect(() => {
     const el = messageThreadRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, activeToolCall]);
-
-  function selectAgent(agent: UserAgent | null) {
-    setSelectedAgent(agent);
-  }
 
   const sendMessage = useCallback(async (userText: string) => {
     if (isStreaming) return;
@@ -189,9 +166,9 @@ export default function MediaPlanChatPanel({
     setActiveToolCall(null);
 
     try {
-      const endpoint = selectedAgent ? '/api/agency/chat' : `/api/clients/${clientId}/ai-agent`;
-      const body = selectedAgent
-        ? { messages: newApiMessages, agentId: selectedAgent.id }
+      const endpoint = mediaPlanAgent ? '/api/agency/chat' : `/api/clients/${clientId}/ai-agent`;
+      const body = mediaPlanAgent
+        ? { messages: newApiMessages, agentId: mediaPlanAgent.id }
         : { messages: newApiMessages };
 
       const res = await fetch(endpoint, {
@@ -248,7 +225,7 @@ export default function MediaPlanChatPanel({
                 return next;
               });
             } else if (event.type === 'error') {
-              assistantText = event.message ?? 'Something went wrong. Please try again.';
+              assistantText = sanitizeChatErrorMessage(event.message);
               setMessages(prev => {
                 const next = [...prev];
                 const last = next[next.length - 1];
@@ -284,7 +261,7 @@ export default function MediaPlanChatPanel({
       setIsStreaming(false);
       setActiveToolCall(null);
     }
-  }, [clientId, clientName, apiMessages, isStreaming, selectedAgent, onWriteAction, currentPlan]);
+  }, [clientId, clientName, apiMessages, isStreaming, mediaPlanAgent, onWriteAction, currentPlan]);
 
   const applyExtraction = useCallback((extraction: VisionExtraction, msgIndex: number) => {
     setPreApplySnapshot(currentPlan);
@@ -485,57 +462,8 @@ export default function MediaPlanChatPanel({
               Media Plan Editor
             </span>
 
-            <div ref={agentMenuRef} style={{ position: 'relative', marginLeft: 'auto' }}>
-              <button
-                onClick={() => setShowAgentMenu(v => !v)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 5,
-                  padding: '3px 10px', borderRadius: 99, border: `1px solid ${BORDER}`,
-                  background: CARD_BG, color: GRAPHITE, fontSize: 11.5, fontWeight: 500,
-                  cursor: 'pointer', fontFamily: sansFont,
-                }}
-              >
-                {selectedAgent ? <AgentIcon name={selectedAgent.icon} size={12} /> : <Users size={12} />}
-                {selectedAgent ? selectedAgent.name : 'Default Assistant'}
-                <ChevronDown size={12} style={{ transform: showAgentMenu ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
-              </button>
-              {showAgentMenu && (
-                <div style={{
-                  position: 'absolute', top: '100%', right: 0, marginTop: 4,
-                  background: CARD_BG, border: `1px solid ${BORDER}`, borderRadius: 10,
-                  boxShadow: '0 4px 16px rgba(0,0,0,0.12)', minWidth: 190, zIndex: 20,
-                  padding: 4, display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 260, overflowY: 'auto',
-                }}>
-                  <button
-                    onClick={() => { selectAgent(null); setShowAgentMenu(false); }}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 7, padding: '6px 10px', borderRadius: 6, border: 'none',
-                      background: selectedAgent === null ? PAPER_BG : 'transparent', color: '#3C3732',
-                      fontSize: 12.5, fontWeight: 500, cursor: 'pointer', textAlign: 'left', width: '100%', fontFamily: sansFont,
-                    }}
-                  >
-                    <Bot size={13} /> Default Assistant
-                  </button>
-                  {agents.map(agent => (
-                    <button
-                      key={agent.id}
-                      onClick={() => { selectAgent(agent); setShowAgentMenu(false); }}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 7, padding: '6px 10px', borderRadius: 6, border: 'none',
-                        background: selectedAgent?.id === agent.id ? PAPER_BG : 'transparent', color: '#3C3732',
-                        fontSize: 12.5, fontWeight: 500, cursor: 'pointer', textAlign: 'left', width: '100%', fontFamily: sansFont,
-                      }}
-                      title={agent.description ?? undefined}
-                    >
-                      <AgentIcon name={agent.icon} size={13} /> {agent.name}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
             {confirmedAt && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: GREEN, fontWeight: 500 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: GREEN, fontWeight: 500, marginLeft: 'auto' }}>
                 <Lock size={11} /> Confirmed
               </div>
             )}
@@ -686,7 +614,7 @@ export default function MediaPlanChatPanel({
                     ? 'Working…'
                     : pendingExtraction
                       ? 'Type a correction, or click Apply above…'
-                      : `Ask ${selectedAgent?.name ?? 'the assistant'} about this plan…`
+                      : `Ask ${mediaPlanAgent?.name ?? 'the assistant'} about this plan…`
                 }
                 style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', fontSize: 14, color: INK, minWidth: 0, ...font }}
               />

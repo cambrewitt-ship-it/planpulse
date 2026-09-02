@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/server';
 import { patchSandboxPlanFlightBudget, upsertSandboxPlanFlight, snapToWeekCommencing } from '@/lib/media-plan/sandbox-sync';
 import { nzToday, nzDateKeyOffset, nzStartOfMonth, formatNZ } from '@/lib/timezone';
 import { withCacheControl } from '@/lib/agent-tools';
+import { withAnthropicOverloadRetry, friendlyAnthropicErrorMessage } from '@/lib/anthropic-retry';
 
 export const maxDuration = 60;
 
@@ -729,26 +730,31 @@ Be concise, professional, and action-oriented. Use bullet points and bold text. 
         let messages = [...userMessages];
 
         while (true) {
-          const anthropicStream = anthropic.messages.stream({
-            model: 'claude-opus-4-7',
-            system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
-            tools: withCacheControl(CLIENT_AGENT_TOOLS),
-            messages,
-            max_tokens: 2048,
-          });
-
           // Buffer this turn's text rather than streaming it live — a turn that
           // ends in tool_use may carry narration ("I'll pull the latest data…")
           // ahead of the tool call, which we never want to surface to the user.
-          // Only the final, tool-free turn's text is actually sent.
+          // Only the final, tool-free turn's text is actually sent. Nothing is
+          // sent to the client until after this resolves, so the whole turn is
+          // safe to transparently retry on an overload/rate-limit error.
           let turnText = '';
-          for await (const event of anthropicStream) {
-            if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-              turnText += event.delta.text;
-            }
-          }
+          const finalMsg = await withAnthropicOverloadRetry(async () => {
+            turnText = '';
+            const anthropicStream = anthropic.messages.stream({
+              model: 'claude-opus-4-7',
+              system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
+              tools: withCacheControl(CLIENT_AGENT_TOOLS),
+              messages,
+              max_tokens: 2048,
+            });
 
-          const finalMsg = await anthropicStream.finalMessage();
+            for await (const event of anthropicStream) {
+              if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+                turnText += event.delta.text;
+              }
+            }
+
+            return anthropicStream.finalMessage();
+          });
           messages.push({ role: 'assistant', content: finalMsg.content });
 
           if (finalMsg.stop_reason !== 'tool_use') {
@@ -802,7 +808,7 @@ Be concise, professional, and action-oriented. Use bullet points and bold text. 
           messages.push({ role: 'user', content: toolResults });
         }
       } catch (err: any) {
-        send({ type: 'error', message: err.message ?? 'Something went wrong' });
+        send({ type: 'error', message: friendlyAnthropicErrorMessage(err) });
       }
 
       send({ type: 'done' });

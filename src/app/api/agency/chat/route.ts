@@ -6,6 +6,7 @@ import { buildAuditSummary, buildOutputLinks, TOOL_LABELS, WRITE_TOOLS } from '@
 import type { AgentAuditStep, AgentOutputLink } from '@/lib/agent-audit';
 import { channelsToSandboxPlan, patchSandboxPlanFlightBudget, upsertSandboxPlanFlight, snapToWeekCommencing } from '@/lib/media-plan/sandbox-sync';
 import { nzToday, nzDateKeyOffset, nzStartOfMonth, formatNZ } from '@/lib/timezone';
+import { withAnthropicOverloadRetry, friendlyAnthropicErrorMessage } from '@/lib/anthropic-retry';
 
 export const maxDuration = 60;
 
@@ -1357,22 +1358,34 @@ export async function POST(request: NextRequest) {
         let messages = [...userMessages];
 
         while (true) {
-          const anthropicStream = anthropic.messages.stream({
-            model: 'claude-opus-4-7',
-            system: [{ type: 'text', text: effectiveSystemPrompt, cache_control: { type: 'ephemeral' } }],
-            tools: withCacheControl(effectiveTools),
-            messages,
-            max_tokens: 2048,
-          });
+          // Text deltas are streamed live to the client, so a retry is only
+          // safe while this turn's attempt hasn't sent anything yet — once
+          // the first chunk goes out, an overload error is reported as-is
+          // rather than retried, to avoid duplicating partial output.
+          let sentAnyThisAttempt = false;
+          const finalMsg = await withAnthropicOverloadRetry(
+            async () => {
+              sentAnyThisAttempt = false;
+              const anthropicStream = anthropic.messages.stream({
+                model: 'claude-opus-4-7',
+                system: [{ type: 'text', text: effectiveSystemPrompt, cache_control: { type: 'ephemeral' } }],
+                tools: withCacheControl(effectiveTools),
+                messages,
+                max_tokens: 2048,
+              });
 
-          for await (const event of anthropicStream) {
-            if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-              finalTextBuffer += event.delta.text;
-              send({ type: 'text', text: event.delta.text });
-            }
-          }
+              for await (const event of anthropicStream) {
+                if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+                  finalTextBuffer += event.delta.text;
+                  send({ type: 'text', text: event.delta.text });
+                  sentAnyThisAttempt = true;
+                }
+              }
 
-          const finalMsg = await anthropicStream.finalMessage();
+              return anthropicStream.finalMessage();
+            },
+            { canRetry: () => !sentAnyThisAttempt }
+          );
           messages.push({ role: 'assistant', content: finalMsg.content });
 
           if (finalMsg.stop_reason !== 'tool_use') break;
@@ -1463,7 +1476,7 @@ export async function POST(request: NextRequest) {
           messages.push({ role: 'user', content: toolResults });
         }
       } catch (err: any) {
-        send({ type: 'error', message: err.message ?? 'Something went wrong' });
+        send({ type: 'error', message: friendlyAnthropicErrorMessage(err) });
 
         if (agentRunId) {
           await supabase

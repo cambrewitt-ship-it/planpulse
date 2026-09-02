@@ -23,6 +23,8 @@ import {
   RefreshCw,
   Plus,
   Trash2,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { MediaPlanChannel, MediaFlight, MediaPlanCampaignLine } from '@/components/legacy-plan-builder/media-plan-grid';
 import { UploadWizard } from '@/components/sandbox/upload-wizard';
@@ -258,6 +260,8 @@ export default function CreateClientPage() {
   // (pre-loaded with this file) since the wizard is otherwise only mounted when
   // there's no plan yet, but the chat panel is available even once a plan exists.
   const [pendingExcelFile, setPendingExcelFile] = useState<File | null>(null);
+  // Collapses the AI Planner Agent chat panel so the grid can take the full width.
+  const [mediaPlanChatOpen, setMediaPlanChatOpen] = useState(true);
   // Purely visual — shown dimmed behind a lock overlay before the client exists,
   // so the grid + chat panel are visible (not interactive) instead of hidden.
   const previewPlan = useMemo(() => createBlankSandboxPlan(), []);
@@ -530,7 +534,10 @@ export default function CreateClientPage() {
     setChannels(sandboxPlanToChannels(updated));
     try { localStorage.setItem(`planpulse_sandbox_plan_${clientId}`, JSON.stringify(updated)); } catch {}
   };
-  const handleSandboxPlanLoaded = (loaded: SandboxPlan) => handleSandboxPlanChange(loaded);
+  const handleSandboxPlanLoaded = (loaded: SandboxPlan) => {
+    handleSandboxPlanChange(loaded);
+    setExternalPlanRevision((v) => v + 1);
+  };
   const handleSandboxPlanUpload = () => {
     setSandboxPlan(null);
     setChannels([]);
@@ -1281,8 +1288,11 @@ export default function CreateClientPage() {
                   </Button>
                 </div>
                 {sandboxPlan ? (
-                  <div style={{ height: 'calc(100vh - 420px)', minHeight: 420, display: 'flex', gap: 12 }}>
-                    <div style={{ flex: '0 0 32%', minWidth: 280, maxWidth: 420 }}>
+                  <div style={{ height: 'calc(100vh - 420px)', minHeight: 420, display: 'flex', gap: 0 }}>
+                    <div style={{
+                      flex: '0 0 32%', minWidth: 280, maxWidth: 420, marginRight: 12,
+                      display: mediaPlanChatOpen ? 'flex' : 'none', flexDirection: 'column',
+                    }}>
                       <MediaPlanChatPanel
                         clientId={clientId}
                         clientName={clientName}
@@ -1295,7 +1305,34 @@ export default function CreateClientPage() {
                         height="100%"
                       />
                     </div>
-                    <div style={{ flex: '1 1 68%', minWidth: 0, borderRadius: 12, border: '1px solid rgba(232,228,220,0.7)', boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', overflow: 'hidden' }}>
+
+                    <div style={{ flexShrink: 0, marginRight: 12, display: 'flex', alignItems: 'center' }}>
+                      <button
+                        onClick={() => setMediaPlanChatOpen(v => !v)}
+                        title={mediaPlanChatOpen ? 'Collapse AI Planner Agent' : 'Open AI Planner Agent'}
+                        style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                          width: mediaPlanChatOpen ? 20 : 'auto',
+                          height: 48, padding: mediaPlanChatOpen ? 0 : '0 14px',
+                          borderRadius: 8, whiteSpace: 'nowrap',
+                          border: '0.5px solid #D5D0C5', background: '#FDFCF8',
+                          color: '#1C1917', cursor: 'pointer',
+                          fontSize: 13, fontWeight: 500, fontFamily: "'DM Sans', system-ui, sans-serif",
+                          boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+                        }}
+                      >
+                        {mediaPlanChatOpen ? (
+                          <ChevronLeft className="w-4 h-4" />
+                        ) : (
+                          <>
+                            <ChevronRight className="w-4 h-4" />
+                            Open AI Planner Agent
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    <div style={{ flex: '1 1 auto', minWidth: 0, borderRadius: 12, border: '1px solid rgba(232,228,220,0.7)', boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', overflow: 'hidden' }}>
                       <PlanGrid
                         key={externalPlanRevision}
                         plan={sandboxPlan}

@@ -10,6 +10,26 @@ export function splitOverview(content: string): { internal: string; client: stri
   return { internal: parts[0].trim(), client: parts.slice(1).join(CLIENT_FACING_DELIMITER).trim() };
 }
 
+// Backend errors are meant to arrive as a friendly string, but this is a last
+// line of defense: if an `error` SSE event ever carries a raw API error
+// payload (e.g. `{"type":"error","error":{"type":"overloaded_error",...}}`),
+// show a generic message instead of dumping JSON into the chat.
+export function sanitizeChatErrorMessage(message: string | undefined | null): string {
+  const fallback = 'Something went wrong. Please try again.';
+  if (!message) return fallback;
+  const trimmed = message.trim();
+  if (!trimmed.startsWith('{')) return trimmed;
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (parsed && typeof parsed === 'object' && ('error' in parsed || parsed.type === 'error')) {
+      return fallback;
+    }
+  } catch {
+    // not JSON — fall through and show as-is
+  }
+  return trimmed;
+}
+
 export const TOOL_LABELS: Record<string, string> = {
   get_client_intelligence: 'Reading client intel…',
   get_channel_performance: 'Checking channel performance…',

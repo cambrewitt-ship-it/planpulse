@@ -55,6 +55,10 @@ export interface HeroHealthSectionProps {
   };
   planStart?: string;
   planEnd?: string;
+  // Date range backing currentSpend/pacingStatus above: the media plan's own
+  // timeline (start → today, or its end date if already finished) — same
+  // window Plan Timeline uses below. Shown as the Spend row's date label.
+  spendDateRange: { startDate: string; endDate: string };
   heroDateRange: { startDate: string; endDate: string };
   onHeroDateRangeChange: (range: { startDate: string; endDate: string }) => void;
   isLoadingScore?: boolean;
@@ -762,6 +766,7 @@ export default function HeroHealthSection({
   performanceStatus,
   planStart,
   planEnd,
+  spendDateRange,
   heroDateRange,
   onHeroDateRangeChange,
   isLoadingScore = false,
@@ -942,9 +947,9 @@ export default function HeroHealthSection({
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Spend</span>
                   <span className="text-xs text-gray-400">
-                    {new Date(heroDateRange.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                    {new Date(spendDateRange.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                     {' – '}
-                    {new Date(heroDateRange.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                    {new Date(spendDateRange.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                   </span>
                 </div>
                 <div className="flex items-center justify-between gap-3">

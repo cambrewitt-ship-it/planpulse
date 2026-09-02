@@ -497,6 +497,9 @@ export function ClientCardCompact({
   const planProgress = getMediaPlanProgress(client.channels);
   // Pacing reference is the plan's own timeline (start → end), not the calendar month.
   const planProgressPct = planProgress ? planProgress.progress * 100 : null;
+  // actualSpend is plan-to-date (plan start → today), so the Spend bar's date
+  // range shares the Plan bar's start date but runs through today, not the plan end.
+  const todayLabel = formatNZ(new Date(`${nzToday()}T00:00:00Z`), { day: 'numeric', month: 'short' }, 'en-GB');
 
   return (
     <div
@@ -627,6 +630,11 @@ export function ClientCardCompact({
       <div style={{ marginTop: 10 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
           <span style={{ fontSize: 10, color: '#8A8578', fontWeight: 500 }}>Spend</span>
+          {hasSpend && planProgress && (
+            <span style={{ fontSize: 9, color: '#B5B0A5' }}>
+              ({planProgress.startLabel} → {todayLabel})
+            </span>
+          )}
           {hasSpend ? (
             <span style={{ fontSize: 10, color: '#1C1917', marginLeft: 'auto' }}>
               {formatCurrency(client.actualSpend)}

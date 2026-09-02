@@ -208,7 +208,7 @@ function SpreadsheetDiagram() {
 }
 
 export function UploadWizard({ onPlanLoaded, onScreenshotSelected, title, description, initialFile }: Props) {
-  const [step, setStep] = useState<Step>("drop");
+  const [step, setStep] = useState<Step>(initialFile ? "parsing" : "drop");
   const [errorMsg, setErrorMsg] = useState("");
   const [parsedPlan, setParsedPlan] = useState<SandboxPlan | null>(null);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
@@ -290,6 +290,7 @@ export function UploadWizard({ onPlanLoaded, onScreenshotSelected, title, descri
   const handleFileSelected = useCallback(async (file: File) => {
     setPendingFile(file);
     setPendingScratch(false);
+    setParseProgress("Reading file...");
     const sheets = await probeSheets(file);
     setAvailableSheets(sheets);
     setSelectedSheet(sheets[0] ?? "");
@@ -362,14 +363,14 @@ export function UploadWizard({ onPlanLoaded, onScreenshotSelected, title, descri
         title: "New Media Plan",
         asAtLabel: "",
         weeks,
-        rows: [{
+        rows: Array.from({ length: 5 }, () => ({
           id: Math.random().toString(36).slice(2),
           funnel: "AWARENESS",
           channel: "",
           detail: "",
           audience: "",
           flights: [],
-        }],
+        })),
         updatedAt: new Date().toISOString(),
       };
       onPlanLoaded(plan);

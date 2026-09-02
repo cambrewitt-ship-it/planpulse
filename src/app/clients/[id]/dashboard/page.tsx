@@ -308,6 +308,9 @@ export default function DashboardV2() {
   const [channelMonthSpendData, setChannelMonthSpendData] = useState<SpendDataPoint[]>([]);
   const [isLoadingSpend, setIsLoadingSpend] = useState(true);
   const [spendApiErrors, setSpendApiErrors] = useState<string[]>([]);
+  // Spend data scoped to the media plan's own timeline (start → today) — feeds
+  // the hero card's Spend bar, independent of the Channel Performance Timeframe picker.
+  const [planToDateSpendData, setPlanToDateSpendData] = useState<SpendDataPoint[]>([]);
   // Non-digital channel actuals
   const [organicSocialActuals, setOrganicSocialActuals] = useState<OrganicSocialActual[]>([]);
   const [edmActuals, setEdmActuals] = useState<EdmActual[]>([]);
@@ -363,13 +366,39 @@ export default function DashboardV2() {
   // Campaign selections lifted from ChannelPerformanceCard: channelKey → selected IDs
   // Empty array = All Campaigns; ['__none__'] = Not set up yet
   const [channelCampaignSelections, setChannelCampaignSelections] = useState<Record<string, string[]>>({});
-  // Derived from channelMonthSpendData — sum of spend across all platforms for
-  // the currently selected analytics period.
-  // ── Total actual spend: respects per-channel campaign filters ────────────
+  // ── Derived campaign date/day values (shared across memos) ──────────────
+  const campaignDates = useMemo(() => {
+    if (!mediaPlanBuilderChannels.length) return null;
+    const allDates = mediaPlanBuilderChannels.flatMap(ch =>
+      ch.flights.flatMap(f => [f.startWeek, f.endWeek])
+    ).filter(Boolean) as Date[];
+    if (!allDates.length) return null;
+    const now = nzTodayLocalMidnight();
+    const start = new Date(Math.min(...allDates.map(d => d.getTime())));
+    const end   = new Date(Math.max(...allDates.map(d => d.getTime())));
+    const totalDays   = Math.max(1, Math.ceil((end.getTime()   - start.getTime()) / 86400000));
+    const daysElapsed = Math.max(0, Math.ceil((now.getTime()   - start.getTime()) / 86400000));
+    const daysRemaining = Math.max(0, Math.ceil((end.getTime() - now.getTime())   / 86400000));
+    const totalBudget = mediaPlanBuilderChannels.reduce((sum, ch) =>
+      sum + ch.flights.reduce((s, f) =>
+        s + Object.values(f.monthlySpend).reduce((a, b) => a + b, 0), 0), 0);
+    const plannedSpend = totalBudget > 0
+      ? Math.min(totalBudget, totalBudget * (daysElapsed / totalDays))
+      : 0;
+    return { start, end, totalDays, daysElapsed, daysRemaining, totalBudget, plannedSpend };
+  }, [mediaPlanBuilderChannels]);
+
+  // ── Total actual spend: plan-to-date (the media plan's own start → today,
+  // same flight-block timeline the Plan Timeline bar uses), NOT the Channel
+  // Performance section's selectable Timeframe. Sourced from planToDateSpendData,
+  // which is fetched independently of analyticsDateRange — see loadPlanToDateSpendData.
+  // Still respects per-channel campaign filters / hidden cards.
   const totalActualSpend = useMemo(() => {
-    if (!channelMonthSpendData.length || !heroDateRange?.startDate || !heroDateRange?.endDate) return 0;
-    const rangeStart = heroDateRange.startDate;
-    const rangeEnd   = heroDateRange.endDate;
+    if (!planToDateSpendData.length || !campaignDates) return 0;
+    const rangeStart = campaignDates.start.toISOString().slice(0, 10);
+    const todayStr = nzToday();
+    const campaignEndStr = campaignDates.end.toISOString().slice(0, 10);
+    const rangeEnd = campaignEndStr < todayStr ? campaignEndStr : todayStr;
 
     const paidChannels = mediaPlanBuilderChannels.filter(ch => {
       const cat = (ch as any).channelCategory || getChannelCategory(ch.channelName);
@@ -377,7 +406,7 @@ export default function DashboardV2() {
     });
 
     if (paidChannels.length === 0) {
-      return (channelMonthSpendData as any[])
+      return (planToDateSpendData as any[])
         .filter((p: any) => p.date >= rangeStart && p.date <= rangeEnd)
         .reduce((sum: number, p: any) => sum + (p.spend ?? 0), 0);
     }
@@ -406,7 +435,7 @@ export default function DashboardV2() {
 
       const keyword = ch.channelName.toLowerCase().split(' ')[0];
 
-      const chPoints = (channelMonthSpendData as any[]).filter((p: any) => {
+      const chPoints = (planToDateSpendData as any[]).filter((p: any) => {
         if (!p.date || p.date < rangeStart || p.date > rangeEnd) return false;
         const matchesPlatform = (p.platform && p.platform === platform) ||
                                  (p.channelName && p.channelName.toLowerCase().includes(keyword));
@@ -434,7 +463,7 @@ export default function DashboardV2() {
       .reduce((sum, ch) => sum + ((ch as any).manualActualSpend ?? 0), 0);
 
     return total + nonDigitalTotal;
-  }, [channelMonthSpendData, heroDateRange.startDate, heroDateRange.endDate, mediaPlanBuilderChannels, channelCampaignSelections, hiddenChannelCards, channelFilterMode]);
+  }, [planToDateSpendData, campaignDates, mediaPlanBuilderChannels, channelCampaignSelections, hiddenChannelCards, channelFilterMode]);
 
   // Fetch account managers
   useEffect(() => {
@@ -531,6 +560,7 @@ export default function DashboardV2() {
 
   const handleClientPlanLoaded = (loaded: SandboxPlan) => {
     handleClientPlanChange(loaded);
+    setExternalPlanRevision(v => v + 1);
   };
 
   // Used by the Media Plan Editor chat panel: PlanGrid only reads its `plan` prop
@@ -941,6 +971,15 @@ export default function DashboardV2() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [analyticsDateRange.startDate, analyticsDateRange.endDate, clientId]);
 
+  // Reload the hero card's plan-to-date spend whenever the media plan's own
+  // timeline changes (e.g. finishes loading, or a flight is added/edited).
+  useEffect(() => {
+    if (clientId && campaignDates) {
+      loadPlanToDateSpendData();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId, campaignDates?.start?.getTime(), campaignDates?.end?.getTime()]);
+
   const loadData = async () => {
     try {
       const foundClient = await getClientById(clientId);
@@ -1120,6 +1159,32 @@ export default function DashboardV2() {
     }
   };
 
+  // Fetches spend data bounded to the media plan's own timeline (start → today),
+  // independent of analyticsDateRange (the Channel Performance Timeframe picker).
+  // Feeds totalActualSpend, which drives the hero card's Spend bar.
+  const loadPlanToDateSpendData = async (force: boolean = false) => {
+    if (!clientId || !campaignDates) return;
+
+    const todayStr = nzToday();
+    const campaignEndStr = campaignDates.end.toISOString().slice(0, 10);
+    try {
+      const result = await fetchCachedAnalyticsData(clientId, {
+        startDate: campaignDates.start.toISOString().slice(0, 10),
+        endDate: campaignEndStr < todayStr ? campaignEndStr : todayStr,
+        force,
+      });
+
+      const enhancedSpendData = (result.spendData || []).map((point: any) => ({
+        ...point,
+        channelName: getChannelDisplayNameFromPlatform(point.platform),
+      }));
+
+      setPlanToDateSpendData(enhancedSpendData);
+    } catch (error) {
+      console.error('Error loading plan-to-date spend data:', error);
+    }
+  };
+
   // Force-refreshes GA4 + all connected ad platforms for this client, bypassing
   // the 6-hour cache — the "Refresh Data" button next to the timeframe picker.
   // Resets each platform's staleness clock so the cron skips it for 6h.
@@ -1127,33 +1192,11 @@ export default function DashboardV2() {
     if (isRefreshingData) return;
     setIsRefreshingData(true);
     try {
-      await loadAnalyticsData(true);
+      await Promise.all([loadAnalyticsData(true), loadPlanToDateSpendData(true)]);
     } finally {
       setIsRefreshingData(false);
     }
   };
-
-  // ── Derived campaign date/day values (shared across memos) ──────────────
-  const campaignDates = useMemo(() => {
-    if (!mediaPlanBuilderChannels.length) return null;
-    const allDates = mediaPlanBuilderChannels.flatMap(ch =>
-      ch.flights.flatMap(f => [f.startWeek, f.endWeek])
-    ).filter(Boolean) as Date[];
-    if (!allDates.length) return null;
-    const now = nzTodayLocalMidnight();
-    const start = new Date(Math.min(...allDates.map(d => d.getTime())));
-    const end   = new Date(Math.max(...allDates.map(d => d.getTime())));
-    const totalDays   = Math.max(1, Math.ceil((end.getTime()   - start.getTime()) / 86400000));
-    const daysElapsed = Math.max(0, Math.ceil((now.getTime()   - start.getTime()) / 86400000));
-    const daysRemaining = Math.max(0, Math.ceil((end.getTime() - now.getTime())   / 86400000));
-    const totalBudget = mediaPlanBuilderChannels.reduce((sum, ch) =>
-      sum + ch.flights.reduce((s, f) =>
-        s + Object.values(f.monthlySpend).reduce((a, b) => a + b, 0), 0), 0);
-    const plannedSpend = totalBudget > 0
-      ? Math.min(totalBudget, totalBudget * (daysElapsed / totalDays))
-      : 0;
-    return { start, end, totalDays, daysElapsed, daysRemaining, totalBudget, plannedSpend };
-  }, [mediaPlanBuilderChannels]);
 
   // ── Gantt data for hero card (single client, all channels) ──────────────
   const ganttClients = useMemo<GanttClient[]>(() => {
@@ -1486,6 +1529,17 @@ export default function DashboardV2() {
       performanceStatus,
       planStart: campaignDates.start.toISOString().slice(0, 10),
       planEnd: campaignDates.end.toISOString().slice(0, 10),
+      // Date range backing the Spend figures above: plan start → today (or the
+      // plan's end date, if it already finished) — same timeline as Plan Timeline,
+      // NOT the Channel Performance section's Timeframe picker.
+      spendDateRange: {
+        startDate: campaignDates.start.toISOString().slice(0, 10),
+        endDate: (() => {
+          const todayStr = nzToday();
+          const campaignEndStr = campaignDates.end.toISOString().slice(0, 10);
+          return campaignEndStr < todayStr ? campaignEndStr : todayStr;
+        })(),
+      },
       isLoadingScore: !healthScoreReady,
       onAccountManagerChange: handleAccountManagerChange,
       isSavingAccountManager,

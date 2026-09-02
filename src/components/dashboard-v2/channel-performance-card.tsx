@@ -1248,8 +1248,22 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
   // The projected line continues from the last actual point to the forecast horizon,
   // generating synthetic daily points when the forecast extends beyond the chart data range.
   const chartDataWithProjection: Array<typeof visibleChartData[0] & { projectedSpend?: number | null }> = (() => {
-    if (!overspendForecast || !visibleChartData.length) {
-      return visibleChartData.map(p => ({ ...p, projectedSpend: null as number | null }));
+    if (!visibleChartData.length) {
+      return fullChartData.map(p => ({ ...p, projectedSpend: null as number | null }));
+    }
+
+    if (!overspendForecast) {
+      // No burn-rate forecast to project, but the selected range may extend
+      // past today (e.g. a future end date) — still show the planned-spend
+      // line all the way out, only actual/projected stop at today.
+      const lastVisibleDate = visibleChartData[visibleChartData.length - 1].date;
+      const future = fullChartData
+        .filter(p => p.date > lastVisibleDate)
+        .map(p => ({ ...p, actualSpend: null as number | null, projectedSpend: null as number | null }));
+      return [
+        ...visibleChartData.map(p => ({ ...p, projectedSpend: null as number | null })),
+        ...future,
+      ];
     }
 
     let lastActualSpend: number | null = null;
@@ -1317,12 +1331,14 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
     return [...withProjection, ...futureFromChart, ...syntheticPoints];
   })();
 
-  // Build month labels for the visible range.
+  // Build month labels for the visible range. Uses chartDataWithProjection
+  // (not visibleChartData) so the footer stays aligned with what the chart
+  // actually renders, including future dates beyond today.
   const monthLabels: { key: string; month: string; position: number; widthPct: number; firstDate: string }[] = [];
-  if (visibleChartData.length > 0) {
+  if (chartDataWithProjection.length > 0) {
     const spans: Record<string, { startIdx: number; endIdx: number; firstDate: string }> = {};
 
-    visibleChartData.forEach((point, idx) => {
+    chartDataWithProjection.forEach((point, idx) => {
       const d = new Date(point.date);
       if (isNaN(d.getTime())) return;
       const key = `${d.getFullYear()}-${d.getMonth()}`;
@@ -1333,8 +1349,8 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
       }
     });
 
-    const total     = Math.max(1, visibleChartData.length - 1);
-    const totalDays = visibleChartData.length;
+    const total     = Math.max(1, chartDataWithProjection.length - 1);
+    const totalDays = chartDataWithProjection.length;
 
     Object.entries(spans).forEach(([key, span]) => {
       const [yearStr, monthIndexStr] = key.split('-');

@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { UserAgent, AgentAuditStep, AgentOutputLink } from '@/types/database';
-import { MarkdownText, TOOL_LABELS, splitOverview } from './ai-shared';
+import { MarkdownText, TOOL_LABELS, splitOverview, sanitizeChatErrorMessage } from './ai-shared';
 
 // Apple × Moleskine design tokens
 const RED = 'oklch(42% 0.16 25)';
@@ -216,7 +216,7 @@ export default function ClientChatPanel({
             } else if (event.type === 'output_links') {
               setOutputLinks(event.links ?? []);
             } else if (event.type === 'error') {
-              assistantText = event.message ?? 'Something went wrong. Please try again.';
+              assistantText = sanitizeChatErrorMessage(event.message);
               setMessages(prev => {
                 const next = [...prev];
                 const last = next[next.length - 1];

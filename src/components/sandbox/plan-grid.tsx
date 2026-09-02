@@ -1604,7 +1604,7 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
                       value={row.channel}
                       libraryChannels={libraryChannels}
                       rowSpan={span.channelSpan}
-                      autoOpen={rows.length === 1 && !row.channel}
+                      autoOpen={rowIdx === 0 && !row.channel && rows.every(r => !r.channel)}
                       onChange={val => {
                         setRows(prev => {
                           const last = rowIdx + span.channelSpan;
