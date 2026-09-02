@@ -18,6 +18,7 @@ const META_ACTION_LABELS: Record<string, string> = {
   purchase: 'Purchases',
   lead: 'Leads',
   complete_registration: 'Registrations',
+  submit_application: 'Submit Application',
   add_to_cart: 'Add to Cart',
   initiate_checkout: 'Checkout Initiated',
   view_content: 'View Content',
@@ -82,6 +83,10 @@ export interface SpendDataPoint {
   campaignId?: string;
   campaignName?: string;
   actions?: Array<{ action_type: string; value: string }>;
+  /** Meta Ads only. */
+  reach?: number;
+  /** Meta Ads only. */
+  frequency?: number;
 }
 
 export interface FetchAnalyticsDataOptions {
@@ -269,6 +274,7 @@ export async function fetchSpendData(
           conversions: item.conversions || 0,
           campaignId: item.campaignId || '',
           campaignName: item.campaignName || '',
+          actions: item.conversionActions || [],
         });
       });
       if (googleData.errors?.length) {
@@ -766,6 +772,28 @@ export function extractPlatformEventOptions(spendData: SpendDataPoint[]): Platfo
     if (totalClicks > 0) options.push({ source: 'google', key: 'clicks', label: 'Clicks', count: totalClicks });
     if (totalImpressions > 0) options.push({ source: 'google', key: 'impressions', label: 'Impressions', count: totalImpressions });
     if (totalConversions > 0) options.push({ source: 'google', key: 'conversions', label: 'Conversions', count: totalConversions });
+
+    // Extract named conversion actions (e.g. "Submit lead form"), mirroring Meta above.
+    // Google's account-configured action name is already human-readable, so it doubles
+    // as both the lookup key and the display label.
+    const actionCounts = new Map<string, number>();
+    googleSpend.forEach(point => {
+      point.actions?.forEach(action => {
+        const val = parseFloat(action.value) || 0;
+        actionCounts.set(action.action_type, (actionCounts.get(action.action_type) || 0) + val);
+      });
+    });
+
+    actionCounts.forEach((count, actionType) => {
+      if (count > 0) {
+        options.push({
+          source: 'google',
+          key: actionType,
+          label: actionType,
+          count: Math.round(count),
+        });
+      }
+    });
   }
 
   return options;

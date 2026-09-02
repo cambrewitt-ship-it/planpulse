@@ -21,7 +21,7 @@ export async function readCachedSpendData(
 ): Promise<SpendDataPoint[]> {
   const { data } = await supabase
     .from('ad_performance_metrics')
-    .select('date, platform, account_name, campaign_id, campaign_name, spend, impressions, clicks, ctr, cpc, conversions, meta_actions')
+    .select('date, platform, account_name, campaign_id, campaign_name, spend, impressions, clicks, ctr, cpc, conversions, reach, frequency, meta_actions, google_conversion_actions')
     .eq('client_id', clientId)
     .in('platform', AD_PLATFORMS)
     .gte('date', startDate)
@@ -44,9 +44,13 @@ export async function readCachedSpendData(
     conversions: Number(row.conversions) || 0,
     campaignId: row.campaign_id ?? '',
     campaignName: row.campaign_name ?? '',
-    // Matches the live path (analytics-data-integration.ts fetchSpendData), which
-    // only ever attaches `actions` for Meta rows.
-    ...(row.platform === 'meta-ads' ? { actions: row.meta_actions ?? [] } : {}),
+    // Matches the live path (analytics-data-integration.ts fetchSpendData): named
+    // per-action-type conversion breakdowns, sourced from meta_actions for Meta and
+    // google_conversion_actions (segmented by the account's own conversion action
+    // name, e.g. "Submit lead form") for Google. reach/frequency stay Meta-only.
+    ...(row.platform === 'meta-ads'
+      ? { actions: row.meta_actions ?? [], reach: Number(row.reach) || 0, frequency: Number(row.frequency) || 0 }
+      : { actions: row.google_conversion_actions ?? [] }),
   }));
 }
 

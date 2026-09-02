@@ -24,8 +24,8 @@ export interface ClientChannel {
 export interface ClientCardData extends ClientWithHealth {
   channels: ClientChannel[];
   tasksDueSoon: number;                // incomplete tasks with due_date within next 3 days
-  plannedBudget: number;               // current-month planned spend across all channels ($)
-  actualSpend: number;                 // current-month actual spend ($)
+  plannedBudget: number;               // total campaign budget across all channels/months ($)
+  actualSpend: number;                 // actual spend from plan start to today ($)
   spendVariancePct: number | null;     // ((actual - planned) / planned) * 100, positive = over
   totalActionPoints: number;           // total action points for this client
   completedActionPoints: number;       // completed action points for this client
@@ -49,15 +49,16 @@ function channelStatus(startDate: string | null, endDate: string | null): 'live'
  * Fetch all clients with their health status
  * Query params:
  *  - status: 'red' | 'amber' | 'green' (optional filter)
- *  - startDate: YYYY-MM-DD (optional, defaults to current month start)
- *  - endDate: YYYY-MM-DD (optional, defaults to today)
+ *  - accountManager: account manager name (optional filter)
+ *
+ * actualSpend is always computed on a plan-to-date basis per client (from
+ * that client's own media plan start date through today), not a shared
+ * date range — there is no date-range override.
  */
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const statusFilter = searchParams.get('status') as HealthStatus | null;
-    const startDateParam = searchParams.get('startDate');
-    const endDateParam = searchParams.get('endDate');
     const accountManagerFilter = searchParams.get('accountManager');
 
     // Validate status filter if provided
@@ -128,27 +129,84 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // ── Fetch actual spend per client for the specified date range ─────────
-    // Default to YTD (Jan 1 – today) to match the dashboard's default date range
-    const dateRangeStart = startDateParam || nzStartOfYear();
-    const dateRangeEnd = endDateParam || nzToday();
+    // ── Build channels + plan-to-date bounds per client (sync, no DB calls) ──
+    const toDateStr = (s: string) => (s.length > 10 ? s.split('T')[0] : s);
+
+    const channelsByClient = new Map<string, ClientChannel[]>();
+    const planBoundsByClient = new Map<string, { start: string | null; end: string }>();
+
+    for (const client of clientsData || []) {
+      const rawChannels: any[] = mediaPlanMap.get(client.id) || [];
+      const channels: ClientChannel[] = rawChannels
+        .filter((ch: any) => ch.channelName)
+        .map((ch: any) => {
+          const rawFlights: any[] = ch.flights || [];
+
+          // Build individual flight periods (each flight has its own start + end)
+          const flightPeriods: ClientChannelFlight[] = rawFlights
+            .map((f: any) => ({
+              startDate: f.startWeek ? toDateStr(f.startWeek as string) : null,
+              endDate:   f.endWeek   ? toDateStr(f.endWeek   as string) : null,
+            }))
+            .filter(fp => fp.startDate && fp.endDate)
+            .map(fp => ({ startDate: fp.startDate!, endDate: fp.endDate! }))
+            .sort((a, b) => a.startDate.localeCompare(b.startDate));
+
+          const startDates = flightPeriods.map(fp => fp.startDate);
+          const endDates   = flightPeriods.map(fp => fp.endDate);
+
+          const earliestStart = startDates[0] || null;
+          const latestEnd = endDates[endDates.length - 1] || null;
+
+          const campaignIds: string[] = Array.from(new Set([
+            ...((ch.metaCampaignIds as string[] | undefined) || []),
+            ...((ch.metaCampaignId as string | undefined) ? [ch.metaCampaignId as string] : []),
+          ]));
+
+          return {
+            channelName: ch.channelName as string,
+            status: channelStatus(earliestStart, latestEnd),
+            startDate: earliestStart,
+            endDate: latestEnd,
+            campaignIds,
+            flights: flightPeriods,
+          };
+        })
+        // Only show live + upcoming (not ended)
+        .filter((ch: ClientChannel) => ch.status !== 'ended')
+        // Sort: live first, then upcoming
+        .sort((a: ClientChannel, b: ClientChannel) => {
+          if (a.status === 'live' && b.status !== 'live') return -1;
+          if (b.status === 'live' && a.status !== 'live') return 1;
+          return (a.startDate || '').localeCompare(b.startDate || '');
+        });
+
+      channelsByClient.set(client.id, channels);
+
+      // Plan-to-date bounds: earliest start / latest end across this client's
+      // current (non-ended) channels, clipped to today if still ongoing.
+      const starts = channels.map(ch => ch.startDate).filter(Boolean) as string[];
+      const ends   = channels.map(ch => ch.endDate).filter(Boolean) as string[];
+      const planStart = starts.length ? [...starts].sort()[0] : null;
+      const planEndRaw = ends.length ? [...ends].sort().reverse()[0] : null;
+      const planEnd = planEndRaw && planEndRaw < today ? planEndRaw : today;
+      planBoundsByClient.set(client.id, { start: planStart, end: planEnd });
+    }
+
+    // ── Fetch actual spend across the widest window any client's plan needs ──
+    // actualSpend is always plan-to-date per client (see planBoundsByClient),
+    // never a shared/selectable date range.
+    const allPlanStarts = Array.from(planBoundsByClient.values())
+      .map(b => b.start)
+      .filter(Boolean) as string[];
+    const spendQueryStart = allPlanStarts.length ? [...allPlanStarts].sort()[0] : nzStartOfYear();
     const { data: spendRows } = await supabase
       .from('ad_performance_metrics')
       .select('client_id, spend, campaign_id, date, platform, account_id')
       .eq('user_id', session.user.id) // Filter by current user
-      .gte('date', dateRangeStart)
-      .lte('date', dateRangeEnd)
+      .gte('date', spendQueryStart)
+      .lte('date', today)
       .not('client_id', 'is', null); // Only include rows with client_id (matching new-client-dashboard which filters by client)
-
-    // Sum actual API spend per client — exclude manual-override rows to match
-    // new-client-dashboard behaviour (which uses live API data only, not stored overrides)
-    const spendByClient = new Map<string, number>();
-    for (const row of spendRows || []) {
-      if (!row.client_id) continue;
-      // Skip manual override rows — they are not part of the live API data
-      if (row.campaign_id && row.campaign_id.startsWith('manual-override-')) continue;
-      spendByClient.set(row.client_id, (spendByClient.get(row.client_id) || 0) + Number(row.spend || 0));
-    }
 
     // ── Build enriched client list ────────────────────────────────────────────
     const enrichedClients: ClientCardData[] = await Promise.all(
@@ -160,52 +218,9 @@ export async function GET(request: NextRequest) {
           health = await calculateClientHealth(supabase, client.id);
         }
 
-        // ── Channels with live/upcoming status ──
         const rawChannels: any[] = mediaPlanMap.get(client.id) || [];
-        const channels: ClientChannel[] = rawChannels
-          .filter((ch: any) => ch.channelName)
-          .map((ch: any) => {
-            const rawFlights: any[] = ch.flights || [];
-            const toD = (s: string) => s.length > 10 ? s.split('T')[0] : s;
-
-            // Build individual flight periods (each flight has its own start + end)
-            const flightPeriods: ClientChannelFlight[] = rawFlights
-              .map((f: any) => ({
-                startDate: f.startWeek ? toD(f.startWeek as string) : null,
-                endDate:   f.endWeek   ? toD(f.endWeek   as string) : null,
-              }))
-              .filter(fp => fp.startDate && fp.endDate)
-              .map(fp => ({ startDate: fp.startDate!, endDate: fp.endDate! }))
-              .sort((a, b) => a.startDate.localeCompare(b.startDate));
-
-            const startDates = flightPeriods.map(fp => fp.startDate);
-            const endDates   = flightPeriods.map(fp => fp.endDate);
-
-            const earliestStart = startDates[0] || null;
-            const latestEnd = endDates[endDates.length - 1] || null;
-
-            const campaignIds: string[] = Array.from(new Set([
-              ...((ch.metaCampaignIds as string[] | undefined) || []),
-              ...((ch.metaCampaignId as string | undefined) ? [ch.metaCampaignId as string] : []),
-            ]));
-
-            return {
-              channelName: ch.channelName as string,
-              status: channelStatus(earliestStart, latestEnd),
-              startDate: earliestStart,
-              endDate: latestEnd,
-              campaignIds,
-              flights: flightPeriods,
-            };
-          })
-          // Only show live + upcoming (not ended)
-          .filter((ch: ClientChannel) => ch.status !== 'ended')
-          // Sort: live first, then upcoming
-          .sort((a: ClientChannel, b: ClientChannel) => {
-            if (a.status === 'live' && b.status !== 'live') return -1;
-            if (b.status === 'live' && a.status !== 'live') return 1;
-            return (a.startDate || '').localeCompare(b.startDate || '');
-          });
+        const channels = channelsByClient.get(client.id) || [];
+        const { start: planStart, end: planEnd } = planBoundsByClient.get(client.id) || { start: null, end: today };
 
         // ── Tasks due soon (within 3 days, not completed) ──
         const clientCompletions = completionsByClient.get(client.id) || new Map<string, boolean>();
@@ -236,32 +251,33 @@ export async function GET(request: NextRequest) {
           }
         }
 
-        // ── Actual spend: use campaign-filtered cache when date range matches ──
+        // ── Actual spend: plan-to-date (this client's own plan start → today) ──
         // Priority 1: mtd_actual_spend from client_health_status — this is computed
         // by the client dashboard with the user's campaign selection applied, so it
         // correctly excludes campaigns the client hasn't linked. Use it when the
-        // stored date range matches the agency date range.
+        // stored range matches this client's plan-to-date window.
         // Priority 2: filter ad_performance_metrics by metaCampaignIds from the
-        // media plan (also campaign-filtered, available without a dashboard visit).
-        // Priority 3: sum all campaign rows (fallback, may over-count).
+        // media plan (also campaign-filtered, available without a dashboard visit),
+        // bounded to the plan-to-date window.
+        // Priority 3: sum all campaign rows in the window (fallback, may over-count).
 
         const cachedSpend: number | null = health?.mtd_actual_spend ?? null;
         const cachedStart: string | null = health?.spend_date_start ?? null;
         const cachedEnd: string | null = health?.spend_date_end ?? null;
-        // Cache hit when:
-        // 1. Dates match exactly (normal case after new code runs), OR
-        // 2. No dates stored yet (pre-migration rows) — both pages default to YTD
-        //    so the value is almost certainly for the same period.
-        // Don't use the cache when the user has explicitly changed the agency date
-        // range and stored dates differ from the request.
+        // Only trust the cache when its stored range exactly matches this
+        // client's own plan-to-date window (not a shared/selectable range).
         const cacheHit =
           cachedSpend !== null &&
-          cachedStart === dateRangeStart &&
-          cachedEnd === dateRangeEnd;
+          planStart !== null &&
+          cachedStart === planStart &&
+          cachedEnd === planEnd;
 
         let actualSpend: number;
         if (cacheHit) {
           actualSpend = cachedSpend!;
+        } else if (planStart === null) {
+          // No dated flights yet — nothing to sum plan-to-date.
+          actualSpend = 0;
         } else {
           // Build set of selected campaign IDs from the media plan (server-side source
           // of truth that is always available without a dashboard visit).
@@ -276,6 +292,8 @@ export async function GET(request: NextRequest) {
           actualSpend = calculateActualSpendForClient(
             client.id,
             spendRows || [],
+            planStart,
+            planEnd,
             selectedCampaignIds.size > 0 ? selectedCampaignIds : undefined
           );
         }
@@ -352,19 +370,23 @@ function normalizeChannel(name: string): string {
 }
 
 /**
- * Calculate actual spend for a client by summing live API rows only.
- * When selectedCampaignIds is provided, only rows with a matching campaign_id
- * are counted — this mirrors the client dashboard's per-channel campaign filter.
+ * Calculate actual spend for a client by summing live API rows only, bounded
+ * to [dateStart, dateEnd] (the client's own plan-to-date window). When
+ * selectedCampaignIds is provided, only rows with a matching campaign_id are
+ * counted — this mirrors the client dashboard's per-channel campaign filter.
  */
 function calculateActualSpendForClient(
   clientId: string,
   spendRows: any[],
+  dateStart: string,
+  dateEnd: string,
   selectedCampaignIds?: Set<string>
 ): number {
   let totalSpend = 0;
 
   for (const row of spendRows) {
     if (row.client_id !== clientId) continue;
+    if (!row.date || row.date < dateStart || row.date > dateEnd) continue;
     if (row.campaign_id && row.campaign_id.startsWith('manual-override-')) continue;
     if (selectedCampaignIds && selectedCampaignIds.size > 0) {
       if (!row.campaign_id || !selectedCampaignIds.has(row.campaign_id)) continue;

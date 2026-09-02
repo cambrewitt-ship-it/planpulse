@@ -266,6 +266,12 @@ export default function ClientChatPanel({
   function handleGenerateSummary() {
     if (isStreaming) return;
     setOverviewTab('internal');
+    // Clear the old overview out of the thread first — sendMessage below appends
+    // its new (empty, then streamed-into) assistant bubble via a functional
+    // setMessages update, so it lands on top of this clear rather than racing it.
+    setMessages([]);
+    setAuditSteps([]);
+    setOutputLinks([]);
     sendMessage(buildOverviewPrompt(), { silent: true, overviewRequest: true, forceRefresh: true });
   }
 
@@ -457,8 +463,8 @@ export default function ClientChatPanel({
           return (
             <div key={idx} style={{ display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
               <div style={{
-                maxWidth: '92%',
-                padding: msg.role === 'user' ? '7px 12px' : '9px 12px',
+                maxWidth: overview ? '100%' : '92%',
+                padding: msg.role === 'user' ? '7px 12px' : overview ? '11px 14px' : '9px 12px',
                 borderRadius: 14,
                 background: msg.role === 'user' ? INK : CARD_BG,
                 color: msg.role === 'user' ? CARD_BG : GRAPHITE,
@@ -466,7 +472,7 @@ export default function ClientChatPanel({
                 {msg.role === 'user' ? (
                   <span style={{ fontSize: 12.5, lineHeight: 1.5, fontFamily: sansFont }}>{msg.content}</span>
                 ) : overview ? (
-                  <MarkdownText text={overviewTab === 'internal' ? overview.internal : overview.client} />
+                  <MarkdownText text={overviewTab === 'internal' ? overview.internal : overview.client} variant="overview" />
                 ) : msg.content ? (
                   <MarkdownText text={msg.content} />
                 ) : (

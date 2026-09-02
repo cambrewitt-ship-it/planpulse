@@ -59,6 +59,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
   // Conversion event selectors
   const ga4EventName = url.searchParams.get('ga4EventName') ?? null;   // GA4 metric_name to use as conversion
   const metaActionType = url.searchParams.get('metaActionType') ?? null; // meta_actions action_type
+  const googleAdsConversionAction = url.searchParams.get('googleAdsConversionAction') ?? null; // google_conversion_actions action_type (the account's own conversion action name)
 
   // Use the client's local date if provided (avoids UTC vs local timezone mismatch on Vercel)
   const clientDateParam = url.searchParams.get('clientDate');
@@ -176,6 +177,28 @@ export async function GET(_req: NextRequest, { params }: Params) {
         }
       }
       actuals['meta-ads'].conversions = metaConvs;
+    }
+
+    // 4a-google. Override Google Ads conversions using a specific named conversion
+    // action if requested (e.g. "Submit lead form") — mirrors the Meta override above.
+    if (googleAdsConversionAction && actuals['google-ads']) {
+      let googleActQuery = supabase
+        .from('ad_performance_metrics')
+        .select('google_conversion_actions')
+        .eq('client_id', clientId)
+        .eq('platform', 'google-ads')
+        .gte('date', monthStart)
+        .lte('date', today)
+        .not('google_conversion_actions', 'is', null);
+      if (filterCampaignIds.length > 0) googleActQuery = googleActQuery.in('campaign_id', filterCampaignIds);
+      const { data: googleActRows } = await googleActQuery;
+      let googleConvs = 0;
+      for (const row of googleActRows ?? []) {
+        for (const act of ((row.google_conversion_actions as any[]) ?? [])) {
+          if (act.action_type === googleAdsConversionAction) googleConvs += parseInt(act.value, 10) || 0;
+        }
+      }
+      actuals['google-ads'].conversions = googleConvs;
     }
 
     // 4b. Auto-detect Meta conversion event when none is configured.
@@ -297,7 +320,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
 
     const seriesBase = () => supabase
       .from('ad_performance_metrics')
-      .select('date, spend, impressions, clicks, conversions, meta_actions')
+      .select('date, spend, impressions, clicks, conversions, meta_actions, google_conversion_actions')
       .eq('client_id', clientId)
       .in('platform', activePlatforms as ('google-ads' | 'meta-ads')[])
       .not('campaign_id', 'like', 'manual-override-%');
@@ -358,6 +381,10 @@ export async function GET(_req: NextRequest, { params }: Params) {
       if (effectiveActionType && row.meta_actions) {
         for (const act of (row.meta_actions as any[]) ?? []) {
           if (act.action_type === effectiveActionType) cur.conversions += parseInt(act.value, 10) || 0;
+        }
+      } else if (googleAdsConversionAction && row.google_conversion_actions) {
+        for (const act of (row.google_conversion_actions as any[]) ?? []) {
+          if (act.action_type === googleAdsConversionAction) cur.conversions += parseInt(act.value, 10) || 0;
         }
       } else {
         cur.conversions += Number(row.conversions || 0);

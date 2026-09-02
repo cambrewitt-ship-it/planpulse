@@ -162,7 +162,7 @@ const GA4_DEFAULT_EVENTS: string[] = [
 
 const GOOGLE_ADS_DEFAULT_CONVERSIONS: string[] = [
   'Purchase', 'Lead', 'Sign-up', 'Add to cart', 'Begin checkout',
-  'Contact', 'Submit lead form', 'Book appointment', 'Request quote',
+  'Contact', 'Submit lead forms', 'Book appointment', 'Request quote',
   'Get directions', 'Phone call leads', 'Outbound click', 'Download',
 ];
 

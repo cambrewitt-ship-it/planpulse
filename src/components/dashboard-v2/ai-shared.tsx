@@ -62,18 +62,25 @@ export function OverviewSkeleton() {
   );
 }
 
-export function MarkdownText({ text }: { text: string }) {
+export function MarkdownText({ text, variant = 'chat' }: { text: string; variant?: 'chat' | 'overview' }) {
   const lines = text.split('\n');
   let sectionMode: 'default' | 'attention' = 'default';
   let listCounter = 0;
   let noteMode = false;
 
+  // Overview mode (the internal/client-facing dashboard summary) reads as a
+  // scan of short, spaced-out statements rather than a dense paragraph — bigger
+  // type, more air between bullets, a bolder marker.
+  const big = variant === 'overview';
+  const bodySize = big ? 14.5 : 12.5;
+  const bulletGap = big ? 12 : 3;
+
   return (
-    <div style={{ fontSize: 12.5, lineHeight: 1.65, color: INK, fontFamily: sansFont }}>
+    <div style={{ fontSize: bodySize, lineHeight: big ? 1.5 : 1.65, color: INK, fontFamily: sansFont }}>
       {lines.map((line, i) => {
         if (line === '') {
           noteMode = false;
-          return <div key={i} style={{ height: 5 }} />;
+          return <div key={i} style={{ height: big ? 2 : 5 }} />;
         }
 
         if (line.startsWith('### ') || line.startsWith('## ') || line.startsWith('# ')) {
@@ -88,7 +95,7 @@ export function MarkdownText({ text }: { text: string }) {
               <div key={i} style={{
                 marginTop: i > 0 ? 14 : 0, marginBottom: 6, paddingTop: 8,
                 borderTop: `2px solid ${RED}`,
-                fontFamily: serifFont, fontWeight: 600, fontSize: 13.5, color: INK,
+                fontFamily: serifFont, fontWeight: 600, fontSize: big ? 15.5 : 13.5, color: INK,
               }}>
                 {label}
               </div>
@@ -113,7 +120,7 @@ export function MarkdownText({ text }: { text: string }) {
           noteMode = false;
           return (
             <div key={i} style={{
-              fontFamily: serifFont, fontStyle: 'italic', color: GRAPHITE, fontSize: 12.5,
+              fontFamily: serifFont, fontStyle: 'italic', color: GRAPHITE, fontSize: bodySize,
               marginTop: 4, paddingLeft: 10, borderLeft: `2px solid ${BORDER_SOFT}`,
             }}>
               {renderInline(line.slice(2))}
@@ -137,7 +144,7 @@ export function MarkdownText({ text }: { text: string }) {
                 Recommended next step
               </div>
               {rest && (
-                <div style={{ fontFamily: serifFont, fontStyle: 'italic', fontSize: 12.5, color: GRAPHITE }}>
+                <div style={{ fontFamily: serifFont, fontStyle: 'italic', fontSize: bodySize, color: GRAPHITE }}>
                   {renderInline(rest)}
                 </div>
               )}
@@ -151,23 +158,29 @@ export function MarkdownText({ text }: { text: string }) {
           if (sectionMode === 'attention') {
             listCounter += 1;
             return (
-              <div key={i} style={{ display: 'flex', gap: 8, marginTop: 5, alignItems: 'flex-start' }}>
+              <div key={i} style={{ display: 'flex', gap: 8, marginTop: bulletGap - (big ? 2 : -2), alignItems: 'flex-start' }}>
                 <span style={{
-                  flexShrink: 0, width: 16, height: 16, borderRadius: '50%', marginTop: 1,
+                  flexShrink: 0, width: big ? 19 : 16, height: big ? 19 : 16, borderRadius: '50%', marginTop: 1,
                   border: `1.5px solid ${RED}`, color: RED, fontFamily: monoFont,
-                  fontSize: 9.5, fontWeight: 600,
+                  fontSize: big ? 10.5 : 9.5, fontWeight: 600,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>
                   {listCounter}
                 </span>
-                <span>{renderInline(content)}</span>
+                <span style={{ fontWeight: big ? 500 : 400 }}>{renderInline(content)}</span>
               </div>
             );
           }
           return (
-            <div key={i} style={{ display: 'flex', gap: 7, marginTop: 3, paddingLeft: 2 }}>
-              <span style={{ color: '#9C8F84', flexShrink: 0, marginTop: 1 }}>•</span>
-              <span>{renderInline(content)}</span>
+            <div key={i} style={{ display: 'flex', gap: big ? 9 : 7, marginTop: bulletGap, paddingLeft: 2 }}>
+              <span style={{
+                color: big ? INK : '#9C8F84', flexShrink: 0, marginTop: big ? 6 : 1,
+                width: big ? 5 : undefined, height: big ? 5 : undefined,
+                borderRadius: big ? '50%' : undefined, background: big ? INK : undefined,
+              }}>
+                {big ? null : '•'}
+              </span>
+              <span style={{ fontWeight: big ? 500 : 400 }}>{renderInline(content)}</span>
             </div>
           );
         }
@@ -176,7 +189,7 @@ export function MarkdownText({ text }: { text: string }) {
           return (
             <div key={i} style={{
               paddingLeft: 12, borderLeft: `2px solid ${RED}`, marginTop: 2,
-              fontFamily: serifFont, fontStyle: 'italic', fontSize: 12.5, color: GRAPHITE,
+              fontFamily: serifFont, fontStyle: 'italic', fontSize: bodySize, color: GRAPHITE,
             }}>
               {renderInline(line)}
             </div>

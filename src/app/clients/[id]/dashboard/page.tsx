@@ -21,7 +21,7 @@
 'use client';
 
 import Link from 'next/link';
-import { ChevronLeft, ChevronRight, Eye, X } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Eye, X } from 'lucide-react';
 import { MediaPlanChannel, MediaPlanCampaignLine } from '@/components/legacy-plan-builder/media-plan-grid';
 import { UploadWizard } from '@/components/sandbox/upload-wizard';
 import { PlanGrid } from '@/components/sandbox/plan-grid';
@@ -179,6 +179,21 @@ export default function DashboardV2() {
       return next;
     });
   };
+  // Quick filter for Channel Performance: 'all' shows every card (default), 'digital'
+  // shows only paid digital-advertising cards (Meta/Google/LinkedIn/TikTok/etc).
+  const [channelFilterMode, setChannelFilterMode] = useState<'all' | 'digital'>(() => {
+    if (typeof window === 'undefined') return 'all';
+    try {
+      const saved = localStorage.getItem(`channel-filter-mode-${params.id}`);
+      if (saved === 'digital') return 'digital';
+    } catch {}
+    return 'all';
+  });
+  const handleChannelFilterModeChange = (mode: 'all' | 'digital') => {
+    setChannelFilterMode(mode);
+    try { localStorage.setItem(`channel-filter-mode-${clientId}`, mode); } catch {}
+  };
+  const [hiddenChannelsSectionExpanded, setHiddenChannelsSectionExpanded] = useState(false);
   const [notesActiveTab, setNotesActiveTab] = useState<'notes' | 'todo'>('todo');
   const [noteFiles, setNoteFiles] = useState<{ id: string; name: string }[]>([{ id: 'default', name: 'General' }]);
   const [activeFileId, setActiveFileId] = useState<string>('default');
@@ -370,12 +385,26 @@ export default function DashboardV2() {
     let total = 0;
     for (const ch of paidChannels) {
       const channelKey = String((ch as any).id ?? ch.channelName);
+      const platform = getPlatformForChannel(ch.channelName);
+
+      // Skip channels whose card is hidden — their spend (or lack of it)
+      // shouldn't count toward total client spend. Meta/Google cards can fan
+      // out into one card per campaign line, so only skip when every line is hidden.
+      const isHidden = platform === 'meta-ads' || platform === 'google-ads'
+        ? (() => {
+            const lines: MediaPlanCampaignLine[] = (ch as any).campaignLines ?? [];
+            return lines.length > 1
+              ? lines.every(line => hiddenChannelCards.has(`paid-${channelKey}::${line.id}`))
+              : hiddenChannelCards.has(`paid-${channelKey}`);
+          })()
+        : hiddenChannelCards.has(`other-${channelKey}`);
+      if (isHidden) continue;
+
       const selectedIds = channelCampaignSelections[channelKey];
       const isNone = selectedIds?.length === 1 && selectedIds[0] === '__none__';
       if (isNone) continue;
 
-      const platform = getPlatformForChannel(ch.channelName);
-      const keyword  = ch.channelName.toLowerCase().split(' ')[0];
+      const keyword = ch.channelName.toLowerCase().split(' ')[0];
 
       const chPoints = (channelMonthSpendData as any[]).filter((p: any) => {
         if (!p.date || p.date < rangeStart || p.date > rangeEnd) return false;
@@ -388,16 +417,24 @@ export default function DashboardV2() {
 
       total += chPoints.reduce((s: number, p: any) => s + (p.spend ?? 0), 0);
     }
-    // Add manual actual spend from non-digital channels (exclude fee rows)
+    // Add manual actual spend from non-digital channels (exclude fee rows and hidden cards)
     const nonDigitalTotal = mediaPlanBuilderChannels
       .filter(ch => {
         const cat = (ch as any).channelCategory || getChannelCategory(ch.channelName);
-        return cat !== 'paid_digital' && cat !== 'fee';
+        if (cat === 'paid_digital' || cat === 'fee') return false;
+        const prefix = cat === 'organic_social' ? 'organic'
+          : cat === 'edm' ? 'edm'
+          : cat === 'ooh' ? 'ooh'
+          : cat === 'display_native' ? 'display-native'
+          : 'other';
+        if (hiddenChannelCards.has(`${prefix}-${(ch as any).id}`)) return false;
+        if (channelFilterMode === 'digital') return false; // non-digital cards hidden by the quick filter
+        return true;
       })
       .reduce((sum, ch) => sum + ((ch as any).manualActualSpend ?? 0), 0);
 
     return total + nonDigitalTotal;
-  }, [channelMonthSpendData, heroDateRange.startDate, heroDateRange.endDate, mediaPlanBuilderChannels, channelCampaignSelections]);
+  }, [channelMonthSpendData, heroDateRange.startDate, heroDateRange.endDate, mediaPlanBuilderChannels, channelCampaignSelections, hiddenChannelCards, channelFilterMode]);
 
   // Fetch account managers
   useEffect(() => {
@@ -1383,8 +1420,11 @@ export default function DashboardV2() {
   const heroProps = useMemo(() => {
     if (!client || !adjustedHealthScore || !campaignDates) return null;
 
-    const pacingRatio = plannedBudget > 0
-      ? totalActualSpend / plannedBudget
+    // Plan-to-date pacing: compare actual spend against the linear day-elapsed
+    // expected spend for the full campaign, never the Channel Performance
+    // section's selected analytics window.
+    const pacingRatio = campaignDates.plannedSpend > 0
+      ? totalActualSpend / campaignDates.plannedSpend
       : 0;
     const pacingPct = pacingRatio * 100;
     const pacingStatus: { percentage: number; variance: number; status: 'ahead' | 'on-track' | 'behind' } = {
@@ -1453,7 +1493,7 @@ export default function DashboardV2() {
       heroDateRange,
       onHeroDateRangeChange: setHeroDateRange,
     };
-  }, [client, clientId, adjustedHealthScore, campaignDates, totalActualSpend, plannedBudget, actionPointsStats, handleAccountManagerChange, isSavingAccountManager, accountManagers, perfHealthResult, heroDateRange]);
+  }, [client, clientId, adjustedHealthScore, campaignDates, totalActualSpend, actionPointsStats, handleAccountManagerChange, isSavingAccountManager, accountManagers, perfHealthResult, heroDateRange]);
 
   // Calculate current week commencing (Monday of current week)
   const currentWeekCommencing = useMemo(() => {
@@ -1594,8 +1634,11 @@ export default function DashboardV2() {
       const totalImpressions = chMetricPoints.reduce((s: number, p: any) => s + (p.impressions ?? 0), 0);
       const totalClicks      = chMetricPoints.reduce((s: number, p: any) => s + (p.clicks ?? 0), 0);
       const totalConversions = chMetricPoints.reduce((s: number, p: any) => s + (p.conversions ?? 0), 0);
+      // Reach/frequency are Meta-only — chMetricPoints from other platforms simply lack these fields.
+      const totalReach       = chMetricPoints.reduce((s: number, p: any) => s + (p.reach ?? 0), 0);
       const aggregatedCtr    = totalImpressions > 0 ? totalClicks / totalImpressions : 0;
       const aggregatedCpc    = totalClicks > 0 ? currentSpend / totalClicks : 0;
+      const aggregatedFrequency = totalReach > 0 ? totalImpressions / totalReach : 0;
 
       // ── Per-day metrics chart data (full range, zero-filled) ─────────────────
       const metricsByDate = new Map<string, { impressions: number; clicks: number; spend: number; conversions: number }>();
@@ -1663,6 +1706,8 @@ export default function DashboardV2() {
           ctr:         aggregatedCtr,
           cpc:         aggregatedCpc,
           conversions: totalConversions,
+          reach:       totalReach,
+          frequency:   aggregatedFrequency,
         },
         issues: (() => {
           const base = detectIssues(currentSpend, plannedSpend, selectedMonth);
@@ -1794,14 +1839,36 @@ export default function DashboardV2() {
 
   // Stable per-card key used for DOM ids (scroll-to-channel), the manage
   // menu's "Hide card" action, and the hidden-channel-cards localStorage set.
-  const getChannelCardKey = useCallback((ch: any, idx: number): string => {
+  // Paid-digital cards key off their own `id` (raw channel id, `::lineId`
+  // suffixed when fanned out per campaign line) rather than array index, so
+  // the same key can be recomputed from raw channel data when excluding
+  // hidden channels' spend from totalActualSpend.
+  const getChannelCardKey = useCallback((ch: any, _idx: number): string => {
     if (ch.type === 'organic_social') return `organic-${ch.channel.id}`;
     if (ch.type === 'edm') return `edm-${ch.channel.id}`;
     if (ch.type === 'ooh') return `ooh-${ch.channel.id}`;
     if (ch.type === 'display_native') return `display-native-${ch.channel.id}`;
     if (ch.type === 'other') return `other-${ch.channel.id}`;
-    return `paid-${idx}-${ch.name}`;
+    return `paid-${ch.id}`;
   }, []);
+
+  // A card is hidden either because the user explicitly hid it, or because
+  // the "Digital Ads Only" quick filter is active and this card isn't a paid
+  // digital-advertising channel.
+  const isCardDigitalAdvertising = useCallback((ch: any): boolean => {
+    if (ch.type === 'paid_digital') return true;
+    if (ch.type === 'other') {
+      const cat = ch.channel?.channelCategory || getChannelCategory(ch.channel?.channelName ?? '');
+      return cat === 'paid_digital';
+    }
+    return false;
+  }, []);
+
+  const isChannelCardHidden = useCallback((ch: any, idx: number): boolean => {
+    if (hiddenChannelCards.has(getChannelCardKey(ch, idx))) return true;
+    if (channelFilterMode === 'digital' && !isCardDigitalAdvertising(ch)) return true;
+    return false;
+  }, [hiddenChannelCards, channelFilterMode, getChannelCardKey, isCardDigitalAdvertising]);
 
   const liveChannels = useMemo(() =>
     channelCards.map((ch: any, idx: number) => {
@@ -1850,8 +1917,10 @@ export default function DashboardV2() {
 
       const totalDays   = Math.max(1, Math.ceil((campaignEnd.getTime() - campaignStart.getTime()) / (1000 * 60 * 60 * 24)));
       const daysElapsed = Math.max(0, Math.ceil((now.getTime() - campaignStart.getTime()) / (1000 * 60 * 60 * 24)));
-      // Use month-accurate planned budget (prorated to analytics period) rather than a linear day interpolation
-      const plannedSpend = plannedBudget > 0 ? plannedBudget : Math.min(totalBudget, totalBudget * (daysElapsed / totalDays));
+      // Plan-to-date expected spend: linear day-elapsed interpolation over the
+      // full campaign, independent of the Channel Performance section's
+      // selected analytics window (analyticsDateRange / plannedBudget).
+      const plannedSpend = Math.min(totalBudget, totalBudget * (daysElapsed / totalDays));
 
       // Compute benchmark-based performance score
       const paidCards = (channelCards as Array<{ type: string; name?: string; platform?: string; metrics?: { impressions: number; clicks: number; ctr: number; cpc: number; conversions: number } }>)
@@ -1888,7 +1957,7 @@ export default function DashboardV2() {
       console.error('Health score calculation failed:', err);
       setDashboardError('Health score could not be calculated. Other data is still available below.');
     }
-  }, [mediaPlanBuilderChannels, totalActualSpend, plannedBudget, actionPointsStats, channelCards, allBenchmarks, allPresets, clientChannelPresets, isLoadingSpend]);
+  }, [mediaPlanBuilderChannels, totalActualSpend, actionPointsStats, channelCards, allBenchmarks, allPresets, clientChannelPresets, isLoadingSpend]);
 
   // ── Action points data pipeline ─────────────────────────────────────────
   const handleActionPointsUpdate = useCallback((actionPoints: any[]) => {
@@ -2682,6 +2751,20 @@ export default function DashboardV2() {
                     <div className="flex items-center justify-between mb-4">
                       <h3 className="text-lg font-bold" style={{ color: '#1C1917', fontFamily: "'Inter', system-ui, sans-serif" }}>Channel Performance</h3>
                       <div className="flex items-center gap-3">
+                        <div className="flex items-center rounded-full border border-gray-200 overflow-hidden text-sm">
+                          <button
+                            onClick={() => handleChannelFilterModeChange('all')}
+                            className={`px-3 py-1 transition-colors ${channelFilterMode === 'all' ? 'bg-gray-900 text-white' : 'bg-white text-gray-500 hover:text-gray-700'}`}
+                          >
+                            All Channels
+                          </button>
+                          <button
+                            onClick={() => handleChannelFilterModeChange('digital')}
+                            className={`px-3 py-1 transition-colors ${channelFilterMode === 'digital' ? 'bg-gray-900 text-white' : 'bg-white text-gray-500 hover:text-gray-700'}`}
+                          >
+                            Digital Ads Only
+                          </button>
+                        </div>
                         {commission > 0 && (
                           <div className="flex items-center rounded-full border border-gray-200 overflow-hidden text-sm">
                             <button
@@ -2733,9 +2816,10 @@ export default function DashboardV2() {
                           />
                         ) : null;
 
-                        // Hidden cards are collapsed to a small strip and moved
-                        // below the visible cards, rather than rendered in place.
-                        if (hiddenChannelCards.has(cardKey)) {
+                        // Hidden cards (manually hidden, or filtered out by the
+                        // "Digital Ads Only" quick filter) are collapsed to a
+                        // small strip and moved below the visible cards.
+                        if (isChannelCardHidden(ch, idx)) {
                           return null;
                         }
 
@@ -2858,32 +2942,53 @@ export default function DashboardV2() {
                         );
                       })}
 
-                      {/* ── Hidden channel cards: collapsed strips, always at the bottom ── */}
-                      {channelCards.some((ch, idx) => hiddenChannelCards.has(getChannelCardKey(ch, idx))) && (
-                        <div className="space-y-2 pt-2">
-                          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider px-1">Hidden cards</p>
-                          {channelCards.map((ch, idx) => {
-                            const cardKey = getChannelCardKey(ch, idx);
-                            if (!hiddenChannelCards.has(cardKey)) return null;
-                            const cardLabel = ch.type === 'paid_digital' ? ch.name : (ch as any).channel.channelName;
-                            return (
-                              <div
-                                key={cardKey}
-                                className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5"
-                              >
-                                <span className="text-sm font-medium text-gray-400">{cardLabel}</span>
-                                <button
-                                  onClick={() => toggleChannelCardHidden(cardKey)}
-                                  className="flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 px-2 py-1 rounded-md hover:bg-gray-100 transition-colors"
-                                >
-                                  <Eye size={13} />
-                                  Show card
-                                </button>
+                      {/* ── Hidden channels summary: collapsed strips, always at the bottom ── */}
+                      {(() => {
+                        const hiddenCards = channelCards.filter((ch, idx) => isChannelCardHidden(ch, idx));
+                        if (hiddenCards.length === 0) return null;
+                        return (
+                          <div className="pt-2">
+                            <button
+                              onClick={() => setHiddenChannelsSectionExpanded(v => !v)}
+                              className="flex items-center gap-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wider px-1 hover:text-gray-600 transition-colors"
+                            >
+                              <ChevronDown size={13} className={`transition-transform ${hiddenChannelsSectionExpanded ? '' : '-rotate-90'}`} />
+                              {hiddenCards.length} channel{hiddenCards.length === 1 ? '' : 's'} hidden
+                            </button>
+                            {hiddenChannelsSectionExpanded && (
+                              <div className="space-y-2 mt-2">
+                                {channelCards.map((ch, idx) => {
+                                  const cardKey = getChannelCardKey(ch, idx);
+                                  // Only manually-hidden cards get an individual restore button —
+                                  // cards hidden by the quick filter come back as soon as it's cleared.
+                                  if (!hiddenChannelCards.has(cardKey)) return null;
+                                  const cardLabel = ch.type === 'paid_digital' ? ch.name : (ch as any).channel.channelName;
+                                  return (
+                                    <div
+                                      key={cardKey}
+                                      className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5"
+                                    >
+                                      <span className="text-sm font-medium text-gray-400">{cardLabel}</span>
+                                      <button
+                                        onClick={() => toggleChannelCardHidden(cardKey)}
+                                        className="flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 px-2 py-1 rounded-md hover:bg-gray-100 transition-colors"
+                                      >
+                                        <Eye size={13} />
+                                        Show card
+                                      </button>
+                                    </div>
+                                  );
+                                })}
+                                {channelFilterMode === 'digital' && (
+                                  <p className="text-xs text-gray-400 px-1">
+                                    Non-digital channels are hidden by the &quot;Digital Ads Only&quot; filter — switch to &quot;All Channels&quot; to show them.
+                                  </p>
+                                )}
                               </div>
-                            );
-                          })}
-                        </div>
-                      )}
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
                 ) : (

@@ -68,10 +68,6 @@ const PROTECTED_API_ROUTES = [
 ];
 
 export async function middleware(req: NextRequest) {
-  if (isPasswordGated(req.nextUrl.pathname) && !hasValidGatePassword(req)) {
-    return gateResponse();
-  }
-
   let res = NextResponse.next({ request: req });
 
   const supabase = createServerClient<Database>(
@@ -112,6 +108,14 @@ export async function middleware(req: NextRequest) {
   const {
     data: { session },
   } = await supabase.auth.getSession();
+
+  // The password gate only protects the anonymous/public media plan builder tool —
+  // logged-in users hitting these same route prefixes from within the app (e.g. the
+  // AI Planner Agent on /clients/create) are already authenticated, so skip the gate
+  // for them entirely rather than challenging them with Basic Auth.
+  if (isPasswordGated(req.nextUrl.pathname) && !session && !hasValidGatePassword(req)) {
+    return gateResponse();
+  }
 
   // Redirect to login if accessing protected route without session
   if (!isPublicRoute && !session) {

@@ -25,8 +25,8 @@ import {
 // Types
 // ---------------------------------------------------------------------------
 
-type MetricKey = 'impressions' | 'clicks' | 'ctr' | 'cpc' | 'conversions' | 'conv_events';
-const ALL_METRIC_KEYS: MetricKey[] = ['impressions', 'clicks', 'ctr', 'cpc', 'conv_events'];
+type MetricKey = 'impressions' | 'reach' | 'frequency' | 'clicks' | 'ctr' | 'cpc' | 'conversions' | 'conv_events';
+const ALL_METRIC_KEYS: MetricKey[] = ['impressions', 'reach', 'frequency', 'clicks', 'ctr', 'cpc', 'conv_events'];
 
 export interface ChannelCardProps {
   channel: {
@@ -44,6 +44,10 @@ export interface ChannelCardProps {
       ctr: number;
       cpc: number;
       conversions: number;
+      /** Meta Ads only. */
+      reach?: number;
+      /** Meta Ads only. */
+      frequency?: number;
     };
     format?: string;
     issues?: string[];
@@ -146,6 +150,22 @@ const METRIC_CONFIG: Record<MetricKey, {
     formatAxis:    (v) => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(Math.round(v)),
     formatTooltip: (v) => fmt(v, 'decimal', 0),
   },
+  reach: {
+    label: 'Reach',
+    shortLabel: 'Reach',
+    color: '#ec4899',
+    formatValue:   (v) => fmt(v, 'decimal', 0),
+    formatAxis:    (v) => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(Math.round(v)),
+    formatTooltip: (v) => fmt(v, 'decimal', 0),
+  },
+  frequency: {
+    label: 'Frequency',
+    shortLabel: 'Freq',
+    color: '#14b8a6',
+    formatValue:   (v) => `${v.toFixed(2)}x`,
+    formatAxis:    (v) => `${v.toFixed(1)}x`,
+    formatTooltip: (v) => `${v.toFixed(2)}x`,
+  },
   clicks: {
     label: 'Clicks',
     shortLabel: 'Clicks',
@@ -206,6 +226,8 @@ function getRealValue(
     case 'ctr':         return metrics.ctr * 100;
     case 'cpc':         return metrics.cpc;
     case 'impressions': return metrics.impressions;
+    case 'reach':       return metrics.reach ?? null;
+    case 'frequency':   return metrics.frequency ?? null;
     case 'clicks':      return metrics.clicks;
     case 'conversions': return metrics.conversions;
     case 'conv_events': return metrics.conv_events ?? null;
@@ -344,7 +366,7 @@ function PacingBar({
         <div className="flex justify-between text-base pt-0.5">
           <span className="text-gray-400">Run rate</span>
           <span className={runRate.actual > runRate.required ? 'text-red-600 font-medium' : 'text-gray-500 font-medium'}>
-            <strong>{fmt(runRate.actual, 'currency', 0)}</strong>/day actual vs <strong>{fmt(runRate.required, 'currency', 0)}</strong>/day planned
+            <strong>{fmt(runRate.actual, 'currency', 0)}</strong> last 24h vs <strong>{fmt(runRate.required, 'currency', 0)}</strong>/day planned
           </span>
         </div>
       )}
@@ -789,8 +811,12 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
       return s + (found ? parseFloat(found.value || '0') : 0);
     }, 0);
 
+  // Reach is summable across campaigns; frequency (avg impressions per person) is
+  // re-derived from the filtered totals rather than averaged, matching Meta's own convention.
+  const sumReach = (pts: any[]): number => pts.reduce((s: number, p: any) => s + (p.reach ?? 0), 0);
+
   const filteredMetrics = useMemo(() => {
-    if (isNoneSelected) return { impressions: 0, clicks: 0, spend: 0, ctr: 0, cpc: 0, conversions: 0, conv_events: 0 };
+    if (isNoneSelected) return { impressions: 0, clicks: 0, spend: 0, ctr: 0, cpc: 0, conversions: 0, conv_events: 0, reach: 0, frequency: 0 };
 
     if (selectedCampaignIds.size === 0) {
       const allPts = channel.rawSpendPoints ?? [];
@@ -800,7 +826,8 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
       const spend = allPts.reduce((s: number, p: any) => s + (p.spend ?? 0), 0);
       const conversions = allPts.reduce((s: number, p: any) => s + (p.conversions ?? 0), 0);
       const conv_events = selectedActionType ? sumActionType(allPts, selectedActionType) : 0;
-      return { impressions, clicks, spend, ctr: impressions > 0 ? clicks / impressions : 0, cpc: clicks > 0 ? spend / clicks : 0, conversions, conv_events };
+      const reach = sumReach(allPts);
+      return { impressions, clicks, spend, ctr: impressions > 0 ? clicks / impressions : 0, cpc: clicks > 0 ? spend / clicks : 0, conversions, conv_events, reach, frequency: reach > 0 ? impressions / reach : 0 };
     }
 
     const pts = (channel.rawSpendPoints ?? []).filter(matchesSelection);
@@ -823,6 +850,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
       const clicks = pts.reduce((s: number, p: any) => s + (p.clicks ?? 0), 0);
       const conversions = pts.reduce((s: number, p: any) => s + (p.conversions ?? 0), 0);
       const conv_events = selectedActionType ? sumActionType(pts, selectedActionType) : 0;
+      const reach = sumReach(pts);
 
       return {
         impressions,
@@ -832,6 +860,8 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
         cpc: clicks > 0 ? estimatedSpend / clicks : 0,
         conversions,
         conv_events,
+        reach,
+        frequency: reach > 0 ? impressions / reach : 0,
       };
     }
 
@@ -840,6 +870,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
     const spend = pts.reduce((s: number, p: any) => s + (p.spend ?? 0), 0);
     const conversions = pts.reduce((s: number, p: any) => s + (p.conversions ?? 0), 0);
     const conv_events = selectedActionType ? sumActionType(pts, selectedActionType) : 0;
+    const reach = sumReach(pts);
 
     return {
       impressions,
@@ -849,6 +880,8 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
       cpc: clicks > 0 ? spend / clicks : 0,
       conversions,
       conv_events,
+      reach,
+      frequency: reach > 0 ? impressions / reach : 0,
     };
   }, [selectedCampaignIds, selectedActionType, channel.rawSpendPoints, channel.metrics, matchesSelection, allSelectedRepresented]);
 
@@ -1028,6 +1061,20 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
       }
     }
 
+    // Last 24h actual spend: delta between the two most recent cumulative
+    // actual-spend points, i.e. yesterday's/most-recent single day of spend —
+    // shown as the "actual" figure in the run-rate badge instead of the
+    // smoothed trailing-window rate above (which stays reserved for the
+    // end-of-period forecast, where a single noisy day shouldn't swing it).
+    let last24hSpend = 0;
+    if (actualPointsInPeriod.length >= 2) {
+      const last = actualPointsInPeriod[actualPointsInPeriod.length - 1];
+      const prev = actualPointsInPeriod[actualPointsInPeriod.length - 2];
+      last24hSpend = Math.max(0, last.actualSpend! - prev.actualSpend!);
+    } else if (actualPointsInPeriod.length === 1) {
+      last24hSpend = actualPointsInPeriod[0].actualSpend!;
+    }
+
     // Required run rate: read off the *local slope* of the planned-spend curve
     // around today, rather than planned-total ÷ days-in-selected-view. The
     // curve (channel.chartData) is already anchored to the flight's real
@@ -1054,7 +1101,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
 
     const forecastEndStr = `${forecastEnd.getFullYear()}-${pad(forecastEnd.getMonth() + 1)}-${pad(forecastEnd.getDate())}`;
 
-    return { projectedEndSpend, overspendAmount, overspendPct, dailyBurnRate, requiredDailyRate, daysRemaining, forecastEndStr };
+    return { projectedEndSpend, overspendAmount, overspendPct, dailyBurnRate, last24hSpend, requiredDailyRate, daysRemaining, forecastEndStr };
   }, [isNoneSelected, filteredMetrics.spend, channel.plannedSpend, dateRange, selectedMonth, filteredSpendChartData]);
 
   // Benchmark / preset derived values
@@ -1452,7 +1499,7 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                       plannedSpend={displayPlanned}
                       plannedLabel={plannedLabel}
                       status={channel.status}
-                      runRate={overspendForecast ? { actual: overspendForecast.dailyBurnRate, required: overspendForecast.requiredDailyRate } : null}
+                      runRate={overspendForecast ? { actual: overspendForecast.last24hSpend, required: overspendForecast.requiredDailyRate } : null}
                     />
                   );
                 })()}
@@ -1496,12 +1543,9 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
                 // 'conversions' slots are remapped to conv_events so they share data and chart toggle
                 const effectiveKey: MetricKey = key === 'conversions' ? 'conv_events' : key;
                 const rawValue = (filteredMetrics as any)[effectiveKey] ?? 0;
-                const displayValue = effectiveKey === 'ctr'
-                  ? fmt(rawValue * 100, 'percent', 2)
-                  : effectiveKey === 'cpc'
-                    ? fmt(rawValue, 'currency', 2)
-                    : fmt(rawValue, 'decimal', 0);
-                const benchmark = channelBenchmarks.find(b => b.metric_key === effectiveKey);
+                const displayValue = METRIC_CONFIG[effectiveKey].formatValue(rawValue);
+                // Frequency has no meaningful "good" target to benchmark against — skip it.
+                const benchmark = effectiveKey === 'frequency' ? undefined : channelBenchmarks.find(b => b.metric_key === effectiveKey);
                 const realValue = getRealValue(effectiveKey, filteredMetrics);
                 const effectiveDisplayed: string[] = displayedMetrics.map(k => k === 'conversions' ? 'conv_events' : k);
                 const availableSwaps = ALL_METRIC_KEYS.filter(k => k !== effectiveKey && !effectiveDisplayed.includes(k));

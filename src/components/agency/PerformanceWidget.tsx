@@ -62,7 +62,7 @@ const GOOGLE_ADS_DEFAULT_CONVERSIONS = [
   'Add to cart',
   'Begin checkout',
   'Contact',
-  'Submit lead form',
+  'Submit lead forms',
   'Book appointment',
   'Request quote',
   'Get directions',

@@ -236,36 +236,56 @@ export function getChannelMonthlyBudgetCents(
 }
 
 /**
- * Determines the flight's actual active window within a given month, derived
- * from the weekly plan rows that fall inside that month (i.e. the flight's
- * real start/end dates, not the calendar month boundaries).
+ * Per-day planned-spend rate (dollars) for the linear (Google/Meta) ramp,
+ * derived from each week's own weekly_plan budget rather than averaging the
+ * whole month into a single flat rate. The ramp stays linear *within* a week
+ * (so the line doesn't staircase) but its slope changes at week boundaries to
+ * match that week's specific budget — e.g. a lighter first week followed by a
+ * heavier one reads as two distinct gradients instead of one blended average.
  *
- * Used by the linear (Google/Meta) planned-spend ramp so it starts on the
- * flight's real start date instead of the 1st of the month.
+ * Days outside the flight's active window in this month are left unset.
  */
-function getFlightActiveWindowInMonth(
+function getLinearDailyRatesForMonth(
   weeklyPlans: WeeklyPlan[],
   monthStart: Date,
   monthEnd: Date,
-): { flightStart: Date; flightEnd: Date; activeDays: number } {
-  const monthWeeklyPlans = weeklyPlans.filter(wp => {
-    const weekStart = parseISO(wp.week_commencing);
-    return isWithinInterval(weekStart, { start: monthStart, end: monthEnd });
-  });
+): { dailyRateByDate: Map<string, number>; flightStart: Date; flightEnd: Date; lastDailyRate: number } {
+  const monthWeeklyPlans = weeklyPlans
+    .filter(wp => isWithinInterval(parseISO(wp.week_commencing), { start: monthStart, end: monthEnd }))
+    .sort((a, b) => a.week_commencing.localeCompare(b.week_commencing));
+
+  const dailyRateByDate = new Map<string, number>();
 
   if (monthWeeklyPlans.length === 0) {
-    return { flightStart: monthStart, flightEnd: monthStart, activeDays: 1 };
+    return { dailyRateByDate, flightStart: monthStart, flightEnd: monthStart, lastDailyRate: 0 };
   }
 
-  const weekStartTimes = monthWeeklyPlans.map(wp => parseISO(wp.week_commencing).getTime());
-  const flightStart    = new Date(Math.min(...weekStartTimes));
-  const lastWeekStart  = new Date(Math.max(...weekStartTimes));
-  const lastWeekEnd    = new Date(lastWeekStart);
+  const flightStart   = parseISO(monthWeeklyPlans[0].week_commencing);
+  const lastWeekStart = parseISO(monthWeeklyPlans[monthWeeklyPlans.length - 1].week_commencing);
+  const lastWeekEnd   = new Date(lastWeekStart);
   lastWeekEnd.setDate(lastWeekEnd.getDate() + 6);
-  const flightEnd       = lastWeekEnd < monthEnd ? lastWeekEnd : monthEnd;
-  const activeDays      = Math.floor((flightEnd.getTime() - flightStart.getTime()) / 86400000) + 1;
+  const flightEnd      = lastWeekEnd < monthEnd ? lastWeekEnd : monthEnd;
 
-  return { flightStart, flightEnd, activeDays };
+  let lastDailyRate = 0;
+
+  monthWeeklyPlans.forEach(wp => {
+    const weekStart = parseISO(wp.week_commencing);
+    const weekEnd   = new Date(weekStart);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+
+    const rangeStart = weekStart > flightStart ? weekStart : flightStart;
+    const rangeEnd    = weekEnd < flightEnd ? weekEnd : flightEnd;
+    const activeDaysInWeek = Math.max(1, Math.floor((rangeEnd.getTime() - rangeStart.getTime()) / 86400000) + 1);
+
+    const dailyRate = ((wp.budget_planned ?? 0) / 100) / activeDaysInWeek;
+    lastDailyRate = dailyRate;
+
+    for (let d = new Date(rangeStart); d <= rangeEnd; d.setDate(d.getDate() + 1)) {
+      dailyRateByDate.set(format(d, 'yyyy-MM-dd'), dailyRate);
+    }
+  });
+
+  return { dailyRateByDate, flightStart, flightEnd, lastDailyRate };
 }
 
 // ---------------------------------------------------------------------------
@@ -343,14 +363,16 @@ export function generateMonthDataFromWeeklyPlans(
   const plannedSpendByDate = new Map<string, number>();
 
   if (useLinearPlannedSpend) {
-    const { flightStart, flightEnd, activeDays } = getFlightActiveWindowInMonth(weeklyPlans, monthStart, monthEnd);
+    const { dailyRateByDate, flightEnd, lastDailyRate } = getLinearDailyRatesForMonth(weeklyPlans, monthStart, monthEnd);
     const monthBudgetInDollars = monthBudget / 100;
 
+    let cumulativeRamp = 0;
     allDays.forEach(date => {
       const dateKey = format(date, 'yyyy-MM-dd');
-      if (date >= flightStart && date <= flightEnd) {
-        const dayNumber        = Math.floor((date.getTime() - flightStart.getTime()) / 86400000) + 1;
-        plannedSpendByDate.set(dateKey, (dayNumber / activeDays) * monthBudgetInDollars);
+      const rate = dailyRateByDate.get(dateKey);
+      if (rate !== undefined) {
+        cumulativeRamp += rate;
+        plannedSpendByDate.set(dateKey, cumulativeRamp);
       } else if (date > flightEnd && date <= monthEnd) {
         // Weekly-plan boundaries (Monday-based) can land a few days short of
         // the calendar month end. The full month budget is already committed
@@ -359,12 +381,11 @@ export function generateMonthDataFromWeeklyPlans(
         // before the month is even over.
         plannedSpendByDate.set(dateKey, monthBudgetInDollars);
       } else if (date > monthEnd) {
-        // Beyond the calendar month: continue the established daily pace as
-        // a forward-looking projection (used by the 30-day lookahead window),
-        // anchored from the true month end rather than flightEnd.
-        const daysPast   = Math.floor((date.getTime() - monthEnd.getTime()) / 86400000);
-        const dailyRate  = monthBudgetInDollars / activeDays;
-        plannedSpendByDate.set(dateKey, monthBudgetInDollars + dailyRate * daysPast);
+        // Beyond the calendar month: continue the most recent week's daily
+        // pace as a forward-looking projection (used by the 30-day lookahead
+        // window), anchored from the true month end.
+        const daysPast = Math.floor((date.getTime() - monthEnd.getTime()) / 86400000);
+        plannedSpendByDate.set(dateKey, monthBudgetInDollars + lastDailyRate * daysPast);
       }
       // date < flightStart: left unset → defaults to 0 (no spend planned before flight starts)
     });
@@ -478,13 +499,12 @@ export function generateChannelChartDataForRange(
       monthGroups.get(key)!.days.push(day);
     });
     monthGroups.forEach(({ monthStart: ms, days }) => {
-      const budgetCents    = getChannelMonthlyBudgetCents(weeklyPlans, ms);
       const { start: flightWindowStart, end: monthEndForMs } = getWeekAlignedMonthRange(ms);
-      const { flightStart, flightEnd, activeDays } = getFlightActiveWindowInMonth(weeklyPlans, flightWindowStart, monthEndForMs);
-      const dailyRate      = (budgetCents / 100) / activeDays;
+      const { dailyRateByDate } = getLinearDailyRatesForMonth(weeklyPlans, flightWindowStart, monthEndForMs);
       days.forEach(day => {
-        if (day >= flightStart && day <= flightEnd) {
-          dailyPlannedByDate.set(format(day, 'yyyy-MM-dd'), dailyRate);
+        const rate = dailyRateByDate.get(format(day, 'yyyy-MM-dd'));
+        if (rate !== undefined) {
+          dailyPlannedByDate.set(format(day, 'yyyy-MM-dd'), rate);
         }
         // days outside the flight's active window: left unset → 0 (no spend planned)
       });

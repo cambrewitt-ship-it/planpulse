@@ -1,14 +1,12 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { format, startOfYear } from 'date-fns';
 import Link from 'next/link';
 import { Plus, BookOpen, RefreshCw } from 'lucide-react';
 import type { ClientCardData } from '@/app/api/agency/clients/route';
 import type { AgencyClientActionPoints } from '@/app/api/agency/action-points/route';
 import { ClientCardCompact } from '@/components/agency/ClientCardCompact';
 import { Button } from '@/components/ui/button';
-import { DateRangePicker } from '@/components/ui/date-range-picker';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 interface AccountManager {
@@ -27,16 +25,6 @@ export default function ClientsPage() {
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
   const [accountManagerFilter, setAccountManagerFilter] = useState<string>('All');
-  
-  // Date range state - default to YTD (Jan 1 - now)
-  const [dateRange, setDateRange] = useState<{ startDate: string; endDate: string }>(() => {
-    const today = new Date();
-    const yearStart = startOfYear(today);
-    return {
-      startDate: format(yearStart, 'yyyy-MM-dd'),
-      endDate: format(today, 'yyyy-MM-dd'),
-    };
-  });
 
   const fetchAccountManagers = useCallback(async () => {
     try {
@@ -55,12 +43,9 @@ export default function ClientsPage() {
       showRefreshing ? setRefreshing(true) : setLoading(true);
       setError(null);
 
-      // Build query params with date range and account manager filter
-      const clientsParams = new URLSearchParams({
-        startDate: dateRange.startDate,
-        endDate: dateRange.endDate,
-      });
-      
+      // Build query params with account manager filter
+      const clientsParams = new URLSearchParams();
+
       // Add account manager filter if not "All"
       if (accountManagerFilter && accountManagerFilter !== 'All') {
         clientsParams.set('accountManager', accountManagerFilter);
@@ -88,7 +73,7 @@ export default function ClientsPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [dateRange, accountManagerFilter]);
+  }, [accountManagerFilter]);
 
   useEffect(() => {
     fetchAccountManagers();
@@ -161,13 +146,7 @@ export default function ClientsPage() {
               ))}
             </SelectContent>
           </Select>
-          
-          {/* Date Range Picker */}
-          <DateRangePicker
-            value={dateRange}
-            onChange={setDateRange}
-          />
-          
+
           {/* Refresh button */}
           <Button
             variant="outline"

@@ -112,14 +112,6 @@ function getMediaPlanProgress(channels: { startDate: string | null; endDate: str
   return { progress, startLabel: fmt(startD), endLabel: fmt(endD) };
 }
 
-// ── Month elapsed % for pacing marker ─────────────────────────────────────
-
-function getMonthElapsed(): number {
-  const [y, m, d] = nzToday().split('-').map(Number);
-  const daysInMonth = new Date(y, m, 0).getDate();
-  return Math.min(1, d / daysInMonth);
-}
-
 // ── Action points colour ───────────────────────────────────────────────────
 
 function apColor(count: number): string {
@@ -502,8 +494,9 @@ export function ClientCardCompact({
   const outstanding = Math.max(0, client.totalActionPoints - client.completedActionPoints);
   const hasSpend = client.plannedBudget > 0;
   const spendPct = hasSpend ? Math.min(100, (client.actualSpend / client.plannedBudget) * 100) : 0;
-  const monthElapsedPct = getMonthElapsed() * 100;
   const planProgress = getMediaPlanProgress(client.channels);
+  // Pacing reference is the plan's own timeline (start → end), not the calendar month.
+  const planProgressPct = planProgress ? planProgress.progress * 100 : null;
 
   return (
     <div
@@ -650,16 +643,17 @@ export function ClientCardCompact({
           {hasSpend && (
             <div style={{
               height: '100%', width: `${spendPct}%`,
-              background: spendPct > monthElapsedPct + 10 ? '#A0442A' :
-                          spendPct < monthElapsedPct - 10 ? '#B07030' : '#4A7C59',
+              background: planProgressPct === null ? '#4A7C59' :
+                          spendPct > planProgressPct + 10 ? '#A0442A' :
+                          spendPct < planProgressPct - 10 ? '#B07030' : '#4A7C59',
               borderRadius: 3, transition: 'width 0.3s',
             }} />
           )}
-          {/* Time marker tick */}
-          {hasSpend && (
+          {/* Plan-timeline marker tick */}
+          {hasSpend && planProgressPct !== null && (
             <div style={{
               position: 'absolute', top: -2, bottom: -2,
-              left: `${Math.min(100, monthElapsedPct)}%`,
+              left: `${Math.min(100, planProgressPct)}%`,
               width: 1.5, background: '#1C1917', opacity: 0.35, borderRadius: 1,
             }} />
           )}
