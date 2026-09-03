@@ -50,7 +50,7 @@ interface ActionPoint {
   id: string;
   text: string;
   completed: boolean;
-  category: 'SET UP' | 'HEALTH CHECK';
+  category: 'SET UP' | 'HEALTH CHECK' | 'TODO';
   channel_type?: string;
   due_date?: string | null;
 }

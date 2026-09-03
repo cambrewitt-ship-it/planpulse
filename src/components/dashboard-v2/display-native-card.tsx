@@ -5,7 +5,7 @@ import { Monitor, ChevronDown, ChevronUp, StickyNote } from 'lucide-react';
 import ManualSpendSlider from './manual-spend-slider';
 import { MediaPlanChannel } from '@/components/legacy-plan-builder/media-plan-grid';
 import { format } from 'date-fns';
-import InlineActionPoints from './inline-action-points';
+import ChannelHealthBadge from './channel-health-badge';
 
 interface DisplayNativeCardProps {
   channel: MediaPlanChannel;
@@ -249,14 +249,10 @@ export default function DisplayNativeCard({ channel, clientId, onUpdateChannel, 
 
         {/* ── Action Points — right column ──────────────── */}
         <div style={{ flex: 1, minWidth: 0, borderLeft: '1px solid #F3F4F6', background: '#FAFAFA', padding: 16 }}>
-          <h3 style={{ fontSize: 15, fontWeight: 600, color: '#1C1917', marginBottom: 10, fontFamily: "'Inter', system-ui, sans-serif" }}>Action Points</h3>
-          <InlineActionPoints
+          <ChannelHealthBadge
             channelType={channel.channelName}
             clientId={clientId}
-            maxVisible={5}
-            showBorder={false}
-            showTitle={false}
-            sideBySide={true}
+            showTopBorder={false}
           />
         </div>
       </div>

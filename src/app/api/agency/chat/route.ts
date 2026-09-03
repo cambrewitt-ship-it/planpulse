@@ -81,16 +81,27 @@ async function callInternalApi(path: string, request: NextRequest): Promise<any>
 // ── Read tool implementations ─────────────────────────────────────────────────
 
 async function toolGetActionPoints(request: NextRequest, clientNameFilter?: string) {
-  const data = await callInternalApi('/api/agency/action-points', request);
-  if (data.error) return data;
+  // Ad-hoc TODOs and the per-channel SET UP/HEALTH CHECK checklist now live
+  // in two separate feeds (the checklist was moved out of the To Do list to
+  // stop it flooding /agency — see /api/agency/channel-health) — merge both
+  // so the AI still sees the full picture.
+  const [todoData, checklistData] = await Promise.all([
+    callInternalApi('/api/agency/action-points', request),
+    callInternalApi('/api/agency/channel-health', request),
+  ]);
+  if (todoData.error && checklistData.error) return todoData;
 
   const today = nzToday();
   const in7Days = nzDateKeyOffset(7);
 
-  let clients: any[] = data.clients ?? [];
+  let todoClients: any[] = todoData.clients ?? [];
+  let checklistClients: any[] = checklistData.clients ?? [];
 
   if (clientNameFilter) {
-    clients = clients.filter((c: any) =>
+    todoClients = todoClients.filter((c: any) =>
+      c.clientName.toLowerCase().includes(clientNameFilter.toLowerCase())
+    );
+    checklistClients = checklistClients.filter((c: any) =>
       c.clientName.toLowerCase().includes(clientNameFilter.toLowerCase())
     );
   }
@@ -99,7 +110,7 @@ async function toolGetActionPoints(request: NextRequest, clientNameFilter?: stri
   const dueSoon: any[] = [];
   const upcoming: any[] = [];
 
-  for (const client of clients) {
+  for (const client of todoClients) {
     for (const channel of client.channels ?? []) {
       for (const ap of channel.actionPoints ?? []) {
         const item = {
@@ -119,6 +130,32 @@ async function toolGetActionPoints(request: NextRequest, clientNameFilter?: stri
           dueSoon.push(item);
         } else {
           upcoming.push(item);
+        }
+      }
+    }
+  }
+
+  for (const client of checklistClients) {
+    for (const channel of client.channels ?? []) {
+      for (const item of channel.items ?? []) {
+        if (item.category === 'HEALTH CHECK' && item.completed && !item.stale) continue; // fresh, nothing to surface
+        const entry = {
+          id: item.id,
+          client: client.clientName,
+          client_id: client.clientId,
+          channel: channel.channelType,
+          task: item.text,
+          category: item.category,
+          due_date: item.dueDate,
+          checklist_status: item.completed ? (item.stale ? 'stale — needs recheck' : 'checked') : 'not yet checked',
+        };
+        if (!item.completed) {
+          if (!item.dueDate) upcoming.push(entry);
+          else if (item.dueDate < today) overdue.push(entry);
+          else if (item.dueDate <= in7Days) dueSoon.push(entry);
+          else upcoming.push(entry);
+        } else {
+          dueSoon.push(entry); // stale health-check items — surfaced but not urgent
         }
       }
     }

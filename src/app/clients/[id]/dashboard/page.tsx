@@ -300,6 +300,10 @@ export default function DashboardV2() {
   const [actionPointsStats, setActionPointsStats] = useState<{ totalAll: number; completedAll: number; trafficLightColor: string; loading: boolean }>({ totalAll: 0, completedAll: 0, trafficLightColor: 'bg-gray-400', loading: true });
   const [allActionPoints, setAllActionPoints] = useState<any[]>([]);
   const [actionPointsRefetchTrigger, setActionPointsRefetchTrigger] = useState(0);
+  // Ad-hoc TODO tasks for this client — fetched independently of allActionPoints
+  // (which only ever holds SET UP/HEALTH CHECK checklist templates). This is
+  // what actually powers the client dashboard's To Do panel.
+  const [todoActionPoints, setTodoActionPoints] = useState<any[]>([]);
   const [healthScore, setHealthScore] = useState<HealthScoreResult | null>(null);
   const [healthScoreReady, setHealthScoreReady] = useState(false);
   const [perfHealthResult, setPerfHealthResult] = useState<PerformanceHealthResult | null>(null);
@@ -857,6 +861,16 @@ export default function DashboardV2() {
     }
     setSelectedMonth(monthAnchor);
   }, [analyticsDateRange.startDate, selectedMonth]);
+
+  // Fetch this client's ad-hoc TODO tasks — independent of allActionPoints
+  // (SET UP/HEALTH CHECK templates), so the To Do panel actually shows them.
+  useEffect(() => {
+    if (!clientId) return;
+    fetch(`/api/action-points?category=TODO&client_id=${clientId}`)
+      .then(r => r.ok ? r.json() : { data: [] })
+      .then(({ data }) => setTodoActionPoints(Array.isArray(data) ? data : []))
+      .catch(() => setTodoActionPoints([]));
+  }, [clientId, actionPointsRefetchTrigger]);
 
   // Fetch all Meta campaigns (not limited to spend data) so the campaign
   // filter dropdown in each channel card shows the full account campaign list.
@@ -2018,163 +2032,30 @@ export default function DashboardV2() {
     setAllActionPoints(actionPoints);
   }, []);
 
-  const determinePriority = (item: any): 'urgent' | 'this-week' | 'completed' => {
-    if (item.completed) return 'completed';
-    const dueDate = item.due_date ? new Date(item.due_date) : null;
-    if (!dueDate) return 'this-week';
-    const now = nzTodayLocalMidnight();
-    const daysUntilDue = Math.ceil((dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-    if (daysUntilDue <= 2) return 'urgent';
-    return 'this-week';
-  };
+  // The client dashboard's To Do panel shows only ad-hoc TODO tasks —
+  // SET UP/HEALTH CHECK templates live in the per-channel health-check
+  // checklist instead (see ChannelHealthBadge / ChannelHealthCheckModal).
+  // TODOs already carry their own due_date, so no enrichment is needed.
+  // TODOs are always stamped channel_type: 'General' in the DB — not
+  // meaningful information, so drop it rather than show a "General" tag.
+  const enrichedActionPoints = useMemo(
+    () => todoActionPoints.map((ap: any) => ({ ...ap, channel_type: undefined })),
+    [todoActionPoints]
+  );
 
-  // Enrich action points with effective due dates (SET UP points use campaign_start - days_before_live_due)
-  // SET UP points are suppressed when the matched channel has an active flight, and re-anchored
-  // to the next upcoming flight's start date when in a gap between flights.
-  const enrichedActionPoints = useMemo(() => {
-    const today = nzTodayLocalMidnight();
-    const todayMs = today.getTime();
-
-    const channelHasActiveFlight = (flights: { startWeek: Date | string; endWeek: Date | string }[]): boolean =>
-      flights.some(f => {
-        const start = new Date(f.startWeek).setHours(0, 0, 0, 0);
-        const end = new Date(f.endWeek).setHours(23, 59, 59, 999);
-        return todayMs >= start && todayMs <= end;
-      });
-
-    const nextUpcomingFlightStart = (flights: { startWeek: Date | string; endWeek: Date | string }[]): Date | null => {
-      const upcoming = flights
-        .filter(f => new Date(f.startWeek).getTime() > todayMs)
-        .sort((a, b) => new Date(a.startWeek).getTime() - new Date(b.startWeek).getTime());
-      return upcoming.length > 0 ? new Date(upcoming[0].startWeek) : null;
-    };
-
-    return allActionPoints.flatMap((ap: any) => {
-      if (ap.category === 'SET UP') {
-        // Find matching channel with flight data from the media plan
-        const matchedMpCh = mediaPlanBuilderChannels.find(ch =>
-          ch.channelName.toLowerCase().trim() === (ap.channel_type ?? '').toLowerCase().trim() ||
-          ch.channelName.toLowerCase().includes((ap.channel_type ?? '').toLowerCase()) ||
-          (ap.channel_type ?? '').toLowerCase().includes(ch.channelName.toLowerCase())
-        );
-        const flights = matchedMpCh?.flights ?? [];
-
-        if (flights.length > 0) {
-          // Suppress while a flight is actively running
-          if (channelHasActiveFlight(flights)) return [];
-
-          // Find the next upcoming flight to anchor the due date
-          const nextStart = nextUpcomingFlightStart(flights);
-          if (!nextStart) return []; // No upcoming flights — nothing to set up for
-
-          if (ap.days_before_live_due != null) {
-            const d = new Date(nextStart);
-            d.setDate(d.getDate() - (ap.days_before_live_due as number));
-            return [{ ...ap, due_date: d.toISOString().slice(0, 10) }];
-          }
-          // Has a hardcoded due_date with an upcoming flight — keep as-is
-          return [ap];
-        }
-      }
-
-      // Non-SET UP, or SET UP with no flight data: existing enrichment logic
-      // For SET UP APs with a hardcoded past due date, suppress — the channel already launched.
-      if (ap.due_date) {
-        if (ap.category === 'SET UP') {
-          const dueDateMs = new Date(ap.due_date).setHours(0, 0, 0, 0);
-          if (dueDateMs < todayMs) return [];
-        }
-        return [ap];
-      }
-      if (ap.category === 'SET UP' && ap.days_before_live_due != null) {
-        const matchedChannel = ganttChannels.find(
-          ch => ch.label.toLowerCase().trim() === (ap.channel_type ?? '').toLowerCase().trim() ||
-                ch.label.toLowerCase().includes((ap.channel_type ?? '').toLowerCase()) ||
-                (ap.channel_type ?? '').toLowerCase().includes(ch.label.toLowerCase())
-        );
-        const refDate = matchedChannel?.start_date
-          ? new Date(matchedChannel.start_date)
-          : (campaignDates?.start ?? null);
-        if (refDate) {
-          // Suppress if the channel has already launched — the setup window has passed.
-          const refMs = new Date(refDate).setHours(0, 0, 0, 0);
-          if (refMs < todayMs) return [];
-          const d = new Date(refDate);
-          d.setDate(d.getDate() - (ap.days_before_live_due as number));
-          return [{ ...ap, due_date: d.toISOString().slice(0, 10) }];
-        }
-      }
-      if (ap.category === 'HEALTH CHECK' && ap.frequency) {
-        const intervalDays =
-          ap.frequency === 'daily' ? 1 :
-          ap.frequency === 'weekly' ? 7 :
-          ap.frequency === 'fortnightly' ? 14 :
-          ap.frequency === 'monthly' ? 30 : 0;
-        if (intervalDays > 0) {
-          // Use earliest flight start for the matching channel as the recurring anchor
-          const matchedMpCh = mediaPlanBuilderChannels.find((ch: any) =>
-            ch.channelName.toLowerCase().trim() === (ap.channel_type ?? '').toLowerCase().trim() ||
-            ch.channelName.toLowerCase().includes((ap.channel_type ?? '').toLowerCase()) ||
-            (ap.channel_type ?? '').toLowerCase().includes(ch.channelName.toLowerCase())
-          );
-          const flights: any[] = matchedMpCh?.flights ?? [];
-          let anchorDate: Date | null = null;
-          if (flights.length > 0) {
-            const sorted = [...flights].sort((a: any, b: any) =>
-              new Date(a.startWeek).getTime() - new Date(b.startWeek).getTime()
-            );
-            anchorDate = new Date(sorted[0].startWeek);
-          }
-          if (!anchorDate) {
-            const matchedGanttCh = ganttChannels.find(
-              ch => ch.label.toLowerCase().trim() === (ap.channel_type ?? '').toLowerCase().trim() ||
-                    ch.label.toLowerCase().includes((ap.channel_type ?? '').toLowerCase()) ||
-                    (ap.channel_type ?? '').toLowerCase().includes(ch.label.toLowerCase())
-            );
-            anchorDate = matchedGanttCh?.start_date ? new Date(matchedGanttCh.start_date) : null;
-          }
-          if (!anchorDate && campaignDates?.start) anchorDate = new Date(campaignDates.start);
-          if (anchorDate) {
-            anchorDate.setHours(0, 0, 0, 0);
-            const intervalMs = intervalDays * 86400000;
-            const startMs = anchorDate.getTime();
-            for (let n = 1; n <= 730; n++) {
-              const occMs = startMs + n * intervalMs;
-              if (occMs >= todayMs) {
-                return [{ ...ap, due_date: new Date(occMs).toISOString().slice(0, 10) }];
-              }
-            }
-            return [{ ...ap, due_date: today.toISOString().slice(0, 10) }];
-          }
-        }
-      }
-      return [ap];
-    });
-  }, [allActionPoints, ganttChannels, campaignDates, mediaPlanBuilderChannels]);
-
-  const actionItemsForSection = useMemo(() => {
-    return allActionPoints.map((item: any) => ({
-      id: item.id,
-      text: item.text,
-      completed: item.completed,
-      priority: determinePriority(item),
-      dueDate: item.due_date ?? undefined,
-      channelType: item.channel_type ?? undefined,
-      category: item.category as 'SET UP' | 'HEALTH CHECK',
-    }));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allActionPoints]);
-
-  const handleToggleActionPoint = async (id: string, completed: boolean) => {
+  // TODO completion is written directly to action_points.completed (no
+  // client_id) — matching KanbanBoard's convention — so the agency To Do
+  // feed and this panel never disagree about a TODO's completion state.
+  const handleToggleTodo = async (id: string, completed: boolean) => {
     try {
       await fetch('/api/action-points', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, completed, client_id: clientId }),
+        body: JSON.stringify({ id, completed }),
       });
-      setActionPointsRefetchTrigger(prev => prev + 1);
+      setTodoActionPoints(prev => prev.map(ap => ap.id === id ? { ...ap, completed } : ap));
     } catch (error) {
-      console.error('Failed to update action point:', error);
+      console.error('Failed to update TODO:', error);
     }
   };
 
@@ -2701,7 +2582,7 @@ export default function DashboardV2() {
                             {notesActiveTab === 'notes' ? (
                               <ClientActionPointsList
                                 actionPoints={enrichedActionPoints}
-                                onToggle={handleToggleActionPoint}
+                                onToggle={handleToggleTodo}
                               />
                             ) : (
                               <NotesChecklist activeClientId={`${clientId}:${activeFileId}`} />
@@ -2717,7 +2598,7 @@ export default function DashboardV2() {
                             ) : (
                               <ClientActionPointsList
                                 actionPoints={enrichedActionPoints}
-                                onToggle={handleToggleActionPoint}
+                                onToggle={handleToggleTodo}
                               />
                             )}
                           </div>

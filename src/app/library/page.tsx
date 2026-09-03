@@ -47,11 +47,13 @@ interface LibraryDocument {
 interface ActionPoint {
   id: string;
   text: string;
+  description?: string | null;
   completed: boolean;
   category: 'SET UP' | 'HEALTH CHECK';
   channel_type: string;
   frequency?: 'daily' | 'weekly' | 'fortnightly' | 'monthly' | null;
   days_before_live_due?: number | null;
+  sort_order?: number;
 }
 
 interface MediaChannelLibraryEntry {
@@ -79,9 +81,10 @@ const CHANNEL_OPTIONS = [
   { value: 'LinkedIn Ads', label: 'LinkedIn Ads', icon: Linkedin },
   { value: 'TikTok Ads', label: 'TikTok Ads', icon: Music },
   { value: 'Instagram Ads', label: 'Instagram Ads', icon: Instagram },
-  { value: 'Twitter Ads', label: 'Twitter Ads', icon: Radio },
+  { value: 'Twitter / X Ads', label: 'Twitter / X Ads', icon: Radio },
   { value: 'YouTube Ads', label: 'YouTube Ads', icon: Radio },
   { value: 'Snapchat Ads', label: 'Snapchat Ads', icon: Radio },
+  { value: 'Pinterest Ads', label: 'Pinterest Ads', icon: Radio },
   { value: 'Reddit Ads', label: 'Reddit Ads', icon: Radio },
   { value: 'Instagram (Organic)', label: 'Instagram (Organic)', icon: Instagram },
   { value: 'Facebook (Organic)', label: 'Facebook (Organic)', icon: Facebook },
@@ -111,13 +114,17 @@ export default function LibraryPage() {
   const [editingNotes, setEditingNotes] = useState('');
   const [editingActionPointId, setEditingActionPointId] = useState<string | null>(null);
   const [editingActionPointText, setEditingActionPointText] = useState('');
+  const [editingActionPointDescription, setEditingActionPointDescription] = useState('');
   const [editingActionPointDaysBefore, setEditingActionPointDaysBefore] = useState<number | ''>('');
   const [editingActionPointFrequency, setEditingActionPointFrequency] = useState<'daily' | 'weekly' | 'fortnightly' | 'monthly'>('weekly');
+  const [editingActionPointSortOrder, setEditingActionPointSortOrder] = useState<number | ''>('');
   const [addingActionPointChannelType, setAddingActionPointChannelType] = useState<string | null>(null);
   const [newActionPointText, setNewActionPointText] = useState('');
+  const [newActionPointDescription, setNewActionPointDescription] = useState('');
   const [newActionPointCategory, setNewActionPointCategory] = useState<'SET UP' | 'HEALTH CHECK'>('SET UP');
   const [newActionPointFrequency, setNewActionPointFrequency] = useState<'daily' | 'weekly' | 'fortnightly' | 'monthly'>('weekly');
   const [newActionPointDaysBefore, setNewActionPointDaysBefore] = useState<number | ''>('');
+  const [newActionPointSortOrder, setNewActionPointSortOrder] = useState<number | ''>('');
   const [actionPointFilter, setActionPointFilter] = useState<Record<string, 'SET UP' | 'HEALTH CHECK'>>({});
   const [editingSpecId, setEditingSpecId] = useState<string | null>(null);
   const [editingSpecText, setEditingSpecText] = useState('');
@@ -451,12 +458,14 @@ export default function LibraryPage() {
         body: JSON.stringify({
           channel_type: channelType,
           text: newActionPointText.trim(),
+          description: newActionPointDescription.trim() || null,
           category: newActionPointCategory,
           frequency: newActionPointCategory === 'HEALTH CHECK' ? newActionPointFrequency : null,
           days_before_live_due:
             newActionPointCategory === 'SET UP' && newActionPointDaysBefore !== ''
               ? Number(newActionPointDaysBefore)
               : null,
+          sort_order: newActionPointSortOrder !== '' ? Number(newActionPointSortOrder) : undefined,
         }),
       });
 
@@ -467,9 +476,11 @@ export default function LibraryPage() {
 
       // Reset form
       setNewActionPointText('');
+      setNewActionPointDescription('');
       setNewActionPointCategory('SET UP');
       setNewActionPointFrequency('weekly');
       setNewActionPointDaysBefore('');
+      setNewActionPointSortOrder('');
       setAddingActionPointChannelType(null);
 
       // Reload action points for this channel type
@@ -492,15 +503,19 @@ export default function LibraryPage() {
   const handleStartEditActionPoint = (ap: ActionPoint) => {
     setEditingActionPointId(ap.id);
     setEditingActionPointText(ap.text);
+    setEditingActionPointDescription(ap.description ?? '');
     setEditingActionPointDaysBefore(ap.days_before_live_due ?? '');
     setEditingActionPointFrequency(ap.frequency || 'weekly');
+    setEditingActionPointSortOrder(ap.sort_order ?? '');
   };
 
   const handleCancelEditActionPoint = () => {
     setEditingActionPointId(null);
     setEditingActionPointText('');
+    setEditingActionPointDescription('');
     setEditingActionPointDaysBefore('');
     setEditingActionPointFrequency('weekly');
+    setEditingActionPointSortOrder('');
   };
 
   const handleSaveEditActionPoint = async (ap: ActionPoint) => {
@@ -511,6 +526,8 @@ export default function LibraryPage() {
       const updateBody: any = {
         id: editingActionPointId,
         text: editingActionPointText.trim(),
+        description: editingActionPointDescription.trim() || null,
+        sort_order: editingActionPointSortOrder !== '' ? Number(editingActionPointSortOrder) : undefined,
       };
 
       if (ap.category === 'SET UP') {
@@ -1267,6 +1284,7 @@ export default function LibraryPage() {
           {libraryEntries.map((entry, entryIndex) => {
             const allChannelActionPoints = actionPoints[entry.channel_type] || [];
             const currentFilter = actionPointFilter[entry.channel_type] || 'SET UP';
+            // Already ordered by sort_order then created_at from the API.
             const channelActionPoints = allChannelActionPoints.filter(ap => ap.category === currentFilter);
             const isEditing = editingId === entry.id;
 
@@ -1422,6 +1440,29 @@ export default function LibraryPage() {
                                     className="text-xs h-7"
                                     placeholder="Action point text"
                                   />
+                                  <Textarea
+                                    value={editingActionPointDescription}
+                                    onChange={(e) => setEditingActionPointDescription(e.target.value)}
+                                    className="text-xs"
+                                    rows={2}
+                                    placeholder="Description (optional)"
+                                  />
+                                  <div className="flex items-center gap-2">
+                                    <Label className="text-xs text-gray-600 whitespace-nowrap">
+                                      Order:
+                                    </Label>
+                                    <Input
+                                      type="number"
+                                      min={0}
+                                      value={editingActionPointSortOrder}
+                                      onChange={(e) =>
+                                        setEditingActionPointSortOrder(
+                                          e.target.value === '' ? '' : Number(e.target.value)
+                                        )
+                                      }
+                                      className="text-xs h-7 w-20"
+                                    />
+                                  </div>
                                   {actionPoint.category === 'SET UP' && (
                                     <div className="flex items-center gap-2">
                                       <Label className="text-xs text-gray-600 whitespace-nowrap">
@@ -1496,7 +1537,7 @@ export default function LibraryPage() {
                                     >
                                       {actionPoint.text}
                                     </p>
-                                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
                                       <Button
                                         size="icon"
                                         variant="ghost"
@@ -1515,6 +1556,9 @@ export default function LibraryPage() {
                                       </Button>
                                     </div>
                                   </div>
+                                  {actionPoint.description && (
+                                    <p className="text-xs text-gray-500 mt-0.5">{actionPoint.description}</p>
+                                  )}
                                   <div className="flex items-center gap-2 mt-1">
                                     <Badge
                                       variant={actionPoint.category === 'SET UP' ? 'secondary' : 'default'}
@@ -1665,6 +1709,34 @@ export default function LibraryPage() {
               />
             </div>
             <div className="space-y-2">
+              <Label htmlFor="action-point-description">Description (optional)</Label>
+              <Textarea
+                id="action-point-description"
+                placeholder="Longer explanation of what to check, shown under the title"
+                value={newActionPointDescription}
+                onChange={(e) => setNewActionPointDescription(e.target.value)}
+                rows={2}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="action-point-sort-order">Order</Label>
+              <Input
+                id="action-point-sort-order"
+                type="number"
+                min={0}
+                value={newActionPointSortOrder}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setNewActionPointSortOrder(val === '' ? '' : Number(val));
+                }}
+                className="text-sm"
+                placeholder="0"
+              />
+              <p className="text-xs text-gray-500">
+                Controls the checklist order — lower numbers appear first.
+              </p>
+            </div>
+            <div className="space-y-2">
               <Label htmlFor="action-point-category">Category</Label>
               <Select
                 value={newActionPointCategory}
@@ -1728,8 +1800,10 @@ export default function LibraryPage() {
             <Button variant="outline" onClick={() => {
               setAddingActionPointChannelType(null);
               setNewActionPointText('');
+              setNewActionPointDescription('');
               setNewActionPointCategory('SET UP');
               setNewActionPointFrequency('weekly');
+              setNewActionPointSortOrder('');
             }}>
               Cancel
             </Button>

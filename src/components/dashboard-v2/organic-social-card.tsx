@@ -8,7 +8,7 @@ import { MediaPlanChannel } from '@/components/legacy-plan-builder/media-plan-gr
 import type { OrganicSocialActual } from '@/types/database';
 import { format, startOfMonth, endOfMonth, parseISO, eachWeekOfInterval } from 'date-fns';
 import Nango from '@nangohq/frontend';
-import InlineActionPoints from './inline-action-points';
+import ChannelHealthBadge from './channel-health-badge';
 import { getChannelLogo } from '@/lib/utils/channel-icons';
 import ManualSpendSlider from './manual-spend-slider';
 
@@ -547,11 +547,10 @@ export default function OrganicSocialCard({ channel, clientId, weekCommencing, a
                 </Button>
               </div>
             </div>
-            <InlineActionPoints
+            <ChannelHealthBadge
               channelType={channel.channelName}
               clientId={clientId}
-              maxVisible={4}
-              sideBySide={true}
+              showTopBorder={false}
             />
           </div>
         </div>

@@ -8,6 +8,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const channelType = searchParams.get('channel_type');
     const clientId = searchParams.get('client_id');
+    const category = searchParams.get('category');
 
     const supabase = await createClient();
 
@@ -19,10 +20,21 @@ export async function GET(request: NextRequest) {
     let query = supabase
       .from('action_points')
       .select('*')
+      .order('sort_order', { ascending: true })
       .order('created_at', { ascending: true });
 
     if (channelType) {
       query = query.eq('channel_type', channelType);
+    }
+    if (category) {
+      query = query.eq('category', category as 'SET UP' | 'HEALTH CHECK' | 'ONGOING' | 'TODO');
+    }
+    // TODO rows are ad-hoc per-client tasks — scope the base query by
+    // client_id so a client's real TODOs are actually fetchable (SET
+    // UP/HEALTH CHECK templates stay unscoped; client_id there is only used
+    // below to overlay this client's completion state).
+    if (category === 'TODO' && clientId) {
+      query = query.eq('client_id', clientId);
     }
 
     const { data, error } = await query;
@@ -76,7 +88,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { channel_type, text, category, frequency, due_date, days_before_live_due, client_id } = body;
+    const { channel_type, text, category, frequency, due_date, days_before_live_due, client_id, description, sort_order } = body;
 
     if (!text || !text.trim()) {
       return NextResponse.json(
@@ -113,6 +125,13 @@ export async function POST(request: NextRequest) {
       category,
       completed: false,
     };
+
+    if (description !== undefined) {
+      insertData.description = description || null;
+    }
+    if (sort_order !== undefined && sort_order !== null && sort_order !== '') {
+      insertData.sort_order = Number(sort_order);
+    }
 
     if (category === 'HEALTH CHECK' && frequency) {
       insertData.frequency = frequency;
@@ -168,7 +187,7 @@ export async function POST(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { id, text, completed, category, frequency, due_date, days_before_live_due, client_id, assigned_to } = body;
+    const { id, text, completed, category, frequency, due_date, days_before_live_due, client_id, assigned_to, description, sort_order } = body;
 
     if (!id) {
       return NextResponse.json(
@@ -279,6 +298,12 @@ export async function PUT(request: NextRequest) {
     }
     if (days_before_live_due !== undefined) {
       updateData.days_before_live_due = days_before_live_due;
+    }
+    if (description !== undefined) {
+      updateData.description = description || null;
+    }
+    if (sort_order !== undefined && sort_order !== null && sort_order !== '') {
+      updateData.sort_order = Number(sort_order);
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

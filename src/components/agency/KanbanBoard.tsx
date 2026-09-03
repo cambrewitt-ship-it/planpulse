@@ -6,6 +6,8 @@ import { createPortal } from 'react-dom';
 import { Facebook, Search, Linkedin, Music, Radio, X, Check, Clock, CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
 import { DndContext, DragOverlay, PointerSensor, closestCenter, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import type { AgencyClientActionPoints } from '@/app/api/agency/action-points/route';
+import type { ClientChannelHealth } from '@/app/api/agency/channel-health/route';
+import { ChannelHealthPanel } from './ChannelHealthPanel';
 import { getChannelLogo } from '@/lib/utils/channel-icons';
 import { nzToday, nzDateKeyOffset } from '@/lib/timezone';
 
@@ -929,15 +931,17 @@ interface KanbanBoardProps {
   amFilter: string;
   onActionPointCompleted?: () => void;
   accountManagers?: AccountManager[];
-  view?: 'kanban' | 'list' | 'gantt';
-  onViewChange?: (view: 'kanban' | 'list' | 'gantt') => void;
+  view?: 'kanban' | 'list' | 'gantt' | 'health';
+  onViewChange?: (view: 'kanban' | 'list' | 'gantt' | 'health') => void;
   onAskAI?: (prompt: string) => void;
   clients?: ClientOption[];
   onAccountManagerCreated?: () => void;
+  channelHealth?: ClientChannelHealth[];
+  onChannelHealthItemToggle?: (id: string, completed: boolean, clientId: string) => void | Promise<void>;
 }
 
 export function KanbanBoard(
-  { actionPointClients, amFilter, onActionPointCompleted, accountManagers = [], view = 'kanban', onViewChange, onAskAI, clients = [], onAccountManagerCreated }: KanbanBoardProps
+  { actionPointClients, amFilter, onActionPointCompleted, accountManagers = [], view = 'kanban', onViewChange, onAskAI, clients = [], onAccountManagerCreated, channelHealth = [], onChannelHealthItemToggle }: KanbanBoardProps
 ) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -1338,7 +1342,7 @@ export function KanbanBoard(
   const overdueCount = cards.filter(c => c.daysUntilDue !== null && c.daysUntilDue < 0).length;
   const todayCount = cards.filter(c => c.daysUntilDue === 0).length;
   const parsedCapture = parseCaptureText(addText, clients, accountManagers);
-  const viewTab = (v: 'kanban' | 'list' | 'gantt', label: string) => (
+  const viewTab = (v: 'kanban' | 'list' | 'gantt' | 'health', label: string) => (
     <button
       key={v}
       type="button"
@@ -1422,6 +1426,7 @@ export function KanbanBoard(
           {viewTab('list', 'List')}
           {viewTab('kanban', 'Board')}
           {viewTab('gantt', 'Timeline')}
+          {viewTab('health', 'Health')}
         </div>
         {view === 'list' && (
           <div style={{ display: 'flex', gap: 2, background: '#EDEAE3', padding: 2, borderRadius: 4, marginBottom: 6 }}>
@@ -1451,7 +1456,15 @@ export function KanbanBoard(
       </div>
 
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-    {view === 'gantt' ? (
+    {cards.length === 0 && view !== 'health' ? (
+      /* ── Empty state: no ad-hoc TODOs yet (SET UP/HEALTH CHECK items live in the Health view instead) ── */
+      <div style={{
+        height: '100%', minHeight: 240, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        color: '#8A8578', fontSize: 14, fontFamily: "'DM Sans', system-ui, sans-serif", textAlign: 'center', padding: '0 24px',
+      }}>
+        Add a task in the top bar
+      </div>
+    ) : view === 'gantt' ? (
       /* ── Timeline view: [230px label][64px OVERDUE gutter][8 day columns] ── */
       (() => {
         const WINDOW = 8; // today + next 7 days
@@ -1660,6 +1673,12 @@ export function KanbanBoard(
           </div>
         ))}
       </div>
+    ) : view === 'health' ? (
+      /* ── Health view: per-client digital-ad channel checklist status ── */
+      <ChannelHealthPanel
+        clients={channelHealth}
+        onItemToggle={(id, completed, clientId) => onChannelHealthItemToggle?.(id, completed, clientId)}
+      />
     ) : (
     /* ── Board view: fixed 236px columns, never squeezed, drag between columns ── */
     <DndContext

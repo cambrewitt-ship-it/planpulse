@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { MediaPlanChannel } from '@/components/legacy-plan-builder/media-plan-grid';
 import type { EdmActual } from '@/types/database';
 import { format } from 'date-fns';
-import InlineActionPoints from './inline-action-points';
+import ChannelHealthBadge from './channel-health-badge';
 import ManualSpendSlider from './manual-spend-slider';
 import { nzToday, nzDateKeyOffset } from '@/lib/timezone';
 
@@ -254,14 +254,10 @@ export default function EdmCard({ channel, clientId, actuals, onUpdateChannel, h
 
         {/* Action Points — right side column (half width) */}
         <div style={{ flex: 1, minWidth: 0, borderLeft: '1px solid #F3F4F6', background: '#FAFAFA', padding: 16 }}>
-          <h3 style={{ fontSize: 15, fontWeight: 600, color: '#1C1917', marginBottom: 10, fontFamily: "'Inter', system-ui, sans-serif" }}>Action Points</h3>
-          <InlineActionPoints
+          <ChannelHealthBadge
             channelType="EDM / Email"
             clientId={clientId}
-            maxVisible={5}
-            showBorder={false}
-            showTitle={false}
-            sideBySide={true}
+            showTopBorder={false}
           />
         </div>
       </div>{/* end display:flex container */}

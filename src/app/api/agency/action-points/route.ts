@@ -1,10 +1,14 @@
 // src/app/api/agency/action-points/route.ts
-// Aggregates all outstanding (incomplete) action points across all clients,
-// grouped by client and media channel, ordered by due date.
+// Aggregates outstanding ad-hoc TODO tasks across all clients, grouped by
+// client, plus a special "Agency Tasks" group for agency-wide TODOs.
+//
+// SET UP / HEALTH CHECK items are NOT included here — they live in the
+// per-channel health-check checklist system instead (see
+// /api/agency/channel-health and the channel-card checklist modal on the
+// client dashboard), so they no longer flood this To Do feed.
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { nzToday } from '@/lib/timezone';
 
 export interface AgencyActionPoint {
   id: string;
@@ -31,8 +35,9 @@ export interface AgencyClientActionPoints {
 
 /**
  * GET /api/agency/action-points
- * Returns all outstanding (incomplete) action points for all clients,
- * grouped by client then by media channel, ordered by due date.
+ * Returns all outstanding (incomplete) ad-hoc TODO tasks for all clients,
+ * grouped by client, plus a special "Agency Tasks" group for agency-wide
+ * (no client_id) TODOs.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -59,10 +64,12 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // 2. Fetch all action points (templates)
-    const { data: allActionPoints, error: apError } = await supabase
+    // 2. Fetch only ad-hoc TODO items (SET UP/HEALTH CHECK templates are
+    //    handled entirely by /api/agency/channel-health now)
+    const { data: allTodos, error: apError } = await supabase
       .from('action_points')
       .select('*')
+      .eq('category', 'TODO')
       .order('due_date', { ascending: true, nullsFirst: false });
 
     if (apError) {
@@ -72,335 +79,34 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    if (!allActionPoints || allActionPoints.length === 0) {
+    if (!allTodos || allTodos.length === 0) {
       return NextResponse.json({ clients: [] });
     }
 
-    const actionPointIds = allActionPoints.map((ap) => ap.id);
-
-    // 3. Fetch all per-client completions in one query (including completed_at for period reset)
+    // 3. Fetch per-client completions for these TODOs (used for assigned_to
+    //    on client-scoped TODOs — completion itself is read from
+    //    action_points.completed directly, see below)
+    const todoIds = allTodos.map((ap: any) => ap.id);
     const { data: allCompletions } = await supabase
       .from('client_action_point_completions')
-      .select('client_id, action_point_id, completed, completed_at, assigned_to')
-      .in('action_point_id', actionPointIds);
+      .select('client_id, action_point_id, assigned_to')
+      .in('action_point_id', todoIds);
 
-    // Build a lookup: { client_id -> { action_point_id -> { completed, completedAt, assignedTo } } }
-    const completionLookup = new Map<string, Map<string, { completed: boolean; completedAt: string | null; assignedTo: string | null }>>();
+    const assignedToLookup = new Map<string, Map<string, string | null>>();
     for (const comp of allCompletions || []) {
-      if (!completionLookup.has(comp.client_id)) {
-        completionLookup.set(comp.client_id, new Map());
-      }
-      completionLookup.get(comp.client_id)!.set(comp.action_point_id, {
-        completed: comp.completed,
-        completedAt: comp.completed_at || null,
-        assignedTo: (comp as any).assigned_to || null,
-      });
+      if (!assignedToLookup.has(comp.client_id)) assignedToLookup.set(comp.client_id, new Map());
+      assignedToLookup.get(comp.client_id)!.set(comp.action_point_id, (comp as any).assigned_to || null);
     }
 
-    // 4. Fetch all media plan builder data (channels per client)
-    const { data: allMediaPlans } = await supabase
-      .from('client_media_plan_builder')
-      .select('client_id, channels');
-
-    // Helper to convert date string to YYYY-MM-DD
-    function toDateStr(date: Date | string): string {
-      if (typeof date === 'string') {
-        return date.length > 10 ? date.split('T')[0] : date;
-      }
-      return date.toISOString().split('T')[0];
-    }
-
-    // Helper to determine channel status
-    function channelStatus(startDate: string | null, endDate: string | null): 'live' | 'upcoming' | 'ended' {
-      const today = nzToday();
-      if (!startDate) return 'upcoming';
-      if (endDate && endDate < today) return 'ended';
-      if (startDate <= today) return 'live';
-      return 'upcoming';
-    }
-
-    // Build a lookup: client_id -> Set<channelType>
-    const clientChannels = new Map<string, Set<string>>();
-    // Build lookups: client_id -> channelName -> start/end date
-    const channelStartDates = new Map<string, Map<string, string | null>>();
-    const channelEndDates = new Map<string, Map<string, string | null>>();
-    // Upcoming (future) start dates per channel — used for SET UP due date calculation.
-    // Null means the channel has no future flights, so SET UP should be suppressed.
-    const channelSetUpStartDates = new Map<string, Map<string, string | null>>();
-
-    const today = nzToday();
-
-    for (const plan of allMediaPlans || []) {
-      const channels = new Set<string>();
-      const startDates = new Map<string, string | null>();
-      const endDates = new Map<string, string | null>();
-      const setUpStartDates = new Map<string, string | null>();
-
-      if (plan.channels && Array.isArray(plan.channels)) {
-        for (const ch of plan.channels as any[]) {
-          if (ch.channelName) {
-            const normalizedName = normalizeChannelName(ch.channelName);
-
-            // Find earliest flight start date, latest end date, and earliest
-            // *upcoming* (>= today) flight start (used for SET UP action points)
-            let earliestStart: string | null = null;
-            let latestEnd: string | null = null;
-            let nextUpcomingStart: string | null = null;
-            const flights: any[] = ch.flights || [];
-
-            for (const flight of flights) {
-              if (flight.startWeek) {
-                const startDate = toDateStr(flight.startWeek);
-                if (!earliestStart || startDate < earliestStart) {
-                  earliestStart = startDate;
-                }
-                if (startDate >= today) {
-                  if (!nextUpcomingStart || startDate < nextUpcomingStart) {
-                    nextUpcomingStart = startDate;
-                  }
-                }
-              }
-              if (flight.endWeek) {
-                const endDate = toDateStr(flight.endWeek);
-                if (!latestEnd || endDate > latestEnd) {
-                  latestEnd = endDate;
-                }
-              }
-            }
-
-            // Only include channels that are live or upcoming (not ended)
-            const status = channelStatus(earliestStart, latestEnd);
-            if (status !== 'ended') {
-              channels.add(normalizedName);
-              const existingStart = startDates.get(normalizedName);
-              if (!existingStart) {
-                startDates.set(normalizedName, earliestStart);
-                endDates.set(normalizedName, latestEnd);
-                setUpStartDates.set(normalizedName, nextUpcomingStart);
-              } else if (earliestStart && earliestStart > existingStart) {
-                startDates.set(normalizedName, earliestStart);
-                endDates.set(normalizedName, latestEnd);
-                setUpStartDates.set(normalizedName, nextUpcomingStart);
-              }
-            }
-          }
-        }
-      }
-
-      if (channels.size > 0) {
-        clientChannels.set(plan.client_id, channels);
-        channelStartDates.set(plan.client_id, startDates);
-        channelEndDates.set(plan.client_id, endDates);
-        channelSetUpStartDates.set(plan.client_id, setUpStartDates);
-      }
-    }
-
-    // Helper: convert YYYY-MM-DD string to UTC ms
-    function dateStrToMs(dateStr: string): number {
-      const [y, m, d] = dateStr.split('-').map(Number);
-      return Date.UTC(y, m - 1, d);
-    }
-
-    // Helper: convert UTC ms to YYYY-MM-DD string
-    function msToDateStr(ms: number): string {
-      const d = new Date(ms);
-      return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
-    }
-
-    /**
-     * For HEALTH CHECK action points:
-     * - Uses the channel start date as the schedule anchor (matches Gantt/Calendar view).
-     * - Each occurrence is at channelStart + n × interval (n = 1, 2, 3 …).
-     * - A completion counts for the current period if completedAt ≥ previousOccurrence.
-     * - Once the current period is done, surfaces the next scheduled occurrence immediately.
-     * - Falls back to completion-based logic when no channel start date is available.
-     */
-    function getHealthCheckStatus(
-      frequency: string,
-      todayStr: string,
-      completedAt: string | null,
-      channelStartDate: string | null
-    ): { nextDueDate: string | null; isCompletedForCurrentPeriod: boolean } {
-      if (frequency === 'daily') {
-        const isComplete = completedAt ? completedAt.slice(0, 10) === todayStr : false;
-        return { nextDueDate: todayStr, isCompletedForCurrentPeriod: isComplete };
-      }
-
-      let intervalDays = 0;
-      if (frequency === 'weekly') intervalDays = 7;
-      else if (frequency === 'fortnightly') intervalDays = 14;
-      else if (frequency === 'monthly') intervalDays = 30;
-      else return { nextDueDate: null, isCompletedForCurrentPeriod: false };
-
-      const intervalMs = intervalDays * 24 * 60 * 60 * 1000;
-      const todayMs = dateStrToMs(todayStr);
-
-      if (channelStartDate) {
-        const startMs = dateStrToMs(channelStartDate);
-        const elapsed = todayMs - startMs;
-        // n = number of complete intervals since channel start; first occurrence is n=1
-        const n = elapsed > 0 ? Math.floor(elapsed / intervalMs) : 0;
-
-        const currentOccMs = startMs + n * intervalMs;
-        const nextOccMs    = startMs + (n + 1) * intervalMs;
-        // Previous occurrence boundary — a completion on or after this counts for the current period
-        const prevOccMs    = n > 0 ? startMs + (n - 1) * intervalMs : startMs;
-
-        const completedMs = completedAt ? dateStrToMs(completedAt.slice(0, 10)) : null;
-
-        if (n === 0) {
-          // Before first occurrence — always surface it so it matches what the Timeline shows
-          const completedBeforeFirst = completedMs !== null && completedMs >= startMs;
-          return { nextDueDate: msToDateStr(nextOccMs), isCompletedForCurrentPeriod: completedBeforeFirst };
-        }
-
-        if (completedMs !== null && completedMs >= prevOccMs) {
-          // Current period is complete — surface next scheduled occurrence now (no hide window)
-          // This matches what the Gantt/Calendar shows so the two views stay in sync.
-          return { nextDueDate: msToDateStr(nextOccMs), isCompletedForCurrentPeriod: false };
-        }
-
-        // Current period NOT completed — due at the current scheduled occurrence (overdue or today)
-        return { nextDueDate: msToDateStr(currentOccMs), isCompletedForCurrentPeriod: false };
-      }
-
-      // Fallback: completion-based logic when no channel start date is available
-      if (!completedAt) {
-        return { nextDueDate: todayStr, isCompletedForCurrentPeriod: false };
-      }
-      const completedMsNum = dateStrToMs(completedAt.slice(0, 10));
-      const nextDueMs = completedMsNum + intervalMs;
-      const reappearMs = nextDueMs - 2 * 24 * 60 * 60 * 1000;
-      return { nextDueDate: msToDateStr(nextDueMs), isCompletedForCurrentPeriod: todayMs < reappearMs };
-    }
-
-    // Helper function to calculate due date for SET UP action points
-    function calculateSetUpDueDate(
-      ap: any,
-      channelStartDate: string | null
-    ): string | null {
-      if (!channelStartDate) return null;
-      const daysBefore = ap.days_before_live_due;
-      if (daysBefore === null || daysBefore === undefined) return null;
-
-      return msToDateStr(dateStrToMs(channelStartDate) - daysBefore * 24 * 60 * 60 * 1000);
-    }
-
-    // 5. For each client, determine outstanding action points per channel
+    // 4. Group outstanding TODOs by client (or "Agency Tasks" if no client_id)
     const result: AgencyClientActionPoints[] = [];
-
-    for (const client of clients) {
-      const channels = clientChannels.get(client.id);
-      if (!channels || channels.size === 0) continue;
-
-      const clientCompletion = completionLookup.get(client.id) || new Map<string, { completed: boolean; completedAt: string | null; assignedTo: string | null }>();
-      const clientStartDates = channelStartDates.get(client.id) || new Map<string, string | null>();
-      const clientEndDates = channelEndDates.get(client.id) || new Map<string, string | null>();
-      const clientSetUpStartDates = channelSetUpStartDates.get(client.id) || new Map<string, string | null>();
-
-      // Group outstanding action points by channel
-      const channelMap = new Map<string, AgencyActionPoint[]>();
-
-      for (const ap of allActionPoints) {
-        const apChannelNorm = normalizeChannelName(ap.channel_type);
-
-        // Only include action points relevant to this client's channels
-        if (!channels.has(apChannelNorm)) continue;
-
-        const channelStartDate = clientStartDates.get(apChannelNorm) || null;
-        const channelEndDate = clientEndDates.get(apChannelNorm) || null;
-        const completionData = clientCompletion.get(ap.id) || null;
-        const isCompleted = completionData ? completionData.completed : false;
-        const completedAt = completionData ? completionData.completedAt : null;
-        const assignedTo = completionData ? completionData.assignedTo : null;
-
-        let calculatedDueDate: string | null = null;
-
-        if (ap.category === 'SET UP') {
-          if (isCompleted) continue;
-          // Only show SET UP actions for channels with an upcoming (future) flight.
-          // If a channel has already started and no future flight exists, we assume
-          // set-up was done when the plan was originally configured.
-          const nextUpcomingStart = clientSetUpStartDates.get(apChannelNorm) ?? null;
-          if (!nextUpcomingStart) continue;
-          calculatedDueDate = calculateSetUpDueDate(ap, nextUpcomingStart);
-        } else if (ap.category === 'HEALTH CHECK') {
-          if (!ap.frequency) continue;
-
-          const { nextDueDate, isCompletedForCurrentPeriod } = getHealthCheckStatus(
-            ap.frequency,
-            today,
-            completedAt,
-            channelStartDate
-          );
-
-          if (isCompletedForCurrentPeriod) continue;
-          calculatedDueDate = nextDueDate;
-        } else {
-          if (isCompleted) continue;
-        }
-
-        // Use original channel_type as the key to preserve the original name
-        if (!channelMap.has(ap.channel_type)) {
-          channelMap.set(ap.channel_type, []);
-        }
-        channelMap.get(ap.channel_type)!.push({
-          id: ap.id,
-          text: ap.text,
-          category: ap.category,
-          channel_type: ap.channel_type,
-          due_date: calculatedDueDate,
-          frequency: ap.frequency || null,
-          days_before_live_due: ap.days_before_live_due ?? null,
-          assigned_to: assignedTo,
-        });
-      }
-
-      if (channelMap.size === 0) continue;
-
-      // Sort action points within each channel by calculated due_date (nulls last)
-      const channelGroups: AgencyChannelGroup[] = [];
-      for (const [channelType, aps] of channelMap.entries()) {
-        const sorted = aps.sort((a, b) => {
-          if (!a.due_date && !b.due_date) return 0;
-          if (!a.due_date) return 1;
-          if (!b.due_date) return -1;
-          return new Date(a.due_date).getTime() - new Date(b.due_date).getTime();
-        });
-        channelGroups.push({ channelType, actionPoints: sorted });
-      }
-
-      // Sort channels alphabetically
-      channelGroups.sort((a, b) => a.channelType.localeCompare(b.channelType));
-
-      const totalOutstanding = channelGroups.reduce(
-        (sum, cg) => sum + cg.actionPoints.length,
-        0
-      );
-
-      result.push({
-        clientId: client.id,
-        clientName: client.name,
-        channels: channelGroups,
-        totalOutstanding,
-      });
-    }
-
-    // 6. Add TODO items — these are not channel-matched; they go directly
-    //    into the relevant client group (if client_id is set) or into a
-    //    special "Agency Tasks" group at the top.
     const agencyTodos: AgencyActionPoint[] = [];
 
-    for (const ap of allActionPoints) {
-      if (ap.category !== 'TODO') continue;
+    for (const ap of allTodos) {
       if (ap.completed) continue;
 
-      // TODOs scoped to a client persist their assignee on the same
-      // client_action_point_completions row as SET UP/HEALTH CHECK items;
-      // agency-wide TODOs (no client_id) have no client to key that table on,
-      // so they always come back unassigned today.
       const todoAssignedTo = ap.client_id
-        ? completionLookup.get(ap.client_id)?.get(ap.id)?.assignedTo ?? null
+        ? assignedToLookup.get(ap.client_id)?.get(ap.id) ?? null
         : null;
 
       const apEntry: AgencyActionPoint = {
@@ -415,10 +121,8 @@ export async function GET(request: NextRequest) {
       };
 
       if (ap.client_id) {
-        // Attach to the specific client's result entry
         let clientEntry = result.find(r => r.clientId === ap.client_id);
         if (!clientEntry) {
-          // Client may have no channel-based APs — create a stub entry
           const clientData = clients.find(c => c.id === ap.client_id);
           if (clientData) {
             clientEntry = { clientId: clientData.id, clientName: clientData.name, channels: [], totalOutstanding: 0 };
@@ -448,7 +152,7 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Sort clients by most outstanding action points first (keep Agency Tasks at top)
+    // Sort clients by most outstanding TODOs first (keep Agency Tasks at top)
     const agencyEntry = result.find(r => r.clientId === '__agency__');
     const otherEntries = result.filter(r => r.clientId !== '__agency__');
     otherEntries.sort((a, b) => b.totalOutstanding - a.totalOutstanding);
@@ -462,13 +166,4 @@ export async function GET(request: NextRequest) {
       { status: 500 }
     );
   }
-}
-
-function normalizeChannelName(name: string): string {
-  const lower = name.toLowerCase();
-  if (lower.includes('meta') || lower.includes('facebook')) return 'Meta Ads';
-  if (lower.includes('google')) return 'Google Ads';
-  if (lower.includes('linkedin')) return 'LinkedIn Ads';
-  if (lower.includes('tiktok')) return 'TikTok Ads';
-  return name;
 }

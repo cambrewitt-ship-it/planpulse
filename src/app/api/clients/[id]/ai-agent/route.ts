@@ -304,20 +304,25 @@ async function toolGetChannelPerformance(clientId: string, input: { start_date?:
 }
 
 async function toolGetActionPoints(clientId: string, req: NextRequest) {
-  const data = await callInternal('/api/agency/action-points', req);
-  if (data.error) return data;
+  // Ad-hoc TODOs and the per-channel SET UP/HEALTH CHECK checklist now live
+  // in two separate feeds (the checklist was moved out of the To Do list to
+  // stop it flooding /agency — see /api/agency/channel-health) — merge both
+  // so the AI still sees the full picture for a client.
+  const [todoData, checklistData] = await Promise.all([
+    callInternal('/api/agency/action-points', req),
+    callInternal('/api/agency/channel-health', req),
+  ]);
+  if (todoData.error && checklistData.error) return todoData;
 
   const today = nzToday();
   const in7Days = nzDateKeyOffset(7);
-
-  const clientEntry = (data.clients ?? []).find((c: any) => c.clientId === clientId);
-  if (!clientEntry) return { total: 0, overdue: [], due_soon: [], upcoming: [] };
 
   const overdue: any[] = [];
   const dueSoon: any[] = [];
   const upcoming: any[] = [];
 
-  for (const channel of clientEntry.channels ?? []) {
+  const todoEntry = (todoData.clients ?? []).find((c: any) => c.clientId === clientId);
+  for (const channel of todoEntry?.channels ?? []) {
     for (const ap of channel.actionPoints ?? []) {
       const item = { id: ap.id, channel: channel.channelType, task: ap.text, category: ap.category, due_date: ap.due_date };
       if (!ap.due_date) upcoming.push(item);
@@ -327,6 +332,30 @@ async function toolGetActionPoints(clientId: string, req: NextRequest) {
     }
   }
 
+  const checklistEntry = (checklistData.clients ?? []).find((c: any) => c.clientId === clientId);
+  for (const channel of checklistEntry?.channels ?? []) {
+    for (const item of channel.items ?? []) {
+      if (item.category === 'HEALTH CHECK' && item.completed && !item.stale) continue; // fresh, nothing to surface
+      const entry = {
+        id: item.id,
+        channel: channel.channelType,
+        task: item.text,
+        category: item.category,
+        due_date: item.dueDate,
+        checklist_status: item.completed ? (item.stale ? 'stale — needs recheck' : 'checked') : 'not yet checked',
+      };
+      if (!item.completed) {
+        if (!item.dueDate) upcoming.push(entry);
+        else if (item.dueDate < today) overdue.push(entry);
+        else if (item.dueDate <= in7Days) dueSoon.push(entry);
+        else upcoming.push(entry);
+      } else {
+        dueSoon.push(entry); // stale health-check items — surfaced but not urgent
+      }
+    }
+  }
+
+  if (!todoEntry && !checklistEntry) return { total: 0, overdue: [], due_soon: [], upcoming: [] };
   return { total: overdue.length + dueSoon.length + upcoming.length, overdue, due_soon: dueSoon, upcoming: upcoming.slice(0, 10) };
 }
 

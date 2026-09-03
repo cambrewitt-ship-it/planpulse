@@ -15,6 +15,7 @@ import { KanbanBoard } from '@/components/agency/KanbanBoard';
 import { NotesChecklist } from '@/components/agency/NotesChecklist';
 import { DateRangePicker } from '@/components/ui/date-range-picker';
 import { FullscreenGanttView, type GanttAPMarker } from '@/components/agency/FullscreenGanttView';
+import type { ClientChannelHealth } from '@/app/api/agency/channel-health/route';
 import { AgencyTimeline, ZOOM_LEVELS as TIMELINE_ZOOM_LEVELS, DEFAULT_ZOOM as DEFAULT_TIMELINE_ZOOM } from '@/components/agency/AgencyTimeline';
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -45,6 +46,7 @@ interface AccountManager {
 export default function AgencyDashboard() {
   const [clients, setClients] = useState<ClientCardData[]>([]);
   const [actionPointClients, setActionPointClients] = useState<AgencyClientActionPoints[]>([]);
+  const [channelHealthClients, setChannelHealthClients] = useState<ClientChannelHealth[]>([]);
   const [accountManagers, setAccountManagers] = useState<AccountManager[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -97,7 +99,7 @@ export default function AgencyDashboard() {
   };
 
   const chatRef = useRef<AgencyChatHandle>(null);
-  const [kanbanView, setKanbanView] = useState<'kanban' | 'list' | 'gantt'>('list');
+  const [kanbanView, setKanbanView] = useState<'kanban' | 'list' | 'gantt' | 'health'>('list');
   const [activeCardTab, setActiveCardTab] = useState<'clients' | 'todo' | 'timeline'>('todo');
   const [timelineZoom, setTimelineZoom] = useState(DEFAULT_TIMELINE_ZOOM);
   const [timelineSort, setTimelineSort] = useState<'default' | 'ending-soon' | 'starting-soon'>('ending-soon');
@@ -126,17 +128,20 @@ export default function AgencyDashboard() {
         endDate: dateRange.endDate,
       });
 
-      const [clientsRes, apRes] = await Promise.all([
+      const [clientsRes, apRes, chRes] = await Promise.all([
         fetch(`/api/agency/clients?${clientsParams.toString()}`),
         fetch('/api/agency/action-points'),
+        fetch('/api/agency/channel-health'),
       ]);
 
       const clientsData = clientsRes.ok ? await clientsRes.json() : { clients: [] };
       const apData = apRes.ok ? await apRes.json() : { clients: [] };
+      const chData = chRes.ok ? await chRes.json() : { clients: [] };
 
       const fetchedClients: ClientCardData[] = clientsData.clients || [];
       setClients(fetchedClients);
       setActionPointClients(apData.clients || []);
+      setChannelHealthClients(chData.clients || []);
       setLastRefreshed(new Date());
 
       if (fetchedClients.length > 0) {
@@ -244,6 +249,38 @@ export default function AgencyDashboard() {
       }));
   }, [actionPointClients, amFilter]);
 
+  // Channel health-check status, filtered by the same AM selection as the
+  // Clients tab (client-level membership, not per-item assignment).
+  const filteredChannelHealthClients = useMemo(() => {
+    if (amFilter === 'All') return channelHealthClients;
+    return channelHealthClients.filter(c => filteredIds.includes(c.clientId));
+  }, [channelHealthClients, amFilter, filteredIds]);
+
+  const handleChannelHealthItemToggle = useCallback(async (id: string, completed: boolean, clientId: string) => {
+    // Optimistic update so the checklist/chip color responds immediately
+    setChannelHealthClients(prev => prev.map(c => {
+      if (c.clientId !== clientId) return c;
+      return {
+        ...c,
+        channels: c.channels.map(ch => ({
+          ...ch,
+          items: ch.items.map(item => item.id === id ? { ...item, completed, completedAt: completed ? new Date().toISOString() : null } : item),
+        })),
+      };
+    }));
+    try {
+      await fetch('/api/action-points', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, completed, client_id: clientId }),
+      });
+    } catch (err) {
+      console.error('Error toggling channel health item:', err);
+    } finally {
+      // Re-sync with the server (recomputes status/staleness authoritatively)
+      void fetchData(true);
+    }
+  }, [fetchData]);
 
   // Fullscreen Gantt data derivation
   const ganttClients = useMemo(() =>
@@ -322,7 +359,8 @@ export default function AgencyDashboard() {
   }, [ganttClients, ganttChannels, timelineSort]);
 
   const ganttAPMarkers = useMemo<GanttAPMarker[]>(() => {
-    const markers: GanttAPMarker[] = filteredActionPointClients.flatMap(c =>
+    // TODO due-date markers — from the (now TODO-only) action-points feed.
+    const todoMarkers: GanttAPMarker[] = filteredActionPointClients.flatMap(c =>
       c.channels.flatMap(ch =>
         ch.actionPoints.map(ap => ({
           client_id: c.clientId,
@@ -337,6 +375,28 @@ export default function AgencyDashboard() {
         }))
       )
     );
+
+    // SET UP / HEALTH CHECK due-date markers — from the channel health feed
+    // (moved out of /api/agency/action-points along with the To Do declutter).
+    const checklistMarkers: GanttAPMarker[] = filteredChannelHealthClients.flatMap(c =>
+      c.channels.flatMap(ch =>
+        ch.items
+          .filter(item => item.dueDate !== null)
+          .map(item => ({
+            client_id: c.clientId,
+            client_name: c.clientName,
+            channel_label: ch.channelType,
+            text: item.text,
+            category: item.category,
+            due_date: item.dueDate,
+            frequency: item.frequency,
+            assigned_to: item.assignedTo,
+            id: item.id,
+          }))
+      )
+    );
+
+    const markers: GanttAPMarker[] = [...todoMarkers, ...checklistMarkers];
 
     // Add one Report marker per client at the end of the latest channel flight
     const clientLatest = new Map<string, { label: string; endDate: string; clientName: string }>();
@@ -362,7 +422,7 @@ export default function AgencyDashboard() {
     }
 
     return markers;
-  }, [filteredActionPointClients, ganttChannels, filteredClients]);
+  }, [filteredActionPointClients, filteredChannelHealthClients, ganttChannels, filteredClients]);
 
   const formatLastRefreshed = () => {
     if (!lastRefreshed) return 'Updated just now';
@@ -867,6 +927,8 @@ export default function AgencyDashboard() {
                     onAskAI={(prompt) => chatRef.current?.sendMessage(prompt)}
                     clients={clients.map(c => ({ id: c.id, name: c.name }))}
                     onAccountManagerCreated={fetchAccountManagers}
+                    channelHealth={filteredChannelHealthClients}
+                    onChannelHealthItemToggle={handleChannelHealthItemToggle}
                   />
                 </div>
               </div>

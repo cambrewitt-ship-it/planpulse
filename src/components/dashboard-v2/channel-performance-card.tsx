@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { differenceInDays, parseISO } from 'date-fns';
 import { AlertTriangle, ChevronDown, ExternalLink } from 'lucide-react';
-import InlineActionPoints from './inline-action-points';
+import ChannelHealthBadge from './channel-health-badge';
 import type { ChannelBenchmark, MetricPreset, ClientChannelPreset } from '@/types/database';
 import { getChannelLogo } from '@/lib/utils/channel-icons';
 import { getWeekAlignedMonthRange } from '@/lib/utils/channel-pacing';
@@ -1989,28 +1989,15 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
           )}
         </div>
 
-        {/* ── Right Section: Action Points ── */}
+        {/* ── Right Section: Health Check ── */}
         {clientId && (
-          <div className="flex-shrink-0 w-64 bg-white flex flex-col self-stretch overflow-hidden">
-            <div className="px-4 pt-4 flex-shrink-0">
-              <h3 className="text-base font-semibold text-gray-900 mb-3" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>Action Points</h3>
-            </div>
-            <div className="relative flex-1 min-h-0">
-              <div className={`h-full px-4 pb-6 ${isExpanded ? 'overflow-y-auto' : 'overflow-hidden'}`}>
-                <InlineActionPoints
-                  channelType={inferActionPointChannelType(channel.platform, channel.name)}
-                  clientId={clientId}
-                  channelStartDate={channelStartDate}
-                  channelFlights={channelFlights}
-                  maxVisible={3}
-                  showBorder={false}
-                  showTitle={false}
-                  refetchTrigger={refetchTrigger}
-                />
-              </div>
-              {/* Fade at the bottom — always shown to signal more content */}
-              <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12" style={{ background: 'linear-gradient(to top, white 0%, transparent 100%)' }} />
-            </div>
+          <div className="flex-shrink-0 w-64 bg-white flex flex-col self-stretch justify-center px-4">
+            <ChannelHealthBadge
+              channelType={inferActionPointChannelType(channel.platform, channel.name)}
+              clientId={clientId}
+              channelStartDate={channelStartDate}
+              channelFlights={channelFlights}
+            />
           </div>
         )}
       </div>

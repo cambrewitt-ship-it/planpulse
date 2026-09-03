@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { getChannelLogo } from '@/lib/utils/channel-icons';
-import InlineActionPoints from './inline-action-points';
+import ChannelHealthBadge from './channel-health-badge';
 import { MediaPlanChannel } from '@/components/legacy-plan-builder/media-plan-grid';
 import { supabase } from '@/lib/supabase/client';
 import ManualSpendSlider from './manual-spend-slider';
@@ -424,16 +424,12 @@ export default function OtherChannelCard({
           {/* ── Right: action points ── */}
 
           <div className="flex-1 md:border-l md:border-gray-100 md:pl-4">
-            <InlineActionPoints
+            <ChannelHealthBadge
               channelType={channel.channelName}
               clientId={clientId}
               channelStartDate={channelStartDate}
               channelFlights={channel.flights ?? []}
-              maxVisible={4}
-              sideBySide={true}
-              refetchTrigger={refetchTrigger}
-              showBorder={false}
-              showTitle={true}
+              showTopBorder={false}
             />
           </div>
         </div>
