@@ -21,6 +21,8 @@ import { CreativesSection } from './creatives-section';
 import { DemographicsSection } from './demographics-section';
 import { GoogleAdsPerformanceSection } from './google-ads-performance-section';
 import { GoogleAdsInsightsSection } from './google-ads-insights-section';
+import { GA4PerformanceSection } from './ga4-performance-section';
+import { GA4InsightsSection } from './ga4-insights-section';
 import { MetaPaidAdsSection } from './meta-paid-ads-section';
 import { FunnelSection } from './funnel-section';
 import { CostPerSection } from './cost-per-section';
@@ -417,6 +419,22 @@ export function ClientHubView({
                   <div key={key} id="section-googleAdsInsights" style={{ marginBottom: 44, ...sectionOutline('googleAdsInsights') }}>
                     {isHidden('googleAdsInsights') && <HiddenBadge />}
                     <GoogleAdsInsightsSection clientId={data.client.id} token={publicToken} editable={editMode} />
+                  </div>
+                );
+
+              case 'ga4Performance':
+                return !show('ga4Performance') ? null : (
+                  <div key={key} id="section-ga4Performance" style={{ marginBottom: 44, ...sectionOutline('ga4Performance') }}>
+                    {isHidden('ga4Performance') && <HiddenBadge />}
+                    <GA4PerformanceSection clientId={data.client.id} token={publicToken} editable={editMode} />
+                  </div>
+                );
+
+              case 'ga4Insights':
+                return !show('ga4Insights') ? null : (
+                  <div key={key} id="section-ga4Insights" style={{ marginBottom: 44, ...sectionOutline('ga4Insights') }}>
+                    {isHidden('ga4Insights') && <HiddenBadge />}
+                    <GA4InsightsSection clientId={data.client.id} token={publicToken} editable={editMode} />
                   </div>
                 );
 

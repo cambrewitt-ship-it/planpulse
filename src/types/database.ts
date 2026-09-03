@@ -658,6 +658,56 @@ export interface Database {
           };
           Relationships: [];
         };
+        google_analytics_breakdowns: {
+          Row: {
+            id: string;
+            user_id: string;
+            client_id: string | null;
+            property_id: string;
+            date: string;
+            dimension: string;
+            dimension_value: string;
+            sessions: number | null;
+            users: number | null;
+            conversions: number | null;
+            engaged_sessions: number | null;
+            event_count: number | null;
+            created_at: string;
+            updated_at: string;
+          };
+          Insert: {
+            id?: string;
+            user_id: string;
+            client_id?: string | null;
+            property_id: string;
+            date: string;
+            dimension: string;
+            dimension_value: string;
+            sessions?: number | null;
+            users?: number | null;
+            conversions?: number | null;
+            engaged_sessions?: number | null;
+            event_count?: number | null;
+            created_at?: string;
+            updated_at?: string;
+          };
+          Update: {
+            id?: string;
+            user_id?: string;
+            client_id?: string | null;
+            property_id?: string;
+            date?: string;
+            dimension?: string;
+            dimension_value?: string;
+            sessions?: number | null;
+            users?: number | null;
+            conversions?: number | null;
+            engaged_sessions?: number | null;
+            event_count?: number | null;
+            updated_at?: string;
+          };
+          Relationships: [];
+        };
         google_analytics_metrics: {
           Row: {
             id: string;

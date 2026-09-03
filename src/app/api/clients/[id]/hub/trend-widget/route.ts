@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/server';
 import {
-  DEFAULT_TREND_WIDGET, VALID_METRICS, VALID_PLATFORMS, VALID_CHART_TYPES, VALID_PERIODS,
+  DEFAULT_TREND_WIDGET, VALID_PLATFORMS, VALID_CHART_TYPES, VALID_PERIODS, isValidMetricForPlatform,
   type TrendWidgetConfig,
 } from '@/lib/client-hub/trend-widget';
 
@@ -45,11 +45,11 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const body = await req.json();
   const patch: Partial<TrendWidgetConfig> = {};
   if (body.metricA != null) {
-    if (!VALID_METRICS.includes(body.metricA)) return NextResponse.json({ error: 'Invalid metricA' }, { status: 400 });
+    if (typeof body.metricA !== 'string') return NextResponse.json({ error: 'Invalid metricA' }, { status: 400 });
     patch.metricA = body.metricA;
   }
   if (body.metricB != null) {
-    if (!VALID_METRICS.includes(body.metricB)) return NextResponse.json({ error: 'Invalid metricB' }, { status: 400 });
+    if (typeof body.metricB !== 'string') return NextResponse.json({ error: 'Invalid metricB' }, { status: 400 });
     patch.metricB = body.metricB;
   }
   if (body.platformA != null) {
@@ -84,6 +84,16 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     .maybeSingle();
 
   const trendWidget = { ...DEFAULT_TREND_WIDGET, ...(existing?.trend_widget ?? {}), ...patch };
+
+  // Validated against the effective (merged) platform, not the raw patch — a
+  // caller may patch metric and platform in separate requests (see
+  // trend-builder-section.tsx's onMetricChange/onPlatformChange handlers).
+  if (!isValidMetricForPlatform(trendWidget.metricA, trendWidget.platformA)) {
+    return NextResponse.json({ error: 'Invalid metricA for platformA' }, { status: 400 });
+  }
+  if (!isValidMetricForPlatform(trendWidget.metricB, trendWidget.platformB)) {
+    return NextResponse.json({ error: 'Invalid metricB for platformB' }, { status: 400 });
+  }
 
   const { data, error } = await supabase
     .from('client_hub_config')

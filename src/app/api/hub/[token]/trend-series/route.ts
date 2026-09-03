@@ -1,8 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient as createSupabaseAdmin } from '@supabase/supabase-js';
+import { createClient as createSupabaseAdmin, type SupabaseClient } from '@supabase/supabase-js';
 import { computePerfSeries } from '@/lib/client-hub/perf-series';
+import { computeGA4PerfSeries } from '@/lib/client-hub/ga4-perf-series';
 import { DEFAULT_TREND_WIDGET, PERIOD_DAYS, platformsFor } from '@/lib/client-hub/trend-widget';
 import { rateLimit } from '@/lib/rate-limit';
+
+function seriesFor(supabase: SupabaseClient, clientId: string, platform: string, metric: string, event: string | null, windowDays: number) {
+  if (platform === 'google-analytics') {
+    return computeGA4PerfSeries(supabase, clientId, { metric, windowDays });
+  }
+  return computePerfSeries(supabase, clientId, {
+    metric, platforms: platformsFor(platform), windowDays,
+    metaActionType: platform === 'meta-ads' ? event : null,
+    googleConversionAction: platform === 'google-ads' ? event : null,
+  });
+}
 
 type Params = { params: Promise<{ token: string }> | { token: string } };
 
@@ -54,16 +66,8 @@ export async function GET(req: NextRequest, { params }: Params) {
   const windowDays = PERIOD_DAYS[trendWidget.period] ?? 30;
 
   const [seriesA, seriesB] = await Promise.all([
-    computePerfSeries(admin, link.client_id, {
-      metric: trendWidget.metricA, platforms: platformsFor(trendWidget.platformA), windowDays,
-      metaActionType: trendWidget.platformA === 'meta-ads' ? trendWidget.eventA : null,
-      googleConversionAction: trendWidget.platformA === 'google-ads' ? trendWidget.eventA : null,
-    }),
-    computePerfSeries(admin, link.client_id, {
-      metric: trendWidget.metricB, platforms: platformsFor(trendWidget.platformB), windowDays,
-      metaActionType: trendWidget.platformB === 'meta-ads' ? trendWidget.eventB : null,
-      googleConversionAction: trendWidget.platformB === 'google-ads' ? trendWidget.eventB : null,
-    }),
+    seriesFor(admin, link.client_id, trendWidget.platformA, trendWidget.metricA, trendWidget.eventA, windowDays),
+    seriesFor(admin, link.client_id, trendWidget.platformB, trendWidget.metricB, trendWidget.eventB, windowDays),
   ]);
 
   return NextResponse.json({ seriesA: seriesA.series, seriesB: seriesB.series, trendWidget });

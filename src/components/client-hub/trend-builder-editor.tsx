@@ -2,15 +2,17 @@
 
 import { useEffect, useState } from 'react';
 import { COLOR, FONT_BODY } from './tokens';
-import { VALID_METRICS, VALID_PLATFORMS, type TrendWidgetConfig } from '@/lib/client-hub/trend-widget';
+import { metricsForPlatform, VALID_PLATFORMS, type TrendWidgetConfig } from '@/lib/client-hub/trend-widget';
 
 const METRIC_LABELS: Record<string, string> = {
   spend: 'Spend', impressions: 'Impressions', clicks: 'Clicks', reach: 'Reach',
   ctr: 'CTR', cpc: 'CPC', cpm: 'CPM', frequency: 'Frequency', conversions: 'Conversions',
+  sessions: 'Sessions', totalUsers: 'Users', engagementRate: 'Engagement rate',
+  bounceRate: 'Bounce rate', screenPageViews: 'Pageviews',
 };
 
 const PLATFORM_LABELS: Record<string, string> = {
-  all: 'All platforms', 'meta-ads': 'Meta Ads', 'google-ads': 'Google Ads',
+  all: 'All platforms', 'meta-ads': 'Meta Ads', 'google-ads': 'Google Ads', 'google-analytics': 'Google Analytics',
 };
 
 const LIST_EVENTS_ENDPOINT: Record<string, string> = {
@@ -59,7 +61,7 @@ function MetricPicker({ id, clientId, metric, platform, event, onMetricChange, o
   id: string; clientId: string; metric: string; platform: string; event: string | null;
   onMetricChange: (v: string) => void; onPlatformChange: (v: string) => void; onEventChange: (v: string | null) => void;
 }) {
-  const showEventPicker = metric === 'conversions' && platform !== 'all';
+  const showEventPicker = metric === 'conversions' && platform !== 'all' && platform !== 'google-analytics';
   const events = useConversionEvents(clientId, platform, showEventPicker);
 
   return (
@@ -67,7 +69,7 @@ function MetricPicker({ id, clientId, metric, platform, event, onMetricChange, o
       <div style={labelStyle}>{id}</div>
       <div style={{ display: 'flex', gap: 6 }}>
         <select value={metric} onChange={e => onMetricChange(e.target.value)} style={selectStyle}>
-          {VALID_METRICS.map(m => <option key={m} value={m}>{METRIC_LABELS[m] ?? m}</option>)}
+          {metricsForPlatform(platform).map(m => <option key={m} value={m}>{METRIC_LABELS[m] ?? m}</option>)}
         </select>
         <select value={platform} onChange={e => onPlatformChange(e.target.value)} style={selectStyle}>
           {VALID_PLATFORMS.map(p => <option key={p} value={p}>{PLATFORM_LABELS[p] ?? p}</option>)}
@@ -87,6 +89,12 @@ function MetricPicker({ id, clientId, metric, platform, event, onMetricChange, o
   );
 }
 
+/** Picks a metric to carry over when switching platforms — keeps the current metric if still valid (e.g. 'conversions' is shared between ad and GA4 metric lists), otherwise falls back to the new platform's first metric. */
+function metricForPlatformSwitch(currentMetric: string, newPlatform: string): string {
+  const options = metricsForPlatform(newPlatform);
+  return options.includes(currentMetric) ? currentMetric : options[0];
+}
+
 export function TrendBuilderEditor({ clientId, config, onChange }: TrendBuilderEditorProps) {
   return (
     <div style={{
@@ -99,7 +107,7 @@ export function TrendBuilderEditor({ clientId, config, onChange }: TrendBuilderE
         clientId={clientId}
         metric={config.metricA} platform={config.platformA} event={config.eventA}
         onMetricChange={v => onChange({ metricA: v, eventA: v === 'conversions' ? config.eventA : null })}
-        onPlatformChange={v => onChange({ platformA: v, eventA: null })}
+        onPlatformChange={v => onChange({ platformA: v, metricA: metricForPlatformSwitch(config.metricA, v), eventA: null })}
         onEventChange={v => onChange({ eventA: v })}
       />
       <MetricPicker
@@ -107,7 +115,7 @@ export function TrendBuilderEditor({ clientId, config, onChange }: TrendBuilderE
         clientId={clientId}
         metric={config.metricB} platform={config.platformB} event={config.eventB}
         onMetricChange={v => onChange({ metricB: v, eventB: v === 'conversions' ? config.eventB : null })}
-        onPlatformChange={v => onChange({ platformB: v, eventB: null })}
+        onPlatformChange={v => onChange({ platformB: v, metricB: metricForPlatformSwitch(config.metricB, v), eventB: null })}
         onEventChange={v => onChange({ eventB: v })}
       />
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>

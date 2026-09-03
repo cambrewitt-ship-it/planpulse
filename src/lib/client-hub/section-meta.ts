@@ -20,6 +20,8 @@ export const SECTION_META: SectionMetaItem[] = [
   { key: 'demographics', label: 'Audience' },
   { key: 'googleAdsPerformance', label: 'Google Ads — Performance' },
   { key: 'googleAdsInsights', label: 'Google Ads — Insights' },
+  { key: 'ga4Performance', label: 'Google Analytics — Traffic' },
+  { key: 'ga4Insights', label: 'Google Analytics — Behaviour' },
   { key: 'metaPaidAds', label: 'Meta Ads — Paid' },
   { key: 'pacing', label: 'Pacing' },
   { key: 'goals', label: 'Goals' },

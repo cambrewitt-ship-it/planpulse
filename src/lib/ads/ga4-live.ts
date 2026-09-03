@@ -75,6 +75,7 @@ export async function syncGA4Data(params: {
   } = params;
   const requestedMetrics = params.requestedMetrics || [
     'activeUsers', 'eventCount', 'conversions', 'totalUsers', 'sessions', 'screenPageViews',
+    'newUsers', 'engagementRate', 'averageSessionDuration', 'bounceRate',
   ];
 
   let nangoConnection;

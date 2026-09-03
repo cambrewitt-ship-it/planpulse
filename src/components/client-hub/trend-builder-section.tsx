@@ -12,9 +12,11 @@ import { DEFAULT_TREND_WIDGET, type TrendWidgetConfig } from '@/lib/client-hub/t
 const METRIC_LABELS: Record<string, string> = {
   spend: 'Spend', impressions: 'Impressions', clicks: 'Clicks', reach: 'Reach',
   ctr: 'CTR', cpc: 'CPC', cpm: 'CPM', frequency: 'Frequency', conversions: 'Conversions',
+  sessions: 'Sessions', totalUsers: 'Users', engagementRate: 'Engagement rate',
+  bounceRate: 'Bounce rate', screenPageViews: 'Pageviews',
 };
 
-const PERCENT_METRICS = new Set(['ctr']);
+const PERCENT_METRICS = new Set(['ctr', 'engagementRate', 'bounceRate']);
 const CURRENCY_METRICS = new Set(['spend', 'cpc', 'cpm']);
 
 function formatMetricValue(metric: string, v: number): string {
