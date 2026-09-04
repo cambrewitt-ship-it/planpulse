@@ -1406,7 +1406,7 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
   const stickyHeader = "border border-gray-200 bg-gray-800 text-white text-xs font-semibold uppercase tracking-wide px-2 py-2";
 
   return (
-    <div className="flex flex-col h-screen bg-gray-100" style={outerStyle}>
+    <div className="flex flex-col bg-gray-100" style={outerStyle}>
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-3 px-4 py-2.5 bg-white border-b border-gray-200 shadow-sm flex-shrink-0">
         <div>
@@ -1503,8 +1503,9 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
         </div>
       )}
 
-      {/* Grid */}
-      <div ref={scrollRef} className="flex-1 overflow-auto bg-white">
+      {/* Grid — vertical growth is unbounded (no scroll), only horizontal
+          scrolling for wide week ranges is needed. */}
+      <div ref={scrollRef} className="overflow-x-auto bg-white">
         <div style={{ position: "relative", width: `${totalLeftColsWidth + weeks.length * weekWidth}px` }}>
         <table
           className="border-separate border-spacing-0"

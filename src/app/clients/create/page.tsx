@@ -1288,9 +1288,10 @@ export default function CreateClientPage() {
                   </Button>
                 </div>
                 {sandboxPlan ? (
-                  <div style={{ height: 'calc(100vh - 420px)', minHeight: 420, display: 'flex', gap: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 0 }}>
                     <div style={{
                       flex: '0 0 32%', minWidth: 280, maxWidth: 420, marginRight: 12,
+                      height: 'calc(100vh - 420px)', minHeight: 420,
                       display: mediaPlanChatOpen ? 'flex' : 'none', flexDirection: 'column',
                     }}>
                       <MediaPlanChatPanel
@@ -1306,7 +1307,7 @@ export default function CreateClientPage() {
                       />
                     </div>
 
-                    <div style={{ flexShrink: 0, marginRight: 12, display: 'flex', alignItems: 'center' }}>
+                    <div style={{ flexShrink: 0, marginRight: 12, height: 'calc(100vh - 420px)', minHeight: 420, display: 'flex', alignItems: 'center' }}>
                       <button
                         onClick={() => setMediaPlanChatOpen(v => !v)}
                         title={mediaPlanChatOpen ? 'Collapse AI Planner Agent' : 'Open AI Planner Agent'}
@@ -1338,7 +1339,6 @@ export default function CreateClientPage() {
                         plan={sandboxPlan}
                         onPlanChange={handleSandboxPlanChange}
                         onUpload={handleSandboxPlanUpload}
-                        outerStyle={{ height: '100%' }}
                         showDownloadPdf={false}
                       />
                     </div>
@@ -1403,8 +1403,8 @@ export default function CreateClientPage() {
                     </div>
                     <Button disabled>Continue<ArrowRight className="h-4 w-4 ml-2" /></Button>
                   </div>
-                  <div style={{ height: 'calc(100vh - 420px)', minHeight: 420, display: 'flex', gap: 12 }}>
-                    <div style={{ flex: '0 0 32%', minWidth: 280, maxWidth: 420 }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                    <div style={{ flex: '0 0 32%', minWidth: 280, maxWidth: 420, height: 'calc(100vh - 420px)', minHeight: 420 }}>
                       <MediaPlanChatPanel
                         clientId=""
                         clientName={clientName || 'New client'}
@@ -1418,7 +1418,6 @@ export default function CreateClientPage() {
                         plan={previewPlan}
                         onPlanChange={() => {}}
                         onUpload={() => {}}
-                        outerStyle={{ height: '100%' }}
                         showDownloadPdf={false}
                       />
                     </div>
@@ -1712,9 +1711,14 @@ export default function CreateClientPage() {
               </CardContent>
             </Card>
 
-            <Button onClick={goToDashboard} className="w-full">
-              Finish Setup<Check className="h-4 w-4 ml-2" />
-            </Button>
+            <div className="flex items-center gap-3">
+              <Button type="button" variant="ghost" size="sm" onClick={goToDashboard} className="flex-shrink-0">
+                Skip, I&apos;ll do this later
+              </Button>
+              <Button onClick={goToDashboard} className="flex-1">
+                Finish Setup<Check className="h-4 w-4 ml-2" />
+              </Button>
+            </div>
             </div>
           );
         })()}
@@ -2193,13 +2197,25 @@ export default function CreateClientPage() {
               </Card>
             </div>
 
-            <Button
-              onClick={saveCampaigns}
-              disabled={campaignsSaving || (connectionStatus.facebook && !metaSaved)}
-              className="w-full"
-            >
-              {campaignsSaving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving&hellip;</> : <>Continue<ArrowRight className="h-4 w-4 ml-2" /></>}
-            </Button>
+            <div className="flex items-center gap-3">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setStep(3)}
+                disabled={campaignsSaving}
+                className="flex-shrink-0"
+              >
+                Skip, I&apos;ll do this later
+              </Button>
+              <Button
+                onClick={saveCampaigns}
+                disabled={campaignsSaving || (connectionStatus.facebook && !metaSaved)}
+                className="flex-1"
+              >
+                {campaignsSaving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving&hellip;</> : <>Continue<ArrowRight className="h-4 w-4 ml-2" /></>}
+              </Button>
+            </div>
           </div>
         )}
 

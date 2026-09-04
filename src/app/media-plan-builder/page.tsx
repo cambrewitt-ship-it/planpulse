@@ -135,15 +135,18 @@ export default function MediaPlanBuilderPage() {
 
       <section className="pb-16" style={{ background: '#F5F3EF' }}>
         <div className="container mx-auto px-4">
-          <div style={{ height: BUILDER_HEIGHT, display: 'flex' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start' }}>
             {!hydrated ? (
-              <div className="w-full h-full animate-pulse bg-gray-100 rounded-xl" />
+              <div className="w-full animate-pulse bg-gray-100 rounded-xl" style={{ height: BUILDER_HEIGHT }} />
             ) : plan ? (
               <>
                 {/* AI panel sits on the left, same as the Media Plan tab in the
-                    client dashboard (src/app/clients/[id]/dashboard/page.tsx) */}
+                    client dashboard (src/app/clients/[id]/dashboard/page.tsx).
+                    It keeps a fixed height with its own internal scroll — the
+                    grid next to it is unbounded and grows with its row count. */}
                 <div style={{
                   flex: '0 0 32%', minWidth: 280, maxWidth: 420, marginRight: 12,
+                  height: BUILDER_HEIGHT,
                   display: aiPanelOpen ? 'flex' : 'none', flexDirection: 'column',
                 }}>
                   <PublicAiPanel
@@ -155,7 +158,7 @@ export default function MediaPlanBuilderPage() {
                   />
                 </div>
 
-                <div style={{ flexShrink: 0, marginRight: 12, display: 'flex', alignItems: 'center' }}>
+                <div style={{ flexShrink: 0, marginRight: 12, height: BUILDER_HEIGHT, display: 'flex', alignItems: 'center' }}>
                   <button
                     onClick={() => setAiPanelOpen(v => !v)}
                     title={aiPanelOpen ? 'Collapse AI Assistant' : 'Open AI Assistant'}
@@ -192,7 +195,6 @@ export default function MediaPlanBuilderPage() {
                     plan={plan}
                     onPlanChange={handlePlanChange}
                     onUpload={handleUpload}
-                    outerStyle={{ height: '100%' }}
                   />
                 </div>
               </>
@@ -201,7 +203,7 @@ export default function MediaPlanBuilderPage() {
                 flex: '1 1 auto', minWidth: 0, borderRadius: 12,
                 border: '1px solid rgba(232,228,220,0.7)',
                 boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)',
-                overflow: 'auto', background: '#fff',
+                overflow: 'auto', height: BUILDER_HEIGHT, background: '#fff',
               }}>
                 <UploadWizard
                   onPlanLoaded={handlePlanLoaded}

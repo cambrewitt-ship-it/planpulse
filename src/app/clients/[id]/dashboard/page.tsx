@@ -2938,8 +2938,9 @@ export default function DashboardV2() {
 
             {/* ── Media Plan view ── */}
             {viewMode === 'media-plan' && sandboxPlanHydrated && (
-              // Container height drives the grid — outerStyle overrides h-screen so the
-              // inner scroll area reaches exactly the container bottom (totals visible).
+              // The chat panel keeps a fixed, viewport-relative height with its
+              // own internal scroll. The grid next to it is unbounded — it grows
+              // to fit however many rows the plan has, instead of scrolling.
               // The Media Plan Editor chat panel is always mounted here (even when
               // collapsed, via `display: none`) so its conversation survives toggling —
               // only its layout width/visibility changes with mediaPlanChatOpen.
@@ -2953,9 +2954,9 @@ export default function DashboardV2() {
                     {sandboxPlanSaveError}
                   </div>
                 )}
-                <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: 0 }}>
+                <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'flex-start', gap: 0 }}>
                   <div style={{
-                    flex: '0 0 32%', minWidth: 280, maxWidth: 420, marginRight: 12,
+                    flex: '0 0 32%', minWidth: 280, maxWidth: 420, marginRight: 12, height: '100%',
                     display: mediaPlanChatOpen ? 'flex' : 'none', flexDirection: 'column',
                   }}>
                     <MediaPlanChatPanel
@@ -2977,7 +2978,7 @@ export default function DashboardV2() {
                       expands/collapses depending on mediaPlanChatOpen. Collapsed state
                       carries a text label so it's an obvious call-to-action, not just
                       a bare icon. */}
-                  <div style={{ flexShrink: 0, marginRight: 12, display: 'flex', alignItems: 'center' }}>
+                  <div style={{ flexShrink: 0, marginRight: 12, height: '100%', display: 'flex', alignItems: 'center' }}>
                     <button
                       onClick={() => setMediaPlanChatOpen(v => !v)}
                       title={mediaPlanChatOpen ? 'Collapse AI Planner Agent' : 'Open AI Planner Agent'}
@@ -3010,7 +3011,6 @@ export default function DashboardV2() {
                         plan={clientSandboxPlanForGrid}
                         onPlanChange={handleClientPlanChange}
                         onUpload={handleClientPlanUpload}
-                        outerStyle={{ height: '100%' }}
                         showUploadNew={false}
                       />
                     ) : (
