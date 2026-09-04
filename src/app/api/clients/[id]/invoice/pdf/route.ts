@@ -3,7 +3,6 @@ import { createClient } from '@/lib/supabase/server';
 
 // ── Colours from spec ───────────────────────────────────────────────────────
 const NAVY   = '#16305A';
-const GOLD   = '#D4AF37';
 const BODY   = '#182236';
 const SEC    = '#33394a';
 const MUTED  = '#5b6472';
@@ -203,9 +202,9 @@ export async function GET(
 
   y += Math.max(LOGO_SIZE, 18) + 2;
 
-  // ── Gold divider ─────────────────────────────────────────────────────────
+  // ── Divider ──────────────────────────────────────────────────────────────
   y += 5.8; // ~22px top margin
-  doc.setFillColor(GOLD);
+  doc.setFillColor('#000000');
   doc.rect(ML, y, CW, 0.8, 'F'); // 3px ≈ 0.8mm
   y += 0.8 + 5.3; // bar + ~20px bottom margin
 
