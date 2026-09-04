@@ -43,6 +43,8 @@ export function FunnelSection({ clientId, token, editable, client }: FunnelSecti
   const [mediaChannels, setMediaChannels] = useState<MediaChannel[]>([]);
   const [isFunnelBuilderOpen, setIsFunnelBuilderOpen] = useState(false);
   const [editingFunnel, setEditingFunnel] = useState<MediaPlanFunnel | null>(null);
+  const [commission, setCommission] = useState(0);
+  const [grossUp, setGrossUp] = useState(false);
 
   const calculateFunnel = useCallback(async (funnelId: string) => {
     setLoadingFunnels(true);
@@ -70,6 +72,7 @@ export function FunnelSection({ clientId, token, editable, client }: FunnelSecti
       const res = await fetch(token ? `/api/hub/${token}/funnels` : `/api/funnels?clientId=${clientId}`);
       const data = await res.json();
       if (data.success && data.funnels) {
+        setCommission(data.commission || 0);
         setFunnels(data.funnels);
         if (data.funnels.length > 0) {
           const firstId = data.funnels[0].id;
@@ -151,6 +154,19 @@ export function FunnelSection({ clientId, token, editable, client }: FunnelSecti
 
   const hubClient = useMemo(() => client ? { id: client.id, name: client.name, logo_url: client.logo_url } : undefined, [client]);
 
+  // Commission is stored net-of-agency-fee (e.g. 20 means the client is billed at
+  // net / (1 - 0.20)); grossing up multiplies spend and cost-per-action figures
+  // by the same factor so they reflect what the client is actually billed.
+  const grossUpMultiplier = grossUp && commission > 0 && commission < 100 ? 100 / (100 - commission) : 1;
+  const displayTotalSpend = totalSpend * grossUpMultiplier;
+  const displayStages = useMemo(() => (
+    grossUpMultiplier === 1
+      ? funnelStages
+      : funnelStages.map(stage => stage.costPerAction !== undefined
+          ? { ...stage, costPerAction: stage.costPerAction * grossUpMultiplier }
+          : stage)
+  ), [funnelStages, grossUpMultiplier]);
+
   if (!editable && !loadingFunnels && funnels.length === 0) return null;
 
   return (
@@ -159,6 +175,31 @@ export function FunnelSection({ clientId, token, editable, client }: FunnelSecti
         <h2 style={{ ...sectionTitleStyle, margin: 0 }}>Funnels</h2>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <DateRangePicker value={dateRange} onChange={setDateRange} disabled={loadingFunnels} />
+          {commission > 0 && (
+            <div style={{ display: 'flex', borderRadius: 6, border: `0.5px solid ${COLOR.cardBorder}`, overflow: 'hidden' }}>
+              <button
+                onClick={() => setGrossUp(false)}
+                style={{
+                  padding: '6px 12px', border: 'none', cursor: 'pointer', fontSize: 12.5, fontWeight: 600,
+                  background: !grossUp ? COLOR.accent : 'transparent',
+                  color: !grossUp ? COLOR.bg : COLOR.muted,
+                }}
+              >
+                Net
+              </button>
+              <button
+                onClick={() => setGrossUp(true)}
+                title={`Gross up by ${commission}% commission`}
+                style={{
+                  padding: '6px 12px', border: 'none', cursor: 'pointer', fontSize: 12.5, fontWeight: 600,
+                  background: grossUp ? COLOR.accent : 'transparent',
+                  color: grossUp ? COLOR.bg : COLOR.muted,
+                }}
+              >
+                Gross
+              </button>
+            </div>
+          )}
           {editable && (
             <button
               onClick={() => { setEditingFunnel(null); setIsFunnelBuilderOpen(true); }}
@@ -225,8 +266,8 @@ export function FunnelSection({ clientId, token, editable, client }: FunnelSecti
 
       {selectedFunnelId && (
         <FunnelChart
-          funnelStages={funnelStages}
-          totalCost={totalSpend}
+          funnelStages={displayStages}
+          totalCost={displayTotalSpend}
           dateRange={dateRange}
           isLoading={loadingFunnels}
           client={hubClient}

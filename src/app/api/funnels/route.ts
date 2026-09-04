@@ -45,7 +45,13 @@ export async function GET(request: NextRequest) {
       updatedAt: f.updated_at,
     }));
 
-    return NextResponse.json({ success: true, funnels: mapped });
+    const { data: mediaPlanBuilder } = await (supabase as any)
+      .from('client_media_plan_builder')
+      .select('commission')
+      .eq('client_id', clientId)
+      .maybeSingle();
+
+    return NextResponse.json({ success: true, funnels: mapped, commission: mediaPlanBuilder?.commission || 0 });
   } catch (error: any) {
     console.error('GET /api/funnels unexpected error:', error);
     return NextResponse.json(

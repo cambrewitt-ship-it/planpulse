@@ -1,11 +1,13 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import type { Database } from '@/types/database';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   console.log('=== GET /api/ads/google-analytics/get-accounts ===');
-  
+
   try {
+    const clientId = request.nextUrl.searchParams.get('clientId');
+
     // 1. Get authenticated user's ID
     const supabase = await createClient();
     const { data: { session }, error: authError } = await supabase.auth.getSession();
@@ -19,14 +21,29 @@ export async function GET() {
     }
 
     const user = session.user;
-    console.log('Fetching Google Analytics accounts for user:', user.id);
+    console.log('Fetching Google Analytics accounts for user:', user.id, 'client:', clientId);
 
-    // 2. Query saved Google Analytics accounts from database
-    const { data: accounts, error: dbError } = await supabase
+    // 2. Query saved Google Analytics accounts from database, scoped to this client
+    let query = supabase
       .from('google_analytics_accounts')
       .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false });
+      .eq('user_id', user.id);
+    if (clientId) query = query.eq('client_id', clientId);
+
+    let { data: accounts, error: dbError } = await query.order('created_at', { ascending: false });
+
+    // Fall back to legacy rows saved before client scoping was added, so
+    // accounts don't disappear from this client's list until re-saved.
+    if (clientId && !dbError && (!accounts || accounts.length === 0)) {
+      const legacy = await supabase
+        .from('google_analytics_accounts')
+        .select('*')
+        .eq('user_id', user.id)
+        .is('client_id', null)
+        .order('created_at', { ascending: false });
+      accounts = legacy.data;
+      dbError = legacy.error;
+    }
 
     if (dbError) {
       console.error('Database error fetching accounts:', dbError);

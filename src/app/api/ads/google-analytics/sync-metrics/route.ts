@@ -90,10 +90,13 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Get GA4 properties to associate data with property_ids
-    // First try with client_id, then fallback to just user_id
+    // Get GA4 properties to associate data with property_ids.
+    // First try this client's own properties, then fall back only to legacy
+    // rows never assigned to a client (client_id IS NULL) — never to another
+    // client's explicitly-assigned property, which would attribute its data
+    // to this client.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const buildPropertiesQuery = (withClientId: boolean) => {
+    const buildPropertiesQuery = (scope: 'client' | 'legacy') => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let q: any = supabase
         .from('google_analytics_accounts')
@@ -101,16 +104,17 @@ export async function POST(request: NextRequest) {
         .eq('user_id', userId)
         .eq('is_active', true);
       if (propertyId) q = q.eq('property_id', propertyId);
-      if (withClientId && clientId) q = q.eq('client_id', clientId);
+      if (scope === 'client' && clientId) q = q.eq('client_id', clientId);
+      if (scope === 'legacy') q = q.is('client_id', null);
       return q;
     };
 
-    let { data: gaProperties } = await buildPropertiesQuery(true);
+    let { data: gaProperties } = await buildPropertiesQuery('client');
 
-    // If no properties found with client_id filter, try without it
+    // If no properties found with client_id filter, try legacy (unscoped) rows
     if ((!gaProperties || gaProperties.length === 0) && clientId) {
-      console.log('⚠️  No GA4 properties found with client_id filter, trying without client_id...');
-      const { data: fallbackProperties } = await buildPropertiesQuery(false);
+      console.log('⚠️  No GA4 properties found with client_id filter, trying legacy rows...');
+      const { data: fallbackProperties } = await buildPropertiesQuery('legacy');
       gaProperties = fallbackProperties;
     }
 

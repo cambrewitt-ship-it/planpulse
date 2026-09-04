@@ -106,8 +106,25 @@ export async function syncGA4Data(params: {
     .eq('user_id', userId)
     .eq('is_active', true);
   if (propertyId) propertiesQuery = propertiesQuery.eq('property_id', propertyId);
+  if (clientId) propertiesQuery = propertiesQuery.eq('client_id', clientId);
 
-  const { data: gaAccounts, error: accountsError } = await propertiesQuery;
+  let { data: gaAccounts, error: accountsError } = await propertiesQuery;
+
+  // Fall back to accounts never assigned to a client (legacy rows saved
+  // before client scoping was added). Never fall back to another client's
+  // explicitly-assigned property, which would leak its data into this sync.
+  if (clientId && !accountsError && (!gaAccounts || gaAccounts.length === 0)) {
+    let legacyQuery = supabase
+      .from('google_analytics_accounts')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('is_active', true)
+      .is('client_id', null);
+    if (propertyId) legacyQuery = legacyQuery.eq('property_id', propertyId);
+    const legacy = await legacyQuery;
+    gaAccounts = legacy.data;
+    accountsError = legacy.error;
+  }
 
   if (accountsError || !gaAccounts || gaAccounts.length === 0) {
     return {

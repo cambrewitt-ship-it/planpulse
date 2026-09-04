@@ -1,13 +1,15 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import type { Database } from '@/types/database';
 import { Nango } from '@nangohq/node';
 import { toNangoPlatform } from '@/lib/platform-mapping';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   console.log('=== GET /api/ads/google-analytics/accounts ===');
-  
+
   try {
+    const clientId = request.nextUrl.searchParams.get('clientId');
+
     // Initialize Nango with secret key
     const secretKey = process.env.NANGO_SECRET_KEY_DEV_PLAN_CHECK;
     if (!secretKey) {
@@ -17,9 +19,9 @@ export async function GET() {
         { status: 500 }
       );
     }
-    
+
     const nango = new Nango({ secretKey });
-    
+
     // 1. Get authenticated user's ID
     console.log('Step 1: Authenticating user...');
     const supabase = await createClient();
@@ -34,16 +36,23 @@ export async function GET() {
     }
 
     const user = session.user;
-    console.log('Step 2: Looking up Google Analytics connection for user:', user.id);
+    console.log('Step 2: Looking up Google Analytics connection for user:', user.id, 'client:', clientId);
 
-    // 2. Look up their Google Analytics connection_id from the database
-    const { data: connection, error: dbError } = await supabase
+    // 2. Look up this client's Google Analytics connection_id from the database.
+    // Use limit(1) instead of single() — a user can have multiple active GA4
+    // connections (one per client), so filter by client_id when known and
+    // never let a second client's connection make this route error out.
+    let connectionQuery = supabase
       .from('ad_platform_connections')
       .select('connection_id')
       .eq('user_id', user.id)
       .eq('platform', 'google-analytics')
       .eq('connection_status', 'active')
-      .single();
+      .order('created_at', { ascending: false })
+      .limit(1);
+    if (clientId) connectionQuery = connectionQuery.eq('client_id', clientId);
+    const { data: connections, error: dbError } = await connectionQuery;
+    const connection = connections?.[0] ?? null;
 
     if (dbError || !connection) {
       console.error('Database error fetching connection:', dbError);
@@ -66,29 +75,9 @@ export async function GET() {
 
     console.log('Step 5: Calling Google Analytics Admin API to list properties...');
 
-    // 4. Call Google Analytics Admin API to get account summaries
-    // First, get account summaries which include account, property, and view info
-    const accountsResponse = await fetch(
-      'https://analyticsadmin.googleapis.com/v1beta/accountSummaries',
-      {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        }
-      }
-    );
-
-    if (!accountsResponse.ok) {
-      const errorText = await accountsResponse.text();
-      console.error('Google Analytics API error:', errorText);
-      throw new Error(`Failed to fetch account summaries: ${accountsResponse.status}`);
-    }
-
-    const accountsData = await accountsResponse.json();
-    console.log('Step 6: Successfully fetched account summaries');
-
-    // 5. Extract properties from account summaries
-    // The response structure: accountSummaries[] -> propertySummaries[]
+    // 4. Call Google Analytics Admin API to get account summaries.
+    // The endpoint paginates (default/max pageSize is 200) — loop through
+    // nextPageToken so accounts with many GA4 properties aren't truncated.
     const properties: Array<{
       propertyId: string;
       propertyName: string;
@@ -96,42 +85,69 @@ export async function GET() {
       accountName: string;
     }> = [];
 
-    if (accountsData.accountSummaries) {
-      for (const accountSummary of accountsData.accountSummaries) {
-        const accountId = accountSummary.account?.replace('accounts/', '') || '';
-        const accountName = accountSummary.displayName || '';
-        
-        if (accountSummary.propertySummaries) {
-          for (const propertySummary of accountSummary.propertySummaries) {
-            const propertyId = propertySummary.property?.replace('properties/', '') || '';
-            const propertyName = propertySummary.displayName || '';
-            
-            properties.push({
-              propertyId,
-              propertyName,
-              accountId,
-              accountName,
-            });
+    let pageToken: string | undefined;
+    do {
+      const url = new URL('https://analyticsadmin.googleapis.com/v1beta/accountSummaries');
+      url.searchParams.set('pageSize', '200');
+      if (pageToken) url.searchParams.set('pageToken', pageToken);
+
+      const accountsResponse = await fetch(url.toString(), {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        }
+      });
+
+      if (!accountsResponse.ok) {
+        const errorText = await accountsResponse.text();
+        console.error('Google Analytics API error:', errorText);
+        throw new Error(`Failed to fetch account summaries: ${accountsResponse.status}`);
+      }
+
+      const accountsData = await accountsResponse.json();
+
+      // Extract properties from account summaries
+      // The response structure: accountSummaries[] -> propertySummaries[]
+      if (accountsData.accountSummaries) {
+        for (const accountSummary of accountsData.accountSummaries) {
+          const accountId = accountSummary.account?.replace('accounts/', '') || '';
+          const accountName = accountSummary.displayName || '';
+
+          if (accountSummary.propertySummaries) {
+            for (const propertySummary of accountSummary.propertySummaries) {
+              const propertyId = propertySummary.property?.replace('properties/', '') || '';
+              const propertyName = propertySummary.displayName || '';
+
+              properties.push({
+                propertyId,
+                propertyName,
+                accountId,
+                accountName,
+              });
+            }
           }
         }
       }
-    }
 
+      pageToken = accountsData.nextPageToken || undefined;
+    } while (pageToken);
+
+    console.log('Step 6: Successfully fetched account summaries');
     console.log('Step 7: Found', properties.length, 'properties');
 
     // 6. Format and return the properties
-    return NextResponse.json({ 
+    return NextResponse.json({
       accounts: properties
     });
-    
+
   } catch (error: any) {
     console.error('=== ERROR in /api/ads/google-analytics/accounts ===');
     console.error('Error type:', error?.constructor?.name);
     console.error('Error message:', error?.message);
     console.error('Error stack:', error?.stack);
-    
+
     return NextResponse.json(
-      { 
+      {
         error: 'Failed to fetch Google Analytics properties',
         details: error?.message || 'Unknown error',
         type: error?.constructor?.name
@@ -140,5 +156,3 @@ export async function GET() {
     );
   }
 }
-
-

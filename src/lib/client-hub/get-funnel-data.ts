@@ -141,12 +141,27 @@ export async function computeFunnelStages(
         const accessToken = (nangoConnection.credentials as any)?.access_token as string;
 
         if (accessToken) {
-          // GA4 accounts stored per-user only (no client_id column)
-          const { data: gaAccounts } = await supabase
+          // Scope to this client's own GA4 properties; fall back to legacy
+          // rows saved before client scoping was added, never to another
+          // client's explicitly-assigned property.
+          let gaAccountsQuery = supabase
             .from('google_analytics_accounts')
             .select('property_id, property_name')
             .eq('user_id', userId)
             .eq('is_active', true);
+          if (clientId) gaAccountsQuery = gaAccountsQuery.eq('client_id', clientId);
+
+          let { data: gaAccounts } = await gaAccountsQuery;
+
+          if (clientId && (!gaAccounts || gaAccounts.length === 0)) {
+            const legacy = await supabase
+              .from('google_analytics_accounts')
+              .select('property_id, property_name')
+              .eq('user_id', userId)
+              .eq('is_active', true)
+              .is('client_id', null);
+            gaAccounts = legacy.data;
+          }
 
           if (gaAccounts && gaAccounts.length > 0) {
             for (const account of gaAccounts) {

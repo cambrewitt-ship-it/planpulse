@@ -164,6 +164,7 @@ export default function AdPlatformConnector({ clientId, onConfigNeeded }: AdPlat
   const [isDiscoveringGoogleAnalyticsAccounts, setIsDiscoveringGoogleAnalyticsAccounts] = useState(false);
   const [isSavingGoogleAnalyticsAccounts, setIsSavingGoogleAnalyticsAccounts] = useState(false);
   const [googleAnalyticsAccountMessage, setGoogleAnalyticsAccountMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [googleAnalyticsAccountSearch, setGoogleAnalyticsAccountSearch] = useState('');
 
   const modalFocusRef = useRef<HTMLDivElement>(null);
 
@@ -241,8 +242,25 @@ export default function AdPlatformConnector({ clientId, onConfigNeeded }: AdPlat
           } else if (event.type === 'error') {
             console.error('Nango connection error:', event);
             setLoadingStates((prev) => ({ ...prev, [platformId]: false }));
-            const errorMessage = (event as any).error?.message || (event as any).error || 'An error occurred during connection';
-            alert(`Connection error: ${errorMessage}\n\nPlease check your Nango configuration and try again.`);
+            const errorMessage = event.payload?.errorMessage || event.payload?.errorType || 'An error occurred during connection';
+
+            // Google Ads Manager (MCC) IDs are often copied straight from the
+            // Google Ads UI, which displays them with dashes (e.g. 123-456-7890).
+            // Nango's connect form rejects that format but its own error text
+            // doesn't say why, so surface the fix directly.
+            const looksLikeIdFormatIssue =
+              platformId === 'google-ads' &&
+              /id/i.test(errorMessage) &&
+              (/invalid|incorrect|format/i.test(errorMessage) || event.payload?.errorType === 'connection_validation_failed');
+
+            if (looksLikeIdFormatIssue) {
+              alert(
+                `Connection error: ${errorMessage}\n\nTip: enter your Google Ads Manager (MCC) ID without dashes ` +
+                `(e.g. 1234567890 instead of 123-456-7890), then try again.`
+              );
+            } else {
+              alert(`Connection error: ${errorMessage}\n\nPlease check your Nango configuration and try again.`);
+            }
           } else if (event.type === 'connect') {
             console.log('Connection successful! Syncing to database...');
             
@@ -667,7 +685,7 @@ export default function AdPlatformConnector({ clientId, onConfigNeeded }: AdPlat
   const fetchGoogleAnalyticsAccounts = async () => {
     setIsLoadingGoogleAnalyticsAccounts(true);
     try {
-      const response = await fetch('/api/ads/google-analytics/get-accounts');
+      const response = await fetch(`/api/ads/google-analytics/get-accounts?clientId=${clientId}`);
       if (response.ok) {
         const data = await response.json();
         setGoogleAnalyticsAccounts(data.accounts || []);
@@ -685,27 +703,28 @@ export default function AdPlatformConnector({ clientId, onConfigNeeded }: AdPlat
   const handleDiscoverGoogleAnalyticsAccounts = async () => {
     setIsDiscoveringGoogleAnalyticsAccounts(true);
     setGoogleAnalyticsAccountMessage(null);
+    setGoogleAnalyticsAccountSearch('');
 
     try {
-      const response = await fetch('/api/ads/google-analytics/accounts');
-      
+      const response = await fetch(`/api/ads/google-analytics/accounts?clientId=${clientId}`);
+
       if (response.ok) {
         const data = await response.json();
         setDiscoveredGoogleAnalyticsAccounts(data.accounts || []);
         setSelectedGoogleAnalyticsAccounts(new Set());
-        
+
         if (data.accounts.length === 0) {
-          setGoogleAnalyticsAccountMessage({ type: 'error', text: 'No Google Analytics properties found' });
+          setGoogleAnalyticsAccountMessage({ type: 'error', text: 'No Google Analytics accounts found' });
         } else {
-          setGoogleAnalyticsAccountMessage({ type: 'success', text: `Found ${data.accounts.length} property(ies)` });
+          setGoogleAnalyticsAccountMessage({ type: 'success', text: `Found ${data.accounts.length} account(s)` });
         }
       } else {
         const errorData = await response.json();
-        setGoogleAnalyticsAccountMessage({ type: 'error', text: errorData.error || 'Failed to discover properties' });
+        setGoogleAnalyticsAccountMessage({ type: 'error', text: errorData.error || 'Failed to load accounts' });
       }
     } catch (error) {
-      console.error('Error discovering Google Analytics properties:', error);
-      setGoogleAnalyticsAccountMessage({ type: 'error', text: 'Failed to discover properties. Please try again.' });
+      console.error('Error loading Google Analytics accounts:', error);
+      setGoogleAnalyticsAccountMessage({ type: 'error', text: 'Failed to load accounts. Please try again.' });
     } finally {
       setIsDiscoveringGoogleAnalyticsAccounts(false);
     }
@@ -747,7 +766,7 @@ export default function AdPlatformConnector({ clientId, onConfigNeeded }: AdPlat
       const response = await fetch('/api/ads/google-analytics/save-accounts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accounts: accountsToSave }),
+        body: JSON.stringify({ accounts: accountsToSave, clientId }),
       });
 
       const data = await response.json();
@@ -977,6 +996,12 @@ export default function AdPlatformConnector({ clientId, onConfigNeeded }: AdPlat
                     <p className="text-sm text-blue-800">
                       Click the button below to connect your {platforms.find(p => p.id === openModal)?.displayName} account.
                     </p>
+                    {openModal === 'google-ads' && (
+                      <p className="text-sm text-blue-800 mt-2">
+                        If you&apos;re asked for your Google Ads Manager (MCC) ID, enter it without dashes
+                        &mdash; e.g. <span className="font-mono">1234567890</span> instead of <span className="font-mono">123-456-7890</span>.
+                      </p>
+                    )}
                   </div>
                   <Button
                     onClick={() => handleConnect(openModal)}
@@ -1327,7 +1352,7 @@ export default function AdPlatformConnector({ clientId, onConfigNeeded }: AdPlat
                           disabled={isDiscoveringGoogleAnalyticsAccounts}
                           className="w-full bg-blue-600 hover:bg-blue-700 text-white"
                         >
-                          {isDiscoveringGoogleAnalyticsAccounts ? 'Discovering...' : '🔍 Discover My Properties'}
+                          {isDiscoveringGoogleAnalyticsAccounts ? 'Loading...' : 'Load Accounts'}
                         </Button>
 
                         {discoveredGoogleAnalyticsAccounts.length > 0 && (
@@ -1335,8 +1360,19 @@ export default function AdPlatformConnector({ clientId, onConfigNeeded }: AdPlat
                             <p className="text-sm text-gray-600 font-medium">
                               Select properties to add:
                             </p>
+                            <Input
+                              type="text"
+                              placeholder="Search accounts..."
+                              value={googleAnalyticsAccountSearch}
+                              onChange={(e) => setGoogleAnalyticsAccountSearch(e.target.value)}
+                              className="text-sm"
+                            />
                             <div className="max-h-48 overflow-y-auto space-y-2 border border-gray-200 rounded p-2">
-                              {discoveredGoogleAnalyticsAccounts.map((account) => (
+                              {discoveredGoogleAnalyticsAccounts.filter(acc =>
+                                acc.propertyName.toLowerCase().includes(googleAnalyticsAccountSearch.toLowerCase()) ||
+                                acc.propertyId.includes(googleAnalyticsAccountSearch) ||
+                                acc.accountName.toLowerCase().includes(googleAnalyticsAccountSearch.toLowerCase())
+                              ).map((account) => (
                                 <label
                                   key={account.propertyId}
                                   className="flex items-center space-x-3 p-2 hover:bg-gray-100 rounded cursor-pointer"

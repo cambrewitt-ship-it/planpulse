@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
 
     // Parse request body
     const body = await request.json();
-    const { accounts } = body;
+    const { accounts, clientId } = body;
 
     if (!accounts || !Array.isArray(accounts) || accounts.length === 0) {
       return NextResponse.json(
@@ -28,15 +28,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get user's Google Analytics connection
-    const { data: connection, error: connectionError } = await supabase
+    // Verify the user has an active Google Analytics connection for this client.
+    // Use limit(1) instead of single() — a user can have multiple active GA4
+    // connections (one per client), so filter by client_id when known and
+    // never let a second client's connection make this route error out.
+    let connectionQuery = supabase
       .from('ad_platform_connections')
       .select('connection_id')
       .eq('user_id', user.id)
       .eq('platform', 'google-analytics')
-      .single();
+      .eq('connection_status', 'active')
+      .order('created_at', { ascending: false })
+      .limit(1);
+    if (clientId) connectionQuery = connectionQuery.eq('client_id', clientId);
+    const { data: connections, error: connectionError } = await connectionQuery;
 
-    if (connectionError || !connection) {
+    if (connectionError || !connections?.length) {
       console.error('Connection lookup error:', connectionError);
       return NextResponse.json(
         { error: 'No active Google Analytics connection found. Please connect your Google Analytics account first.' },
@@ -47,6 +54,7 @@ export async function POST(request: NextRequest) {
     // Insert all selected accounts
     const accountsToInsert = accounts.map(account => ({
       user_id: user.id,
+      client_id: clientId ?? null,
       property_id: account.propertyId,
       property_name: account.propertyName || null,
       account_id: account.accountId || null,
@@ -60,7 +68,7 @@ export async function POST(request: NextRequest) {
       .upsert(
         accountsToInsert,
         {
-          onConflict: 'user_id,property_id',
+          onConflict: 'user_id,client_id,property_id',
           ignoreDuplicates: false,
         }
       )

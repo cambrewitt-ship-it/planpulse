@@ -624,6 +624,7 @@ export interface Database {
           Row: {
             id: string;
             user_id: string;
+            client_id: string | null;
             connection_id: string | null;
             property_id: string;
             property_name: string | null;
@@ -636,6 +637,7 @@ export interface Database {
           Insert: {
             id?: string;
             user_id: string;
+            client_id?: string | null;
             connection_id?: string | null;
             property_id: string;
             property_name?: string | null;
@@ -648,6 +650,7 @@ export interface Database {
           Update: {
             id?: string;
             user_id?: string;
+            client_id?: string | null;
             connection_id?: string | null;
             property_id?: string;
             property_name?: string | null;

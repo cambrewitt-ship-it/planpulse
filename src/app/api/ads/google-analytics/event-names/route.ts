@@ -124,7 +124,7 @@ export async function POST(request: NextRequest) {
       }, { status: 500 });
     }
 
-    // Get Google Analytics properties from database
+    // Get Google Analytics properties from database, scoped to this client
     console.log('Querying GA4 properties from database...');
     let propertiesQuery = supabase
       .from('google_analytics_accounts')
@@ -136,8 +136,24 @@ export async function POST(request: NextRequest) {
       console.log('Filtering by specific propertyId:', propertyId);
       propertiesQuery = propertiesQuery.eq('property_id', propertyId);
     }
+    if (clientId) propertiesQuery = propertiesQuery.eq('client_id', clientId);
 
-    const { data: gaAccounts, error: accountsError } = await propertiesQuery;
+    let { data: gaAccounts, error: accountsError } = await propertiesQuery;
+
+    // Fall back to legacy rows saved before client scoping was added, never
+    // to another client's explicitly-assigned property.
+    if (clientId && !accountsError && (!gaAccounts || gaAccounts.length === 0)) {
+      let legacyQuery = supabase
+        .from('google_analytics_accounts')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('is_active', true)
+        .is('client_id', null);
+      if (propertyId) legacyQuery = legacyQuery.eq('property_id', propertyId);
+      const legacy = await legacyQuery;
+      gaAccounts = legacy.data;
+      accountsError = legacy.error;
+    }
 
     // Check if we have any GA properties configured
     if (accountsError) {

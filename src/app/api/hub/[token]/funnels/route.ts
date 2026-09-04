@@ -59,5 +59,11 @@ export async function GET(req: NextRequest, { params }: Params) {
     updatedAt: f.updated_at,
   }));
 
-  return NextResponse.json({ success: true, funnels: mapped });
+  const { data: mediaPlanBuilder } = await (admin as any)
+    .from('client_media_plan_builder')
+    .select('commission')
+    .eq('client_id', link.client_id)
+    .maybeSingle();
+
+  return NextResponse.json({ success: true, funnels: mapped, commission: mediaPlanBuilder?.commission || 0 });
 }
