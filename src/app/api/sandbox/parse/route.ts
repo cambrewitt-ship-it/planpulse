@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import ExcelJS from 'exceljs';
 import Anthropic from '@anthropic-ai/sdk';
-import type { SandboxPlan, Week, PlanRow, Flight } from '@/components/sandbox/types';
+import type { SandboxPlan, Week, PlanRow, Flight, FeeRow } from '@/components/sandbox/types';
 import { FLIGHT_COLORS } from '@/components/sandbox/types';
 import { rateLimit } from '@/lib/rate-limit';
 
@@ -105,6 +105,14 @@ function monthLabel(d: Date): string {
 
 function id(): string {
   return Math.random().toString(36).slice(2, 10);
+}
+
+// Non-media line items (agency/management fees, retainers, setup costs) that should
+// land in the fees strip rather than be imported as a media channel row.
+const FEE_LINE_PATTERN = /\bfee(s)?\b|\bretainer\b/i;
+
+function isFeeLine(...parts: string[]): boolean {
+  return FEE_LINE_PATTERN.test(parts.join(' '));
 }
 
 // ── Column detection via Claude ───────────────────────────────────────────────
@@ -367,6 +375,7 @@ export async function POST(request: NextRequest) {
 
   const rows: PlanRow[] = [];
   const rowNums: number[] = []; // parallel array: Excel row number for each entry in rows[]
+  const fees: FeeRow[] = [];
 
   for (let rowNum = colMap.dateHeaderRow + 1; rowNum <= ws.rowCount; rowNum++) {
     // Check if this row has any colored cells in the date range
@@ -516,6 +525,21 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Fee / retainer / non-media line item — goes into the fees strip, not the channel grid
+    if (isFeeLine(channel, funnel, detail)) {
+      let amount = flights.reduce((s, f) => s + f.budget, 0);
+      if (amount === 0 && colMap.budget) {
+        const bv = masterCell(rowNum, colMap.budget).value;
+        if (typeof bv === 'number') amount = Math.round(bv);
+        else if (typeof bv === 'string') {
+          const n = parseFloat(bv.replace(/[$,\s]/g, ''));
+          if (!isNaN(n)) amount = Math.round(n);
+        }
+      }
+      fees.push({ id: id(), name: channel || funnel || detail, amount });
+      continue;
+    }
+
     const customFields: Record<string, string> = {};
     for (const cc of colMap.customColumns) {
       const val = masterValue(rowNum, cc.col);
@@ -560,6 +584,7 @@ export async function POST(request: NextRequest) {
     asAtLabel: colMap.asAtLabel,
     weeks,
     rows,
+    fees: fees.length > 0 ? fees : undefined,
     customColumns: colMap.customColumns.length > 0
       ? colMap.customColumns.map(cc => ({
           id: cc.name.toLowerCase().replace(/\s+/g, '_'),
