@@ -13,12 +13,13 @@ export const maxDuration = 60;
 const SYSTEM_PROMPT = `You are an AI assistant embedded in a digital media agency's management platform called PlanPulse. You have real-time access to the agency's client data, campaigns, action points, and channel library. You can also take actions directly in the platform.
 
 You help the team with:
-- Daily briefings on client status and health
+- Daily briefings on client status, spend pacing, and overdue tasks
 - Checking outstanding and overdue action points
 - Client campaign performance and spend pacing
 - Channel-level performance health checks (spend vs plan, KPIs, pacing status)
 - Media channel specifications and best practices from the agency library
 - Agency playbooks, SOPs, and process documentation using get_agency_playbooks
+- Setup Auditor findings: live campaign configuration that doesn't match its intended setup (wrong geotargeting, dead destination URL, wrong budget/optimization goal, Advantage+ automation left on) using get_setup_audit_findings and list_setup_auditor_campaigns
 - Guidance on how to use the platform
 
 You can also take actions:
@@ -27,6 +28,8 @@ You can also take actions:
 - Update budgets: Adjust channel budgets in media plans for a whole calendar month using update_media_plan_budget, or for a specific week-commencing (W/C) date range / flight using update_media_plan_flight — this also works for a channel that isn't in the plan yet, or a totally empty plan; it creates the channel automatically rather than erroring.
 - Load several channels at once: Replace a client's ENTIRE plan from a pasted/described multi-channel list using set_media_plan_channels. Only for multi-channel loads or an explicit "replace/start over" request — never for a single channel, even a brand-new one (use update_media_plan_flight for that).
 - View live Meta campaigns: Fetch current campaign data directly from the Meta Ads API using get_live_meta_campaigns
+- Run a Setup Auditor check: Audit a client's registered campaign(s) against their intended setup right now using run_setup_audit — it only ever reads live campaign config and flags discrepancies, it never modifies the live campaign
+- Register a new Setup Auditor campaign: use find_live_ad_campaigns then register_setup_auditor_campaign — see the guided flow below
 
 Budget edit tool choice — this matters, don't default to the monthly tool out of habit:
 - The user gives a whole month ("set June to $5,000") → update_media_plan_budget.
@@ -35,10 +38,7 @@ Budget edit tool choice — this matters, don't default to the monthly tool out 
 
 Default to adding, without asking for confirmation first, whenever: the client's plan is empty, the channel mentioned isn't already in the plan, or the user's message says "add" (or similar). Just call the write tool. Only ask first if budget or dates are genuinely missing, or the change would overwrite an existing flight/budget with different numbers the user didn't ask to change.
 
-Client health indicators:
-- Red: Significant issues (spend variance >15%, overdue setup tasks)
-- Amber: Minor concerns requiring attention
-- Green: On track
+There's no single client health score. When asked how a client's doing, synthesise from: overdue action points (2+ is worth flagging), client-level spend variance (>15% off plan is worth flagging), and open Setup Auditor findings (get_setup_audit_findings) — report the actual numbers and findings rather than inventing a grade.
 
 Channel health is based on spend pacing relative to plan:
 - Overpacing (>15% above plan): flag as concern
@@ -57,6 +57,7 @@ Multi-step workflow patterns:
 - "End of month review": Use get_daily_briefing + get_channel_performance for all clients, synthesise and flag issues
 - "Sort out tasks for [client]": Use get_action_points to list overdue items, then use complete_action_point for any the user confirms are done
 - When completing action points for multiple items, you can call complete_action_point multiple times in parallel
+- "Set up Setup Auditor for [client]" / "audit [client]'s campaign" when nothing is registered yet: this is a guided flow, ask one question at a time rather than assuming answers — (1) which client, if not already clear; (2) Google Ads or Meta Ads; (3) call find_live_ad_campaigns and show the real live campaigns grouped by account so the user picks one (never invent a campaign name); (4) ask what the campaign's intended setup should be — geo targeting, budget, optimization goal, destination URL — making clear every one of these is optional and can be skipped; (5) call register_setup_auditor_campaign with what you gathered; (6) immediately call run_setup_audit for that campaign to run the first check; (7) report the result, critical findings first
 
 After a write action, confirm what happened in 1-2 short lines — channel, budget, dates. No restating the request back, no walls of text. If a request is ambiguous (e.g. multiple clients or action points match), ask for clarification before acting.
 
@@ -76,6 +77,19 @@ async function callInternalApi(path: string, request: NextRequest): Promise<any>
   });
   if (!res.ok) return { error: `API call failed: ${res.status}` };
   return res.json();
+}
+
+async function postInternalApi(path: string, request: NextRequest, body?: object): Promise<any> {
+  const origin = new URL(request.url).origin;
+  const cookieHeader = request.headers.get('cookie') ?? '';
+  const res = await fetch(`${origin}${path}`, {
+    method: 'POST',
+    headers: { cookie: cookieHeader, 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return { error: data.error || `API call failed: ${res.status}` };
+  return data;
 }
 
 // ── Read tool implementations ─────────────────────────────────────────────────
@@ -172,11 +186,8 @@ async function toolGetActionPoints(request: NextRequest, clientNameFilter?: stri
   };
 }
 
-async function toolGetClientStatus(request: NextRequest, input: { client_name?: string; status_filter?: string }) {
-  const params = new URLSearchParams();
-  if (input.status_filter) params.set('status', input.status_filter);
-
-  const data = await callInternalApi(`/api/agency/clients?${params}`, request);
+async function toolGetClientStatus(request: NextRequest, input: { client_name?: string }) {
+  const data = await callInternalApi('/api/agency/clients', request);
   if (data.error) return data;
 
   let clients: any[] = Array.isArray(data) ? data : (data.clients ?? []);
@@ -189,8 +200,7 @@ async function toolGetClientStatus(request: NextRequest, input: { client_name?: 
 
   return clients.map((c: any) => ({
     name: c.name,
-    health: c.health?.status ?? 'green',
-    health_reason: c.health?.reason ?? null,
+    overdue_tasks: c.spendCache?.total_overdue_tasks ?? 0,
     spend_variance_pct: c.spendVariancePct,
     planned_budget: c.plannedBudget,
     actual_spend: c.actualSpend,
@@ -213,12 +223,21 @@ async function toolGetDailyBriefing(request: NextRequest) {
   ]);
 
   const clients = Array.isArray(clientData) ? clientData : [];
-  const redClients = clients.filter((c: any) => c.health === 'red');
-  const amberClients = clients.filter((c: any) => c.health === 'amber');
-  const greenClients = clients.filter((c: any) => c.health === 'green');
 
   const overpacing = clients.filter((c: any) => c.spend_variance_pct !== null && c.spend_variance_pct > 15);
   const underpacing = clients.filter((c: any) => c.spend_variance_pct !== null && c.spend_variance_pct < -15);
+
+  // Clients needing attention: 2+ overdue tasks, or spend pacing >15% off plan
+  const needingAttention = clients
+    .map((c: any) => {
+      const reasons: string[] = [];
+      if (c.overdue_tasks >= 2) reasons.push(`${c.overdue_tasks} overdue tasks`);
+      if (c.spend_variance_pct !== null && Math.abs(c.spend_variance_pct) > 15) {
+        reasons.push(`Spend variance ${c.spend_variance_pct > 0 ? '+' : ''}${c.spend_variance_pct.toFixed(1)}%`);
+      }
+      return { name: c.name, reasons };
+    })
+    .filter((c: any) => c.reasons.length > 0);
 
   const today = nzToday();
   const in7Days = nzDateKeyOffset(7);
@@ -231,9 +250,8 @@ async function toolGetDailyBriefing(request: NextRequest) {
 
   return {
     date: today,
-    client_summary: { total: clients.length, red: redClients.length, amber: amberClients.length, green: greenClients.length },
-    red_clients: redClients.map((c: any) => ({ name: c.name, reason: c.health_reason })),
-    amber_clients: amberClients.map((c: any) => ({ name: c.name, reason: c.health_reason })),
+    client_summary: { total: clients.length, needing_attention: needingAttention.length },
+    clients_needing_attention: needingAttention,
     overdue_action_points: actionData.overdue_count ?? 0,
     overdue_items: actionData.overdue_items ?? [],
     due_within_7_days: actionData.due_within_7_days_count ?? 0,
@@ -1125,6 +1143,278 @@ async function toolGetLiveMetaCampaigns(
   };
 }
 
+// ── Setup Auditor tools ───────────────────────────────────────────────────────
+// Thin wrappers over /api/setup-auditor/* — the deterministic engine (rule
+// resolution, live GAQL/Graph reads, findings persistence) lives in
+// src/lib/setup-auditor/, not here. These just resolve client_name → clientId
+// (same partial-match convention as every other tool) and call those routes.
+
+// status=active restricts to campaigns actually delivering right now (Google
+// ENABLED / Meta effective_status ACTIVE) — Setup Auditor only ever audits
+// live campaigns, never the full history of everything an account has run.
+function setupAuditorPickerEndpoint(platform: string, clientId: string): string {
+  return platform === 'google-ads'
+    ? `/api/ads/google-ads/campaigns?clientId=${clientId}&status=active`
+    : `/api/ads/meta/campaigns?clientId=${clientId}&status=active`;
+}
+
+async function toolFindLiveAdCampaigns(request: NextRequest, input: { client_name: string; platform: string }) {
+  const supabase = await createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.user) return { error: 'Unauthorized' };
+
+  if (input.platform !== 'google-ads' && input.platform !== 'meta-ads') {
+    return { error: 'platform must be "google-ads" or "meta-ads"' };
+  }
+
+  const { data: clientsData } = await supabase
+    .from('clients').select('id, name').eq('user_id', session.user.id).ilike('name', `%${input.client_name}%`);
+  if (!clientsData?.length) return { error: `No client found matching "${input.client_name}"` };
+  if (clientsData.length > 1) {
+    return { error: 'Multiple clients matched — be more specific.', matches: clientsData.map((c: any) => c.name) };
+  }
+  const client = clientsData[0];
+
+  const data = await callInternalApi(setupAuditorPickerEndpoint(input.platform, client.id), request);
+  if (data.error) return { error: data.error, client: client.name, client_id: client.id };
+
+  const campaigns: any[] = data.campaigns ?? [];
+  if (campaigns.length === 0) {
+    return {
+      client: client.name,
+      client_id: client.id,
+      platform: input.platform,
+      message: `No live campaigns found for ${client.name} on ${input.platform}. Make sure that platform is connected for this client in Platform Connections.`,
+      by_account: [],
+    };
+  }
+
+  // Group by account so "which account" and "which campaign" can be answered in one step.
+  const grouped = new Map<string, { id: string; name: string }[]>();
+  for (const c of campaigns) {
+    const acctLabel = input.platform === 'google-ads' ? (c.customerId ?? 'Unknown account') : (c.accountName ?? 'Unknown account');
+    const arr = grouped.get(acctLabel) ?? [];
+    arr.push({ id: c.id, name: c.name });
+    grouped.set(acctLabel, arr);
+  }
+
+  return {
+    client: client.name,
+    client_id: client.id,
+    platform: input.platform,
+    total_campaigns: campaigns.length,
+    by_account: Array.from(grouped.entries()).map(([account, cams]) => ({ account, campaigns: cams })),
+  };
+}
+
+async function toolRegisterSetupAuditorCampaign(
+  request: NextRequest,
+  input: {
+    client_name: string; platform: string; campaign_name: string; channel_name?: string;
+    expected_geo?: string[]; expected_geo_mode?: string; expected_budget_amount?: number;
+    expected_optimization_goal?: string; expected_destination_url?: string; notes?: string;
+  }
+) {
+  const supabase = await createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.user) return { error: 'Unauthorized' };
+
+  if (input.platform !== 'google-ads' && input.platform !== 'meta-ads') {
+    return { error: 'platform must be "google-ads" or "meta-ads"' };
+  }
+  if (!input.campaign_name) {
+    return { error: 'campaign_name is required — call find_live_ad_campaigns first if you don\'t have the exact name.' };
+  }
+
+  const { data: clientsData } = await supabase
+    .from('clients').select('id, name').eq('user_id', session.user.id).ilike('name', `%${input.client_name}%`);
+  if (!clientsData?.length) return { error: `No client found matching "${input.client_name}"` };
+  if (clientsData.length > 1) {
+    return { error: 'Multiple clients matched — be more specific.', matches: clientsData.map((c: any) => c.name) };
+  }
+  const client = clientsData[0];
+
+  const liveData = await callInternalApi(setupAuditorPickerEndpoint(input.platform, client.id), request);
+  const liveCampaigns: any[] = liveData.campaigns ?? [];
+  const matches = liveCampaigns.filter((c: any) => c.name.toLowerCase().includes(input.campaign_name.toLowerCase()));
+
+  if (matches.length === 0) {
+    return { error: `No live ${input.platform} campaign matching "${input.campaign_name}" found for ${client.name}. Use find_live_ad_campaigns to see what's actually available.` };
+  }
+  if (matches.length > 1) {
+    return {
+      clarification_needed: true,
+      message: 'Multiple live campaigns matched — which one did you mean?',
+      matches: matches.map((c: any) => ({ name: c.name, account: input.platform === 'google-ads' ? c.customerId : c.accountName })),
+    };
+  }
+
+  const selected = matches[0];
+  const externalAccountId = input.platform === 'google-ads' ? selected.customerId : selected.accountId;
+  if (!externalAccountId) {
+    return { error: 'This campaign is missing its account ID — call find_live_ad_campaigns again and retry.' };
+  }
+
+  const result = await postInternalApi('/api/setup-auditor/campaigns', request, {
+    clientId: client.id,
+    platform: input.platform,
+    externalAccountId,
+    externalCampaignId: selected.id,
+    campaignName: selected.name,
+    channelName: input.channel_name ?? null,
+    expectedGeo: input.expected_geo?.length ? input.expected_geo : null,
+    expectedGeoMode: input.platform === 'google-ads' ? (input.expected_geo_mode ?? null) : null,
+    expectedBudgetAmount: input.expected_budget_amount ?? null,
+    expectedOptimizationGoal: input.expected_optimization_goal ?? null,
+    expectedDestinationUrl: input.expected_destination_url ?? null,
+    notes: input.notes ?? null,
+  });
+  if (result.error) return { error: result.error, client: client.name, client_id: client.id };
+
+  return {
+    success: true,
+    message: `Registered "${selected.name}" for ${client.name} with Setup Auditor.`,
+    client: client.name,
+    client_id: client.id,
+    campaign_name: selected.name,
+    platform: input.platform,
+    platform_campaign_id: result.campaign?.id,
+  };
+}
+
+async function toolListSetupAuditorCampaigns(request: NextRequest, input: { client_name?: string }) {
+  const supabase = await createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.user) return { error: 'Unauthorized' };
+
+  const { data: clientsData } = await supabase.from('clients').select('id, name').eq('user_id', session.user.id);
+  let clients: { id: string; name: string }[] = clientsData || [];
+  if (input.client_name) {
+    clients = clients.filter(c => c.name.toLowerCase().includes(input.client_name!.toLowerCase()));
+  }
+  if (clients.length === 0) return { error: `No client found matching "${input.client_name}"` };
+
+  const perClient = await Promise.all(clients.map(async (client) => {
+    const [campaignsData, findingsData] = await Promise.all([
+      callInternalApi(`/api/setup-auditor/campaigns?clientId=${client.id}`, request),
+      callInternalApi(`/api/setup-auditor/findings?clientId=${client.id}`, request),
+    ]);
+    const campaigns: any[] = campaignsData.campaigns ?? [];
+    const findings: any[] = findingsData.findings ?? [];
+    const findingsByCampaign = new Map<string, any[]>();
+    for (const f of findings) {
+      const arr = findingsByCampaign.get(f.platform_campaign_id) ?? [];
+      arr.push(f);
+      findingsByCampaign.set(f.platform_campaign_id, arr);
+    }
+    return {
+      client: client.name,
+      client_id: client.id,
+      campaigns: campaigns.map((c: any) => {
+        const campaignFindings = findingsByCampaign.get(c.id) ?? [];
+        return {
+          id: c.id,
+          platform: c.platform,
+          campaign_name: c.campaign_name,
+          channel_name: c.channel_name,
+          open_findings: campaignFindings.length,
+          worst_severity: campaignFindings.some((f: any) => f.severity === 'critical') ? 'critical'
+            : campaignFindings.some((f: any) => f.severity === 'warning') ? 'warning' : null,
+        };
+      }),
+    };
+  }));
+
+  const totalCampaigns = perClient.reduce((sum, c) => sum + c.campaigns.length, 0);
+  const result: any = { clients: perClient, total_campaigns: totalCampaigns };
+  if (perClient.length === 1) result.client_id = perClient[0].client_id;
+  if (totalCampaigns === 0) result.message = 'No campaigns registered with Setup Auditor yet.';
+  return result;
+}
+
+async function toolRunSetupAudit(request: NextRequest, input: { client_name: string; campaign_name?: string }) {
+  const supabase = await createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.user) return { error: 'Unauthorized' };
+
+  const { data: clientsData } = await supabase
+    .from('clients').select('id, name').eq('user_id', session.user.id).ilike('name', `%${input.client_name}%`);
+  if (!clientsData?.length) return { error: `No client found matching "${input.client_name}"` };
+  if (clientsData.length > 1) {
+    return { error: 'Multiple clients matched — be more specific.', matches: clientsData.map((c: any) => c.name) };
+  }
+  const client = clientsData[0];
+
+  const campaignsData = await callInternalApi(`/api/setup-auditor/campaigns?clientId=${client.id}`, request);
+  let campaigns: any[] = campaignsData.campaigns ?? [];
+  if (input.campaign_name) {
+    campaigns = campaigns.filter((c: any) => (c.campaign_name || '').toLowerCase().includes(input.campaign_name!.toLowerCase()));
+  }
+  if (campaigns.length === 0) {
+    return {
+      error: input.campaign_name
+        ? `No registered campaign matching "${input.campaign_name}" for ${client.name}.`
+        : `${client.name} has no campaigns registered with Setup Auditor yet.`,
+    };
+  }
+
+  const runs = await Promise.all(campaigns.map(async (c: any) => {
+    const data = await postInternalApi(`/api/setup-auditor/campaigns/${c.id}/run`, request);
+    return { campaign_name: c.campaign_name, platform: c.platform, ...data };
+  }));
+
+  const failed = runs.filter((r: any) => r.error);
+
+  return {
+    success: failed.length < runs.length,
+    client: client.name,
+    client_id: client.id,
+    campaigns_checked: runs.length,
+    newly_flagged: runs.reduce((sum: number, r: any) => sum + (r.result?.opened?.length ?? 0), 0),
+    resolved: runs.reduce((sum: number, r: any) => sum + (r.result?.resolved?.length ?? 0), 0),
+    still_open: runs.reduce((sum: number, r: any) => sum + (r.result?.stillOpen?.length ?? 0), 0),
+    failures: failed.length ? failed.map((r: any) => ({ campaign_name: r.campaign_name, error: r.error })) : undefined,
+    runs,
+  };
+}
+
+async function toolGetSetupAuditFindings(request: NextRequest, input: { client_name?: string; severity?: string }) {
+  const supabase = await createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.user) return { error: 'Unauthorized' };
+
+  const { data: clientsData } = await supabase.from('clients').select('id, name').eq('user_id', session.user.id);
+  let clients: { id: string; name: string }[] = clientsData || [];
+  if (input.client_name) {
+    clients = clients.filter(c => c.name.toLowerCase().includes(input.client_name!.toLowerCase()));
+  }
+  if (clients.length === 0) return { error: `No client found matching "${input.client_name}"` };
+
+  const perClient = await Promise.all(clients.map(async (client) => {
+    const data = await callInternalApi(`/api/setup-auditor/findings?clientId=${client.id}`, request);
+    let findings: any[] = data.findings ?? [];
+    if (input.severity) findings = findings.filter((f: any) => f.severity === input.severity);
+    return {
+      client: client.name,
+      client_id: client.id,
+      findings: findings.map((f: any) => ({
+        campaign_name: f.platform_campaigns?.campaign_name,
+        platform: f.platform_campaigns?.platform,
+        rule_key: f.rule_key,
+        severity: f.severity,
+        detail: f.detail,
+        first_detected_at: f.first_detected_at,
+      })),
+    };
+  }));
+
+  const totalFindings = perClient.reduce((sum, c) => sum + c.findings.length, 0);
+  const result: any = { clients: perClient, total_findings: totalFindings };
+  if (perClient.length === 1) result.client_id = perClient[0].client_id;
+  if (totalFindings === 0) result.message = 'No open Setup Auditor findings.';
+  return result;
+}
+
 // ── Client Intelligence tool implementation (Tier 2) ─────────────────────────
 
 async function toolGetClientIntelligence(
@@ -1471,6 +1761,17 @@ export async function POST(request: NextRequest) {
             // Live ad platform tools (Tier 3)
             } else if (block.name === 'get_live_meta_campaigns') {
               result = await toolGetLiveMetaCampaigns(request, input);
+            // Setup Auditor
+            } else if (block.name === 'find_live_ad_campaigns') {
+              result = await toolFindLiveAdCampaigns(request, input);
+            } else if (block.name === 'register_setup_auditor_campaign') {
+              result = await toolRegisterSetupAuditorCampaign(request, input);
+            } else if (block.name === 'list_setup_auditor_campaigns') {
+              result = await toolListSetupAuditorCampaigns(request, input);
+            } else if (block.name === 'run_setup_audit') {
+              result = await toolRunSetupAudit(request, input);
+            } else if (block.name === 'get_setup_audit_findings') {
+              result = await toolGetSetupAuditFindings(request, input);
             } else {
               result = { error: `Unknown tool: ${block.name}` };
             }
@@ -1499,7 +1800,7 @@ export async function POST(request: NextRequest) {
             }
 
             // Emit structured action event so the UI can trigger animations
-            const writableTools = ['complete_action_point', 'create_action_point', 'create_client', 'update_media_plan_budget', 'update_media_plan_flight', 'set_media_plan_channels'];
+            const writableTools = ['complete_action_point', 'create_action_point', 'create_client', 'update_media_plan_budget', 'update_media_plan_flight', 'set_media_plan_channels', 'run_setup_audit', 'register_setup_auditor_campaign'];
             if (writableTools.includes(block.name) && result?.success) {
               send({ type: 'action', tool: block.name, data: result });
             }

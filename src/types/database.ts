@@ -262,17 +262,16 @@ export interface Database {
           };
           Relationships: [];
         };
-        client_health_status: {
+        client_spend_cache: {
           Row: {
             id: string;
             client_id: string;
-            status: 'green' | 'amber' | 'red';
             active_channel_count: number;
             total_overdue_tasks: number;
             at_risk_tasks: number;
             total_budget_cents: number;
             total_spent_cents: number;
-            budget_health_percentage: number | null;
+            budget_pacing_percentage: number | null;
             next_critical_date: string | null;
             next_critical_task: string | null;
             last_calculated_at: string;
@@ -286,13 +285,12 @@ export interface Database {
           Insert: {
             id?: string;
             client_id: string;
-            status: 'green' | 'amber' | 'red';
             active_channel_count?: number;
             total_overdue_tasks?: number;
             at_risk_tasks?: number;
             total_budget_cents?: number;
             total_spent_cents?: number;
-            budget_health_percentage?: number | null;
+            budget_pacing_percentage?: number | null;
             next_critical_date?: string | null;
             next_critical_task?: string | null;
             last_calculated_at?: string;
@@ -304,13 +302,12 @@ export interface Database {
           Update: {
             id?: string;
             client_id?: string;
-            status?: 'green' | 'amber' | 'red';
             active_channel_count?: number;
             total_overdue_tasks?: number;
             at_risk_tasks?: number;
             total_budget_cents?: number;
             total_spent_cents?: number;
-            budget_health_percentage?: number | null;
+            budget_pacing_percentage?: number | null;
             next_critical_date?: string | null;
             next_critical_task?: string | null;
             last_calculated_at?: string;
@@ -1569,7 +1566,7 @@ export type WeeklyPlan = Database['public']['Tables']['weekly_plans']['Row'];
 export type ActionPoint = Database['public']['Tables']['action_points']['Row'];
 
 // Agency Dashboard types
-export type ClientHealthStatus = Database['public']['Tables']['client_health_status']['Row'];
+export type ClientSpendCache = Database['public']['Tables']['client_spend_cache']['Row'];
 export type ClientTask = Database['public']['Tables']['client_tasks']['Row'];
 
 // Ad Performance Metrics types
@@ -1587,8 +1584,7 @@ export type EdmActualInsert = Database['public']['Tables']['edm_actuals']['Inser
 export type EdmActualUpdate = Database['public']['Tables']['edm_actuals']['Update'];
 
 // Composite types for API responses
-export type ClientWithHealth = Client & { health: ClientHealthStatus | null };
-export type HealthStatus = 'green' | 'amber' | 'red';
+export type ClientWithSpendCache = Client & { spendCache: ClientSpendCache | null };
 
 // Benchmarks types
 export type MetricPreset = Database['public']['Tables']['metric_presets']['Row'];

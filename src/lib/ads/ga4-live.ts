@@ -278,3 +278,109 @@ export async function syncGA4Data(params: {
     errors: errors.length > 0 ? errors : undefined,
   };
 }
+
+export interface GA4EventSeriesPoint {
+  date: string;
+  value: number;
+}
+
+export interface GA4EventSeriesResult {
+  success: boolean;
+  current: GA4EventSeriesPoint[];
+  previous: GA4EventSeriesPoint[];
+  error?: string;
+}
+
+/**
+ * Live per-day eventCount for one named conversion event, current vs.
+ * previous period. Deliberately live (not cached like the rest of this
+ * file) — it backs the Engagement Overview's "Key events" tab only when the
+ * viewer picks a specific named event instead of the default "All key
+ * events" (which reads the cached `conversions` total), the same rare,
+ * explicit-action justification as the event-name-discovery mode in
+ * src/app/api/ads/google-analytics/fetch-data/route.ts.
+ */
+export async function fetchGA4EventSeries(params: {
+  supabase: AnySupabase;
+  nango: Nango;
+  userId: string;
+  clientId: string;
+  connectionId: string;
+  eventName: string;
+  startDate: string;
+  endDate: string;
+  previousStartDate: string;
+  previousEndDate: string;
+}): Promise<GA4EventSeriesResult> {
+  const { supabase, nango, userId, clientId, connectionId, eventName, startDate, endDate, previousStartDate, previousEndDate } = params;
+
+  let nangoConnection;
+  try {
+    nangoConnection = await nango.getConnection(toNangoPlatform('google-analytics'), connectionId);
+  } catch (nangoError: any) {
+    return { success: false, current: [], previous: [], error: `Failed to retrieve OAuth credentials: ${nangoError.message}` };
+  }
+  const accessToken = (nangoConnection.credentials as any)?.access_token as string;
+  if (!accessToken) {
+    return { success: false, current: [], previous: [], error: 'No access token found in Nango connection. Please reconnect your Google Analytics account.' };
+  }
+
+  let { data: gaAccounts, error: accountsError } = await supabase
+    .from('google_analytics_accounts')
+    .select('property_id')
+    .eq('user_id', userId).eq('is_active', true).eq('client_id', clientId);
+  if (!accountsError && (!gaAccounts || gaAccounts.length === 0)) {
+    const legacy = await supabase
+      .from('google_analytics_accounts')
+      .select('property_id')
+      .eq('user_id', userId).eq('is_active', true).is('client_id', null);
+    gaAccounts = legacy.data;
+    accountsError = legacy.error;
+  }
+  if (accountsError || !gaAccounts || gaAccounts.length === 0) {
+    return { success: false, current: [], previous: [], error: 'No active Google Analytics properties found for this client.' };
+  }
+
+  async function fetchRange(rangeStart: string, rangeEnd: string): Promise<Map<string, number>> {
+    const byDate = new Map<string, number>();
+    await Promise.all(gaAccounts!.map(async (account: { property_id: string }) => {
+      try {
+        const response = await fetch(
+          `https://analyticsdata.googleapis.com/v1beta/properties/${account.property_id}:runReport`,
+          {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              dateRanges: [{ startDate: rangeStart, endDate: rangeEnd }],
+              dimensions: [{ name: 'date' }],
+              metrics: [{ name: 'eventCount' }],
+              dimensionFilter: { filter: { fieldName: 'eventName', stringFilter: { matchType: 'EXACT', value: eventName } } },
+            }),
+          },
+        );
+        if (!response.ok) return;
+        const json = await response.json();
+        for (const row of json.rows ?? []) {
+          const dateValue = row.dimensionValues?.[0]?.value ?? '';
+          const isoDate = dateValue.length === 8 && !dateValue.includes('-')
+            ? `${dateValue.substring(0, 4)}-${dateValue.substring(4, 6)}-${dateValue.substring(6, 8)}`
+            : dateValue;
+          const value = parseFloat(row.metricValues?.[0]?.value ?? '0') || 0;
+          byDate.set(isoDate, (byDate.get(isoDate) ?? 0) + value);
+        }
+      } catch {
+        // Best-effort across properties — one property's failure shouldn't blank the whole series.
+      }
+    }));
+    return byDate;
+  }
+
+  const [currentMap, previousMap] = await Promise.all([
+    fetchRange(startDate, endDate),
+    fetchRange(previousStartDate, previousEndDate),
+  ]);
+  const toPoints = (m: Map<string, number>): GA4EventSeriesPoint[] =>
+    [...m.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([date, value]) => ({ date, value }));
+
+  return { success: true, current: toPoints(currentMap), previous: toPoints(previousMap) };
+}

@@ -110,6 +110,22 @@ export function getPlatformForChannel(channelName: string): string {
   return lower.replace(/\s+/g, '-');
 }
 
+// Ad platforms actually connectable via Nango today (mirrors the `platforms`
+// array in AdPlatformConnector.tsx). LinkedIn and TikTok are defined there
+// too but flagged `comingSoon`, so they're excluded until they go live.
+const NANGO_CONNECTABLE_PLATFORMS = new Set(['meta-ads', 'google-ads']);
+
+/**
+ * Whether a channel's platform (by name) is one users can actually connect
+ * via Nango today. Used by the dashboard's "Digital Ads Only" filter — this
+ * is intentionally stricter than getChannelCategory's 'paid_digital', which
+ * defaults to 'paid_digital' for ANY unrecognised channel name (so it can't
+ * be used on its own to distinguish real ad platforms from everything else).
+ */
+export function isNangoConnectableChannel(channelName: string): boolean {
+  return NANGO_CONNECTABLE_PLATFORMS.has(getPlatformForChannel(channelName));
+}
+
 export function getChannelDisplayNameFromPlatform(platform?: string): string {
   if (!platform) return 'Unknown Channel';
   const lower = platform.toLowerCase();

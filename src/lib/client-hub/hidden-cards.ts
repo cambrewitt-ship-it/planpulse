@@ -13,7 +13,7 @@ export const CARD_REGISTRY: Record<string, string[]> = {
   demographics: ['age', 'gender', 'country'],
   googleAdsPerformance: ['adGroups', 'budgetSplit', 'insight'],
   googleAdsInsights: ['searchTerms', 'region', 'deviceDonut', 'dayOfWeekDonut', 'ageDonut', 'genderDonut'],
-  ga4Performance: ['channelDonut', 'deviceDonut', 'newVsReturningDonut', 'insight'],
+  ga4Performance: ['engagementOverview', 'channelDonut', 'deviceDonut', 'newVsReturningDonut', 'dimensionExplorer', 'insight'],
   ga4Insights: ['landingPages', 'countries', 'events', 'insight'],
   metaPaidAds: ['commentsVsReactions', 'costPerEngagement', 'pageLikesVsEngagements', 'topAds'],
 };

@@ -13,7 +13,7 @@ import { ExtractionCard } from '@/components/sandbox/extraction-card';
 
 // Same Apple × Moleskine tokens as client-chat-panel.tsx, for visual consistency
 const RED = 'oklch(42% 0.16 25)';
-const CARD_BG = 'oklch(98% 0.006 75)';
+const CARD_BG = '#FFFFFF';
 const PAPER_BG = 'oklch(96% 0.009 75)';
 const INK = '#1C1917';
 const GRAPHITE = '#5C5450';
@@ -107,6 +107,7 @@ export default function MediaPlanChatPanel({
   const [extracting, setExtracting] = useState(false);
 
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const [pendingExtraction, setPendingExtraction] = useState<VisionExtraction | null>(null);
   const [confirmedAt, setConfirmedAt] = useState<string | null>(null);
@@ -382,6 +383,7 @@ export default function MediaPlanChatPanel({
     if (file.size > 20 * 1024 * 1024) return;
     const caption = input.trim();
     setInput('');
+    if (textareaRef.current) textareaRef.current.style.height = 'auto';
     const reader = new FileReader();
     reader.onload = (ev) => {
       const dataUrl = ev.target?.result as string;
@@ -394,12 +396,22 @@ export default function MediaPlanChatPanel({
     const text = input.trim();
     if (isStreaming || extracting || !text) return;
     setInput('');
+    if (textareaRef.current) textareaRef.current.style.height = 'auto';
     if (pendingExtraction) runRevise(text);
     else sendMessage(text);
   }
 
-  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key === 'Enter') { e.preventDefault(); handleSubmit(); }
+  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit(); }
+  }
+
+  function handleInputChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    setInput(e.target.value);
+    const ta = textareaRef.current;
+    if (ta) {
+      ta.style.height = 'auto';
+      ta.style.height = `${Math.min(ta.scrollHeight, 120)}px`;
+    }
   }
 
   function handleConfirmLock() {
@@ -492,8 +504,9 @@ export default function MediaPlanChatPanel({
                     of {clientName || 'this client'}&apos;s media plan — we&apos;ll read it automatically
                   </span>
                 </button>
-                <div style={{ fontSize: 12.5, color: '#B5B0A5', fontFamily: serifFont, fontStyle: 'italic', textAlign: 'center' }}>
-                  Or just ask a question — e.g. &quot;set Meta Ads to $2,000 in August&quot;.
+                <div style={{ fontSize: 14, color: GRAPHITE, fontFamily: serifFont, textAlign: 'center', lineHeight: 1.5 }}>
+                  <div>Or describe your media plan in English</div>
+                  <div>e.g. &quot;Meta Ads - $10,000 in August&quot;.</div>
                 </div>
               </div>
             )}
@@ -585,58 +598,109 @@ export default function MediaPlanChatPanel({
           </div>
 
           {/* Input */}
-          <div style={{ padding: '10px 16px 14px', borderTop: `1px solid ${BORDER_SOFT}`, flexShrink: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: CARD_BG, border: `1.5px solid ${BORDER}`, borderRadius: 24, padding: '8px 10px 8px 14px' }}>
-              <input
-                ref={imageInputRef}
-                type="file"
-                accept="image/png,image/jpeg,image/gif,image/webp,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
-                onChange={handleFileAttach}
-                style={{ display: 'none' }}
-              />
-              <button
-                onClick={() => imageInputRef.current?.click()}
-                disabled={isStreaming || extracting}
-                title="Attach a screenshot or Excel spreadsheet of a media plan"
-                style={{ border: 'none', background: 'none', cursor: isStreaming || extracting ? 'default' : 'pointer', color: MUTED, display: 'flex', flexShrink: 0 }}
-              >
-                <Paperclip size={15} />
-              </button>
-              {(isStreaming || extracting) && (
-                <Loader2 size={14} style={{ color: MUTED, animation: 'mpChatSpin 1s linear infinite', flexShrink: 0 }} />
-              )}
-              <input
-                value={input}
-                onChange={e => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder={
-                  isStreaming || extracting
-                    ? 'Working…'
-                    : pendingExtraction
-                      ? 'Type a correction, or click Apply above…'
-                      : `Ask ${mediaPlanAgent?.name ?? 'the assistant'} about this plan…`
-                }
-                style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', fontSize: 14, color: INK, minWidth: 0, ...font }}
-              />
-              <button
-                onClick={handleSubmit}
-                disabled={!input.trim() || isStreaming || extracting}
-                style={{
-                  width: 30, height: 30, flexShrink: 0,
-                  background: input.trim() && !isStreaming && !extracting ? RED : PAPER_BG,
-                  border: input.trim() && !isStreaming && !extracting ? 'none' : `1px solid ${BORDER}`,
-                  borderRadius: '50%', cursor: input.trim() && !isStreaming && !extracting ? 'pointer' : 'default',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.15s',
-                }}
-              >
-                <ArrowUp size={13} style={{ color: input.trim() && !isStreaming && !extracting ? CARD_BG : MUTED }} />
-              </button>
+          <div style={{ padding: '10px 16px 14px', flexShrink: 0 }}>
+            <div style={{ borderRadius: 20, boxShadow: '0 2px 16px rgba(0,0,0,0.09)' }}>
+              <div style={{
+                position: 'relative', borderRadius: 20, padding: 1.5,
+                overflow: 'hidden', background: 'rgba(224,220,212,0.7)',
+              }}>
+                {!input && !isStreaming && !extracting && <div className="mp-chat-glow-spin" />}
+                <div style={{
+                  background: '#FFFFFF', borderRadius: 18.5,
+                  padding: '13px 13px 10px',
+                  position: 'relative', zIndex: 1,
+                }}>
+                  <input
+                    ref={imageInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/gif,image/webp,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+                    onChange={handleFileAttach}
+                    style={{ display: 'none' }}
+                  />
+                  <textarea
+                    ref={textareaRef}
+                    value={input}
+                    onChange={handleInputChange}
+                    onKeyDown={handleKeyDown}
+                    disabled={isStreaming || extracting}
+                    placeholder={
+                      isStreaming || extracting
+                        ? 'Working…'
+                        : pendingExtraction
+                          ? 'Type a correction, or click Apply above…'
+                          : `Ask ${mediaPlanAgent?.name ?? 'the assistant'} about this plan…`
+                    }
+                    rows={2}
+                    style={{
+                      width: '100%', resize: 'none', border: 'none',
+                      background: 'transparent', fontSize: 13, lineHeight: 1.5,
+                      color: '#1C1917', outline: 'none', ...font,
+                      minHeight: 44, maxHeight: 120, overflow: 'auto',
+                      display: 'block', boxSizing: 'border-box',
+                    }}
+                  />
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
+                    <button
+                      onClick={() => imageInputRef.current?.click()}
+                      disabled={isStreaming || extracting}
+                      title="Attach a screenshot or Excel spreadsheet of a media plan"
+                      style={{
+                        width: 30, height: 30, borderRadius: '50%', border: '1.5px solid #D1D5DB',
+                        background: 'transparent', color: '#6B7280',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        cursor: isStreaming || extracting ? 'default' : 'pointer', flexShrink: 0,
+                      }}
+                    >
+                      <Paperclip size={15} />
+                    </button>
+                    <button
+                      onClick={handleSubmit}
+                      disabled={!input.trim() || isStreaming || extracting}
+                      style={{
+                        width: 36, height: 36, borderRadius: '50%', border: 'none',
+                        background: (input.trim() && !isStreaming && !extracting) ? '#3B82F6' : '#D1D5DB',
+                        color: '#FFFFFF',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        cursor: (input.trim() && !isStreaming && !extracting) ? 'pointer' : 'default',
+                        transition: 'background 0.15s', flexShrink: 0,
+                      }}
+                    >
+                      {isStreaming || extracting ? (
+                        <Loader2 size={16} style={{ color: '#FFFFFF', animation: 'mpChatSpin 1s linear infinite' }} />
+                      ) : (
+                        <ArrowUp size={16} style={{ color: '#FFFFFF' }} />
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
           <style>{`
             @keyframes mpChatBounce { 0%, 80%, 100% { transform: translateY(0); opacity: 0.4; } 40% { transform: translateY(-3px); opacity: 1; } }
             @keyframes mpChatSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+            .mp-chat-glow-spin {
+              position: absolute;
+              inset: -100%;
+              background: conic-gradient(
+                from 0deg,
+                transparent 270deg,
+                rgba(129,140,248,0.7) 295deg,
+                rgba(96,165,250,0.9) 315deg,
+                rgba(167,139,250,0.7) 335deg,
+                transparent 360deg
+              );
+              animation: mpChatGlowOrbit 4s linear infinite, mpChatGlowPulse 9s ease-in-out 1s infinite;
+            }
+            @keyframes mpChatGlowOrbit {
+              to { transform: rotate(360deg); }
+            }
+            @keyframes mpChatGlowPulse {
+              0%, 100% { opacity: 0; }
+              8%, 50% { opacity: 1; }
+              58%, 95% { opacity: 0; }
+            }
           `}</style>
         </div>
       </div>

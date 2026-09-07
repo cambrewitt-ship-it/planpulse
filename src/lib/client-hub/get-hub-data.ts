@@ -484,8 +484,8 @@ export async function getClientHubData(
   }
 
   // ── Pacing (current month elapsed vs budget spent) ──────────────────────
-  const { data: healthStatus } = await supabase
-    .from('client_health_status')
+  const { data: spendCache } = await supabase
+    .from('client_spend_cache')
     .select('mtd_actual_spend')
     .eq('client_id', clientId)
     .maybeSingle();
@@ -500,7 +500,7 @@ export async function getClientHubData(
   const mtdFromAdRows = adRows
     .filter(r => r.date >= format(monthStart, 'yyyy-MM-dd'))
     .reduce((s, r) => s + r.spend, 0);
-  const mtdActual = healthStatus?.mtd_actual_spend != null ? Number(healthStatus.mtd_actual_spend) : mtdFromAdRows;
+  const mtdActual = spendCache?.mtd_actual_spend != null ? Number(spendCache.mtd_actual_spend) : mtdFromAdRows;
 
   const pacing: HubPacing | null = monthlyBudget > 0 || mtdActual > 0 ? {
     dayOfMonth,

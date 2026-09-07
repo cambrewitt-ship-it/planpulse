@@ -24,6 +24,9 @@ export async function GET(request: NextRequest) {
     const filterCustomerIds = customerIdsParam
       ? new Set(customerIdsParam.split(',').map(id => id.replace(/-/g, '').trim()).filter(Boolean))
       : null;
+    // Optional: restrict to campaigns Google reports as currently enabled/serving,
+    // not merely "not removed" (which also includes every paused campaign ever run).
+    const liveOnly = request.nextUrl.searchParams.get('status') === 'active';
     console.log(`[google-ads/campaigns] user=${user.id} clientId=${clientId} filterCustomerIds=${customerIdsParam ?? 'all'}`);
 
     // Get the active Google Ads connection — try client-specific first, fall back to any active connection
@@ -71,14 +74,18 @@ export async function GET(request: NextRequest) {
     }
     const { data: accountsData, error: accountsError } = await accountsQuery;
     let googleAdsAccounts = (accountsData ?? []) as Array<{ customer_id: string; account_name: string; manager_customer_id: string | null }>;
-    // If client_id filter returned nothing (accounts saved before the column existed),
-    // fall back to connection-scoped accounts so existing setups keep working.
+    // If client_id filter returned nothing, fall back to connection-scoped
+    // accounts that have NEVER been assigned to any client (client_id IS
+    // NULL — pre-migration legacy rows) so old setups keep working. Never
+    // fall back further than that: an account explicitly assigned to a
+    // DIFFERENT client must never leak into this client's campaign picker.
     if (clientId && googleAdsAccounts.length === 0) {
       const { data: fallback } = await supabase
         .from('google_ads_accounts')
         .select('customer_id, account_name, manager_customer_id')
         .eq('user_id', user.id)
         .eq('connection_id', connection.connection_id)
+        .is('client_id', null)
         .eq('is_active', true);
       googleAdsAccounts = (fallback ?? []) as Array<{ customer_id: string; account_name: string; manager_customer_id: string | null }>;
     }
@@ -112,11 +119,11 @@ export async function GET(request: NextRequest) {
     const gaqlQuery = `
       SELECT campaign.id, campaign.name, campaign.status
       FROM campaign
-      WHERE campaign.status != 'REMOVED'
+      WHERE campaign.status ${liveOnly ? "= 'ENABLED'" : "!= 'REMOVED'"}
       ORDER BY campaign.name
     `;
 
-    const seen = new Map<string, string>();
+    const seen = new Map<string, { name: string; customerId: string }>();
 
     for (const account of googleAdsAccounts) {
       const cleanCustomerId = account.customer_id.replace(/-/g, '');
@@ -163,7 +170,7 @@ export async function GET(request: NextRequest) {
           const id = result.campaign?.id?.toString();
           const name = result.campaign?.name;
           if (id && name && !seen.has(id)) {
-            seen.set(id, name);
+            seen.set(id, { name, customerId: account.customer_id });
           }
         }
       } catch (e: any) {
@@ -171,7 +178,8 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const campaigns = Array.from(seen.entries()).map(([id, name]) => ({ id, name }));
+    // customerId is additive — existing consumers destructuring {id, name} are unaffected.
+    const campaigns = Array.from(seen.entries()).map(([id, v]) => ({ id, name: v.name, customerId: v.customerId }));
     console.log(`[google-ads/campaigns] returning ${campaigns.length} campaigns`);
     return NextResponse.json({ campaigns });
   } catch (error: any) {

@@ -27,15 +27,13 @@ export async function PATCH(
       return NextResponse.json({ error: 'actualSpend must be a number' }, { status: 400 });
     }
 
-    // Upsert into client_health_status — only update the MTD spend cache columns.
-    // We use onConflict on client_id so this is safe even if no health record exists yet.
+    // Upsert into client_spend_cache — only update the MTD spend cache columns.
+    // We use onConflict on client_id so this is safe even if no cache row exists yet.
     const { error } = await supabase
-      .from('client_health_status')
+      .from('client_spend_cache')
       .upsert(
         {
           client_id: clientId,
-          // Required non-null columns — use safe defaults when inserting a new row
-          status: 'green',
           mtd_actual_spend: actualSpend,
           mtd_actual_spend_updated_at: new Date().toISOString(),
           // Store the date range so the agency dashboard can verify a cache hit

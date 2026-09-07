@@ -4,7 +4,7 @@ export const TOOL_DEFINITIONS: Anthropic.Tool[] = [
   // ── Read tools ────────────────────────────────────────────────────────────────
   {
     name: 'get_daily_briefing',
-    description: 'Get a full daily briefing: all clients, health status, overdue action points, upcoming tasks, and pacing issues. Use this for morning briefings or "how are we doing" questions.',
+    description: 'Get a full daily briefing: all clients, spend pacing, overdue action points, upcoming tasks, and pacing issues. Use this for morning briefings or "how are we doing" questions.',
     input_schema: { type: 'object', properties: {}, required: [] },
   },
   {
@@ -339,12 +339,143 @@ export const TOOL_DEFINITIONS: Anthropic.Tool[] = [
       required: [],
     },
   },
+
+  // ── Setup Auditor ──────────────────────────────────────────────────────────────
+  {
+    name: 'find_live_ad_campaigns',
+    description: "List a client's LIVE campaigns directly from Google Ads or Meta (not yet registered with Setup Auditor), grouped by ad account. Use this to show the user real options for which account and which campaign to register — call it before register_setup_auditor_campaign whenever the user hasn't given an exact live campaign name. Never invent or guess a campaign name.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        client_name: {
+          type: 'string',
+          description: 'The client name (partial match is fine).',
+        },
+        platform: {
+          type: 'string',
+          enum: ['google-ads', 'meta-ads'],
+          description: 'Which ad platform to search.',
+        },
+      },
+      required: ['client_name', 'platform'],
+    },
+  },
+  {
+    name: 'register_setup_auditor_campaign',
+    description: "Register a live campaign with Setup Auditor and capture what it's supposed to look like (its intended spec). Use find_live_ad_campaigns first if you don't already know the exact live campaign name — never guess one. After registering, call run_setup_audit to run the first check immediately.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        client_name: {
+          type: 'string',
+          description: 'The client name (partial match is fine).',
+        },
+        platform: {
+          type: 'string',
+          enum: ['google-ads', 'meta-ads'],
+          description: 'Which ad platform the campaign is on.',
+        },
+        campaign_name: {
+          type: 'string',
+          description: 'The exact or partial live campaign name to register, from find_live_ad_campaigns.',
+        },
+        channel_name: {
+          type: 'string',
+          description: 'Optional: the media-plan channel name this links to, for client-wide rule overrides (e.g. "Google Search").',
+        },
+        expected_geo: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Intended geo targeting. For Google Ads, use numeric Geo Target Constant IDs (e.g. "1013331" for Wellington) — there is no name lookup yet, so ask the user for IDs. For Meta, use location names (e.g. "Wellington"). Omit entirely to skip this check.',
+        },
+        expected_geo_mode: {
+          type: 'string',
+          enum: ['presence', 'presence_or_interest'],
+          description: 'Google Ads only: intended location targeting mode. "presence" is location-restricted; "presence_or_interest" can silently expand reach beyond the intended area. Omit to skip this check.',
+        },
+        expected_budget_amount: {
+          type: 'number',
+          description: 'Intended budget amount, in the account currency. Omit to skip this check.',
+        },
+        expected_optimization_goal: {
+          type: 'string',
+          description: 'Intended optimization goal / bidding strategy (e.g. "TARGET_CPA" for Google Ads, "OFFSITE_CONVERSIONS" for Meta). Omit to skip this check.',
+        },
+        expected_destination_url: {
+          type: 'string',
+          description: 'Intended destination/landing page URL. Omit to skip this check (also skips the URL-liveness check).',
+        },
+        notes: {
+          type: 'string',
+          description: 'Optional free-text notes.',
+        },
+      },
+      required: ['client_name', 'platform', 'campaign_name'],
+    },
+  },
+  {
+    name: 'list_setup_auditor_campaigns',
+    description: 'List campaigns registered with Setup Auditor — the agent that audits LIVE Google Ads / Meta Ads campaigns against their intended setup (geotargeting, budget, optimization goal, destination URL, Advantage+ automation) — and their current open-finding counts. Use when asked what campaigns are being audited, or for a setup-audit status overview.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        client_name: {
+          type: 'string',
+          description: 'Filter to a specific client by partial name match. Omit for all clients.',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'run_setup_audit',
+    description: "Run a Setup Auditor check on a client's registered campaign(s) right now — fetches live config from Google Ads/Meta and compares it against the campaign's intended spec and agency rules, flagging any discrepancies. Read-only against the ad platform: never modifies the live campaign, only flags. Use when asked to run, check, or audit a campaign's setup.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        client_name: {
+          type: 'string',
+          description: 'The client name (partial match is fine).',
+        },
+        campaign_name: {
+          type: 'string',
+          description: 'Optional: filter to one specific registered campaign by partial name match. Omit to run every registered campaign for this client.',
+        },
+      },
+      required: ['client_name'],
+    },
+  },
+  {
+    name: 'get_setup_audit_findings',
+    description: 'Get current OPEN Setup Auditor findings — live campaign configuration that does not match its intended spec (wrong geotargeting, dead destination URL, wrong budget/optimization goal, Advantage+ automation left on, policy disapprovals). Use when asked about setup issues, campaign config drift, or audit flags.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        client_name: {
+          type: 'string',
+          description: 'Filter to a specific client by partial name match. Omit for all clients.',
+        },
+        severity: {
+          type: 'string',
+          enum: ['critical', 'warning', 'info'],
+          description: 'Filter by severity. Omit for all severities.',
+        },
+      },
+      required: [],
+    },
+  },
 ];
 
 // Subset used by the Teams bot: read tools + safe write tools only
 // Excludes create_client and update_media_plan_budget/update_media_plan_flight (too high-risk for bot commands)
+// run_setup_audit/find_live_ad_campaigns/register_setup_auditor_campaign are excluded alongside
+// get_live_meta_campaigns — all make live ad-platform API calls, not just internal reads, and the
+// registration flow is a multi-step conversational wizard unsuited to one-shot bot commands.
 export const BOT_TOOL_DEFINITIONS: Anthropic.Tool[] = TOOL_DEFINITIONS.filter(
-  t => !['create_client', 'update_media_plan_budget', 'update_media_plan_flight', 'get_live_meta_campaigns', 'get_client_intelligence'].includes(t.name)
+  t => ![
+    'create_client', 'update_media_plan_budget', 'update_media_plan_flight', 'get_live_meta_campaigns',
+    'get_client_intelligence', 'run_setup_audit', 'find_live_ad_campaigns', 'register_setup_auditor_campaign',
+  ].includes(t.name)
 );
 
 // Marks the last tool in a schema array as an Anthropic prompt-cache breakpoint,

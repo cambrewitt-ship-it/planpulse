@@ -116,7 +116,7 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
 }
 
 const TOOL_DESCRIPTIONS: Record<string, string> = {
-  get_daily_briefing: 'Full briefing across all clients with health and overdue tasks',
+  get_daily_briefing: 'Full briefing across all clients with spend pacing and overdue tasks',
   get_action_points: 'Outstanding action points grouped by client and due date',
   get_channel_library: 'Channel specs and best practices from the agency library',
   get_agency_playbooks: 'Internal SOPs, processes, and strategy documents',
@@ -131,6 +131,11 @@ const TOOL_DESCRIPTIONS: Record<string, string> = {
   set_media_plan_channels: 'Replace the full media plan from a description',
   generate_invoice: 'Generate an invoice for a client by date range',
   generate_report: 'Generate a performance report for a client',
+  list_setup_auditor_campaigns: 'List campaigns registered with Setup Auditor and their open-finding counts',
+  run_setup_audit: 'Check a live campaign against its intended setup right now (read-only, flags only)',
+  get_setup_audit_findings: 'Current open setup-drift findings (geotargeting, budget, Advantage+, URLs)',
+  find_live_ad_campaigns: "List a client's live Google/Meta campaigns, grouped by account, to pick one to register",
+  register_setup_auditor_campaign: 'Register a live campaign and its intended setup spec with Setup Auditor',
 };
 
 function ToolSelector({ enabled, onChange }: { enabled: string[]; onChange: (tools: string[]) => void }) {

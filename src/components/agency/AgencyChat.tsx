@@ -169,8 +169,8 @@ function channelColor(name: string): string {
 
 // ── Agent wizard ───────────────────────────────────────────────────────────────
 
-type WizardStepId = 'pick_client' | 'pick_month' | 'pick_channel' | 'pick_spend_type';
-interface WizardParams { clientId?: string; clientName?: string; channel?: string; month?: string; spendType?: string; }
+type WizardStepId = 'pick_client' | 'pick_month' | 'pick_channel' | 'pick_spend_type' | 'pick_platform';
+interface WizardParams { clientId?: string; clientName?: string; channel?: string; month?: string; spendType?: string; platform?: string; }
 interface WizardClient { id: string; name: string; channels: string[]; }
 interface WizardState { agent: UserAgent; steps: WizardStepId[]; stepIndex: number; params: WizardParams; }
 
@@ -211,6 +211,17 @@ const AGENT_FLOWS: Record<string, {
       : `Show me action points for ${p.clientName} — overdue first`,
     stepLabel: () => 'Which client?',
   },
+  setup_auditor: {
+    startMessage: 'Run Setup Auditor',
+    // Client and platform are quick chip picks; which account/campaign and
+    // its intended setup (geo, budget, goal, URL) aren't good chip candidates
+    // (live-fetched list + several free-text fields), so those are handed to
+    // the agent conversation itself — its system prompt already knows to ask
+    // for them one at a time and show real live campaigns via find_live_ad_campaigns.
+    steps: ['pick_client', 'pick_platform'],
+    buildPrompt: p => `I'd like to run a Setup Auditor check for ${p.clientName} on ${p.platform === 'google-ads' ? 'Google Ads' : 'Meta Ads'}. Show me the live campaigns to pick from, then ask me what that campaign's intended setup should be, then register it and run the first check.`,
+    stepLabel: s => s === 'pick_client' ? 'Which client?' : 'Google Ads or Meta Ads?',
+  },
 };
 
 // Match an agent to a flow — try template_slug first, then fall back to name matching
@@ -224,6 +235,7 @@ function getFlowForAgent(agent: UserAgent) {
   if (n.includes('performance') || n.includes('analyst'))      return AGENT_FLOWS.performance_analyst;
   if (n.includes('media') || n.includes('editor'))             return AGENT_FLOWS.media_plan_editor;
   if (n.includes('action') || n.includes('points') || n.includes('task')) return AGENT_FLOWS.action_points_manager;
+  if (n.includes('setup') && n.includes('audit'))               return AGENT_FLOWS.setup_auditor;
   return null;
 }
 
@@ -260,6 +272,10 @@ function buildChipsForStep(
   if (step === 'pick_spend_type') return [
     { value: 'actual', label: 'Actual spend' },
     { value: 'planned', label: 'Planned spend' },
+  ];
+  if (step === 'pick_platform') return [
+    { value: 'google-ads', label: 'Google Ads' },
+    { value: 'meta-ads', label: 'Meta Ads' },
   ];
   return [];
 }
@@ -705,6 +721,11 @@ export const AgencyChat = forwardRef<AgencyChatHandle, AgencyChatProps>(function
                 create_client: 'Creating new client…',
                 update_media_plan_budget: 'Updating media plan budget…',
                 get_live_meta_campaigns: 'Fetching live Meta campaigns…',
+                find_live_ad_campaigns: 'Fetching live campaigns…',
+                register_setup_auditor_campaign: 'Registering campaign with Setup Auditor…',
+                list_setup_auditor_campaigns: 'Checking registered campaigns…',
+                run_setup_audit: 'Running Setup Auditor check…',
+                get_setup_audit_findings: 'Checking Setup Auditor findings…',
               };
               setToolInProgress(labels[event.tool] ?? 'Working on it…');
             } else if (event.type === 'audit_step') {
@@ -791,6 +812,11 @@ export const AgencyChat = forwardRef<AgencyChatHandle, AgencyChatProps>(function
       get_live_meta_campaigns: 'Fetching live Meta campaigns…',
       generate_invoice: 'Generating invoice…',
       generate_report: 'Generating report…',
+      find_live_ad_campaigns: 'Fetching live campaigns…',
+      register_setup_auditor_campaign: 'Registering campaign with Setup Auditor…',
+      list_setup_auditor_campaigns: 'Checking registered campaigns…',
+      run_setup_audit: 'Running Setup Auditor check…',
+      get_setup_audit_findings: 'Checking Setup Auditor findings…',
     };
 
     try {
@@ -882,6 +908,7 @@ export const AgencyChat = forwardRef<AgencyChatHandle, AgencyChatProps>(function
     else if (stepId === 'pick_month') { newParams.month = chip.label; }
     else if (stepId === 'pick_channel') { newParams.channel = chip.label; }
     else if (stepId === 'pick_spend_type') { newParams.spendType = chip.label; }
+    else if (stepId === 'pick_platform') { newParams.platform = chip.value; }
 
     const userMsg: Message = { role: 'user', content: chip.label };
     const nextIndex = stepIndex + 1;

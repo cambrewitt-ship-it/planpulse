@@ -9,9 +9,9 @@ function isAuthorised(req: NextRequest): boolean {
 }
 
 interface ClientSnapshot {
-  status: string | null;
   spend_variance_pct: number | null;
   overdue_tasks: number;
+  critical_findings: number;
 }
 
 type AlertSnapshot = Record<string, ClientSnapshot>;
@@ -59,37 +59,48 @@ export async function GET(req: NextRequest) {
 
     const clientIds = clients.map((c: { id: string }) => c.id);
 
-    const { data: healthRows } = await supabase
-      .from('client_health_status')
-      .select('client_id, status, total_overdue_tasks, budget_health_percentage')
+    const { data: spendCacheRows } = await supabase
+      .from('client_spend_cache')
+      .select('client_id, total_overdue_tasks, budget_pacing_percentage')
       .in('client_id', clientIds);
+
+    // Open critical Setup Auditor findings per client — one of the signals
+    // that replaced the old red/amber/green status as a real "this needs
+    // attention" trigger.
+    const { data: findingRows } = await supabase
+      .from('campaign_audit_findings')
+      .select('client_id, severity')
+      .in('client_id', clientIds)
+      .eq('status', 'open');
+
+    const criticalFindingsByClient = new Map<string, number>();
+    for (const f of findingRows ?? []) {
+      if (f.severity !== 'critical') continue;
+      criticalFindingsByClient.set(f.client_id, (criticalFindingsByClient.get(f.client_id) ?? 0) + 1);
+    }
 
     const clientMap = new Map(clients.map((c: { id: string; name: string }) => [c.id, c.name]));
     const newSnapshot: AlertSnapshot = {};
     const anomalies: Array<{ clientName: string; clientId: string; reasons: string[] }> = [];
 
-    for (const row of healthRows ?? []) {
+    for (const row of spendCacheRows ?? []) {
       const clientName = clientMap.get(row.client_id) ?? 'Unknown';
       const prev = previousSnapshot[row.client_id];
+      const criticalFindings = criticalFindingsByClient.get(row.client_id) ?? 0;
 
-      // Derive spend variance from budget_health_percentage (actual/planned * 100)
-      // budget_health_pct = 100 means perfect pacing; deviation gives variance
-      const spendVariancePct = row.budget_health_percentage != null
-        ? row.budget_health_percentage - 100
+      // Derive spend variance from budget_pacing_percentage (actual/planned * 100)
+      // budget_pacing_pct = 100 means perfect pacing; deviation gives variance
+      const spendVariancePct = row.budget_pacing_percentage != null
+        ? row.budget_pacing_percentage - 100
         : null;
 
       newSnapshot[row.client_id] = {
-        status: row.status,
         spend_variance_pct: spendVariancePct,
         overdue_tasks: row.total_overdue_tasks ?? 0,
+        critical_findings: criticalFindings,
       };
 
       const reasons: string[] = [];
-
-      // Alert if client newly became red
-      if (row.status === 'red' && prev && prev.status !== 'red') {
-        reasons.push(`Health changed to 🔴 Red (was ${prev.status})`);
-      }
 
       // Alert if spend crossed ±30% for the first time
       if (spendVariancePct !== null && prev?.spend_variance_pct !== undefined) {
@@ -102,12 +113,24 @@ export async function GET(req: NextRequest) {
         }
       }
 
-      // Alert if overdue tasks increased
+      // Alert if overdue tasks increased — call out specifically when it
+      // crosses into "2+ overdue" territory (this used to be the task leg
+      // of turning red), otherwise just report the delta.
       const prevOverdue = prev?.overdue_tasks ?? 0;
       const newOverdue = row.total_overdue_tasks ?? 0;
-      if (newOverdue > prevOverdue && newOverdue > 0) {
-        const delta = newOverdue - prevOverdue;
-        reasons.push(`${delta} new overdue task${delta !== 1 ? 's' : ''} (${newOverdue} total)`);
+      if (newOverdue > prevOverdue) {
+        if (newOverdue >= 2 && prevOverdue < 2) {
+          reasons.push(`Overdue tasks reached ${newOverdue}`);
+        } else {
+          const delta = newOverdue - prevOverdue;
+          reasons.push(`${delta} new overdue task${delta !== 1 ? 's' : ''} (${newOverdue} total)`);
+        }
+      }
+
+      // Alert if a new open critical Setup Auditor finding appeared
+      const prevCritical = prev?.critical_findings ?? 0;
+      if (criticalFindings > prevCritical) {
+        reasons.push(`${criticalFindings} unresolved Setup Auditor finding${criticalFindings !== 1 ? 's' : ''} (critical)`);
       }
 
       if (reasons.length > 0) {

@@ -3,7 +3,8 @@ import { subDays, format } from 'date-fns';
 import { createClient } from '@/lib/supabase/server';
 import { isClientOwnedByUser } from '@/lib/client-hub/assert-ownership';
 import {
-  getGA4KpiTiles, getGA4DailySeries, getGA4ChannelBreakdown, getGA4DeviceBreakdown, getGA4NewVsReturningBreakdown,
+  getGA4KpiTiles, getGA4ChannelBreakdown, getGA4DeviceBreakdown, getGA4NewVsReturningBreakdown,
+  getGA4EngagementOverview,
 } from '@/lib/client-hub/get-ga4-report';
 import { getStoredInsight } from '@/lib/client-hub/generate-insight';
 import { sanitizeHiddenCards } from '@/lib/client-hub/hidden-cards';
@@ -35,14 +36,14 @@ export async function GET(req: NextRequest, { params }: Params) {
     .maybeSingle();
   const hiddenCards = sanitizeHiddenCards(config?.hidden_cards).ga4Performance ?? [];
 
-  const [metrics, dailySeries, channelDonut, deviceDonut, newVsReturningDonut, insight] = await Promise.all([
+  const [metrics, channelDonut, deviceDonut, newVsReturningDonut, engagementOverview, insight] = await Promise.all([
     getGA4KpiTiles(supabase, clientId, range),
-    getGA4DailySeries(supabase, clientId, range),
     getGA4ChannelBreakdown(supabase, clientId, range),
     getGA4DeviceBreakdown(supabase, clientId, range),
     getGA4NewVsReturningBreakdown(supabase, clientId, range),
+    getGA4EngagementOverview(supabase, clientId, range),
     getStoredInsight(supabase, clientId, 'ga4Performance'),
   ]);
 
-  return NextResponse.json({ period: { start, end }, metrics, dailySeries, channelDonut, deviceDonut, newVsReturningDonut, insight, hiddenCards });
+  return NextResponse.json({ period: { start, end }, metrics, channelDonut, deviceDonut, newVsReturningDonut, engagementOverview, insight, hiddenCards });
 }

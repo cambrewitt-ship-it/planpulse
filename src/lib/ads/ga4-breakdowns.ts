@@ -1,21 +1,24 @@
 /**
- * On-demand GA4 dimension-breakdown sync for the Client Hub "Google
- * Analytics — Traffic" and "Google Analytics — Behaviour" sections (channel,
- * device, country, landing page, new-vs-returning, event name). Deliberately
- * separate from src/lib/ads/ga4-live.ts: that file's date-series query runs
- * for every connected client every 6 hours via the refresh cron, and adding
- * these dimension queries there would inflate that always-on call with data
- * only this on-demand report needs. Triggered by a manual "Sync" button in
- * the Client Hub (see api/ads/google-analytics/fetch-breakdowns/route.ts),
- * mirroring src/lib/ads/google-ads-performance-extras.ts.
+ * GA4 dimension-breakdown sync for the Client Hub "Google Analytics —
+ * Traffic" and "Google Analytics — Behaviour" sections (channel, device,
+ * newVsReturning, sessionSourceMedium, country, landing page, event name).
+ * Deliberately separate from src/lib/ads/ga4-live.ts: that file's date-series
+ * query runs for every connected client every 6 hours via the refresh cron.
+ * This sync is heavier (six-plus GA4 report calls per property instead of
+ * one), so the cron only re-runs it for a client once its
+ * google_analytics_breakdowns rows are >~20h old (see refresh-ad-data/route.ts),
+ * rather than on every 6h tick. It's also still triggered on-demand by the
+ * Client Hub's manual "Sync" button (see
+ * api/ads/google-analytics/fetch-breakdowns/route.ts) for an immediate
+ * refresh, mirroring src/lib/ads/google-ads-performance-extras.ts.
  *
- * channel/device/newVsReturning are queried with a date dimension and
- * upserted per-day, so the Hub's date-range picker can filter them the same
- * way it filters the KPI tiles. country/landingPage/eventName are high-
- * cardinality, so they're queried as a single top-N snapshot over the sync's
- * date range (no date dimension) and replaced wholesale on each sync —
- * deleted then re-inserted, rather than upserted, since there's no date key
- * to naturally overwrite stale rows from a previous sync.
+ * channel/device/newVsReturning/sessionSourceMedium are queried with a date
+ * dimension and upserted per-day, so the Hub's date-range picker can filter
+ * them the same way it filters the KPI tiles. country/landingPage/eventName
+ * are high-cardinality, so they're queried as a single top-N snapshot over
+ * the sync's date range (no date dimension) and replaced wholesale on each
+ * sync — deleted then re-inserted, rather than upserted, since there's no
+ * date key to naturally overwrite stale rows from a previous sync.
  */
 
 import { Nango } from '@nangohq/node';
@@ -32,6 +35,8 @@ interface DailyBreakdownRow {
   users: number;
   conversions: number;
   engagedSessions: number;
+  eventCount: number;
+  engagementDuration: number;
 }
 
 interface SnapshotBreakdownRow {
@@ -71,7 +76,10 @@ async function fetchDailyDimension(propertyId: string, accessToken: string, dime
   const json = await runGA4Report(propertyId, accessToken, {
     dateRanges: [{ startDate, endDate }],
     dimensions: [{ name: 'date' }, { name: dimensionName }],
-    metrics: [{ name: 'sessions' }, { name: 'totalUsers' }, { name: 'conversions' }, { name: 'engagedSessions' }],
+    metrics: [
+      { name: 'sessions' }, { name: 'totalUsers' }, { name: 'conversions' }, { name: 'engagedSessions' },
+      { name: 'eventCount' }, { name: 'userEngagementDuration' },
+    ],
   });
   return (json.rows ?? []).map((row) => {
     const values = (row.metricValues ?? []).map((m) => parseFloat(m.value ?? '0') || 0);
@@ -82,6 +90,8 @@ async function fetchDailyDimension(propertyId: string, accessToken: string, dime
       users: values[1] ?? 0,
       conversions: values[2] ?? 0,
       engagedSessions: values[3] ?? 0,
+      eventCount: values[4] ?? 0,
+      engagementDuration: values[5] ?? 0,
     };
   });
 }
@@ -113,8 +123,9 @@ async function fetchSnapshotDimension(
 function mergeDaily(map: Map<string, DailyBreakdownRow>, rows: DailyBreakdownRow[]): void {
   for (const r of rows) {
     const key = `${r.date}|${r.dimensionValue}`;
-    const cur = map.get(key) ?? { date: r.date, dimensionValue: r.dimensionValue, sessions: 0, users: 0, conversions: 0, engagedSessions: 0 };
+    const cur = map.get(key) ?? { date: r.date, dimensionValue: r.dimensionValue, sessions: 0, users: 0, conversions: 0, engagedSessions: 0, eventCount: 0, engagementDuration: 0 };
     cur.sessions += r.sessions; cur.users += r.users; cur.conversions += r.conversions; cur.engagedSessions += r.engagedSessions;
+    cur.eventCount += r.eventCount; cur.engagementDuration += r.engagementDuration;
     map.set(key, cur);
   }
 }
@@ -168,21 +179,36 @@ export async function syncGA4Breakdowns(params: {
     return { success: false, rowsSaved: 0, propertiesProcessed: 0, error: 'No access token found in Nango connection. Please reconnect your Google Analytics account.' };
   }
 
-  // google_analytics_accounts has no client_id column — scoped by user_id only, mirroring syncGA4Data in ga4-live.ts.
-  const { data: gaAccounts } = await supabase
+  // Scoped by client_id, mirroring syncGA4Data in ga4-live.ts — never fall
+  // back to another client's explicitly-assigned property, only to rows
+  // never assigned to any client (legacy, pre-client-scoping).
+  let { data: gaAccounts, error: accountsError } = await supabase
     .from('google_analytics_accounts')
     .select('property_id, property_name')
     .eq('user_id', userId)
-    .eq('is_active', true);
+    .eq('is_active', true)
+    .eq('client_id', clientId);
 
-  if (!gaAccounts || gaAccounts.length === 0) {
-    return { success: false, rowsSaved: 0, propertiesProcessed: 0, error: 'No active Google Analytics properties found for this user.' };
+  if (!accountsError && (!gaAccounts || gaAccounts.length === 0)) {
+    const legacy = await supabase
+      .from('google_analytics_accounts')
+      .select('property_id, property_name')
+      .eq('user_id', userId)
+      .eq('is_active', true)
+      .is('client_id', null);
+    gaAccounts = legacy.data;
+    accountsError = legacy.error;
+  }
+
+  if (accountsError || !gaAccounts || gaAccounts.length === 0) {
+    return { success: false, rowsSaved: 0, propertiesProcessed: 0, error: 'No active Google Analytics properties found for this client.' };
   }
 
   const errors: Array<{ propertyId: string; error: string }> = [];
   const channelByKey = new Map<string, DailyBreakdownRow>();
   const deviceByKey = new Map<string, DailyBreakdownRow>();
   const newVsReturningByKey = new Map<string, DailyBreakdownRow>();
+  const sessionSourceMediumByKey = new Map<string, DailyBreakdownRow>();
   const countryByValue = new Map<string, SnapshotBreakdownRow>();
   const landingPageByValue = new Map<string, SnapshotBreakdownRow>();
   const eventByValue = new Map<string, SnapshotBreakdownRow>();
@@ -190,10 +216,11 @@ export async function syncGA4Breakdowns(params: {
   await Promise.all(gaAccounts.map(async (account: { property_id: string }) => {
     const propId = account.property_id;
     try {
-      const [channel, device, newVsReturning, country, landingPage, events] = await Promise.all([
+      const [channel, device, newVsReturning, sessionSourceMedium, country, landingPage, events] = await Promise.all([
         fetchDailyDimension(propId, accessToken, 'sessionDefaultChannelGroup', startDate, endDate),
         fetchDailyDimension(propId, accessToken, 'deviceCategory', startDate, endDate),
         fetchDailyDimension(propId, accessToken, 'newVsReturning', startDate, endDate),
+        fetchDailyDimension(propId, accessToken, 'sessionSourceMedium', startDate, endDate),
         fetchSnapshotDimension(propId, accessToken, 'country', ['sessions', 'totalUsers'], 'sessions', 20, startDate, endDate),
         fetchSnapshotDimension(propId, accessToken, 'landingPage', ['sessions', 'totalUsers'], 'sessions', 20, startDate, endDate),
         fetchSnapshotDimension(propId, accessToken, 'eventName', ['eventCount', 'conversions'], 'eventCount', 30, startDate, endDate),
@@ -201,6 +228,7 @@ export async function syncGA4Breakdowns(params: {
       mergeDaily(channelByKey, channel);
       mergeDaily(deviceByKey, device);
       mergeDaily(newVsReturningByKey, newVsReturning);
+      mergeDaily(sessionSourceMediumByKey, sessionSourceMedium);
       mergeSnapshot(countryByValue, country);
       mergeSnapshot(landingPageByValue, landingPage);
       mergeSnapshot(eventByValue, events);
@@ -223,13 +251,15 @@ export async function syncGA4Breakdowns(params: {
       dailyRows.push({
         user_id: userId, client_id: clientId, property_id: primaryPropertyId, date: r.date,
         dimension, dimension_value: r.dimensionValue,
-        sessions: r.sessions, users: r.users, conversions: r.conversions, engaged_sessions: r.engagedSessions, event_count: 0,
+        sessions: r.sessions, users: r.users, conversions: r.conversions, engaged_sessions: r.engagedSessions,
+        event_count: r.eventCount, engagement_duration: r.engagementDuration,
       });
     }
   };
   pushDaily('channel', channelByKey);
   pushDaily('device', deviceByKey);
   pushDaily('newVsReturning', newVsReturningByKey);
+  pushDaily('sessionSourceMedium', sessionSourceMediumByKey);
 
   if (dailyRows.length > 0) {
     const { error } = await supabase.from('google_analytics_breakdowns')

@@ -18,7 +18,7 @@ const QUICK_ACTIONS = [
   { label: 'Topline results', prompt: 'Give me a topline results check across all clients — for each client summarise their actual spend vs planned spend, key performance highlights, and flag any significant variances or issues I should be aware of.' },
   { label: 'Channel health', prompt: 'Do a channel health check — for each client show me channel pacing, spend vs plan, and flag any channels that are over or under pacing.' },
   { label: 'Overdue tasks', prompt: 'What action points are overdue right now?' },
-  { label: 'Red clients', prompt: 'Which clients have red health status and why?' },
+  { label: 'Needs attention', prompt: 'Which clients need attention right now, based on overdue tasks, spend pacing, or open Setup Auditor findings?' },
   { label: 'Live Meta campaigns', prompt: 'Show me all our live Meta campaigns — which ones are active and which are paused?' },
 ];
 

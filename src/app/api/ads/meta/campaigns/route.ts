@@ -18,6 +18,9 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
     const clientId = request.nextUrl.searchParams.get('clientId');
+    // Optional: restrict to campaigns Meta currently reports as actually
+    // delivering (effective_status === 'ACTIVE'), not merely "not deleted".
+    const liveOnly = request.nextUrl.searchParams.get('status') === 'active';
 
     // Find the connection — try client-specific first, fall back to any active connection.
     let connection: { connection_id: string; client_id: string | null } | null = null;
@@ -106,11 +109,20 @@ export async function GET(request: NextRequest) {
     }
 
     if (savedAccounts.length === 0) {
-      const { data: anyAccounts } = await db
+      // No clientId at all → legitimately show every account for this user
+      // (e.g. onboarding, before a client has any accounts saved). But if a
+      // clientId WAS given and it just has no accounts of its own, only fall
+      // back to accounts never assigned to any client (client_id IS NULL —
+      // pre-migration legacy rows) — never to another client's explicitly
+      // assigned account, which would leak its campaigns into this client's
+      // picker.
+      let fallbackQuery = db
         .from('meta_ads_accounts')
         .select('account_id, account_name')
         .eq('user_id', user.id)
         .eq('is_active', true);
+      if (clientId) fallbackQuery = fallbackQuery.is('client_id', null);
+      const { data: anyAccounts } = await fallbackQuery;
       savedAccounts = (anyAccounts as Array<{ account_id: string; account_name: string | null }> | null) ?? [];
     }
 
@@ -151,7 +163,10 @@ export async function GET(request: NextRequest) {
       })
     );
 
-    return NextResponse.json({ campaigns: campaignArrays.flat() });
+    const allCampaigns = campaignArrays.flat();
+    const campaigns = liveOnly ? allCampaigns.filter((c) => c.effectiveStatus === 'ACTIVE') : allCampaigns;
+
+    return NextResponse.json({ campaigns });
   } catch (error: any) {
     console.error('Error in /api/ads/meta/campaigns:', error);
     return NextResponse.json(

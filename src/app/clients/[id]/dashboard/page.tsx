@@ -40,6 +40,7 @@ import {
   generateChannelChartData,
   generateChannelChartDataForRange,
   getChannelCategory,
+  isNangoConnectableChannel,
   getWeekMonthKey,
   getWeekAlignedMonthRange,
 } from '@/lib/utils/channel-pacing';
@@ -64,6 +65,7 @@ const ReportBuilderModal = dynamic(() => import('@/components/dashboard-v2/repor
 import { type GanttClient, type GanttChannel } from '@/components/agency/GanttCalendar';
 import { FullscreenGanttView, type GanttAPMarker } from '@/components/agency/FullscreenGanttView';
 import { ClientIntelTab } from '@/components/dashboard-v2/client-intel-tab';
+const SetupAuditorPanel = dynamic(() => import('@/components/dashboard-v2/setup-auditor-panel').then(m => m.SetupAuditorPanel), { ssr: false });
 import ClientChatPanel from '@/components/dashboard-v2/client-chat-panel';
 import MediaPlanChatPanel from '@/components/dashboard-v2/media-plan-chat-panel';
 import { nzToday, nzDateKeyOffset, nzStartOfMonth, nzStartOfYear, formatNZ } from '@/lib/timezone';
@@ -151,7 +153,7 @@ export default function DashboardV2() {
   const [loadingPlan, setLoadingPlan] = useState(false);
   const [mediaPlanBuilderChannels, setMediaPlanBuilderChannels] = useState<MediaPlanChannel[]>([]);
   const [commission, setCommission] = useState<number>(0);
-  const [planView, setPlanView] = useState<'gross' | 'net'>('gross');
+  const [planView, setPlanView] = useState<'gross' | 'net'>('net');
   const [isLoadingMediaPlanBuilder, setIsLoadingMediaPlanBuilder] = useState(true);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isInitialLoadRef = useRef(true);
@@ -1614,7 +1616,6 @@ export default function DashboardV2() {
       const expectedSoFar = planned * (dayOfMonth / daysInMonth);
       if (current < expectedSoFar * 0.5)  issues.push('Spend significantly below target — campaign may not be active');
       else if (current < expectedSoFar * 0.8) issues.push('Spending behind pace — review campaign settings');
-      else if (current > expectedSoFar * 1.3) issues.push('Spending ahead of schedule — monitor daily spend');
       return issues;
     };
 
@@ -1921,13 +1922,16 @@ export default function DashboardV2() {
   }, []);
 
   // A card is hidden either because the user explicitly hid it, or because
-  // the "Digital Ads Only" quick filter is active and this card isn't a paid
-  // digital-advertising channel.
+  // the "Digital Ads Only" quick filter is active and this card isn't a
+  // channel we can actually connect to via Nango (Meta/Google Ads today).
+  // Deliberately platform-based rather than category-based: channelCategory
+  // defaults to 'paid_digital' for ANY unrecognised channel name (Print,
+  // Radio, Influencer, ...), so relying on it here would let non-digital
+  // channels leak through the filter.
   const isCardDigitalAdvertising = useCallback((ch: any): boolean => {
     if (ch.type === 'paid_digital') return true;
     if (ch.type === 'other') {
-      const cat = ch.channel?.channelCategory || getChannelCategory(ch.channel?.channelName ?? '');
-      return cat === 'paid_digital';
+      return isNangoConnectableChannel(ch.channel?.channelName ?? '');
     }
     return false;
   }, []);
@@ -2048,11 +2052,12 @@ export default function DashboardV2() {
   // feed and this panel never disagree about a TODO's completion state.
   const handleToggleTodo = async (id: string, completed: boolean) => {
     try {
-      await fetch('/api/action-points', {
+      const response = await fetch('/api/action-points', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, completed }),
       });
+      if (!response.ok) throw new Error('Failed to update TODO');
       setTodoActionPoints(prev => prev.map(ap => ap.id === id ? { ...ap, completed } : ap));
     } catch (error) {
       console.error('Failed to update TODO:', error);
@@ -2857,6 +2862,7 @@ export default function DashboardV2() {
                               onViewReport={() => handleViewReport(ch.platform)}
                               onReconnect={handleReconnectPlatform}
                               clientId={clientId}
+                              clientName={client?.name}
                               planView={planView}
                               channelStartDate={earliestStartDate}
                               channelFlights={cardFlights}
@@ -3247,6 +3253,8 @@ export default function DashboardV2() {
                 <div id="platform-connections-section" className="rounded-lg p-6" style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)' }}>
                   <AdPlatformConnector clientId={clientId} onConfigNeeded={setAdminNeedsConfig} />
                 </div>
+
+                <SetupAuditorPanel clientId={clientId} />
 
                 <ClientIntelTab clientId={clientId} />
 

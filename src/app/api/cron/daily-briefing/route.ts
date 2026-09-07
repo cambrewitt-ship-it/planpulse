@@ -64,24 +64,23 @@ export async function GET(req: NextRequest) {
 
     const clientIds = clients.map((c: { id: string }) => c.id);
 
-    const { data: healthRows } = await supabase
-      .from('client_health_status')
-      .select('client_id, status, total_overdue_tasks, mtd_actual_spend, budget_health_percentage')
+    const { data: spendCacheRows } = await supabase
+      .from('client_spend_cache')
+      .select('client_id, total_overdue_tasks, mtd_actual_spend, budget_pacing_percentage')
       .in('client_id', clientIds);
 
-    const healthMap = new Map<string, typeof healthRows extends (infer T)[] | null ? T : never>();
-    for (const row of healthRows ?? []) {
-      healthMap.set(row.client_id, row);
+    const spendCacheMap = new Map<string, typeof spendCacheRows extends (infer T)[] | null ? T : never>();
+    for (const row of spendCacheRows ?? []) {
+      spendCacheMap.set(row.client_id, row);
     }
 
     const briefingRows: ClientBriefingRow[] = clients.map((c: { id: string; name: string }) => {
-      const h = healthMap.get(c.id);
+      const h = spendCacheMap.get(c.id);
       return {
         name: c.name,
-        status: h?.status ?? null,
         overdue_tasks: h?.total_overdue_tasks ?? 0,
         mtd_spend: h?.mtd_actual_spend ?? null,
-        budget_health_pct: h?.budget_health_percentage ?? null,
+        budget_pacing_pct: h?.budget_pacing_percentage ?? null,
       };
     });
 

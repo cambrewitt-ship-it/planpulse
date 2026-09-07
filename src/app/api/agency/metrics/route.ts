@@ -7,12 +7,6 @@ import { nzToday, nzDateKeyOffset } from '@/lib/timezone';
 
 interface AgencyMetrics {
   totalClients: number;
-  statusBreakdown: {
-    red: number;
-    amber: number;
-    green: number;
-    unknown: number;
-  };
   totalBudgetCents: number;
   totalSpentCents: number;
   totalOverdueTasks: number;
@@ -39,20 +33,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to count clients' }, { status: 500 });
     }
 
-    // 2. Status breakdown from client_health_status
-    const { data: healthStatuses } = await supabase
-      .from('client_health_status')
-      .select('status');
-
-    const statusBreakdown = { red: 0, amber: 0, green: 0, unknown: 0 };
-    (healthStatuses || []).forEach((h: any) => {
-      statusBreakdown[h.status as keyof typeof statusBreakdown]++;
-    });
-    statusBreakdown.unknown =
-      (totalClients || 0) -
-      (statusBreakdown.red + statusBreakdown.amber + statusBreakdown.green);
-
-    // 3. Total planned budget from client_media_plan_builder (sum all flight budgets)
+    // 2. Total planned budget from client_media_plan_builder (sum all flight budgets)
     const { data: allPlans } = await supabase
       .from('client_media_plan_builder')
       .select('channels');
@@ -67,7 +48,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // 4. Total actual spend from ad_performance_metrics (last 30 days)
+    // 3. Total actual spend from ad_performance_metrics (last 30 days)
     const startDate = nzDateKeyOffset(-30);
     const endDate = nzToday();
 
@@ -81,7 +62,7 @@ export async function GET(request: NextRequest) {
       (spendRows || []).reduce((sum: number, row: any) => sum + Number(row.spend || 0), 0) * 100
     );
 
-    // 5. Action point counts — overdue (incomplete with past due_date) and at-risk (total incomplete)
+    // 4. Action point counts — overdue (incomplete with past due_date) and at-risk (total incomplete)
     //    We aggregate across all clients via client_action_point_completions + action_points
 
     // Get all action points that have a due_date
@@ -120,7 +101,6 @@ export async function GET(request: NextRequest) {
 
     const metrics: AgencyMetrics = {
       totalClients: totalClients || 0,
-      statusBreakdown,
       totalBudgetCents,
       totalSpentCents,
       totalOverdueTasks,

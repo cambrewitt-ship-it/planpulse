@@ -1,14 +1,21 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import {
-  ResponsiveContainer, ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip,
-} from 'recharts';
+import { subDays, format } from 'date-fns';
 import { COLOR, FONT_HEAD, cardStyle, sectionTitleStyle, fmtCompact, fmtPct } from './tokens';
-import { HubTooltip, HubLegend, HubDonut, SERIES_COLORS, axisTickStyle, gridProps, axisLineProps } from './chart-kit';
+import { HubDonut, SERIES_COLORS } from './chart-kit';
 import { HideableCard } from './hideable-card';
+import { GA4EngagementOverview } from './ga4-engagement-overview';
+import { GA4DimensionExplorer } from './ga4-dimension-explorer';
+import { DateRangePicker } from '@/components/ui/date-range-picker';
 import type { HubMetric } from '@/lib/client-hub/get-hub-data';
-import type { GA4DailyPoint, DonutBucket } from '@/lib/client-hub/get-ga4-report';
+import type { DonutBucket, GA4TrendMetricSeries } from '@/lib/client-hub/get-ga4-report';
+
+function defaultRange() {
+  const end = new Date();
+  const start = subDays(end, 29);
+  return { startDate: format(start, 'yyyy-MM-dd'), endDate: format(end, 'yyyy-MM-dd') };
+}
 
 export interface GA4PerformanceSectionProps {
   clientId: string;
@@ -19,10 +26,10 @@ export interface GA4PerformanceSectionProps {
 interface SectionData {
   period: { start: string; end: string };
   metrics: HubMetric[];
-  dailySeries: GA4DailyPoint[];
   channelDonut: DonutBucket[];
   deviceDonut: DonutBucket[];
   newVsReturningDonut: DonutBucket[];
+  engagementOverview: GA4TrendMetricSeries[];
   insight: string | null;
   hiddenCards: string[];
 }
@@ -41,10 +48,6 @@ function formatMetricValue(m: HubMetric): string {
     case 'compact': return fmtCompact(m.value);
     default: return Math.round(m.value).toLocaleString('en-US');
   }
-}
-
-function tickInterval(length: number): number {
-  return Math.max(0, Math.ceil(length / 10) - 1);
 }
 
 function InsightCallout({ text }: { text: string }) {
@@ -83,6 +86,7 @@ function DonutCard({ title, data }: { title: string; data: DonutBucket[] }) {
 }
 
 export function GA4PerformanceSection({ clientId, token, editable }: GA4PerformanceSectionProps) {
+  const [dateRange, setDateRange] = useState(defaultRange);
   const [data, setData] = useState<SectionData | null>(null);
   const [hiddenCards, setHiddenCards] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -92,7 +96,8 @@ export function GA4PerformanceSection({ clientId, token, editable }: GA4Performa
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(token ? `/api/hub/${token}/ga4-performance` : `/api/clients/${clientId}/hub/ga4-performance`);
+      const qs = `?start=${dateRange.startDate}&end=${dateRange.endDate}`;
+      const res = await fetch(token ? `/api/hub/${token}/ga4-performance${qs}` : `/api/clients/${clientId}/hub/ga4-performance${qs}`);
       if (res.ok) {
         const json = await res.json();
         setData(json);
@@ -101,7 +106,7 @@ export function GA4PerformanceSection({ clientId, token, editable }: GA4Performa
     } finally {
       setLoading(false);
     }
-  }, [clientId, token]);
+  }, [clientId, token, dateRange]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -132,9 +137,10 @@ export function GA4PerformanceSection({ clientId, token, editable }: GA4Performa
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ clientId, startDate: data.period.start, endDate: data.period.end }),
       });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error ?? 'Sync failed');
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error ?? 'Sync failed');
+      if (Array.isArray(body.errors) && body.errors.length > 0) {
+        setSyncError(`Synced with some errors: ${body.errors.map((e: { error: string }) => e.error).join('; ')}`);
       }
       await load();
     } catch (err) {
@@ -144,25 +150,29 @@ export function GA4PerformanceSection({ clientId, token, editable }: GA4Performa
     }
   }, [clientId, data, load]);
 
-  if (!editable && !loading && (!data || data.dailySeries.length === 0)) return null;
+  const hasAnyData = !!data && data.engagementOverview.some((s) => s.currentTotal > 0 || s.current.length > 0);
+  if (!editable && !loading && !hasAnyData) return null;
 
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
         <h2 style={{ ...sectionTitleStyle, margin: 0 }}>Google Analytics — Traffic</h2>
-        {editable && (
-          <button
-            onClick={handleSync}
-            disabled={syncing || !data}
-            style={{
-              background: COLOR.accent, color: COLOR.bg, border: 'none', borderRadius: 4,
-              padding: '8px 14px', fontSize: 12.5, fontWeight: 600, cursor: syncing ? 'default' : 'pointer',
-              opacity: syncing ? 0.7 : 1,
-            }}
-          >
-            {syncing ? 'Syncing…' : 'Sync breakdown data'}
-          </button>
-        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <DateRangePicker value={dateRange} onChange={setDateRange} disabled={loading} />
+          {editable && (
+            <button
+              onClick={handleSync}
+              disabled={syncing || !data}
+              style={{
+                background: COLOR.accent, color: COLOR.bg, border: 'none', borderRadius: 4,
+                padding: '8px 14px', fontSize: 12.5, fontWeight: 600, cursor: syncing ? 'default' : 'pointer',
+                opacity: syncing ? 0.7 : 1,
+              }}
+            >
+              {syncing ? 'Syncing…' : 'Sync breakdown data'}
+            </button>
+          )}
+        </div>
       </div>
       {syncError && <div style={{ fontSize: 12.5, color: COLOR.accent, marginBottom: 12 }}>{syncError}</div>}
 
@@ -181,59 +191,9 @@ export function GA4PerformanceSection({ clientId, token, editable }: GA4Performa
             ))}
           </div>
 
-          {data.dailySeries.length === 0 ? (
-            <div style={{ ...cardStyle, padding: '20px 24px', fontSize: 13.5, color: COLOR.muted }}>
-              No GA4 data yet for this period.
-            </div>
-          ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-              <div style={{ ...cardStyle, padding: '20px 22px' }}>
-                <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 10 }}>Users &amp; sessions over time</div>
-                <div style={{ marginBottom: 10 }}>
-                  <HubLegend entries={[{ label: 'Users', color: COLOR.accent, kind: 'line' }, { label: 'Sessions', color: '#5B6B4E', kind: 'line' }]} />
-                </div>
-                <ResponsiveContainer width="100%" height={200}>
-                  <ComposedChart data={data.dailySeries} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
-                    <CartesianGrid {...gridProps} />
-                    <XAxis dataKey="date" tick={axisTickStyle} axisLine={axisLineProps} tickLine={false} interval={tickInterval(data.dailySeries.length)} tickFormatter={(d: string) => d.slice(5)} />
-                    <YAxis tick={axisTickStyle} axisLine={false} tickLine={false} width={44} tickFormatter={fmtCompact} />
-                    <Tooltip content={<HubTooltip formatValue={(entry) => Number(entry.value ?? 0).toLocaleString('en-US')} />} />
-                    <Line dataKey="totalUsers" name="Users" stroke={COLOR.accent} strokeWidth={1.6} dot={false} />
-                    <Line dataKey="sessions" name="Sessions" stroke="#5B6B4E" strokeWidth={1.6} dot={false} />
-                  </ComposedChart>
-                </ResponsiveContainer>
-              </div>
-
-              <div style={{ ...cardStyle, padding: '20px 22px' }}>
-                <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 10 }}>Engagement rate &amp; conversions over time</div>
-                <div style={{ marginBottom: 10 }}>
-                  <HubLegend entries={[{ label: 'Engagement rate', color: COLOR.goodBright, kind: 'line' }, { label: 'Conversions', color: COLOR.caution, kind: 'line' }]} />
-                </div>
-                <ResponsiveContainer width="100%" height={200}>
-                  <ComposedChart data={data.dailySeries} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="ga4PerfEngGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor={COLOR.goodBright} stopOpacity={0.22} />
-                        <stop offset="100%" stopColor={COLOR.goodBright} stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid {...gridProps} />
-                    <XAxis dataKey="date" tick={axisTickStyle} axisLine={axisLineProps} tickLine={false} interval={tickInterval(data.dailySeries.length)} tickFormatter={(d: string) => d.slice(5)} />
-                    <YAxis yAxisId="engagement" tick={axisTickStyle} axisLine={false} tickLine={false} width={44} tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
-                    <YAxis yAxisId="conversions" orientation="right" tick={axisTickStyle} axisLine={false} tickLine={false} width={40} />
-                    <Tooltip
-                      content={
-                        <HubTooltip formatValue={(entry) => entry.dataKey === 'engagementRate' ? `${Number(entry.value ?? 0).toFixed(2)}%` : Number(entry.value ?? 0).toLocaleString('en-US')} />
-                      }
-                    />
-                    <Area yAxisId="engagement" dataKey="engagementRate" stroke="none" fill="url(#ga4PerfEngGrad)" isAnimationActive={false} />
-                    <Line yAxisId="engagement" dataKey="engagementRate" name="Engagement rate" stroke={COLOR.goodBright} strokeWidth={1.6} dot={false} />
-                    <Line yAxisId="conversions" dataKey="conversions" name="Conversions" stroke={COLOR.caution} strokeWidth={1.6} dot={false} />
-                  </ComposedChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-          )}
+          <HideableCard editable={editable} hidden={hiddenCards.includes('engagementOverview')} onToggle={() => toggleCard('engagementOverview')}>
+            <GA4EngagementOverview clientId={clientId} token={token} editable={editable} overview={data.engagementOverview} period={data.period} />
+          </HideableCard>
 
           {data.insight && (
             <HideableCard editable={editable} hidden={hiddenCards.includes('insight')} onToggle={() => toggleCard('insight')}>
@@ -253,6 +213,10 @@ export function GA4PerformanceSection({ clientId, token, editable }: GA4Performa
               <DonutCard title="New vs. returning" data={data.newVsReturningDonut} />
             </HideableCard>
           </div>
+
+          <HideableCard editable={editable} hidden={hiddenCards.includes('dimensionExplorer')} onToggle={() => toggleCard('dimensionExplorer')}>
+            <GA4DimensionExplorer clientId={clientId} token={token} period={data.period} />
+          </HideableCard>
         </div>
       )}
     </div>

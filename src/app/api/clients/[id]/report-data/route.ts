@@ -44,9 +44,9 @@ export async function GET(
   const client = clientRaw as { id: string; name: string; logo_url: string | null; account_manager: string | null } | null;
   if (!client) return NextResponse.json({ error: 'Client not found' }, { status: 404 });
 
-  const [healthRes, metricsRes, mediaPlanRes, actionPointsRes, completionsRes] = await Promise.all([
-    supabase.from('client_health_status')
-      .select('status, total_overdue_tasks, budget_health_percentage, mtd_actual_spend')
+  const [spendCacheRes, metricsRes, mediaPlanRes, actionPointsRes, completionsRes] = await Promise.all([
+    supabase.from('client_spend_cache')
+      .select('total_overdue_tasks, budget_pacing_percentage, mtd_actual_spend')
       .eq('client_id', clientId)
       .maybeSingle(),
     supabase.from('ad_performance_metrics')
@@ -67,7 +67,7 @@ export async function GET(
       .eq('completed', true),
   ]);
 
-  const health = healthRes.data;
+  const spendCache = spendCacheRes.data;
   const metrics = metricsRes.data ?? [];
   const mediaPlan = mediaPlanRes.data;
   const allAps = actionPointsRes.data ?? [];
@@ -144,7 +144,7 @@ export async function GET(
       const totalActual = spendChannels.reduce((s, c) => s + c.actual, 0);
       const totalPlanned = spendChannels.reduce((s, c) => s + (c.planned ?? 0), 0);
       const prompt = `Write a 3-4 sentence executive summary for ${client.name}'s campaign performance from ${start_date} to ${end_date}.
-Health: ${health?.status ?? 'unknown'}. Actual spend: $${totalActual.toLocaleString()} vs planned $${totalPlanned.toLocaleString()}.
+Actual spend: $${totalActual.toLocaleString()} vs planned $${totalPlanned.toLocaleString()}.
 Overdue tasks: ${overdueAps.length}. Channels: ${spendChannels.map(c => `${c.name} (${c.pacing_status})`).join(', ')}.
 Be concise and professional. Max 80 tokens.`;
       const msg = await anthropic.messages.create({
@@ -161,10 +161,9 @@ Be concise and professional. Max 80 tokens.`;
   return NextResponse.json({
     client: { id: client.id, name: client.name, logo_url: client.logo_url, account_manager: client.account_manager },
     date_range: { start: start_date, end: end_date },
-    health: {
-      status: health?.status ?? 'unknown',
-      budget_health_pct: health?.budget_health_percentage ?? null,
-      total_overdue_tasks: health?.total_overdue_tasks ?? 0,
+    spendPacing: {
+      budget_pacing_pct: spendCache?.budget_pacing_percentage ?? null,
+      total_overdue_tasks: spendCache?.total_overdue_tasks ?? 0,
     },
     spend: { channels: spendChannels, commission },
     action_points: {

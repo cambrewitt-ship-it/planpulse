@@ -111,7 +111,7 @@ export async function DELETE(
     "metric_presets",
     "client_media_plan_builder",
     "client_action_point_completions",
-    "client_health_status",
+    "client_spend_cache",
     "organic_social_actuals",
     "edm_actuals",
     "ad_performance_metrics",

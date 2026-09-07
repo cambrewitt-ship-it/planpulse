@@ -50,9 +50,9 @@ export function createBlankSandboxPlan(year: number = new Date().getFullYear()):
     title: 'New Media Plan',
     asAtLabel: '',
     weeks,
-    rows: Array.from({ length: 5 }, (_, i) => (
-      { id: `row-${Date.now()}-${i}`, funnel: 'AWARENESS', channel: '', detail: '', audience: '', flights: [] }
-    )),
+    rows: [
+      { id: `row-${Date.now()}-0`, funnel: 'AWARENESS', channel: '', detail: '', audience: '', flights: [] },
+    ],
     updatedAt: new Date().toISOString(),
   };
 }

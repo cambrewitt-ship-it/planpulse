@@ -1,10 +1,10 @@
 // src/app/api/agency/clients/route.ts
-// API endpoint for fetching all clients with health status + enriched card data
+// API endpoint for fetching all clients with cached spend metrics + enriched card data
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import type { Database, ClientWithHealth, HealthStatus } from '@/types/database';
-import { calculateClientHealth, getActionPointStatsForClient } from '@/lib/health/calculations';
+import type { Database, ClientWithSpendCache } from '@/types/database';
+import { refreshClientSpendCache, getActionPointStatsForClient } from '@/lib/health/calculations';
 import { nzToday, nzDateKeyOffset, nzStartOfYear } from '@/lib/timezone';
 
 export interface ClientChannelFlight {
@@ -21,7 +21,7 @@ export interface ClientChannel {
   flights: ClientChannelFlight[]; // individual flight periods (may have gaps between them)
 }
 
-export interface ClientCardData extends ClientWithHealth {
+export interface ClientCardData extends ClientWithSpendCache {
   channels: ClientChannel[];
   tasksDueSoon: number;                // incomplete tasks with due_date within next 3 days
   plannedBudget: number;               // total campaign budget across all channels/months ($)
@@ -46,9 +46,8 @@ function channelStatus(startDate: string | null, endDate: string | null): 'live'
 
 /**
  * GET /api/agency/clients
- * Fetch all clients with their health status
+ * Fetch all clients with their cached spend/task metrics
  * Query params:
- *  - status: 'red' | 'amber' | 'green' (optional filter)
  *  - accountManager: account manager name (optional filter)
  *
  * actualSpend is always computed on a plan-to-date basis per client (from
@@ -58,16 +57,7 @@ function channelStatus(startDate: string | null, endDate: string | null): 'live'
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const statusFilter = searchParams.get('status') as HealthStatus | null;
     const accountManagerFilter = searchParams.get('accountManager');
-
-    // Validate status filter if provided
-    if (statusFilter && !['red', 'amber', 'green'].includes(statusFilter)) {
-      return NextResponse.json(
-        { error: 'Invalid status filter. Must be red, amber, or green' },
-        { status: 400 }
-      );
-    }
 
     // Auth check
     const supabase = await createClient();
@@ -81,7 +71,7 @@ export async function GET(request: NextRequest) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: clientsData, error: clientsError } = await (supabase as any)
       .from('clients')
-      .select(`*, client_health_status (*)`)
+      .select(`*, client_spend_cache (*)`)
       .eq('user_id', session.user.id)
       .order('name', { ascending: true });
 
@@ -211,11 +201,11 @@ export async function GET(request: NextRequest) {
     // ── Build enriched client list ────────────────────────────────────────────
     const enrichedClients: ClientCardData[] = await Promise.all(
       (clientsData || []).map(async (client: any) => {
-        const healthArray = client.client_health_status as any[];
-        let health = healthArray && healthArray.length > 0 ? healthArray[0] : null;
+        const spendCacheArray = client.client_spend_cache as any[];
+        let spendCache = spendCacheArray && spendCacheArray.length > 0 ? spendCacheArray[0] : null;
 
-        if (!health) {
-          health = await calculateClientHealth(supabase, client.id);
+        if (!spendCache) {
+          spendCache = await refreshClientSpendCache(supabase, client.id);
         }
 
         const rawChannels: any[] = mediaPlanMap.get(client.id) || [];
@@ -252,7 +242,7 @@ export async function GET(request: NextRequest) {
         }
 
         // ── Actual spend: plan-to-date (this client's own plan start → today) ──
-        // Priority 1: mtd_actual_spend from client_health_status — this is computed
+        // Priority 1: mtd_actual_spend from client_spend_cache — this is computed
         // by the client dashboard with the user's campaign selection applied, so it
         // correctly excludes campaigns the client hasn't linked. Use it when the
         // stored range matches this client's plan-to-date window.
@@ -261,9 +251,9 @@ export async function GET(request: NextRequest) {
         // bounded to the plan-to-date window.
         // Priority 3: sum all campaign rows in the window (fallback, may over-count).
 
-        const cachedSpend: number | null = health?.mtd_actual_spend ?? null;
-        const cachedStart: string | null = health?.spend_date_start ?? null;
-        const cachedEnd: string | null = health?.spend_date_end ?? null;
+        const cachedSpend: number | null = spendCache?.mtd_actual_spend ?? null;
+        const cachedStart: string | null = spendCache?.spend_date_start ?? null;
+        const cachedEnd: string | null = spendCache?.spend_date_end ?? null;
         // Only trust the cache when its stored range exactly matches this
         // client's own plan-to-date window (not a shared/selectable range).
         const cacheHit =
@@ -311,7 +301,7 @@ export async function GET(request: NextRequest) {
           name: client.name,
           created_at: client.created_at,
           updated_at: client.updated_at,
-          health,
+          spendCache,
           channels,
           tasksDueSoon,
           plannedBudget,
@@ -325,30 +315,16 @@ export async function GET(request: NextRequest) {
       })
     );
 
-    // Apply status filter if provided
-    let filteredClients = enrichedClients;
-    if (statusFilter) {
-      filteredClients = enrichedClients.filter(
-        (client) => client.health?.status === statusFilter
-      );
-    }
-
     // Apply account manager filter if provided
+    let filteredClients = enrichedClients;
     if (accountManagerFilter) {
       filteredClients = filteredClients.filter(
         (client) => client.account_manager === accountManagerFilter
       );
     }
 
-    // Sort by status (red first, then amber, then green), then by name
-    const statusOrder = { red: 0, amber: 1, green: 2 };
-    filteredClients.sort((a, b) => {
-      const aStatus = a.health?.status || 'green';
-      const bStatus = b.health?.status || 'green';
-      const statusDiff = statusOrder[aStatus as keyof typeof statusOrder] - statusOrder[bStatus as keyof typeof statusOrder];
-      if (statusDiff !== 0) return statusDiff;
-      return a.name.localeCompare(b.name);
-    });
+    // Sort by name
+    filteredClients.sort((a, b) => a.name.localeCompare(b.name));
 
     return NextResponse.json({ clients: filteredClients });
   } catch (error: any) {

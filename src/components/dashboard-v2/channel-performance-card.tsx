@@ -2,8 +2,9 @@
 
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { differenceInDays, parseISO } from 'date-fns';
-import { AlertTriangle, ChevronDown, ExternalLink } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
 import ChannelHealthBadge from './channel-health-badge';
+import ChannelAIChat from './channel-ai-chat';
 import type { ChannelBenchmark, MetricPreset, ClientChannelPreset } from '@/types/database';
 import { getChannelLogo } from '@/lib/utils/channel-icons';
 import { getWeekAlignedMonthRange } from '@/lib/utils/channel-pacing';
@@ -83,6 +84,7 @@ export interface ChannelCardProps {
   onViewReport?: () => void;
   onReconnect?: () => void;
   clientId?: string;
+  clientName?: string;
   channelStartDate?: Date | null;
   channelFlights?: { startWeek: Date | string; endWeek: Date | string }[];
   refetchTrigger?: number;
@@ -606,7 +608,8 @@ const ACTION_TYPE_LABELS: Record<string, string> = {
   'offsite_conversion.fb_pixel_lead':                  'Pixel Leads',
   'offsite_conversion.fb_pixel_view_content':          'Content Views',
   'offsite_conversion.fb_pixel_search':                'Searches',
-  'offsite_conversion.fb_pixel_submit_application':    'Submit Application',
+  'offsite_conversion.fb_pixel_submit_application':    'Submit Application (Pixel)',
+  'submit_application':                                'Submit Application',
   'link_click':                                        'Link Clicks',
   'landing_page_view':                                 'Landing Page Views',
   'post_engagement':                                   'Post Engagement',
@@ -643,8 +646,9 @@ function inferActionPointChannelType(platform: string, channelName: string): str
   return normalizeChannelType(channelName);
 }
 
-export default function ChannelPerformanceCard({ channel, selectedMonth, dateRange, onAdjust, onViewReport, onReconnect, clientId, channelStartDate, channelFlights, refetchTrigger, benchmarks, presets, clientChannelPresets, onPresetSaved, onCampaignSelectionChange, planView, headerActions }: ChannelCardProps) {
+export default function ChannelPerformanceCard({ channel, selectedMonth, dateRange, onAdjust, onViewReport, onReconnect, clientId, clientName, channelStartDate, channelFlights, refetchTrigger, benchmarks, presets, clientChannelPresets, onPresetSaved, onCampaignSelectionChange, planView, headerActions }: ChannelCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
   const [chartType, setChartType] = useState<'spend' | 'metrics'>('spend');
   const [selectedMetrics, setSelectedMetrics] = useState<Set<MetricKey>>(new Set(['impressions']));
   const [presetOpen, setPresetOpen] = useState(false);
@@ -1367,10 +1371,15 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
 
   return (
     <div className="bg-white rounded-xl overflow-hidden hover:shadow-md transition-shadow duration-200">
-      {/* ── Main layout: Left (Spend/Metrics) + Right (Action Points) ── */}
-      <div className="flex">
+      {/* ── Main layout: Left (Spend/Metrics) + Right (Action Points) ──
+          The right column is absolutely positioned rather than a flex sibling
+          so its content can never inflate this row's height — the row's height
+          is set purely by the left column (which is what collapses/expands via
+          "See More"/"See Less"), and the right column is pinned to exactly that
+          height with its own internal scroll for anything that doesn't fit. */}
+      <div className={`relative ${clientId ? (rightPanelCollapsed ? 'pr-9' : 'pr-80') : ''}`}>
         {/* ── Left Section: Spend & Metrics ── */}
-        <div className={`flex-1 ${clientId ? 'border-r border-gray-200' : ''}`}>
+        <div className={clientId ? 'border-r border-gray-200' : ''}>
           {/* ── Header + Pacing (aligned under logo → spend) ── */}
           <div className="px-4 pt-4 pb-3">
             <div className="grid grid-cols-[auto,1fr,auto] gap-x-3 gap-y-3 items-start">
@@ -1989,16 +1998,43 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
           )}
         </div>
 
-        {/* ── Right Section: Health Check ── */}
+        {/* ── Right Section: Health Check + channel AI chat ── */}
         {clientId && (
-          <div className="flex-shrink-0 w-64 bg-white flex flex-col self-stretch justify-center px-4">
-            <ChannelHealthBadge
-              channelType={inferActionPointChannelType(channel.platform, channel.name)}
-              clientId={clientId}
-              channelStartDate={channelStartDate}
-              channelFlights={channelFlights}
-            />
-          </div>
+          <>
+            {/* Collapse/expand handle — sits astride the panel's left edge */}
+            <button
+              type="button"
+              onClick={() => setRightPanelCollapsed(v => !v)}
+              title={rightPanelCollapsed ? 'Expand panel' : 'Collapse panel'}
+              className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 z-10 flex items-center justify-center w-9 h-9 rounded-full bg-white text-gray-500 border border-gray-200 shadow-md hover:text-gray-800 hover:shadow-lg transition-[right,box-shadow,color] duration-200 ${rightPanelCollapsed ? 'right-9' : 'right-80'}`}
+            >
+              {rightPanelCollapsed ? <ChevronLeft size={20} /> : <ChevronRight size={20} />}
+            </button>
+
+            <div className={`absolute top-0 right-0 bottom-0 bg-white flex flex-col transition-[width] duration-200 ${rightPanelCollapsed ? 'w-9' : 'w-80 px-4 py-4'}`}>
+              {!rightPanelCollapsed && (
+                <>
+                  <ChannelHealthBadge
+                    channelType={inferActionPointChannelType(channel.platform, channel.name)}
+                    clientId={clientId}
+                    channelStartDate={channelStartDate}
+                    channelFlights={channelFlights}
+                    showTopBorder={false}
+                  />
+                  <div className="flex-1 min-h-0 mt-3 pt-3 border-t border-gray-100">
+                    <ChannelAIChat
+                      clientId={clientId}
+                      clientName={clientName ?? ''}
+                      channelDisplayName={buildCardTitle(channel)}
+                      channelKeyword={channel.channelBaseName ?? channel.name}
+                      platform={channel.platform}
+                      linkedCampaignIds={channel.linkedCampaignIds ?? channel.metaCampaignIds}
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+          </>
         )}
       </div>
     </div>

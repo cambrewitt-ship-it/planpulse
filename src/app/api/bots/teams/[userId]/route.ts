@@ -10,7 +10,7 @@ export const maxDuration = 60;
 
 const BOT_SYSTEM_PROMPT = `You are PlanPulse, a media agency assistant responding in Microsoft Teams.
 
-You have access to live data: client health, spend pacing, action points, and channel performance.
+You have access to live data: spend pacing, overdue tasks, Setup Auditor findings, and channel performance.
 
 Rules:
 - Be concise. Lead with the most important number or status.
@@ -54,7 +54,7 @@ function makeSupabase() {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function runBotTools(toolName: string, toolInput: Record<string, unknown>, userId: string, supabase: any): Promise<unknown> {
   if (toolName === 'get_client_status') {
-    const { client_name, status_filter } = toolInput as { client_name?: string; status_filter?: string };
+    const { client_name } = toolInput as { client_name?: string };
 
     let clientQuery = supabase
       .from('clients')
@@ -67,28 +67,23 @@ async function runBotTools(toolName: string, toolInput: Record<string, unknown>,
     if (!clients?.length) return { error: 'No matching clients found' };
 
     const clientIds = clients.map((c: any) => c.id);
-    const { data: healthRows } = await supabase
-      .from('client_health_status')
-      .select('client_id, status, total_overdue_tasks, budget_health_percentage, active_channel_count')
+    const { data: spendCacheRows } = await supabase
+      .from('client_spend_cache')
+      .select('client_id, total_overdue_tasks, budget_pacing_percentage, active_channel_count')
       .in('client_id', clientIds);
 
-    const healthMap = new Map((healthRows ?? []).map((h: any) => [h.client_id, h]));
+    const spendCacheMap = new Map((spendCacheRows ?? []).map((h: any) => [h.client_id, h]));
 
-    let results = clients.map((c: any) => {
-      const h = healthMap.get(c.id) as any;
+    const results = clients.map((c: any) => {
+      const h = spendCacheMap.get(c.id) as any;
       return {
         name: c.name,
-        health: h?.status ?? 'unknown',
         overdue_tasks: h?.total_overdue_tasks ?? 0,
-        budget_health_pct: h?.budget_health_percentage ?? null,
+        budget_pacing_pct: h?.budget_pacing_percentage ?? null,
         active_channels: h?.active_channel_count ?? 0,
         account_manager: c.account_manager,
       };
     });
-
-    if (status_filter) {
-      results = results.filter((r: any) => r.health === status_filter);
-    }
 
     return results;
   }
@@ -156,15 +151,16 @@ async function runBotTools(toolName: string, toolInput: Record<string, unknown>,
     ]);
 
     const clients = Array.isArray(clientStatus) ? clientStatus : [];
-    const red = clients.filter((c: any) => c.health === 'red');
-    const amber = clients.filter((c: any) => c.health === 'amber');
+    // Clients needing attention: 2+ overdue tasks, or spend pacing >15% off plan
+    const needingAttention = clients.filter((c: any) =>
+      c.overdue_tasks >= 2 || (c.budget_pacing_pct != null && Math.abs(c.budget_pacing_pct - 100) > 15)
+    );
     const ap = actionPoints as any;
 
     return {
       date: new Date().toISOString().split('T')[0],
-      client_summary: { total: clients.length, red: red.length, amber: amber.length, green: clients.length - red.length - amber.length },
-      red_clients: red.map((c: any) => c.name),
-      amber_clients: amber.map((c: any) => c.name),
+      client_summary: { total: clients.length, needing_attention: needingAttention.length },
+      clients_needing_attention: needingAttention.map((c: any) => c.name),
       overdue_action_points: ap?.overdue_count ?? 0,
       overdue_items: ap?.overdue_items ?? [],
     };
@@ -218,18 +214,18 @@ async function runBotTools(toolName: string, toolInput: Record<string, unknown>,
       spendByClient.set(m.client_id, existing);
     }
 
-    const { data: healthRows } = await supabase
-      .from('client_health_status')
-      .select('client_id, budget_health_percentage, status')
+    const { data: spendCacheRows } = await supabase
+      .from('client_spend_cache')
+      .select('client_id, budget_pacing_percentage')
       .in('client_id', clientIds);
 
-    const healthMap = new Map((healthRows ?? []).map((h: any) => [h.client_id, h]));
+    const spendCacheMap = new Map((spendCacheRows ?? []).map((h: any) => [h.client_id, h]));
 
     return clients.map((c: any) => {
       const perf = spendByClient.get(c.id);
-      const health = healthMap.get(c.id) as any;
-      const spendVariancePct = health?.budget_health_percentage != null
-        ? health.budget_health_percentage - 100
+      const spendCache = spendCacheMap.get(c.id) as any;
+      const spendVariancePct = spendCache?.budget_pacing_percentage != null
+        ? spendCache.budget_pacing_percentage - 100
         : null;
       return {
         client: clientMap.get(c.id),
@@ -239,7 +235,6 @@ async function runBotTools(toolName: string, toolInput: Record<string, unknown>,
           : spendVariancePct > 15 ? 'overpacing'
           : spendVariancePct < -15 ? 'underpacing'
           : 'on track',
-        health: health?.status ?? 'unknown',
         impressions: perf?.impressions ?? null,
         clicks: perf?.clicks ?? null,
         conversions: perf?.conversions ?? null,
@@ -331,9 +326,9 @@ async function runBotTools(toolName: string, toolInput: Record<string, unknown>,
 
     const client = clients[0];
 
-    const [healthRes, metricsRes, actionRes, completionsRes] = await Promise.all([
-      supabase.from('client_health_status')
-        .select('status, total_overdue_tasks, budget_health_percentage')
+    const [spendCacheRes, metricsRes, actionRes, completionsRes] = await Promise.all([
+      supabase.from('client_spend_cache')
+        .select('total_overdue_tasks, budget_pacing_percentage')
         .eq('client_id', client.id).maybeSingle(),
       supabase.from('ad_performance_metrics')
         .select('platform, spend')
@@ -345,7 +340,7 @@ async function runBotTools(toolName: string, toolInput: Record<string, unknown>,
         .select('action_point_id').eq('client_id', client.id).eq('completed', true),
     ]);
 
-    const health = healthRes.data;
+    const spendCache = spendCacheRes.data;
     const metrics = metricsRes.data ?? [];
     const completedIds = new Set((completionsRes.data ?? []).map((c: any) => c.action_point_id));
     const today = new Date().toISOString().split('T')[0];
@@ -366,14 +361,12 @@ async function runBotTools(toolName: string, toolInput: Record<string, unknown>,
       .filter(([, s]) => s > 0)
       .map(([p, s]) => `${platformLabels[p] ?? p}: $${s.toLocaleString('en-US', { maximumFractionDigits: 0 })}`);
 
-    const statusIcon = health?.status === 'red' ? 'Red' : health?.status === 'amber' ? 'Amber' : 'Green';
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? '';
 
     return {
       client: client.name,
       date_range: `${start_date} to ${end_date}`,
-      health: statusIcon,
-      budget_health_pct: health?.budget_health_percentage ?? null,
+      budget_pacing_pct: spendCache?.budget_pacing_percentage ?? null,
       total_spend: Math.round(totalSpend * 100) / 100,
       channels: channelLines,
       overdue_action_points: overdueCount,

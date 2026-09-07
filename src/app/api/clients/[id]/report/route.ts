@@ -107,9 +107,7 @@ export async function POST(
   drawText(`${start_date}  →  ${end_date}`, 11, MUTED);
   y += 4;
 
-  const statusEmoji: Record<string, string> = { green: 'Green', amber: 'Amber', red: 'Red' };
-  const healthStatus = statusEmoji[data.health.status] ?? data.health.status;
-  drawText(`Health: ${healthStatus}  |  Budget: ${data.health.budget_health_pct != null ? data.health.budget_health_pct.toFixed(0) + '%' : 'N/A'}  |  Overdue tasks: ${data.health.total_overdue_tasks}`, 10, MUTED);
+  drawText(`Budget pacing: ${data.spendPacing.budget_pacing_pct != null ? data.spendPacing.budget_pacing_pct.toFixed(0) + '%' : 'N/A'}  |  Overdue tasks: ${data.spendPacing.total_overdue_tasks}`, 10, MUTED);
   y += 6;
   rule();
 

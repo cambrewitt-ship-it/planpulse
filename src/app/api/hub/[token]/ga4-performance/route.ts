@@ -3,7 +3,8 @@ import { subDays, format } from 'date-fns';
 import { createClient as createSupabaseAdmin } from '@supabase/supabase-js';
 import { rateLimit } from '@/lib/rate-limit';
 import {
-  getGA4KpiTiles, getGA4DailySeries, getGA4ChannelBreakdown, getGA4DeviceBreakdown, getGA4NewVsReturningBreakdown,
+  getGA4KpiTiles, getGA4ChannelBreakdown, getGA4DeviceBreakdown, getGA4NewVsReturningBreakdown,
+  getGA4EngagementOverview,
 } from '@/lib/client-hub/get-ga4-report';
 import { getStoredInsight } from '@/lib/client-hub/generate-insight';
 import { sanitizeHiddenCards } from '@/lib/client-hub/hidden-cards';
@@ -52,12 +53,12 @@ export async function GET(req: NextRequest, { params }: Params) {
   const end = req.nextUrl.searchParams.get('end') ?? format(today, 'yyyy-MM-dd');
   const range = { start, end };
 
-  const [metrics, dailySeries, channelDonut, deviceDonut, newVsReturningDonut, insight] = await Promise.all([
+  const [metrics, channelDonut, deviceDonut, newVsReturningDonut, engagementOverview, insight] = await Promise.all([
     getGA4KpiTiles(admin, link.client_id, range),
-    getGA4DailySeries(admin, link.client_id, range),
     getGA4ChannelBreakdown(admin, link.client_id, range),
     getGA4DeviceBreakdown(admin, link.client_id, range),
     getGA4NewVsReturningBreakdown(admin, link.client_id, range),
+    getGA4EngagementOverview(admin, link.client_id, range),
     getStoredInsight(admin, link.client_id, 'ga4Performance'),
   ]);
 
@@ -66,10 +67,10 @@ export async function GET(req: NextRequest, { params }: Params) {
   return NextResponse.json({
     period: { start, end },
     metrics,
-    dailySeries,
     channelDonut: hiddenCards.includes('channelDonut') ? [] : channelDonut,
     deviceDonut: hiddenCards.includes('deviceDonut') ? [] : deviceDonut,
     newVsReturningDonut: hiddenCards.includes('newVsReturningDonut') ? [] : newVsReturningDonut,
+    engagementOverview: hiddenCards.includes('engagementOverview') ? [] : engagementOverview,
     insight: hiddenCards.includes('insight') ? null : insight,
     hiddenCards,
   });

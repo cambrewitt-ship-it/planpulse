@@ -1,31 +1,21 @@
 // src/lib/health/calculations.ts
-// Health calculation logic — reads from the real data sources used by new-client-dashboard:
+// Spend/task metric calculation logic — reads from the real data sources used by new-client-dashboard:
 //   - client_media_plan_builder (JSONB) for channel list + planned budget
 //   - client_action_point_completions + action_points for task completion
 //   - ad_performance_metrics for actual spend
+//
+// Note: this used to also classify clients into a red/amber/green traffic
+// light (client_health_status.status). That's been removed — it was hard to
+// measure meaningfully. What's left are plain cached numbers (overdue task
+// count, budget pacing %, next critical task) with no grade attached.
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { ClientHealthStatus, HealthStatus } from '@/types/database';
+import type { ClientSpendCache } from '@/types/database';
 import { nzToday, nzDateKeyOffset } from '@/lib/timezone';
 
 // ============================================================================
 // TYPES
 // ============================================================================
-
-export interface ChannelHealthMetrics {
-  overdueTasks: number;
-  upcomingTasks: number;
-  budgetVariance: number;
-  setupComplete: boolean;
-  daysToStart: number | null;
-}
-
-export interface ChannelHealth {
-  channelId: string;
-  status: HealthStatus;
-  reasons: string[];
-  metrics: ChannelHealthMetrics;
-}
 
 export interface RefreshAllResult {
   updated: number;
@@ -202,21 +192,16 @@ export async function getActualSpendForClient(
 // ============================================================================
 
 /**
- * Calculate health status for a client using real data sources.
- *
- * Traffic light rules:
- *   RED:   2+ overdue action points  OR  spend > 120% of plan  OR  spend < 60% of plan (with data)
- *   AMBER: 1 overdue action point    OR  spend 110-120%        OR  spend 60-80%
- *   GREEN: everything else
+ * Refresh the cached spend/task metrics for a client using real data sources.
+ * No grading — just plain numbers (overdue task count, budget pacing %,
+ * next critical task) cached in client_spend_cache for reuse across the
+ * agency list, reports, Teams bot, and crons.
  */
-export async function calculateClientHealth(
+export async function refreshClientSpendCache(
   supabase: SupabaseClient,
   clientId: string
-): Promise<ClientHealthStatus | null> {
+): Promise<ClientSpendCache | null> {
   try {
-    const reasons: string[] = [];
-    let clientStatus: HealthStatus = 'green';
-
     // 1. Action point stats
     const { total, completed, overdueIncomplete } =
       await getActionPointStatsForClient(supabase, clientId);
@@ -228,41 +213,9 @@ export async function calculateClientHealth(
     const plannedBudget = await getPlannedBudgetForClient(supabase, clientId);
     const actualSpend = await getActualSpendForClient(supabase, clientId);
 
-    // Budget variance as percentage (actual / planned * 100)
-    const budgetVariance =
+    // Budget pacing as percentage (actual / planned * 100)
+    const budgetPacing =
       plannedBudget > 0 ? (actualSpend / plannedBudget) * 100 : null;
-
-    // --- Apply traffic light rules ---
-
-    // Task rules
-    if (overdueIncomplete >= 2) {
-      clientStatus = 'red';
-      reasons.push(`${overdueIncomplete} overdue action points`);
-    } else if (overdueIncomplete === 1) {
-      clientStatus = 'amber';
-      reasons.push('1 overdue action point');
-    }
-
-    // Spend rules (only when we have planned budget data)
-    if (budgetVariance !== null) {
-      if (budgetVariance > 120) {
-        clientStatus = 'red';
-        reasons.push(`Overspend: ${budgetVariance.toFixed(0)}% of plan`);
-      } else if (budgetVariance < 60 && actualSpend > 0) {
-        clientStatus = 'red';
-        reasons.push(`Underspend: ${budgetVariance.toFixed(0)}% of plan`);
-      } else if (budgetVariance >= 110 && budgetVariance <= 120) {
-        if (clientStatus !== 'red') clientStatus = 'amber';
-        reasons.push(`Slightly over budget: ${budgetVariance.toFixed(0)}%`);
-      } else if (budgetVariance >= 60 && budgetVariance < 80 && actualSpend > 0) {
-        if (clientStatus !== 'red') clientStatus = 'amber';
-        reasons.push(`Slightly under budget: ${budgetVariance.toFixed(0)}%`);
-      }
-    }
-
-    if (clientStatus === 'green' && reasons.length === 0) {
-      reasons.push('All metrics healthy');
-    }
 
     // 4. Find next due incomplete action point
     let nextCriticalDate: string | null = null;
@@ -326,47 +279,46 @@ export async function calculateClientHealth(
       // non-fatal
     }
 
-    // 5. Upsert to client_health_status
+    // 5. Upsert to client_spend_cache
     // mtd_actual_spend, mtd_actual_spend_updated_at, spend_date_start, and
     // spend_date_end are intentionally excluded — they are managed by the
     // dashboard's PATCH /api/clients/[id]/actual-spend endpoint and must not
     // be overwritten here.
-    const healthStatus: Omit<ClientHealthStatus, 'id' | 'created_at' | 'updated_at' | 'mtd_actual_spend' | 'mtd_actual_spend_updated_at' | 'spend_date_start' | 'spend_date_end'> = {
+    const spendCache: Omit<ClientSpendCache, 'id' | 'created_at' | 'updated_at' | 'mtd_actual_spend' | 'mtd_actual_spend_updated_at' | 'spend_date_start' | 'spend_date_end'> = {
       client_id: clientId,
-      status: clientStatus,
       active_channel_count: activeChannelCount,
       total_overdue_tasks: overdueIncomplete,
       at_risk_tasks: total - completed,        // total incomplete
       total_budget_cents: Math.round(plannedBudget * 100),
       total_spent_cents: Math.round(actualSpend * 100),
-      budget_health_percentage: budgetVariance,
+      budget_pacing_percentage: budgetPacing,
       next_critical_date: nextCriticalDate,
       next_critical_task: nextCriticalTask,
       last_calculated_at: new Date().toISOString(),
     };
 
     const { data: upserted, error: upsertError } = await supabase
-      .from('client_health_status')
-      .upsert(healthStatus, { onConflict: 'client_id' })
+      .from('client_spend_cache')
+      .upsert(spendCache, { onConflict: 'client_id' })
       .select()
       .single();
 
     if (upsertError) {
-      console.error('Error upserting client health status:', upsertError);
+      console.error('Error upserting client spend cache:', upsertError);
       return null;
     }
 
     return upserted;
   } catch (err) {
-    console.error('Exception in calculateClientHealth:', err);
+    console.error('Exception in refreshClientSpendCache:', err);
     return null;
   }
 }
 
 /**
- * Refresh health status for all clients.
+ * Refresh spend cache for all clients.
  */
-export async function refreshAllClientHealth(
+export async function refreshAllClientSpendCaches(
   supabase: SupabaseClient
 ): Promise<RefreshAllResult> {
   const result: RefreshAllResult = { updated: 0, errors: [] };
@@ -383,11 +335,11 @@ export async function refreshAllClientHealth(
 
     for (const client of clients) {
       try {
-        const health = await calculateClientHealth(supabase, client.id);
-        if (health) {
+        const cache = await refreshClientSpendCache(supabase, client.id);
+        if (cache) {
           result.updated++;
         } else {
-          result.errors.push({ clientId: client.id, error: 'Failed to calculate health' });
+          result.errors.push({ clientId: client.id, error: 'Failed to refresh spend cache' });
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Unknown error';
@@ -395,7 +347,7 @@ export async function refreshAllClientHealth(
       }
     }
   } catch (err) {
-    console.error('Exception in refreshAllClientHealth:', err);
+    console.error('Exception in refreshAllClientSpendCaches:', err);
   }
 
   return result;

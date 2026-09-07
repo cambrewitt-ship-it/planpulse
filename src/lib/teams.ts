@@ -47,33 +47,36 @@ export async function sendTeamsAlert({ title, text, color = '0078D4', facts, act
 
 export interface ClientBriefingRow {
   name: string;
-  status: 'green' | 'amber' | 'red' | null;
   overdue_tasks: number;
   mtd_spend: number | null;
-  budget_health_pct: number | null;
+  budget_pacing_pct: number | null;
+}
+
+// A client "needs attention" if it has 2+ overdue tasks, or its spend pacing
+// is more than 15% off plan — the same pacing threshold used elsewhere in
+// the app (chat system prompt's channel-pacing rule, toolGetChannelPerformance).
+function needsAttentionReasons(c: ClientBriefingRow): string[] {
+  const reasons: string[] = [];
+  if (c.overdue_tasks >= 2) reasons.push(`${c.overdue_tasks} overdue tasks`);
+  if (c.budget_pacing_pct != null && Math.abs(c.budget_pacing_pct - 100) > 15) {
+    reasons.push(`Budget pacing ${c.budget_pacing_pct.toFixed(0)}% of plan`);
+  }
+  return reasons;
 }
 
 export async function sendTeamsDailyBriefing(clients: ClientBriefingRow[], appUrl?: string, webhookUrl?: string): Promise<void> {
-  const red = clients.filter(c => c.status === 'red');
-  const amber = clients.filter(c => c.status === 'amber');
-  const green = clients.filter(c => c.status === 'green');
   const totalOverdue = clients.reduce((sum, c) => sum + (c.overdue_tasks ?? 0), 0);
 
-  const statusLine = `🔴 ${red.length}  🟡 ${amber.length}  🟢 ${green.length}`;
-
-  const atRisk = [...red, ...amber].slice(0, 5).map(c => ({
-    name: `${c.status === 'red' ? '🔴' : '🟡'} ${c.name}`,
-    value: [
-      c.overdue_tasks > 0 ? `${c.overdue_tasks} overdue task${c.overdue_tasks !== 1 ? 's' : ''}` : null,
-      c.budget_health_pct != null ? `Budget: ${c.budget_health_pct.toFixed(0)}%` : null,
-    ].filter(Boolean).join(' · ') || 'Review needed',
-  }));
+  const atRisk = clients
+    .map(c => ({ client: c, reasons: needsAttentionReasons(c) }))
+    .filter(r => r.reasons.length > 0)
+    .slice(0, 5)
+    .map(r => ({ name: r.client.name, value: r.reasons.join(' · ') }));
 
   const sections: object[] = [
     {
       activityTitle: `**Agency Daily Briefing — ${formatNZWeekdayDate(new Date())}**`,
       activityText: `${clients.length} active clients · ${totalOverdue} overdue task${totalOverdue !== 1 ? 's' : ''}`,
-      facts: [{ name: 'Health overview', value: statusLine }],
     },
   ];
 
@@ -87,7 +90,7 @@ export async function sendTeamsDailyBriefing(clients: ClientBriefingRow[], appUr
   const payload: Record<string, unknown> = {
     '@type': 'MessageCard',
     '@context': 'http://schema.org/extensions',
-    themeColor: red.length > 0 ? 'D13438' : amber.length > 0 ? 'F7630C' : '107C10',
+    themeColor: atRisk.length > 0 ? 'F7630C' : '0078D4',
     summary: 'Agency Daily Briefing',
     sections,
   };

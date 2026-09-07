@@ -308,7 +308,8 @@ interface BoardCardProps {
 }
 
 function BoardCard({ card, isCompleting, isFlashing, onOpenPopup }: BoardCardProps) {
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: cardKey(card) });
+  const isPending = card.id.startsWith('temp-');
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: cardKey(card), disabled: isPending });
   return (
     <div style={{ display: 'grid', gridTemplateRows: isCompleting ? '0fr' : '1fr', transition: 'grid-template-rows 0.45s ease 0.35s', overflow: 'hidden' }}>
     <div style={{ overflow: 'hidden' }}>
@@ -316,13 +317,13 @@ function BoardCard({ card, isCompleting, isFlashing, onOpenPopup }: BoardCardPro
       ref={setNodeRef}
       {...listeners}
       {...attributes}
-      onClick={e => { if (!isDragging) onOpenPopup(card, e.clientX, e.clientY); }}
+      onClick={e => { if (!isDragging && !isPending) onOpenPopup(card, e.clientX, e.clientY); }}
       style={{
         background: '#FDFCF8', border: '1px solid #E8E4DC', borderLeft: `3px solid ${clientColor(card.clientId)}`,
-        borderRadius: 4, padding: '10px 11px', cursor: 'grab',
+        borderRadius: 4, padding: '10px 11px', cursor: isPending ? 'default' : 'grab',
         display: 'flex', flexDirection: 'column', gap: 8,
-        opacity: isDragging ? 0.3 : isCompleting ? 0.4 : 1,
-        animation: isFlashing ? 'aiFlash 2s ease-out' : undefined,
+        opacity: isDragging ? 0.3 : isCompleting ? 0.4 : isPending ? 0.55 : 1,
+        animation: isFlashing ? 'aiFlash 2s ease-out' : isPending ? 'pendingPulse 1.1s ease-in-out infinite' : undefined,
         touchAction: 'none',
       }}
     >
@@ -963,6 +964,12 @@ export function KanbanBoard(
   const [boardAddingCol, setBoardAddingCol] = useState<BoardStatus | null>(null);
   const [boardAddText, setBoardAddText] = useState('');
 
+  // Optimistic "new task" ghost cards — shown instantly (id prefixed "temp-")
+  // instead of waiting on the POST + the full agency-data refetch it kicks
+  // off. Dropped once the real row shows up in actionPointClients.
+  const [pendingCards, setPendingCards] = useState<Map<string, KanbanCard>>(new Map());
+  const pendingRealIdsRef = useRef<Map<string, string>>(new Map());
+
   // Board view drag-and-drop between columns
   const [activeDragCard, setActiveDragCard] = useState<KanbanCard | null>(null);
   const boardSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
@@ -1021,6 +1028,26 @@ export function KanbanBoard(
     return () => window.removeEventListener('planpulse:ai-action', handler);
   }, [onActionPointCompleted]);
 
+  // Drop optimistic "new task" ghosts once the real row lands in
+  // actionPointClients (i.e. the post-create refetch has come back).
+  useEffect(() => {
+    if (pendingRealIdsRef.current.size === 0) return;
+    const liveIds = new Set<string>();
+    for (const clientGroup of actionPointClients) {
+      for (const channelGroup of clientGroup.channels) {
+        for (const ap of channelGroup.actionPoints) liveIds.add(ap.id);
+      }
+    }
+    const resolved = [...pendingRealIdsRef.current.entries()].filter(([, realId]) => liveIds.has(realId));
+    if (resolved.length === 0) return;
+    setPendingCards(prev => {
+      const next = new Map(prev);
+      for (const [tempId] of resolved) next.delete(tempId);
+      return next;
+    });
+    for (const [tempId] of resolved) pendingRealIdsRef.current.delete(tempId);
+  }, [actionPointClients]);
+
   // Delay channel modal state
   const [delayModal, setDelayModal] = useState<{
     clientId: string;
@@ -1050,7 +1077,6 @@ export function KanbanBoard(
 
   // Capture bar state
   const [addText, setAddText] = useState('');
-  const [isSaving, setIsSaving] = useState(false);
   // Explicit calendar-picked due date — takes precedence over anything typed/parsed
   const [captureDueDate, setCaptureDueDate] = useState<string | null>(null);
 
@@ -1099,6 +1125,11 @@ export function KanbanBoard(
         });
       }
     }
+  }
+  // Inject optimistic "new task" ghosts so an add shows up immediately
+  // instead of waiting on the POST + full agency-data refetch to land.
+  for (const [, pendingCard] of pendingCards) {
+    cards.push(pendingCard);
   }
   cardsRef.current = cards; // sync ref each render so event handler always has latest cards
 
@@ -1260,8 +1291,37 @@ export function KanbanBoard(
   // when a client is resolved (see the known agency-wide-TODO schema gap).
   async function createTask(text: string, opts: { clientId?: string | null; dueDate?: string | null; assignedToName?: string | null; boardStatus?: BoardStatus }) {
     const trimmed = text.trim();
-    if (!trimmed || isSaving) return;
-    setIsSaving(true);
+    if (!trimmed) return;
+
+    // Optimistic ghost card — renders immediately; real save happens in the
+    // background. Removed once the real row appears in actionPointClients,
+    // or on failure.
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    let daysUntilDue: number | null = null;
+    if (opts.dueDate) {
+      const dueParts = opts.dueDate.split('-').map(Number);
+      const due = new Date(dueParts[0], dueParts[1] - 1, dueParts[2]);
+      daysUntilDue = Math.ceil((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    }
+    const clientId = opts.clientId ?? '__agency__';
+    const optimisticCard: KanbanCard = {
+      id: tempId,
+      text: trimmed,
+      clientName: opts.clientId ? (clients.find(c => c.id === opts.clientId)?.name ?? 'Agency Tasks') : 'Agency Tasks',
+      clientId,
+      channelType: 'General',
+      tag: 'TODO',
+      urgent: daysUntilDue !== null && daysUntilDue < 0,
+      dueDate: opts.dueDate ?? null,
+      daysUntilDue,
+      assignedTo: opts.assignedToName ?? null,
+      frequency: null,
+    };
+    setPendingCards(prev => new Map(prev).set(tempId, optimisticCard));
+    if (opts.boardStatus && opts.boardStatus !== 'To do') {
+      setBoardStatusOverrides(prev => new Map(prev).set(`${tempId}::${clientId}`, opts.boardStatus!));
+    }
+
     try {
       const body: any = { text: trimmed, category: 'TODO' };
       if (opts.dueDate) body.due_date = opts.dueDate;
@@ -1274,6 +1334,7 @@ export function KanbanBoard(
       if (!res.ok) {
         const err = await res.json();
         console.error('Failed to add action point:', err);
+        setPendingCards(prev => { const next = new Map(prev); next.delete(tempId); return next; });
         return;
       }
       const { data } = await res.json();
@@ -1288,23 +1349,31 @@ export function KanbanBoard(
         // Match cardKey()'s format so this override resolves once the real
         // card (grouped under the same synthetic '__agency__' client id for
         // client-less TODOs) comes back from the next refresh.
-        setBoardStatusOverrides(prev => new Map(prev).set(`${data.id}::${opts.clientId ?? '__agency__'}`, opts.boardStatus!));
+        setBoardStatusOverrides(prev => new Map(prev).set(`${data.id}::${clientId}`, opts.boardStatus!));
+      }
+      if (data?.id) {
+        // Track so the ghost can be dropped once this real id shows up.
+        pendingRealIdsRef.current.set(tempId, data.id);
+      } else {
+        setPendingCards(prev => { const next = new Map(prev); next.delete(tempId); return next; });
       }
       onActionPointCompleted?.();
     } catch (err) {
       console.error('Error adding action point:', err);
-    } finally {
-      setIsSaving(false);
+      setPendingCards(prev => { const next = new Map(prev); next.delete(tempId); return next; });
     }
   }
 
   async function handleCaptureSave() {
     const parsed = parseCaptureText(addText, clients, accountManagers);
-    if (!parsed.text.trim() || isSaving) return;
+    if (!parsed.text.trim()) return;
     // A calendar-picked date always wins over anything typed/parsed
-    await createTask(parsed.text, { clientId: parsed.clientId, dueDate: captureDueDate ?? parsed.dueDate, assignedToName: parsed.assignedToName });
+    const dueDate = captureDueDate ?? parsed.dueDate;
+    // Clear the bar immediately — createTask shows an optimistic card, no
+    // need to keep the input tied up for the network round trip.
     setAddText('');
     setCaptureDueDate(null);
+    await createTask(parsed.text, { clientId: parsed.clientId, dueDate, assignedToName: parsed.assignedToName });
   }
 
   function handleBoardStatusChange(card: KanbanCard, status: BoardStatus) {
@@ -1369,6 +1438,13 @@ export function KanbanBoard(
         60%  { box-shadow: inset 0 0 0 2px rgba(74,124,89,0.3), 0 0 6px rgba(74,124,89,0.15); }
         100% { box-shadow: none; }
       }
+      @keyframes pendingPulse {
+        0%, 100% { opacity: 0.5; }
+        50%      { opacity: 0.85; }
+      }
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
       .av2-todo-row:hover { background: #F5F3EF; }
     `}</style>
     <div style={{ width: '100%', height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column', gap: 12, fontFamily: "'DM Sans', system-ui, sans-serif" }}>
@@ -1401,7 +1477,12 @@ export function KanbanBoard(
 
       {/* Capture bar */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#F5F3EF', border: '1px solid #D5D0C5', borderRadius: 5, padding: '0 12px', height: 42, flexShrink: 0 }}>
-        <div style={{ width: 15, height: 15, borderRadius: '50%', border: '1.5px dashed #B5B0A5', flexShrink: 0 }} />
+        <div style={{
+          width: 15, height: 15, borderRadius: '50%', flexShrink: 0,
+          border: pendingCards.size > 0 ? '1.5px solid #D5D0C5' : '1.5px dashed #B5B0A5',
+          borderTopColor: pendingCards.size > 0 ? '#8A8578' : undefined,
+          animation: pendingCards.size > 0 ? 'spin 0.7s linear infinite' : undefined,
+        }} />
         <input
           value={addText}
           onChange={e => setAddText(e.target.value)}
@@ -1502,14 +1583,20 @@ export function KanbanBoard(
             {/* Rows */}
             {inWindow.map(card => {
               const isCompleting = completingIds.has(ck(card));
+              const isPending = card.id.startsWith('temp-');
               const color = clientColor(card.clientId);
               const overdue = card.daysUntilDue !== null && card.daysUntilDue < 0;
               return (
                 <div key={cardKey(card)} style={{ display: 'grid', gridTemplateRows: isCompleting ? '0fr' : '1fr', transition: 'grid-template-rows 0.45s ease 0.35s', overflow: 'hidden' }}>
                 <div style={{ overflow: 'hidden' }}>
                 <div
-                  onClick={e => setCardPopup({ card, x: e.clientX, y: e.clientY })}
-                  style={{ display: 'flex', alignItems: 'center', height: 40, borderBottom: '1px solid #F0EDE6', cursor: 'pointer', minWidth: 230 + 64 + WINDOW * 60, opacity: isCompleting ? 0.4 : 1 }}
+                  onClick={e => { if (!isPending) setCardPopup({ card, x: e.clientX, y: e.clientY }); }}
+                  style={{
+                    display: 'flex', alignItems: 'center', height: 40, borderBottom: '1px solid #F0EDE6',
+                    cursor: isPending ? 'default' : 'pointer', minWidth: 230 + 64 + WINDOW * 60,
+                    opacity: isCompleting ? 0.4 : isPending ? 0.55 : 1,
+                    animation: isPending ? 'pendingPulse 1.1s ease-in-out infinite' : undefined,
+                  }}
                 >
                   <div style={{ width: 230, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, paddingRight: 12 }}>
                     <div style={{ width: 6, height: 6, borderRadius: 2, background: color, flexShrink: 0 }} />
@@ -1548,11 +1635,17 @@ export function KanbanBoard(
                 <div style={{ fontSize: 11, color: '#B5B0A5', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>No due date</div>
                 {noDue.map(card => {
                   const isCompleting = completingIds.has(ck(card));
+                  const isPending = card.id.startsWith('temp-');
                   return (
                     <div
                       key={cardKey(card)}
-                      onClick={e => setCardPopup({ card, x: e.clientX, y: e.clientY })}
-                      style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', cursor: 'pointer', opacity: isCompleting ? 0.4 : 1 }}
+                      onClick={e => { if (!isPending) setCardPopup({ card, x: e.clientX, y: e.clientY }); }}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0',
+                        cursor: isPending ? 'default' : 'pointer',
+                        opacity: isCompleting ? 0.4 : isPending ? 0.55 : 1,
+                        animation: isPending ? 'pendingPulse 1.1s ease-in-out infinite' : undefined,
+                      }}
                     >
                       <div style={{ width: 6, height: 6, borderRadius: 2, background: clientColor(card.clientId), flexShrink: 0 }} />
                       <span style={{ fontSize: 12, color: '#8A8578' }}>{card.clientName} — {card.text}</span>
@@ -1582,6 +1675,7 @@ export function KanbanBoard(
 
             {section.cards.map(card => {
               const isCompleting = completingIds.has(ck(card));
+              const isPending = card.id.startsWith('temp-');
               const isFlashing = flashingIds.has(card.id);
               const due = dueMeta(card.daysUntilDue);
               const initials = card.assignedTo ? assigneeInitials(card.assignedTo) : null;
@@ -1593,9 +1687,9 @@ export function KanbanBoard(
                   className="av2-todo-row"
                   style={{
                     display: 'flex', alignItems: 'center', gap: 9,
-                    height: 38, borderRadius: 4, opacity: isCompleting ? 0.4 : 1,
+                    height: 38, borderRadius: 4, opacity: isCompleting ? 0.4 : isPending ? 0.55 : 1,
                     transition: 'opacity 0.3s ease',
-                    animation: isFlashing ? 'aiFlash 2s ease-out' : undefined,
+                    animation: isFlashing ? 'aiFlash 2s ease-out' : isPending ? 'pendingPulse 1.1s ease-in-out infinite' : undefined,
                   }}
                 >
                   {/* 3px client colour bar */}
@@ -1604,13 +1698,14 @@ export function KanbanBoard(
                   {/* 18px circle checkbox */}
                   <button
                     type="button"
+                    disabled={isPending}
                     onClick={(e) => { e.stopPropagation(); void handleComplete(card, e); }}
-                    title="Mark complete"
+                    title={isPending ? 'Saving…' : 'Mark complete'}
                     style={{
                       width: 18, height: 18, borderRadius: '50%', flexShrink: 0,
                       border: isCompleting ? '1.5px solid #4A7C59' : '1.5px solid #C7C2B7',
                       background: isCompleting ? '#4A7C59' : 'transparent',
-                      cursor: 'pointer', padding: 0,
+                      cursor: isPending ? 'default' : 'pointer', padding: 0,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       transition: 'background 0.15s, border-color 0.15s',
                     }}

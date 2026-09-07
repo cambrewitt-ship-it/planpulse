@@ -47,8 +47,12 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // If client_id provided, overlay per-client completion state
-    if (clientId && data && data.length > 0) {
+    // If client_id provided, overlay per-client completion state.
+    // TODO rows already store their own completed state directly on
+    // action_points (see PUT handler) — they never get rows in
+    // client_action_point_completions, so overlaying here would always
+    // stomp their real value back to false.
+    if (category !== 'TODO' && clientId && data && data.length > 0) {
       const actionPointIds = data.map((ap: any) => ap.id);
 
       const { data: completions } = await supabase

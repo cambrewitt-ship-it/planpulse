@@ -1,10 +1,18 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { subDays, format } from 'date-fns';
 import { COLOR, cardStyle, sectionTitleStyle } from './tokens';
 import { HorizontalBarChart } from './chart-kit';
 import { HideableCard } from './hideable-card';
+import { DateRangePicker } from '@/components/ui/date-range-picker';
 import type { GA4LandingPageRow, DonutBucket, GA4EventRow } from '@/lib/client-hub/get-ga4-report';
+
+function defaultRange() {
+  const end = new Date();
+  const start = subDays(end, 29);
+  return { startDate: format(start, 'yyyy-MM-dd'), endDate: format(end, 'yyyy-MM-dd') };
+}
 
 export interface GA4InsightsSectionProps {
   clientId: string;
@@ -30,6 +38,7 @@ function InsightCallout({ text }: { text: string }) {
 }
 
 export function GA4InsightsSection({ clientId, token, editable }: GA4InsightsSectionProps) {
+  const [dateRange, setDateRange] = useState(defaultRange);
   const [data, setData] = useState<SectionData | null>(null);
   const [hiddenCards, setHiddenCards] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -39,7 +48,8 @@ export function GA4InsightsSection({ clientId, token, editable }: GA4InsightsSec
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(token ? `/api/hub/${token}/ga4-insights` : `/api/clients/${clientId}/hub/ga4-insights`);
+      const qs = `?start=${dateRange.startDate}&end=${dateRange.endDate}`;
+      const res = await fetch(token ? `/api/hub/${token}/ga4-insights${qs}` : `/api/clients/${clientId}/hub/ga4-insights${qs}`);
       if (res.ok) {
         const json = await res.json();
         setData(json);
@@ -48,7 +58,7 @@ export function GA4InsightsSection({ clientId, token, editable }: GA4InsightsSec
     } finally {
       setLoading(false);
     }
-  }, [clientId, token]);
+  }, [clientId, token, dateRange]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -79,9 +89,10 @@ export function GA4InsightsSection({ clientId, token, editable }: GA4InsightsSec
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ clientId, startDate: data.period.start, endDate: data.period.end }),
       });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error ?? 'Sync failed');
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error ?? 'Sync failed');
+      if (Array.isArray(body.errors) && body.errors.length > 0) {
+        setSyncError(`Synced with some errors: ${body.errors.map((e: { error: string }) => e.error).join('; ')}`);
       }
       await load();
     } catch (err) {
@@ -98,19 +109,22 @@ export function GA4InsightsSection({ clientId, token, editable }: GA4InsightsSec
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
         <h2 style={{ ...sectionTitleStyle, margin: 0 }}>Google Analytics — Behaviour</h2>
-        {editable && (
-          <button
-            onClick={handleSync}
-            disabled={syncing || !data}
-            style={{
-              background: COLOR.accent, color: COLOR.bg, border: 'none', borderRadius: 4,
-              padding: '8px 14px', fontSize: 12.5, fontWeight: 600, cursor: syncing ? 'default' : 'pointer',
-              opacity: syncing ? 0.7 : 1,
-            }}
-          >
-            {syncing ? 'Syncing…' : 'Sync breakdown data'}
-          </button>
-        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <DateRangePicker value={dateRange} onChange={setDateRange} disabled={loading} />
+          {editable && (
+            <button
+              onClick={handleSync}
+              disabled={syncing || !data}
+              style={{
+                background: COLOR.accent, color: COLOR.bg, border: 'none', borderRadius: 4,
+                padding: '8px 14px', fontSize: 12.5, fontWeight: 600, cursor: syncing ? 'default' : 'pointer',
+                opacity: syncing ? 0.7 : 1,
+              }}
+            >
+              {syncing ? 'Syncing…' : 'Sync breakdown data'}
+            </button>
+          )}
+        </div>
       </div>
       {syncError && <div style={{ fontSize: 12.5, color: COLOR.accent, marginBottom: 12 }}>{syncError}</div>}
 
@@ -126,7 +140,7 @@ export function GA4InsightsSection({ clientId, token, editable }: GA4InsightsSec
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <HideableCard editable={editable} hidden={hiddenCards.includes('landingPages')} onToggle={() => toggleCard('landingPages')} style={{ padding: 0, overflow: 'hidden' }}>
             <div style={{ padding: '16px 20px 4px', fontSize: 13.5, fontWeight: 600 }}>Top landing pages</div>
-            <div style={{ padding: '0 20px 8px', fontSize: 11, color: COLOR.muted }}>As of last sync — not filtered by the date picker above.</div>
+            <div style={{ padding: '0 20px 8px', fontSize: 11, color: COLOR.muted }}>As of last sync — the date range above sets the window for the next sync, not a live filter on what&rsquo;s shown below.</div>
             {data.landingPages.length === 0 ? (
               <div style={{ padding: '12px 20px 20px', fontSize: 13, color: COLOR.muted }}>No landing page data yet.</div>
             ) : (

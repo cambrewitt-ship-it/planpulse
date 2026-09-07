@@ -1,11 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { Nango } from '@nangohq/node';
+import { subDays, format } from 'date-fns';
 import { syncGoogleAdsSpend } from '@/lib/ads/google-ads-live';
 import { syncMetaAdsSpend } from '@/lib/ads/meta-ads-live';
 import { syncGA4Data } from '@/lib/ads/ga4-live';
+import { syncGA4Breakdowns } from '@/lib/ads/ga4-breakdowns';
 import { SIX_HOURS_MS } from '@/lib/ads/sync-status';
 import { nzToday, nzStartOfYear } from '@/lib/timezone';
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnySupabase = any;
+
+// syncGA4Breakdowns is ~6 GA4 report calls per property vs. syncGA4Data's 1,
+// so it doesn't need to re-run on every 6h tick — only once its cached rows
+// are this stale. See ga4-breakdowns.ts's header comment.
+const BREAKDOWN_STALE_MS = 20 * 60 * 60 * 1000;
 
 /**
  * Refreshes any ad spend / GA4 connection whose cache has gone stale
@@ -21,6 +31,42 @@ import { nzToday, nzStartOfYear } from '@/lib/timezone';
  * re-fetching the full range every cycle is wasteful in theory but cheap in
  * practice, and it avoids tracking partial date-range coverage per client.
  */
+
+/**
+ * Auto-syncs GA4 dimension breakdowns (Traffic donuts, Behaviour tables, the
+ * Dimension Explorer) once a client's cached rows are >~20h old, so those
+ * cards populate without anyone remembering to click "Sync breakdown data".
+ * Best-effort: a failure here shouldn't fail the metrics refresh above it.
+ */
+async function maybeSyncGA4Breakdowns(
+  supabase: AnySupabase,
+  nango: Nango,
+  row: { user_id: string; client_id: string; connection_id: string },
+): Promise<void> {
+  try {
+    const { data: lastRow } = await supabase
+      .from('google_analytics_breakdowns')
+      .select('updated_at')
+      .eq('client_id', row.client_id)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const isStale = !lastRow || Date.now() - new Date(lastRow.updated_at).getTime() >= BREAKDOWN_STALE_MS;
+    if (!isStale) return;
+
+    const { data: client } = await supabase.from('clients').select('name').eq('id', row.client_id).maybeSingle();
+    const today = new Date();
+    await syncGA4Breakdowns({
+      supabase, nango, userId: row.user_id, clientId: row.client_id, clientName: client?.name ?? 'Client',
+      connectionId: row.connection_id,
+      startDate: format(subDays(today, 29), 'yyyy-MM-dd'),
+      endDate: format(today, 'yyyy-MM-dd'),
+    });
+  } catch {
+    // Best-effort — the section's manual "Sync" button remains available if this keeps failing.
+  }
+}
 
 function isAuthorised(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
@@ -98,6 +144,10 @@ export async function GET(req: NextRequest) {
       } else {
         failed++;
         failures.push(`${row.platform}/${row.client_id}: ${result.error}`);
+      }
+
+      if (row.platform === 'google-analytics' && row.client_id) {
+        await maybeSyncGA4Breakdowns(supabase, nango, row);
       }
     } catch (err: any) {
       failed++;

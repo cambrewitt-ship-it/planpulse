@@ -156,7 +156,9 @@ export async function POST(request: NextRequest) {
               desc: true,
             }
           ],
-          limit: 50, // Top 50 events
+          // High-volume automatically-collected events (page_view, session_start, scroll, click…) can
+          // otherwise crowd a small top-N out before lower-volume custom (e.g. GTM-configured) events appear.
+          limit: 200,
         };
 
         const url = `https://analyticsdata.googleapis.com/v1beta/properties/${propId}:runReport`;

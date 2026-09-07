@@ -18,6 +18,11 @@ export const TOOL_LABELS: Record<string, string> = {
   set_media_plan_channels: 'Set media plan channels',
   generate_invoice: 'Generate invoice',
   generate_report: 'Generate report',
+  list_setup_auditor_campaigns: 'List Setup Auditor campaigns',
+  run_setup_audit: 'Run Setup Auditor check',
+  get_setup_audit_findings: 'Read Setup Auditor findings',
+  find_live_ad_campaigns: 'Find live ad campaigns',
+  register_setup_auditor_campaign: 'Register Setup Auditor campaign',
 };
 
 export const WRITE_TOOLS = [
@@ -29,6 +34,8 @@ export const WRITE_TOOLS = [
   'set_media_plan_channels',
   'generate_invoice',
   'generate_report',
+  'run_setup_audit',
+  'register_setup_auditor_campaign',
 ];
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -132,6 +139,33 @@ export function buildAuditSummary(toolName: string, input: any, result: any): st
           : '';
         return `Generated report for ${client}${dateRange}`;
       }
+      case 'list_setup_auditor_campaigns': {
+        const count = result?.total_campaigns ?? 0;
+        const client = input?.client_name ? ` for ${input.client_name}` : '';
+        return `Found ${count} registered campaign${count === 1 ? '' : 's'}${client}`;
+      }
+      case 'run_setup_audit': {
+        const client = input?.client_name ?? result?.client ?? 'client';
+        const checked = result?.campaigns_checked ?? 0;
+        const flagged = result?.newly_flagged ?? 0;
+        return `Checked ${checked} campaign${checked === 1 ? '' : 's'} for ${client}${flagged ? ` — ${flagged} new finding${flagged === 1 ? '' : 's'}` : ' — no new findings'}`;
+      }
+      case 'get_setup_audit_findings': {
+        const count = result?.total_findings ?? 0;
+        const client = input?.client_name ? ` for ${input.client_name}` : '';
+        return `Found ${count} open Setup Auditor finding${count === 1 ? '' : 's'}${client}`;
+      }
+      case 'find_live_ad_campaigns': {
+        const count = result?.total_campaigns ?? 0;
+        const client = input?.client_name ? ` for ${input.client_name}` : '';
+        const platform = input?.platform ? ` on ${input.platform}` : '';
+        return `Found ${count} live campaign${count === 1 ? '' : 's'}${client}${platform}`;
+      }
+      case 'register_setup_auditor_campaign': {
+        const campaign = input?.campaign_name ?? result?.campaign_name ?? 'campaign';
+        const client = input?.client_name ?? result?.client ?? 'client';
+        return `Registered "${campaign}" for ${client} with Setup Auditor`;
+      }
       default:
         return `Called ${toolName}`;
     }
@@ -161,6 +195,11 @@ export function buildOutputLinks(toolName: string, input: any, result: any, cont
     case 'update_media_plan_flight':
     case 'set_media_plan_channels':
       return [{ label: 'Open Media Plan', href: `/clients/${clientId}/dashboard?view=media-plan` }];
+    case 'run_setup_audit':
+    case 'list_setup_auditor_campaigns':
+    case 'get_setup_audit_findings':
+    case 'register_setup_auditor_campaign':
+      return [{ label: 'Open Setup Auditor', href: `/clients/${clientId}/dashboard#setup-auditor-section` }];
     default:
       return [];
   }

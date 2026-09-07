@@ -153,6 +153,7 @@ const META_DEFAULT_EVENTS: Array<{ name: string; count: number }> = [
   { name: 'offsite_conversion.fb_pixel_contact', count: 0 },
   { name: 'offsite_conversion.fb_pixel_schedule', count: 0 },
   { name: 'offsite_conversion.fb_pixel_submit_application', count: 0 },
+  { name: 'submit_application', count: 0 },
   { name: 'mobile_app_install', count: 0 },
   { name: 'link_click', count: 0 },
 ];
@@ -177,7 +178,8 @@ const META_ACTION_LABELS: Record<string, string> = {
   'offsite_conversion.fb_pixel_view_content':          'Content Views',
   'offsite_conversion.fb_pixel_contact':               'Contact',
   'offsite_conversion.fb_pixel_schedule':              'Schedule',
-  'offsite_conversion.fb_pixel_submit_application':    'Submit Application',
+  'offsite_conversion.fb_pixel_submit_application':    'Submit Application (Pixel)',
+  'submit_application':                                'Submit Application',
   'link_click':                                        'Link Clicks',
   'mobile_app_install':                                'App Installs',
 };
