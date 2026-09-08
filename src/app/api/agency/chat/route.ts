@@ -19,7 +19,7 @@ You help the team with:
 - Channel-level performance health checks (spend vs plan, KPIs, pacing status)
 - Media channel specifications and best practices from the agency library
 - Agency playbooks, SOPs, and process documentation using get_agency_playbooks
-- Setup Auditor findings: live campaign configuration that doesn't match its intended setup (wrong geotargeting, dead destination URL, wrong budget/optimization goal, Advantage+ automation left on) using get_setup_audit_findings and list_setup_auditor_campaigns
+- Health Check Agent findings: live campaign configuration that doesn't match its intended setup (wrong geotargeting, dead destination URL, wrong budget/optimization goal, Advantage+ automation left on) using get_setup_audit_findings and list_setup_auditor_campaigns
 - Guidance on how to use the platform
 
 You can also take actions:
@@ -28,8 +28,8 @@ You can also take actions:
 - Update budgets: Adjust channel budgets in media plans for a whole calendar month using update_media_plan_budget, or for a specific week-commencing (W/C) date range / flight using update_media_plan_flight — this also works for a channel that isn't in the plan yet, or a totally empty plan; it creates the channel automatically rather than erroring.
 - Load several channels at once: Replace a client's ENTIRE plan from a pasted/described multi-channel list using set_media_plan_channels. Only for multi-channel loads or an explicit "replace/start over" request — never for a single channel, even a brand-new one (use update_media_plan_flight for that).
 - View live Meta campaigns: Fetch current campaign data directly from the Meta Ads API using get_live_meta_campaigns
-- Run a Setup Auditor check: Audit a client's registered campaign(s) against their intended setup right now using run_setup_audit — it only ever reads live campaign config and flags discrepancies, it never modifies the live campaign
-- Register a new Setup Auditor campaign: use find_live_ad_campaigns then register_setup_auditor_campaign — see the guided flow below
+- Run a Health Check Agent check: Audit a client's registered campaign(s) against their intended setup right now using run_setup_audit — it only ever reads live campaign config and flags discrepancies, it never modifies the live campaign
+- Register a new Health Check Agent campaign: use find_live_ad_campaigns then register_setup_auditor_campaign — see the guided flow below
 
 Budget edit tool choice — this matters, don't default to the monthly tool out of habit:
 - The user gives a whole month ("set June to $5,000") → update_media_plan_budget.
@@ -38,16 +38,18 @@ Budget edit tool choice — this matters, don't default to the monthly tool out 
 
 Default to adding, without asking for confirmation first, whenever: the client's plan is empty, the channel mentioned isn't already in the plan, or the user's message says "add" (or similar). Just call the write tool. Only ask first if budget or dates are genuinely missing, or the change would overwrite an existing flight/budget with different numbers the user didn't ask to change.
 
-There's no single client health score. When asked how a client's doing, synthesise from: overdue action points (2+ is worth flagging), client-level spend variance (>15% off plan is worth flagging), and open Setup Auditor findings (get_setup_audit_findings) — report the actual numbers and findings rather than inventing a grade.
+There's no single client health score. When asked how a client's doing, synthesise from: overdue action points (2+ is worth flagging), client-level spend variance (>15% off plan is worth flagging), and open Health Check Agent findings (get_setup_audit_findings) — report the actual numbers and findings rather than inventing a grade.
 
-Channel health is based on spend pacing relative to plan:
-- Overpacing (>15% above plan): flag as concern
-- Underpacing (>15% below plan): flag as concern
-- On track: within 15% of planned spend
+Channel health is based on spend pacing relative to plan-to-date, not the full-period plan — get_channel_performance already does this proration server-side and returns both planned_budget_to_date (what should have been spent by now) and planned_budget_full_period (the whole period's plan) alongside spend_variance_pct, which is always actual vs to-date. Always describe pacing using the to-date comparison — never say a channel a week into the month is "underpacing" by comparing its spend to the full month's budget:
+- Overpacing (>15% above plan-to-date): flag as concern
+- Underpacing (>15% below plan-to-date): flag as concern
+- On track: within 15% of plan-to-date
 
 Action points have due dates calculated from channel start dates — SET UP tasks are due N days before a channel goes live, HEALTH CHECK tasks recur on a schedule. Always fetch fresh data before answering questions about action points or client status.
 
 When asked about channel performance, spend, metrics, or pacing — always use get_channel_performance to pull live data.
+
+Meta has no single canonical "conversions" number the way Google Ads does — get_channel_performance's conversions field for a Meta channel reflects whichever event the agency configured in that channel's "Conv. Events" picker, and conversion_event_label names it (e.g. "Registrations"). Report the label alongside the number (e.g. "144 Registrations", not a bare "144 conversions"). If a Meta channel has no conversion_event_label and carries a conversion_note, say so plainly — don't report the 0 as if it were a real conversion count.
 
 Multi-step workflow patterns:
 - "Onboard [client]": Use create_client to create them, then ask for their media plan details (channels, budgets, dates). Once provided, call set_media_plan_channels to load the plan immediately. Then explain next steps (connect ad accounts, assign account manager).
@@ -57,7 +59,7 @@ Multi-step workflow patterns:
 - "End of month review": Use get_daily_briefing + get_channel_performance for all clients, synthesise and flag issues
 - "Sort out tasks for [client]": Use get_action_points to list overdue items, then use complete_action_point for any the user confirms are done
 - When completing action points for multiple items, you can call complete_action_point multiple times in parallel
-- "Set up Setup Auditor for [client]" / "audit [client]'s campaign" when nothing is registered yet: this is a guided flow, ask one question at a time rather than assuming answers — (1) which client, if not already clear; (2) Google Ads or Meta Ads; (3) call find_live_ad_campaigns and show the real live campaigns grouped by account so the user picks one (never invent a campaign name); (4) ask what the campaign's intended setup should be — geo targeting, budget, optimization goal, destination URL — making clear every one of these is optional and can be skipped; (5) call register_setup_auditor_campaign with what you gathered; (6) immediately call run_setup_audit for that campaign to run the first check; (7) report the result, critical findings first
+- "Set up the Health Check Agent for [client]" / "audit [client]'s campaign": this is a guided flow — (1) which client, if not already clear; (2) Google Ads or Meta Ads; (3) call list_setup_auditor_campaigns for that client FIRST to see what's already registered; (4) call find_live_ad_campaigns and show the real live campaigns grouped by account so the user picks one (never invent a campaign name) — if the campaign they pick (or already named) matches one from list_setup_auditor_campaigns, skip straight to (6), don't ask setup questions again or re-register it; (5) for a genuinely new campaign, ask what its intended setup should be — geo targeting, budget, optimization goal, destination URL — making clear every one of these is optional and can be skipped — then call register_setup_auditor_campaign with what you gathered; (6) call run_setup_audit for that campaign to run the check; (7) report the result, critical findings first
 
 After a write action, confirm what happened in 1-2 short lines — channel, budget, dates. No restating the request back, no walls of text. If a request is ambiguous (e.g. multiple clients or action points match), ask for clarification before acting.
 
@@ -286,6 +288,48 @@ function getMonthsInRange(startDate: string, endDate: string): Array<{ padded: s
   return months;
 }
 
+// Inclusive day count between two 'YYYY-MM-DD' strings.
+function daysBetweenInclusive(startDateStr: string, endDateStr: string): number {
+  const start = new Date(`${startDateStr}T00:00:00Z`);
+  const end = new Date(`${endDateStr}T00:00:00Z`);
+  return Math.round((end.getTime() - start.getTime()) / 86400000) + 1;
+}
+
+function lastDayOfMonth(padded: string): string {
+  const [y, m] = padded.split('-').map(Number);
+  return `${padded}-${String(new Date(y, m, 0).getDate()).padStart(2, '0')}`;
+}
+
+// How much of a month's planned budget should have been spent by now, given
+// the flight's own start/end dates and how far into the requested date range
+// `today` actually is. Without this, a channel a week into a month reads as
+// wildly "underpacing" against the FULL month's plan even when it's exactly
+// on schedule — pacing has to compare like-for-like (spend to date vs plan
+// to date), not partial actuals against a whole-period target.
+function proratePlannedForMonth(
+  amount: number, padded: string, flightStart: string | null, flightEnd: string | null,
+  rangeStart: string, rangeEnd: string, today: string,
+): number {
+  if (amount <= 0) return 0;
+  const monthFirst = `${padded}-01`;
+  const monthLast = lastDayOfMonth(padded);
+
+  let coverageStart = flightStart && flightStart > monthFirst ? flightStart : monthFirst;
+  let coverageEnd = flightEnd && flightEnd < monthLast ? flightEnd : monthLast;
+  if (coverageEnd < coverageStart) { coverageStart = monthFirst; coverageEnd = monthLast; } // malformed dates — fall back to whole month
+
+  const totalCoverageDays = daysBetweenInclusive(coverageStart, coverageEnd);
+  if (totalCoverageDays <= 0) return 0;
+
+  const elapsedCap = rangeEnd < today ? rangeEnd : today;
+  const elapsedStart = coverageStart > rangeStart ? coverageStart : rangeStart;
+  const elapsedEnd = coverageEnd < elapsedCap ? coverageEnd : elapsedCap;
+  if (elapsedEnd < elapsedStart) return 0;
+
+  const elapsedDays = daysBetweenInclusive(elapsedStart, elapsedEnd);
+  return amount * (elapsedDays / totalCoverageDays);
+}
+
 async function toolGetChannelPerformance(
   request: NextRequest,
   input: { client_name?: string; channel_name?: string; start_date?: string; end_date?: string }
@@ -320,16 +364,35 @@ async function toolGetChannelPerformance(
 
   const { data: metricsRows } = await supabase
     .from('ad_performance_metrics')
-    .select('client_id, platform, spend, impressions, clicks, ctr, conversions, reach, cpc, cpm, average_cpc, frequency, date')
+    .select('client_id, platform, spend, impressions, clicks, ctr, conversions, reach, cpc, cpm, average_cpc, frequency, date, meta_actions')
     .eq('user_id', session.user.id)
     .in('client_id', clientIds)
     .gte('date', startDate)
     .lte('date', endDate)
     .not('campaign_id', 'like', 'manual-override-%');
 
+  // Meta has no single canonical "conversions" number the way Google Ads
+  // does — ad_performance_metrics.conversions is always NULL for meta-ads
+  // rows, with the raw per-action-type breakdown stored in meta_actions
+  // instead. client_channel_conversion_config (not yet in the generated
+  // Supabase types — cast to `any`, same workaround as platform_campaigns in
+  // src/app/api/setup-auditor/campaigns/route.ts) holds which action_type the
+  // agency picked to represent "conversions" for each channel, so it can be
+  // summed from meta_actions below instead of reporting a false zero.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: conversionConfigRows } = await (supabase as any)
+    .from('client_channel_conversion_config')
+    .select('client_id, channel_key, conversion_action_type, conversion_label')
+    .in('client_id', clientIds);
+  const conversionConfigMap = new Map<string, { actionType: string; label: string }>(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (conversionConfigRows ?? []).map((r: any) => [`${r.client_id}::${r.channel_key}`, { actionType: r.conversion_action_type, label: r.conversion_label }])
+  );
+
   const actualByClientPlatform = new Map<string, {
     spend: number; impressions: number; clicks: number; conversions: number;
     reach: number; cpm_sum: number; cpm_count: number; cpc_sum: number; cpc_count: number; days: number;
+    actionTotals: Map<string, number>;
   }>();
 
   for (const row of metricsRows || []) {
@@ -338,6 +401,7 @@ async function toolGetChannelPerformance(
     const existing = actualByClientPlatform.get(key) || {
       spend: 0, impressions: 0, clicks: 0, conversions: 0,
       reach: 0, cpm_sum: 0, cpm_count: 0, cpc_sum: 0, cpc_count: 0, days: 0,
+      actionTotals: new Map<string, number>(),
     };
     existing.spend += Number(row.spend || 0);
     existing.impressions += Number(row.impressions || 0);
@@ -347,6 +411,13 @@ async function toolGetChannelPerformance(
     if (row.cpm) { existing.cpm_sum += Number(row.cpm); existing.cpm_count++; }
     if (row.cpc) { existing.cpc_sum += Number(row.cpc); existing.cpc_count++; }
     existing.days++;
+    const rawActions = row.meta_actions as Array<{ action_type: string; value: string }> | null;
+    if (Array.isArray(rawActions)) {
+      for (const a of rawActions) {
+        if (!a?.action_type) continue;
+        existing.actionTotals.set(a.action_type, (existing.actionTotals.get(a.action_type) ?? 0) + (parseFloat(a.value) || 0));
+      }
+    }
     actualByClientPlatform.set(key, existing);
   }
 
@@ -360,9 +431,12 @@ async function toolGetChannelPerformance(
     platform: string;
     status: string;
     planned_budget: number;
+    planned_budget_to_date: number;
     actual: typeof actualByClientPlatform extends Map<string, infer V> ? V : never;
     start_date: string | null;
     end_date: string | null;
+    conversion_override: number | null;
+    conversion_label: string | null;
   }>();
 
   for (const plan of mediaPlans || []) {
@@ -375,13 +449,20 @@ async function toolGetChannelPerformance(
 
       const platform = channelNameToPlatform(ch.channelName);
 
-      // Sum planned budget across every month in the requested date range
+      // Sum planned budget across every month in the requested date range, and
+      // separately the portion of it "due" by today given each flight's own
+      // dates — that second figure is what pacing is actually measured against.
       let plannedBudget = 0;
+      let plannedBudgetToDate = 0;
       const flights: any[] = ch.flights || [];
       for (const f of flights) {
+        const flightStart = f.startWeek ? String(f.startWeek).split('T')[0] : null;
+        const flightEnd = f.endWeek ? String(f.endWeek).split('T')[0] : null;
         if (f.monthlySpend && typeof f.monthlySpend === 'object') {
           for (const { padded, unpadded } of monthsInRange) {
-            plannedBudget += Number(f.monthlySpend[padded] || f.monthlySpend[unpadded] || 0);
+            const amt = Number(f.monthlySpend[padded] || f.monthlySpend[unpadded] || 0);
+            plannedBudget += amt;
+            plannedBudgetToDate += proratePlannedForMonth(amt, padded, flightStart, flightEnd, startDate, endDate, today);
           }
         }
       }
@@ -400,6 +481,16 @@ async function toolGetChannelPerformance(
       const actualKey = platform ? `${plan.client_id}::${platform}` : null;
       const actual = (actualKey ? actualByClientPlatform.get(actualKey) : null) as any;
 
+      // If this channel has a configured Meta conversion event, resolve its
+      // total from the shared actionTotals for the client+platform (Meta
+      // actuals are only ever tracked at that granularity, same as spend).
+      // When multiple line items on the same platform merge into one group
+      // below, the first one with a mapping wins for the whole group.
+      const channelKey = ch.id ?? ch.channelName;
+      const mapping = platform === 'meta-ads' ? conversionConfigMap.get(`${plan.client_id}::${channelKey}`) : undefined;
+      const conversionOverride = mapping ? (actual?.actionTotals?.get(mapping.actionType) ?? 0) : null;
+      const conversionLabel = mapping?.label ?? null;
+
       // Aggregate channels that share a platform (actual spend is always platform-level)
       const groupKey = `${clientName}::${platform ?? ch.channelName}`;
       if (!platformGroups.has(groupKey)) {
@@ -409,24 +500,37 @@ async function toolGetChannelPerformance(
           platform: platform ?? 'unknown',
           status: channelStatus,
           planned_budget: plannedBudget,
+          planned_budget_to_date: plannedBudgetToDate,
           actual,
           start_date: earliestStart,
           end_date: latestEnd,
+          conversion_override: conversionOverride,
+          conversion_label: conversionLabel,
         });
       } else {
         const group = platformGroups.get(groupKey)!;
         group.line_items.push(ch.channelName);
         group.planned_budget += plannedBudget;
+        group.planned_budget_to_date += plannedBudgetToDate;
         if (channelStatus === 'live') group.status = 'live';
         if (earliestStart && (!group.start_date || earliestStart < group.start_date)) group.start_date = earliestStart;
         if (latestEnd && (!group.end_date || latestEnd > group.end_date)) group.end_date = latestEnd;
+        if (group.conversion_override === null && conversionOverride !== null) {
+          group.conversion_override = conversionOverride;
+          group.conversion_label = conversionLabel;
+        }
       }
     }
   }
 
   const channels: any[] = Array.from(platformGroups.values()).map(group => {
     const actualSpend = group.actual?.spend ?? 0;
-    const variancePct = group.planned_budget > 0 ? ((actualSpend - group.planned_budget) / group.planned_budget) * 100 : null;
+    // Pacing compares actual spend to what SHOULD have been spent by today
+    // (planned_budget_to_date), not the full-period plan — a channel a week
+    // into a month should be judged against a week's worth of budget, not
+    // the whole month's, or it always reads as "underpacing" early on.
+    const plannedToDate = group.planned_budget_to_date;
+    const variancePct = plannedToDate > 0 ? ((actualSpend - plannedToDate) / plannedToDate) * 100 : null;
     const pacingStatus = variancePct === null ? 'no plan'
       : variancePct > 15 ? 'overpacing'
       : variancePct < -15 ? 'underpacing'
@@ -434,7 +538,12 @@ async function toolGetChannelPerformance(
 
     const impressions = group.actual?.impressions ?? null;
     const clicks = group.actual?.clicks ?? null;
-    const conversions = group.actual?.conversions ?? null;
+    // For Meta, ad_performance_metrics.conversions is always NULL — there's no
+    // single canonical "conversion" the way Google Ads has. group.conversion_override
+    // is the sum of whichever action_type the agency configured as this channel's
+    // conversion event (see client_channel_conversion_config); use it whenever set,
+    // even if it's 0, since 0 is a real answer once an event IS configured.
+    const conversions = group.conversion_override !== null ? group.conversion_override : (group.actual?.conversions ?? null);
     const reach = group.actual?.reach ?? null;
     const ctr = impressions && impressions > 0 ? (clicks! / impressions) * 100 : null;
     const cpc = clicks && clicks > 0 ? actualSpend / clicks : null;
@@ -446,16 +555,22 @@ async function toolGetChannelPerformance(
       platform: group.platform,
       status: group.status,
       date_range: { start: startDate, end: endDate },
-      planned_budget: group.planned_budget > 0 ? Number(group.planned_budget.toFixed(2)) : null,
+      planned_budget_full_period: group.planned_budget > 0 ? Number(group.planned_budget.toFixed(2)) : null,
+      planned_budget_to_date: plannedToDate > 0 ? Number(plannedToDate.toFixed(2)) : null,
       actual_spend: Number(actualSpend.toFixed(2)),
       spend_variance_pct: variancePct !== null ? Number(variancePct.toFixed(1)) : null,
       pacing_status: pacingStatus,
+      pacing_note: 'spend_variance_pct and pacing_status compare actual_spend against planned_budget_to_date (the prorated plan for the days elapsed so far), not planned_budget_full_period — never describe pacing using the full-period figure.',
       impressions,
       clicks,
       ctr_pct: ctr !== null ? Number(ctr.toFixed(2)) : null,
       cpc: cpc !== null ? Number(cpc.toFixed(2)) : null,
       cpm: cpm !== null ? Number(cpm.toFixed(2)) : null,
       conversions,
+      conversion_event_label: group.conversion_label,
+      ...(group.platform === 'meta-ads' && !group.conversion_label && {
+        conversion_note: 'No conversion event is configured for this Meta channel yet, so "conversions" is not meaningful — Meta has no single canonical conversion number. Tell the user to pick one in the channel card\'s "Conv. Events" selector, then re-ask; don\'t report this 0 as a real conversion count.',
+      }),
       reach,
       start_date: group.start_date,
       end_date: group.end_date,
@@ -473,7 +588,7 @@ async function toolGetChannelPerformance(
   const overpacing = channels.filter(c => c.pacing_status === 'overpacing');
   const underpacing = channels.filter(c => c.pacing_status === 'underpacing');
   const onTrack = channels.filter(c => c.pacing_status === 'on track');
-  const noData = channels.filter(c => c.actual_spend === 0 && c.planned_budget);
+  const noData = channels.filter(c => c.actual_spend === 0 && c.planned_budget_full_period);
 
   return {
     date_range: { start: startDate, end: endDate },
@@ -1273,7 +1388,7 @@ async function toolRegisterSetupAuditorCampaign(
 
   return {
     success: true,
-    message: `Registered "${selected.name}" for ${client.name} with Setup Auditor.`,
+    message: `Registered "${selected.name}" for ${client.name} with the Health Check Agent.`,
     client: client.name,
     client_id: client.id,
     campaign_name: selected.name,
@@ -1328,7 +1443,7 @@ async function toolListSetupAuditorCampaigns(request: NextRequest, input: { clie
   const totalCampaigns = perClient.reduce((sum, c) => sum + c.campaigns.length, 0);
   const result: any = { clients: perClient, total_campaigns: totalCampaigns };
   if (perClient.length === 1) result.client_id = perClient[0].client_id;
-  if (totalCampaigns === 0) result.message = 'No campaigns registered with Setup Auditor yet.';
+  if (totalCampaigns === 0) result.message = 'No campaigns registered with the Health Check Agent yet.';
   return result;
 }
 
@@ -1354,7 +1469,7 @@ async function toolRunSetupAudit(request: NextRequest, input: { client_name: str
     return {
       error: input.campaign_name
         ? `No registered campaign matching "${input.campaign_name}" for ${client.name}.`
-        : `${client.name} has no campaigns registered with Setup Auditor yet.`,
+        : `${client.name} has no campaigns registered with the Health Check Agent yet.`,
     };
   }
 
@@ -1411,7 +1526,7 @@ async function toolGetSetupAuditFindings(request: NextRequest, input: { client_n
   const totalFindings = perClient.reduce((sum, c) => sum + c.findings.length, 0);
   const result: any = { clients: perClient, total_findings: totalFindings };
   if (perClient.length === 1) result.client_id = perClient[0].client_id;
-  if (totalFindings === 0) result.message = 'No open Setup Auditor findings.';
+  if (totalFindings === 0) result.message = 'No open Health Check Agent findings.';
   return result;
 }
 

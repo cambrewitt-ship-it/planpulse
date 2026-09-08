@@ -131,11 +131,11 @@ const TOOL_DESCRIPTIONS: Record<string, string> = {
   set_media_plan_channels: 'Replace the full media plan from a description',
   generate_invoice: 'Generate an invoice for a client by date range',
   generate_report: 'Generate a performance report for a client',
-  list_setup_auditor_campaigns: 'List campaigns registered with Setup Auditor and their open-finding counts',
+  list_setup_auditor_campaigns: 'List campaigns registered with the Health Check Agent and their open-finding counts',
   run_setup_audit: 'Check a live campaign against its intended setup right now (read-only, flags only)',
   get_setup_audit_findings: 'Current open setup-drift findings (geotargeting, budget, Advantage+, URLs)',
   find_live_ad_campaigns: "List a client's live Google/Meta campaigns, grouped by account, to pick one to register",
-  register_setup_auditor_campaign: 'Register a live campaign and its intended setup spec with Setup Auditor',
+  register_setup_auditor_campaign: 'Register a live campaign and its intended setup spec with the Health Check Agent',
 };
 
 function ToolSelector({ enabled, onChange }: { enabled: string[]; onChange: (tools: string[]) => void }) {

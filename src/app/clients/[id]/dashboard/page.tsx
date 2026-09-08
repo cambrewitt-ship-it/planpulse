@@ -50,6 +50,7 @@ import OohCard from '@/components/dashboard-v2/ooh-card';
 import OtherChannelCard from '@/components/dashboard-v2/other-channel-card';
 import DisplayNativeCard from '@/components/dashboard-v2/display-native-card';
 import type { OrganicSocialActual, EdmActual, ChannelBenchmark, MetricPreset, ClientChannelPreset } from '@/types/database';
+import type { ChannelConversionConfig } from '@/components/dashboard-v2/channel-performance-card';
 import { startOfWeek } from 'date-fns';
 import { DateRangePicker } from '@/components/ui/date-range-picker';
 import TodoSection from '@/components/TodoSection';
@@ -369,6 +370,11 @@ export default function DashboardV2() {
   const [allBenchmarks, setAllBenchmarks] = useState<ChannelBenchmark[]>([]);
   const [allPresets, setAllPresets] = useState<MetricPreset[]>([]);
   const [clientChannelPresets, setClientChannelPresets] = useState<ClientChannelPreset[]>([]);
+  // Persisted per-channel Meta conversion-event selections (channel_key → config)
+  // so the agency chat agent can read the same "which action_type counts as a
+  // conversion" choice the channel card's picker makes — see the ChannelAIChat
+  // usage below for why this needs to live server-side, not just localStorage.
+  const [channelConversionConfigs, setChannelConversionConfigs] = useState<ChannelConversionConfig[]>([]);
   // Campaign selections lifted from ChannelPerformanceCard: channelKey → selected IDs
   // Empty array = All Campaigns; ['__none__'] = Not set up yet
   const [channelCampaignSelections, setChannelCampaignSelections] = useState<Record<string, string[]>>({});
@@ -524,6 +530,22 @@ export default function DashboardV2() {
       }
     };
     fetchClientPresets();
+  }, [clientId]);
+
+  useEffect(() => {
+    if (!clientId) return;
+    const fetchConversionConfigs = async () => {
+      try {
+        const res = await fetch(`/api/clients/${clientId}/conversion-config`);
+        if (res.ok) {
+          const { data } = await res.json();
+          setChannelConversionConfigs(data ?? []);
+        }
+      } catch (err) {
+        console.error('Error fetching channel conversion configs:', err);
+      }
+    };
+    fetchConversionConfigs();
   }, [clientId]);
 
   // Mirror the computed MTD actual spend to the DB so the agency dashboard can
@@ -2874,6 +2896,13 @@ export default function DashboardV2() {
                                 const idx2 = prev.findIndex(p => p.client_id === updated.client_id && p.channel_name === updated.channel_name);
                                 return idx2 >= 0
                                   ? prev.map((p, i) => i === idx2 ? updated : p)
+                                  : [...prev, updated];
+                              })}
+                              conversionConfigs={channelConversionConfigs}
+                              onConversionConfigSaved={(updated) => setChannelConversionConfigs(prev => {
+                                const idx2 = prev.findIndex(c => c.client_id === updated.client_id && c.channel_key === updated.channel_key);
+                                return idx2 >= 0
+                                  ? prev.map((c, i) => i === idx2 ? updated : c)
                                   : [...prev, updated];
                               })}
                               onCampaignSelectionChange={handleCampaignSelectionChange}

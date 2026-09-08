@@ -212,14 +212,14 @@ const AGENT_FLOWS: Record<string, {
     stepLabel: () => 'Which client?',
   },
   setup_auditor: {
-    startMessage: 'Run Setup Auditor',
+    startMessage: 'Run Health Check Agent',
     // Client and platform are quick chip picks; which account/campaign and
     // its intended setup (geo, budget, goal, URL) aren't good chip candidates
     // (live-fetched list + several free-text fields), so those are handed to
     // the agent conversation itself — its system prompt already knows to ask
     // for them one at a time and show real live campaigns via find_live_ad_campaigns.
     steps: ['pick_client', 'pick_platform'],
-    buildPrompt: p => `I'd like to run a Setup Auditor check for ${p.clientName} on ${p.platform === 'google-ads' ? 'Google Ads' : 'Meta Ads'}. Show me the live campaigns to pick from, then ask me what that campaign's intended setup should be, then register it and run the first check.`,
+    buildPrompt: p => `I'd like to run a Health Check Agent check for ${p.clientName} on ${p.platform === 'google-ads' ? 'Google Ads' : 'Meta Ads'}. Show me the live campaigns to pick from, then ask me what that campaign's intended setup should be, then register it and run the first check.`,
     stepLabel: s => s === 'pick_client' ? 'Which client?' : 'Google Ads or Meta Ads?',
   },
 };
@@ -437,7 +437,16 @@ export const AgencyChat = forwardRef<AgencyChatHandle, AgencyChatProps>(function
 
   // Load agents + pre-fetch clients on mount so wizard launches are instant
   useEffect(() => {
-    fetch('/api/agents').then(r => r.ok ? r.json() : null).then(d => { if (d?.agents) setAgents(d.agents); }).catch(() => {});
+    fetch('/api/agents').then(r => r.ok ? r.json() : null).then(d => {
+      if (d?.agents) setAgents(d.agents);
+      // Sync template content (name/prompt/tools/etc) for existing agent rows —
+      // mirrors the same call on the Agents page so template edits show up here too.
+      fetch('/api/agents/seed-templates', { method: 'POST' }).then(r => r.ok ? r.json() : null).then(s => {
+        if (s?.seeded > 0) {
+          fetch('/api/agents').then(r2 => r2.ok ? r2.json() : null).then(d2 => { if (d2?.agents) setAgents(d2.agents); }).catch(() => {});
+        }
+      }).catch(() => {});
+    }).catch(() => {});
     fetch('/api/agency/clients')
       .then(r => r.json())
       .then((d: any) => {
@@ -722,10 +731,10 @@ export const AgencyChat = forwardRef<AgencyChatHandle, AgencyChatProps>(function
                 update_media_plan_budget: 'Updating media plan budget…',
                 get_live_meta_campaigns: 'Fetching live Meta campaigns…',
                 find_live_ad_campaigns: 'Fetching live campaigns…',
-                register_setup_auditor_campaign: 'Registering campaign with Setup Auditor…',
+                register_setup_auditor_campaign: 'Registering campaign with the Health Check Agent…',
                 list_setup_auditor_campaigns: 'Checking registered campaigns…',
-                run_setup_audit: 'Running Setup Auditor check…',
-                get_setup_audit_findings: 'Checking Setup Auditor findings…',
+                run_setup_audit: 'Running Health Check Agent check…',
+                get_setup_audit_findings: 'Checking Health Check Agent findings…',
               };
               setToolInProgress(labels[event.tool] ?? 'Working on it…');
             } else if (event.type === 'audit_step') {
@@ -813,10 +822,10 @@ export const AgencyChat = forwardRef<AgencyChatHandle, AgencyChatProps>(function
       generate_invoice: 'Generating invoice…',
       generate_report: 'Generating report…',
       find_live_ad_campaigns: 'Fetching live campaigns…',
-      register_setup_auditor_campaign: 'Registering campaign with Setup Auditor…',
+      register_setup_auditor_campaign: 'Registering campaign with the Health Check Agent…',
       list_setup_auditor_campaigns: 'Checking registered campaigns…',
-      run_setup_audit: 'Running Setup Auditor check…',
-      get_setup_audit_findings: 'Checking Setup Auditor findings…',
+      run_setup_audit: 'Running Health Check Agent check…',
+      get_setup_audit_findings: 'Checking Health Check Agent findings…',
     };
 
     try {

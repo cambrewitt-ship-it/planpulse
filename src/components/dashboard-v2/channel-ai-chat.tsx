@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Bot, ArrowUp, ChevronDown, ChevronRight } from 'lucide-react';
 import type { UserAgent, AgentAuditStep } from '@/types/database';
+import { MarkdownText } from './ai-shared';
 
 interface ChannelAIChatProps {
   clientId: string;
@@ -20,6 +21,8 @@ interface CampaignOption {
   id: string;
   name: string;
   account?: string;
+  /** Already has a platform_campaigns row — clicking it should run a check, not re-register it. */
+  isRegistered?: boolean;
 }
 
 interface ChatMessage {
@@ -254,7 +257,11 @@ export default function ChannelAIChat({ clientId, clientName, channelDisplayName
   // Step 1: fetch this channel's LIVE campaigns directly (no LLM round-trip)
   // and present them as clickable chips — scoped to the campaigns already
   // linked to this specific channel card when we have them, otherwise every
-  // currently-live campaign on this platform for the client.
+  // currently-live campaign on this platform for the client. Also cross-check
+  // against campaigns already registered with Setup Auditor, so a campaign
+  // that's already set up can go straight to running a check instead of
+  // marching the user through the whole intended-setup Q&A only to fail at
+  // the end with "already registered".
   const activateSetupAuditor = useCallback(async () => {
     if (isLoading || activatingAgent) return;
     setActivatingAgent(true);
@@ -263,19 +270,30 @@ export default function ChannelAIChat({ clientId, clientName, channelDisplayName
       const campaignsUrl = platform === 'google-ads'
         ? `/api/ads/google-ads/campaigns?clientId=${clientId}&status=active`
         : `/api/ads/meta/campaigns?clientId=${clientId}&status=active`;
-      const res = await fetch(campaignsUrl);
-      const data = res.ok ? await res.json() : null;
+      const [liveRes, registeredRes] = await Promise.all([
+        fetch(campaignsUrl),
+        fetch(`/api/setup-auditor/campaigns?clientId=${clientId}`).catch(() => null),
+      ]);
+      const data = liveRes.ok ? await liveRes.json() : null;
 
       if (!data || data.error) {
         setMessages(prev => [...prev, { role: 'assistant', content: `${platformLabel} isn't connected for this client yet — connect it in Platform Connections first.` }]);
         return;
       }
 
+      const registeredData = registeredRes && registeredRes.ok ? await registeredRes.json().catch(() => null) : null;
+      const registeredExternalIds = new Set(
+        ((registeredData?.campaigns ?? []) as Array<{ platform: string; external_campaign_id: string }>)
+          .filter(c => c.platform === platform)
+          .map(c => c.external_campaign_id)
+      );
+
       const rawCampaigns = (data.campaigns ?? []) as Array<{ id: string; name: string; customerId?: string; accountName?: string }>;
       const allLive: CampaignOption[] = rawCampaigns.map(c => ({
         id: c.id,
         name: c.name,
         account: platform === 'google-ads' ? c.customerId : c.accountName,
+        isRegistered: registeredExternalIds.has(c.id),
       }));
 
       const linkedSet = new Set(linkedCampaignIds ?? []);
@@ -300,7 +318,9 @@ export default function ChannelAIChat({ clientId, clientName, channelDisplayName
 
   // Step 2: user clicked a specific live campaign chip — now hand off to the
   // actual Setup Auditor agent with the campaign already resolved, skipping
-  // the "which campaign" back-and-forth entirely.
+  // the "which campaign" back-and-forth entirely. Already-registered campaigns
+  // skip straight to running a check instead of re-collecting intended setup
+  // and hitting a dead-end "already registered" error at the end.
   const selectCampaignForAudit = useCallback(async (campaign: CampaignOption) => {
     if (isLoading || activatingAgent) return;
     setActivatingAgent(true);
@@ -313,7 +333,9 @@ export default function ChannelAIChat({ clientId, clientName, channelDisplayName
       }
 
       setActiveAgent(agent);
-      const prompt = `I'd like to register and run a Setup Auditor check for the live campaign "${campaign.name}" (${platformLabel}) for ${clientName} — that client is already fixed and certain, so don't ask me which client this is for. Ask me what its intended setup should be — geo targeting, budget, optimization goal, destination URL — making clear each is optional and can be skipped, then register it and run the first check.`;
+      const prompt = campaign.isRegistered
+        ? `Run a Health Check Agent check for the live campaign "${campaign.name}" (${platformLabel}) for ${clientName} — that client and campaign are already fixed and certain, and this campaign is already registered, so don't ask me which client or campaign this is, and don't ask about intended setup. Just call run_setup_audit for it now and report the result, critical findings first.`
+        : `I'd like to register and run a Health Check Agent check for the live campaign "${campaign.name}" (${platformLabel}) for ${clientName} — that client is already fixed and certain, so don't ask me which client this is for. Ask me what its intended setup should be — geo targeting, budget, optimization goal, destination URL — making clear each is optional and can be skipped, then register it and run the first check.`;
       await streamRequest({ messages: [{ role: 'user', content: prompt }], agentId: agent.id });
     } finally {
       setActivatingAgent(false);
@@ -382,7 +404,7 @@ export default function ChannelAIChat({ clientId, clientName, channelDisplayName
                 >
                   {msg.content ? (
                     <>
-                      {msg.content}
+                      {msg.role === 'assistant' ? <MarkdownText text={msg.content} /> : msg.content}
                       {msg.auditSteps && msg.auditSteps.length > 0 && <AuditTrail steps={msg.auditSteps} />}
                     </>
                   ) : msg.isStreaming ? (
@@ -399,6 +421,7 @@ export default function ChannelAIChat({ clientId, clientName, channelDisplayName
                         >
                           {c.name}
                           {c.account && <span className="text-gray-400 font-normal"> · {c.account}</span>}
+                          {c.isRegistered && <span className="text-emerald-600 font-normal"> · Registered</span>}
                         </button>
                       ))}
                     </div>

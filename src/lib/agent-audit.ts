@@ -18,11 +18,11 @@ export const TOOL_LABELS: Record<string, string> = {
   set_media_plan_channels: 'Set media plan channels',
   generate_invoice: 'Generate invoice',
   generate_report: 'Generate report',
-  list_setup_auditor_campaigns: 'List Setup Auditor campaigns',
-  run_setup_audit: 'Run Setup Auditor check',
-  get_setup_audit_findings: 'Read Setup Auditor findings',
+  list_setup_auditor_campaigns: 'List Health Check Agent campaigns',
+  run_setup_audit: 'Run Health Check Agent check',
+  get_setup_audit_findings: 'Read Health Check Agent findings',
   find_live_ad_campaigns: 'Find live ad campaigns',
-  register_setup_auditor_campaign: 'Register Setup Auditor campaign',
+  register_setup_auditor_campaign: 'Register Health Check Agent campaign',
 };
 
 export const WRITE_TOOLS = [
@@ -153,7 +153,7 @@ export function buildAuditSummary(toolName: string, input: any, result: any): st
       case 'get_setup_audit_findings': {
         const count = result?.total_findings ?? 0;
         const client = input?.client_name ? ` for ${input.client_name}` : '';
-        return `Found ${count} open Setup Auditor finding${count === 1 ? '' : 's'}${client}`;
+        return `Found ${count} open Health Check Agent finding${count === 1 ? '' : 's'}${client}`;
       }
       case 'find_live_ad_campaigns': {
         const count = result?.total_campaigns ?? 0;
@@ -164,7 +164,7 @@ export function buildAuditSummary(toolName: string, input: any, result: any): st
       case 'register_setup_auditor_campaign': {
         const campaign = input?.campaign_name ?? result?.campaign_name ?? 'campaign';
         const client = input?.client_name ?? result?.client ?? 'client';
-        return `Registered "${campaign}" for ${client} with Setup Auditor`;
+        return `Registered "${campaign}" for ${client} with the Health Check Agent`;
       }
       default:
         return `Called ${toolName}`;
@@ -199,7 +199,7 @@ export function buildOutputLinks(toolName: string, input: any, result: any, cont
     case 'list_setup_auditor_campaigns':
     case 'get_setup_audit_findings':
     case 'register_setup_auditor_campaign':
-      return [{ label: 'Open Setup Auditor', href: `/clients/${clientId}/dashboard#setup-auditor-section` }];
+      return [{ label: 'Open Health Check Agent', href: `/clients/${clientId}/dashboard#setup-auditor-section` }];
     default:
       return [];
   }

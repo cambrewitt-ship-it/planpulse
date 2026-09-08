@@ -29,6 +29,15 @@ import {
 type MetricKey = 'impressions' | 'reach' | 'frequency' | 'clicks' | 'ctr' | 'cpc' | 'conversions' | 'conv_events';
 const ALL_METRIC_KEYS: MetricKey[] = ['impressions', 'reach', 'frequency', 'clicks', 'ctr', 'cpc', 'conv_events'];
 
+// client_channel_conversion_config isn't in the generated database.ts types yet
+// (see src/app/api/clients/[id]/conversion-config/route.ts) — typed locally.
+export interface ChannelConversionConfig {
+  client_id: string;
+  channel_key: string;
+  conversion_action_type: string;
+  conversion_label: string;
+}
+
 export interface ChannelCardProps {
   channel: {
     id?: string;
@@ -92,6 +101,8 @@ export interface ChannelCardProps {
   presets?: MetricPreset[];
   clientChannelPresets?: ClientChannelPreset[];
   onPresetSaved?: (updated: ClientChannelPreset) => void;
+  conversionConfigs?: ChannelConversionConfig[];
+  onConversionConfigSaved?: (updated: ChannelConversionConfig) => void;
   onCampaignSelectionChange?: (channelKey: string, ids: string[]) => void;
   planView?: 'gross' | 'net';
   headerActions?: React.ReactNode;
@@ -646,7 +657,7 @@ function inferActionPointChannelType(platform: string, channelName: string): str
   return normalizeChannelType(channelName);
 }
 
-export default function ChannelPerformanceCard({ channel, selectedMonth, dateRange, onAdjust, onViewReport, onReconnect, clientId, clientName, channelStartDate, channelFlights, refetchTrigger, benchmarks, presets, clientChannelPresets, onPresetSaved, onCampaignSelectionChange, planView, headerActions }: ChannelCardProps) {
+export default function ChannelPerformanceCard({ channel, selectedMonth, dateRange, onAdjust, onViewReport, onReconnect, clientId, clientName, channelStartDate, channelFlights, refetchTrigger, benchmarks, presets, clientChannelPresets, onPresetSaved, conversionConfigs, onConversionConfigSaved, onCampaignSelectionChange, planView, headerActions }: ChannelCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
   const [chartType, setChartType] = useState<'spend' | 'metrics'>('spend');
@@ -725,7 +736,8 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
     return `${selected.length} CAMPAIGNS SELECTED`;
   })();
 
-  const convEventStorageKey = `conv-event-${clientId ?? ''}-${channel.id ?? channel.name}`;
+  const channelKey = channel.id ?? channel.name;
+  const convEventStorageKey = `conv-event-${clientId ?? ''}-${channelKey}`;
   const [selectedActionType, setSelectedActionType] = useState<string>(() => {
     if (typeof window === 'undefined') return '';
     return localStorage.getItem(convEventStorageKey) ?? '';
@@ -744,12 +756,50 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
     return () => document.removeEventListener('mousedown', handleClick);
   }, [actionDropdownOpen]);
 
+  // Persists to the server (not just localStorage) so backend consumers —
+  // the agency chat agent's get_channel_performance tool in particular — can
+  // read the same "which action_type counts as a conversion" choice instead
+  // of always seeing the always-NULL ad_performance_metrics.conversions
+  // column for Meta and reporting 0.
   const handleSetSelectedActionType = (type: string) => {
     setSelectedActionType(type);
     if (typeof window !== 'undefined') {
       localStorage.setItem(convEventStorageKey, type);
     }
+    if (clientId && type) {
+      fetch(`/api/clients/${clientId}/conversion-config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel_key: channelKey, conversion_action_type: type, conversion_label: actionTypeLabel(type) }),
+      })
+        .then(res => (res.ok ? res.json() : null))
+        .then(json => { if (json?.data) onConversionConfigSaved?.(json.data); })
+        .catch(() => {});
+    }
   };
+
+  // The persisted server value (once the parent's fetch resolves) takes
+  // priority over whatever's in localStorage — pull it in as soon as it
+  // arrives. If nothing is persisted server-side yet but localStorage has a
+  // value from before this was wired up to the backend, push it up once so
+  // it isn't silently lost.
+  const persistedConversionConfig = conversionConfigs?.find(c => c.channel_key === channelKey);
+  useEffect(() => {
+    if (!clientId) return;
+    if (persistedConversionConfig) {
+      if (persistedConversionConfig.conversion_action_type !== selectedActionType) {
+        setSelectedActionType(persistedConversionConfig.conversion_action_type);
+        if (typeof window !== 'undefined') localStorage.setItem(convEventStorageKey, persistedConversionConfig.conversion_action_type);
+      }
+      return;
+    }
+    if (typeof window !== 'undefined') {
+      const local = localStorage.getItem(convEventStorageKey);
+      if (local) handleSetSelectedActionType(local);
+    }
+  // Only re-run when the persisted value itself changes — not on every render.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [persistedConversionConfig, clientId, convEventStorageKey]);
 
   // Names of selected campaigns — used as a fallback when stored campaign IDs don't
   // match the campaign_id values returned by the Meta Insights API (e.g. due to ID
