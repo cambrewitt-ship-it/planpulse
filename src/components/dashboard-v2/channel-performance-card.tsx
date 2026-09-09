@@ -160,7 +160,7 @@ const METRIC_CONFIG: Record<MetricKey, {
     shortLabel: 'Impr',
     color: '#6366f1',
     formatValue:   (v) => fmt(v, 'decimal', 0),
-    formatAxis:    (v) => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(Math.round(v)),
+    formatAxis:    (v) => fmt(v, 'decimal', 0),
     formatTooltip: (v) => fmt(v, 'decimal', 0),
   },
   reach: {
@@ -168,7 +168,7 @@ const METRIC_CONFIG: Record<MetricKey, {
     shortLabel: 'Reach',
     color: '#ec4899',
     formatValue:   (v) => fmt(v, 'decimal', 0),
-    formatAxis:    (v) => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(Math.round(v)),
+    formatAxis:    (v) => fmt(v, 'decimal', 0),
     formatTooltip: (v) => fmt(v, 'decimal', 0),
   },
   frequency: {
@@ -184,7 +184,7 @@ const METRIC_CONFIG: Record<MetricKey, {
     shortLabel: 'Clicks',
     color: '#3b82f6',
     formatValue:   (v) => fmt(v, 'decimal', 0),
-    formatAxis:    (v) => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(Math.round(v)),
+    formatAxis:    (v) => fmt(v, 'decimal', 0),
     formatTooltip: (v) => fmt(v, 'decimal', 0),
   },
   ctr: {

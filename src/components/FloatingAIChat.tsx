@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { usePathname } from 'next/navigation';
 import { X, ChevronDown, ChevronRight, ExternalLink, Bot } from 'lucide-react';
+import { supabase } from '@/lib/supabase/client';
 import type { AgentAuditStep, AgentOutputLink, UserAgent } from '@/types/database';
 
 interface Message {
@@ -586,6 +587,19 @@ function FloatingAIChatInner() {
 
 export function FloatingAIChat() {
   const pathname = usePathname();
+  const [isSignedIn, setIsSignedIn] = useState(false);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setIsSignedIn(!!session?.user);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setIsSignedIn(!!session?.user);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  if (!isSignedIn) return null;
   if (pathname === '/agency' || pathname?.startsWith('/hub/') || pathname?.startsWith('/media-plan-builder')) return null;
   return <FloatingAIChatInner />;
 }

@@ -17,6 +17,8 @@ import { DateRangePicker } from '@/components/ui/date-range-picker';
 import { FullscreenGanttView, type GanttAPMarker } from '@/components/agency/FullscreenGanttView';
 import type { ClientChannelHealth } from '@/app/api/agency/channel-health/route';
 import { AgencyTimeline, ZOOM_LEVELS as TIMELINE_ZOOM_LEVELS, DEFAULT_ZOOM as DEFAULT_TIMELINE_ZOOM } from '@/components/agency/AgencyTimeline';
+import type { AgencyAlert } from '@/app/api/agency/alerts/route';
+import { AlertsPanel } from '@/components/agency/AlertsPanel';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -47,6 +49,8 @@ export default function AgencyDashboard() {
   const [clients, setClients] = useState<ClientCardData[]>([]);
   const [actionPointClients, setActionPointClients] = useState<AgencyClientActionPoints[]>([]);
   const [channelHealthClients, setChannelHealthClients] = useState<ClientChannelHealth[]>([]);
+  const [alerts, setAlerts] = useState<AgencyAlert[]>([]);
+  const [sidebarTab, setSidebarTab] = useState<'today' | 'alerts'>('today');
   const [accountManagers, setAccountManagers] = useState<AccountManager[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -128,20 +132,23 @@ export default function AgencyDashboard() {
         endDate: dateRange.endDate,
       });
 
-      const [clientsRes, apRes, chRes] = await Promise.all([
+      const [clientsRes, apRes, chRes, alertsRes] = await Promise.all([
         fetch(`/api/agency/clients?${clientsParams.toString()}`),
         fetch('/api/agency/action-points'),
         fetch('/api/agency/channel-health'),
+        fetch('/api/agency/alerts'),
       ]);
 
       const clientsData = clientsRes.ok ? await clientsRes.json() : { clients: [] };
       const apData = apRes.ok ? await apRes.json() : { clients: [] };
       const chData = chRes.ok ? await chRes.json() : { clients: [] };
+      const alertsData = alertsRes.ok ? await alertsRes.json() : { alerts: [] };
 
       const fetchedClients: ClientCardData[] = clientsData.clients || [];
       setClients(fetchedClients);
       setActionPointClients(apData.clients || []);
       setChannelHealthClients(chData.clients || []);
+      setAlerts(alertsData.alerts || []);
       setLastRefreshed(new Date());
 
       if (fetchedClients.length > 0) {
@@ -557,14 +564,73 @@ export default function AgencyDashboard() {
 
         {/* ── Column 1: Today + Notes ──────────────────── */}
         <div style={{ width: 240, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 12, minHeight: 0 }}>
-          <div data-tour-id="agency-today-agents" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <TodayCard clients={filteredClients} today={today} />
+          {/* Today / Alerts tab bar */}
+          <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+            <button
+              onClick={() => setSidebarTab('today')}
+              style={{
+                flex: 1,
+                padding: '7px 0',
+                fontSize: 12,
+                fontWeight: 700,
+                letterSpacing: '0.04em',
+                color: sidebarTab === 'today' ? '#FFFFFF' : '#8A8578',
+                background: sidebarTab === 'today' ? '#1C1917' : '#EDEAE3',
+                border: 'none',
+                borderRadius: 10,
+                cursor: 'pointer',
+                fontFamily: "'DM Sans', system-ui, sans-serif",
+                transition: 'all 0.15s',
+              }}
+            >
+              TODAY
+            </button>
+            <button
+              onClick={() => setSidebarTab('alerts')}
+              style={{
+                flex: 1,
+                padding: '7px 0',
+                fontSize: 12,
+                fontWeight: 700,
+                letterSpacing: '0.04em',
+                color: sidebarTab === 'alerts' ? '#FFFFFF' : '#8A8578',
+                background: sidebarTab === 'alerts' ? '#B07030' : '#EDEAE3',
+                border: 'none',
+                borderRadius: 10,
+                cursor: 'pointer',
+                fontFamily: "'DM Sans', system-ui, sans-serif",
+                transition: 'all 0.15s',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 5,
+              }}
+            >
+              ALERTS
+              {alerts.length > 0 && (
+                <span style={{
+                  minWidth: 15, height: 15, padding: '0 3px',
+                  borderRadius: 8, fontSize: 9, fontWeight: 700,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: sidebarTab === 'alerts' ? 'rgba(255,255,255,0.25)' : '#A0442A',
+                  color: '#FFFFFF',
+                }}>
+                  {alerts.length}
+                </span>
+              )}
+            </button>
           </div>
 
-          {/* Notes — dark spine + files panel + content */}
-          <div
-            data-tour-id="agency-notes"
-            style={{
+          {sidebarTab === 'today' ? (
+            <>
+              <div data-tour-id="agency-today-agents" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <TodayCard clients={filteredClients} today={today} />
+              </div>
+
+              {/* Notes — dark spine + files panel + content */}
+              <div
+                data-tour-id="agency-notes"
+                style={{
               flex: 1,
               minHeight: 0,
               display: 'flex',
@@ -677,7 +743,13 @@ export default function AgencyDashboard() {
             <div style={{ flex: 1, minWidth: 0 }}>
               <NotesChecklist activeClientId={`agency:${activeFileId}`} />
             </div>
-          </div>
+              </div>
+            </>
+          ) : (
+            <div style={{ flex: 1, minHeight: 0 }}>
+              <AlertsPanel alerts={alerts} loading={loading} />
+            </div>
+          )}
         </div>
 
         {/* ── Column 2: AI Chat (full height) ──────────── */}

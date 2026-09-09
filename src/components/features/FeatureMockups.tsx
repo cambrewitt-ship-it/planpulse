@@ -457,3 +457,76 @@ export function ActionPointsMockup() {
     </svg>
   );
 }
+
+export function InvoiceMockup() {
+  const lineItems = [
+    { channel: 'Meta Ads', net: '$8,400.00', commission: '15%', total: '$9,660.00' },
+    { channel: 'Google Ads', net: '$6,200.00', commission: '15%', total: '$7,130.00' },
+    { channel: 'GA4 Setup Fee', net: '$450.00', commission: '—', total: '$450.00' },
+  ];
+
+  const width = 420;
+  const height = 520;
+  const rowHeight = 32;
+  const tableTop = 200;
+  const totalsY = tableTop + lineItems.length * rowHeight + 16;
+
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} fill="none" xmlns="http://www.w3.org/2000/svg" className="w-full h-auto">
+      <rect width={width} height={height} rx="16" fill="#FDFCF8" />
+      <rect width={width} height={height} rx="16" stroke="#E8E4DC" strokeWidth="1" />
+
+      {/* Header */}
+      <text x="28" y="46" fill="#1C1917" fontSize="22" fontWeight="700" fontFamily="sans-serif" letterSpacing="0.5">Invoice</text>
+      <text x={width - 28} y="34" textAnchor="end" fill="#8A8578" fontSize="10" fontFamily="sans-serif">#INV-2026-091</text>
+      <text x={width - 28} y="50" textAnchor="end" fill="#8A8578" fontSize="10" fontFamily="sans-serif">Issued 1 Sep 2026</text>
+
+      <line x1="28" y1="66" x2={width - 28} y2="66" stroke="#E8E4DC" strokeWidth="1" />
+
+      {/* Bill to / From */}
+      <text x="28" y="92" fill="#C4BFB8" fontSize="8" fontWeight="700" fontFamily="sans-serif" letterSpacing="1">BILL TO</text>
+      <text x="28" y="110" fill="#1C1917" fontSize="12" fontWeight="700" fontFamily="sans-serif">Client Co.</text>
+      <text x="28" y="126" fill="#8A8578" fontSize="10" fontFamily="sans-serif">Auckland, NZ</text>
+
+      <text x={width - 28} y="92" textAnchor="end" fill="#C4BFB8" fontSize="8" fontWeight="700" fontFamily="sans-serif" letterSpacing="1">FROM</text>
+      <text x={width - 28} y="110" textAnchor="end" fill="#1C1917" fontSize="12" fontWeight="700" fontFamily="sans-serif">Your Agency</text>
+      <text x={width - 28} y="126" textAnchor="end" fill="#8A8578" fontSize="10" fontFamily="sans-serif">billing@youragency.com</text>
+
+      <line x1="28" y1="148" x2={width - 28} y2="148" stroke="#E8E4DC" strokeWidth="1" />
+
+      {/* Table header */}
+      <text x="28" y="170" fill="#C4BFB8" fontSize="8" fontWeight="700" fontFamily="sans-serif" letterSpacing="1">CHANNEL</text>
+      <text x="230" y="170" textAnchor="end" fill="#C4BFB8" fontSize="8" fontWeight="700" fontFamily="sans-serif" letterSpacing="1">NET SPEND</text>
+      <text x="310" y="170" textAnchor="middle" fill="#C4BFB8" fontSize="8" fontWeight="700" fontFamily="sans-serif" letterSpacing="1">COMM.</text>
+      <text x={width - 28} y="170" textAnchor="end" fill="#C4BFB8" fontSize="8" fontWeight="700" fontFamily="sans-serif" letterSpacing="1">TOTAL</text>
+      <line x1="28" y1="182" x2={width - 28} y2="182" stroke="#E8E4DC" strokeWidth="1" />
+
+      {/* Rows */}
+      {lineItems.map((item, i) => {
+        const y = tableTop + i * rowHeight;
+        return (
+          <g key={item.channel}>
+            <text x="28" y={y} fill="#3C3836" fontSize="11" fontWeight="600" fontFamily="sans-serif">{item.channel}</text>
+            <text x="230" y={y} textAnchor="end" fill="#5C5650" fontSize="11" fontFamily="sans-serif">{item.net}</text>
+            <text x="310" y={y} textAnchor="middle" fill="#5C5650" fontSize="11" fontFamily="sans-serif">{item.commission}</text>
+            <text x={width - 28} y={y} textAnchor="end" fill="#1C1917" fontSize="11" fontWeight="600" fontFamily="sans-serif">{item.total}</text>
+            <line x1="28" y1={y + 12} x2={width - 28} y2={y + 12} stroke="#E8E4DC" strokeWidth="0.5" />
+          </g>
+        );
+      })}
+
+      {/* Totals */}
+      <text x="310" y={totalsY} textAnchor="middle" fill="#8A8578" fontSize="10" fontFamily="sans-serif">Subtotal</text>
+      <text x={width - 28} y={totalsY} textAnchor="end" fill="#3C3836" fontSize="10" fontFamily="sans-serif">$15,050.00</text>
+      <text x="310" y={totalsY + 20} textAnchor="middle" fill="#8A8578" fontSize="10" fontFamily="sans-serif">Commission</text>
+      <text x={width - 28} y={totalsY + 20} textAnchor="end" fill="#3C3836" fontSize="10" fontFamily="sans-serif">$2,190.00</text>
+
+      <rect x="24" y={totalsY + 34} width={width - 48} height="40" rx="10" fill="#4A6580" />
+      <text x="40" y={totalsY + 59} fill="white" fontSize="12" fontWeight="700" fontFamily="sans-serif">Total Due</text>
+      <text x={width - 40} y={totalsY + 59} textAnchor="end" fill="white" fontSize="16" fontWeight="700" fontFamily="sans-serif">$17,240.00</text>
+
+      {/* Footer */}
+      <text x={width / 2} y={height - 20} textAnchor="middle" fill="#C4BFB8" fontSize="9" fontFamily="sans-serif">Due within 14 days · Thank you for your business</text>
+    </svg>
+  );
+}

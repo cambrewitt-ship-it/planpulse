@@ -159,11 +159,18 @@ export function GoogleAdsPerformanceSection({ clientId, token, editable }: Googl
                 </div>
                 <ResponsiveContainer width="100%" height={200}>
                   <ComposedChart data={data.dailySeries} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="gaqPerfImpressionsGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={COLOR.accent} stopOpacity={0.22} />
+                        <stop offset="100%" stopColor={COLOR.accent} stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
                     <CartesianGrid {...gridProps} />
                     <XAxis dataKey="date" tick={axisTickStyle} axisLine={axisLineProps} tickLine={false} interval={tickInterval(data.dailySeries.length)} tickFormatter={(d: string) => d.slice(5)} />
                     <YAxis yAxisId="impressions" tick={axisTickStyle} axisLine={false} tickLine={false} width={44} tickFormatter={fmtCompact} />
                     <YAxis yAxisId="clicks" orientation="right" tick={axisTickStyle} axisLine={false} tickLine={false} width={40} />
                     <Tooltip content={<HubTooltip formatValue={(entry) => Number(entry.value ?? 0).toLocaleString('en-US')} />} />
+                    <Area yAxisId="impressions" dataKey="impressions" stroke="none" fill="url(#gaqPerfImpressionsGrad)" isAnimationActive={false} />
                     <Line yAxisId="impressions" dataKey="impressions" name="Impressions" stroke={COLOR.accent} strokeWidth={1.6} dot={false} />
                     <Line yAxisId="clicks" dataKey="clicks" name="Clicks" stroke="#5B6B4E" strokeWidth={1.6} dot={false} />
                   </ComposedChart>

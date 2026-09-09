@@ -487,7 +487,7 @@ function PerfSparkline({ clientId, perf, perfLoading, onConnect }: { clientId: s
           if (/ctr/.test(mk)) return `${targetVal.toFixed(1)}%`;
           if (/roas/.test(mk)) return `${targetVal.toFixed(1)}x`;
           if (/cpa|cpc|cpm|cpl/.test(mk)) return targetVal >= 100 ? `$${Math.round(targetVal)}` : `$${targetVal.toFixed(2)}`;
-          return targetVal >= 1000 ? `${(targetVal / 1000).toFixed(1)}k` : String(Math.round(targetVal));
+          return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(Math.round(targetVal));
         })()
       : null;
     return (
@@ -555,7 +555,7 @@ function PerfSparkline({ clientId, perf, perfLoading, onConnect }: { clientId: s
   function fmtY(v: number): string {
     if (/ctr/.test(mk)) return `${v.toFixed(1)}%`;
     if (/cpa|cpc|cpm|cpl/.test(mk)) return v >= 100 ? `$${Math.round(v)}` : `$${v.toFixed(1)}`;
-    return v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(Math.round(v));
+    return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(Math.round(v));
   }
 
   // Y axis: top tick = high value, bottom tick = low value (standard convention).

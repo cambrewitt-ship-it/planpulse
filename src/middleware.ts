@@ -6,6 +6,11 @@ import type { Database } from '@/types/database';
 // Define public routes that don't require authentication
 const PUBLIC_ROUTES = [
   '/',
+  '/about',
+  '/features',
+  '/pricing',
+  '/terms',
+  '/privacy',
   '/auth/login',
   '/auth/signup',
   '/auth/callback',
@@ -91,7 +96,7 @@ export async function middleware(req: NextRequest) {
 
   // Check if the route is public
   const isPublicRoute = PUBLIC_ROUTES.some(route =>
-    req.nextUrl.pathname.startsWith(route)
+    route === '/' ? req.nextUrl.pathname === '/' : req.nextUrl.pathname.startsWith(route)
   );
 
   // Check if it's a protected API route

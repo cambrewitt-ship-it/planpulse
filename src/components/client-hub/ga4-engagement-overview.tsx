@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ResponsiveContainer, ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
+import { ResponsiveContainer, ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
 import { Filter } from 'lucide-react';
 import { subDays, format, parseISO } from 'date-fns';
 import { COLOR, FONT_HEAD, FONT_BODY, fmtCompact, fmtPct } from './tokens';
@@ -25,8 +25,8 @@ export interface GA4EngagementOverviewProps {
   period: { start: string; end: string };
 }
 
-/** Tabs where a "7-day rolling cost per X" line can be overlaid — the metrics that map onto ad spend (cost per active user / CPA). */
-const COST_PER_ELIGIBLE_METRICS = new Set(['activeUsers', 'conversions']);
+/** Tabs where a "7-day rolling cost per X" line can be overlaid — every GA4 trend metric maps onto ad spend (cost per X / CPA). */
+const COST_PER_ELIGIBLE_METRICS = new Set(GA4_TREND_METRICS.map((m) => m.key));
 
 interface EnhancedSpendPoint extends SpendDataPoint {
   channelId: string;
@@ -267,7 +267,9 @@ export function GA4EngagementOverview({ clientId, token, editable, overview, per
   const { availableChannels, selectedChannels, setSelectedChannels, costByDate } = useCostPerRolling(
     clientId, token, period, showCostLine ? activeMetric : null,
   );
-  const costLineLabel = activeMetric === 'conversions' ? 'CPA (7d rolling)' : 'Cost / active user (7d rolling)';
+  const costLineLabel = activeMetric === 'conversions'
+    ? 'CPA (7d rolling)'
+    : `Cost / ${activeOption.label.toLowerCase()} (7d rolling)`;
 
   if (!active) return null;
 
@@ -338,6 +340,12 @@ export function GA4EngagementOverview({ clientId, token, editable, overview, per
 
       <ResponsiveContainer width="100%" height={220}>
         <ComposedChart data={chartData} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
+          <defs>
+            <linearGradient id="ga4CurrentGradient" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={COLOR.accent} stopOpacity={0.28} />
+              <stop offset="100%" stopColor={COLOR.accent} stopOpacity={0} />
+            </linearGradient>
+          </defs>
           <CartesianGrid {...gridProps} />
           <XAxis
             dataKey="date" tick={axisTickStyle} axisLine={axisLineProps} tickLine={false}
@@ -348,6 +356,7 @@ export function GA4EngagementOverview({ clientId, token, editable, overview, per
             <YAxis yAxisId="cost" orientation="right" tick={axisTickStyle} axisLine={false} tickLine={false} width={52} tickFormatter={(v: number) => fmtCurrency(v)} />
           )}
           <Tooltip content={<HubTooltip formatValue={(entry) => entry.dataKey === 'costPer7d' ? fmtCurrency(Number(entry.value ?? 0)) : formatByFormat(Number(entry.value ?? 0), activeOption.format)} />} />
+          <Area dataKey="current" stroke="none" fill="url(#ga4CurrentGradient)" isAnimationActive={false} />
           <Line dataKey="current" name="Current period" stroke={COLOR.accent} strokeWidth={1.8} dot={false} />
           <Line dataKey="previous" name="Previous period" stroke={COLOR.muted} strokeWidth={1.4} strokeDasharray="4 3" dot={false} />
           {hasCostData && (

@@ -18,96 +18,6 @@ function hexToRgb(hex: string): [number, number, number] {
   return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
 }
 
-function rgbToHex(r: number, g: number, b: number): string {
-  return '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
-}
-
-function colorDistance(a: [number, number, number], b: [number, number, number]): number {
-  return Math.sqrt((a[0]-b[0])**2 + (a[1]-b[1])**2 + (a[2]-b[2])**2);
-}
-
-function isTooLight(r: number, g: number, b: number): boolean {
-  // luminance > 0.85 — skip near-white pixels
-  return (0.299 * r + 0.587 * g + 0.114 * b) > 220;
-}
-
-function extractTwoDominantColors(imgEl: HTMLImageElement): [string, string] | null {
-  try {
-    const canvas = document.createElement('canvas');
-    const size = 32;
-    canvas.width = size; canvas.height = size;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return null;
-    ctx.drawImage(imgEl, 0, 0, size, size);
-    const { data } = ctx.getImageData(0, 0, size, size);
-
-    // Two passes: one excluding near-white (to find the primary), one including all opaque pixels (to find secondary)
-    const freqColored = new Map<string, { count: number; r: number; g: number; b: number }>();
-    const freqAll     = new Map<string, { count: number; r: number; g: number; b: number }>();
-    for (let i = 0; i < data.length; i += 4) {
-      const [r, g, b, a] = [data[i], data[i+1], data[i+2], data[i+3]];
-      if (a < 128) continue;
-      const key = `${r >> 4},${g >> 4},${b >> 4}`;
-      const addTo = (map: typeof freqAll) => {
-        const entry = map.get(key);
-        if (entry) { entry.count++; entry.r += r; entry.g += g; entry.b += b; }
-        else map.set(key, { count: 1, r, g, b });
-      };
-      addTo(freqAll);
-      if (!isTooLight(r, g, b)) addTo(freqColored);
-    }
-
-    if (freqColored.size === 0) return null;
-
-    const toRgb = (map: typeof freqAll) =>
-      [...map.values()]
-        .sort((a, b) => b.count - a.count)
-        .map(e => [Math.round(e.r / e.count), Math.round(e.g / e.count), Math.round(e.b / e.count)] as [number, number, number]);
-
-    const c1 = toRgb(freqColored)[0];
-    // Secondary: most frequent pixel (from all pixels) that contrasts sufficiently with primary
-    const c2 = toRgb(freqAll).find(c => colorDistance(c, c1) > 60) ?? null;
-    if (!c2) return null;
-    return [rgbToHex(...c1), rgbToHex(...c2)];
-  } catch {
-    return null;
-  }
-}
-
-function useLogoColors(logoUrl: string | null | undefined): [string, string] | null {
-  const [colors, setColors] = useState<[string, string] | null>(null);
-
-  useEffect(() => {
-    if (!logoUrl) { setColors(null); return; }
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      const result = extractTwoDominantColors(img);
-      setColors(result);
-    };
-    img.onerror = () => setColors(null);
-    img.src = logoUrl;
-  }, [logoUrl]);
-
-  return colors;
-}
-
-function stripeBackground(primary: string, secondary: string): string {
-  // 3 thin secondary lines centered at 14px, 28px (halfway), 42px within the 56px bar height
-  return [
-    `linear-gradient(`,
-    `  0deg,`,
-    `  ${primary}   0px,  ${primary}  12px,`,
-    `  ${secondary} 12px, ${secondary} 16px,`,
-    `  ${primary}  16px,  ${primary}  26px,`,
-    `  ${secondary} 26px, ${secondary} 30px,`,
-    `  ${primary}  30px,  ${primary}  40px,`,
-    `  ${secondary} 40px, ${secondary} 44px,`,
-    `  ${primary}  44px,  ${primary}  56px`,
-    `)`,
-  ].join('');
-}
-
 const DAY_MS    = 86400000;
 const LABEL_W = 180;
 const ROW_H   = 120;
@@ -222,8 +132,6 @@ interface ClientTimelineRowProps {
   client: GanttClient;
   clientAPs: GanttAPMarker[];
   clientChannels: GanttChannel[];
-  barStartMs: number | null;
-  barEndMs: number | null;
   totalW: number;
   days: { ms: number; isWeekStart: boolean }[];
   xForMs: (ms: number) => number;
@@ -236,24 +144,12 @@ interface ClientTimelineRowProps {
 }
 
 function ClientTimelineRow({
-  client, clientAPs, clientChannels, barStartMs, barEndMs,
+  client, clientAPs, clientChannels,
   totalW, days, xForMs, todayX, dayW,
   windowStart, windowEnd, todayStr, setTooltip,
 }: ClientTimelineRowProps) {
   const [hovered, setHovered] = useState(false);
-  const logoColors = useLogoColors(client.logo_url);
-  const fallbackStripe = clientFallbackStripe(client.id);
   const fallbackColor  = clientMutedColor(client.id);
-
-  const clampedStart = barStartMs !== null ? Math.max(barStartMs, windowStart) : null;
-  const clampedEnd   = barEndMs   !== null ? Math.min(barEndMs,   windowEnd)   : null;
-  const barX = clampedStart !== null ? xForMs(clampedStart) : null;
-  const barW = clampedStart !== null && clampedEnd !== null
-    ? Math.max(xForMs(clampedEnd) - xForMs(clampedStart), 4)
-    : null;
-
-  const activeColors = logoColors ?? fallbackStripe;
-  const barBackground = stripeBackground(activeColors[0], activeColors[1]);
 
   // Deduplicate by label — merge ALL flights first, then filter channels to only those
   // whose overall span overlaps the visible window.
@@ -345,27 +241,9 @@ function ClientTimelineRow({
           background: '#4A6580', opacity: 0.3, zIndex: 1,
         }} />
 
-        {/* ── Default view: composite bar ── */}
-        {barX !== null && barW !== null && (
-          <div style={{
-            position: 'absolute',
-            left: barX, top: '50%', transform: 'translateY(-50%)',
-            width: barW, height: 56,
-            background: barBackground,
-            borderRadius: 12,
-            zIndex: 2,
-            opacity: hovered ? 0 : 1,
-            transition: 'opacity 0.15s',
-            pointerEvents: hovered ? 'none' : 'auto',
-          }} />
-        )}
-
-        {/* ── Hover view: individual channel bars + sticky pills ── */}
+        {/* ── Channel bars + sticky pills — always visible ── */}
         <div style={{
           position: 'absolute', inset: 0,
-          opacity: hovered ? 1 : 0,
-          transition: 'opacity 0.15s',
-          pointerEvents: hovered ? 'auto' : 'none',
           display: 'flex', flexDirection: 'column',
           justifyContent: 'center',
           gap: 2,
@@ -556,14 +434,7 @@ export function AgencyTimeline({ clients, channels, actionPointMarkers, zoomIdx:
       const clientChannels = channels.filter(ch => ch.client_id === client.id);
       const clientAPs      = actionPointMarkers.filter(ap => ap.client_id === client.id);
 
-      let barStartMs: number | null = null;
-      let barEndMs:   number | null = null;
-      for (const ch of clientChannels) {
-        if (ch.start_date) { const ms = dateToMs(ch.start_date); if (barStartMs === null || ms < barStartMs) barStartMs = ms; }
-        if (ch.end_date)   { const ms = dateToMs(ch.end_date);   if (barEndMs   === null || ms > barEndMs)   barEndMs   = ms; }
-      }
-
-      return { client, clientAPs, clientChannels, barStartMs, barEndMs };
+      return { client, clientAPs, clientChannels };
     }),
     [clients, channels, actionPointMarkers]
   );
@@ -745,14 +616,12 @@ export function AgencyTimeline({ clients, channels, actionPointMarkers, zoomIdx:
           </div>
 
           {/* ── Client rows ── */}
-          {clientRows.map(({ client, clientAPs, clientChannels, barStartMs, barEndMs }) => (
+          {clientRows.map(({ client, clientAPs, clientChannels }) => (
             <ClientTimelineRow
               key={client.id}
               client={client}
               clientAPs={clientAPs}
               clientChannels={clientChannels}
-              barStartMs={barStartMs}
-              barEndMs={barEndMs}
               totalW={totalW}
               days={days}
               xForMs={xForMs}

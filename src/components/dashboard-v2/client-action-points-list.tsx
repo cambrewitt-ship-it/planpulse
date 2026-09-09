@@ -12,7 +12,7 @@ function fireConfetti(originX: number, originY: number) {
     canvas.height = window.innerHeight;
     const ctx = canvas.getContext('2d');
     if (!ctx) { canvas.remove(); return; }
-    const COLORS = ['#7A2E22', '#5C5450', '#8A8578', '#F5F0E8', '#D5D0C5', '#A0442A'];
+    const COLORS = ['#A0442A', '#5C5450', '#8A8578', '#FDFCF8', '#D5D0C5', '#4A7C59'];
     const pieces = Array.from({ length: 60 }, () => ({
       x: originX, y: originY,
       vx: (Math.random() - 0.5) * 10,
@@ -60,527 +60,459 @@ interface Props {
   onToggle: (id: string, completed: boolean) => void;
 }
 
-function daysFromToday(dateStr: string | null | undefined): number {
-  if (!dateStr) return Infinity;
+// ---------------------------------------------------------------------------
+// Design tokens — mirrors the agency "To Do" panel (src/components/agency/KanbanBoard.tsx)
+// ---------------------------------------------------------------------------
+const INK = '#1C1917';
+const MUTED = '#8A8578';
+const FAINT = '#B5B0A5';
+const BORDER = '#E8E4DC';
+const BORDER_SOFT = '#F0EDE6';
+const CARD_BG = '#FDFCF8';
+const HOVER_BG = '#F5F3EF';
+const RED = '#A0442A';
+const GREEN = '#4A7C59';
+
+const sansFont = "'DM Sans', system-ui, sans-serif";
+const headingFont = "'Inter', system-ui, sans-serif";
+
+function daysUntilDue(dateStr: string | null | undefined): number | null {
+  if (!dateStr) return null;
   const [y, m, d] = dateStr.split('-').map(Number);
   const date = new Date(y, m - 1, d);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  return Math.ceil((date.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  return Math.round((date.getTime() - today.getTime()) / 86400000);
 }
 
-function formatDueDate(dateStr: string | null | undefined): string {
-  if (!dateStr) return '';
-  const diff = daysFromToday(dateStr);
-  if (diff < 0) return `${Math.abs(diff)}d overdue`;
-  if (diff === 0) return 'Today';
-  if (diff === 1) return 'Tomorrow';
-  if (diff <= 7) return `${diff}d`;
-  const [y, m, d] = dateStr.split('-').map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
+// Row anatomy due-label/colour rules — matches KanbanBoard.tsx's dueMeta().
+function dueMeta(days: number | null): { label: string; color: string; weight: number } {
+  if (days === null) return { label: 'No date', color: FAINT, weight: 400 };
+  if (days < 0) return { label: `${-days}d overdue`, color: RED, weight: 500 };
+  if (days === 0) return { label: 'Today', color: '#B07030', weight: 500 };
+  if (days === 1) return { label: 'Tomorrow', color: '#5F5A50', weight: 400 };
+  if (days <= 2) return { label: `${days}d`, color: '#5F5A50', weight: 400 };
+  return { label: `${days}d`, color: MUTED, weight: 400 };
 }
 
-// Row-anatomy due colour rules, shared with the agency To Do panel.
-function dueDateColor(dateStr: string | null | undefined): string {
-  if (!dateStr) return FAINT;
-  const diff = daysFromToday(dateStr);
-  if (diff < 0) return '#A0442A';
-  if (diff === 0) return '#B07030';
-  if (diff <= 2) return '#5F5A50';
-  return '#8A8578';
+function categoryColor(category: ActionPoint['category']): string {
+  if (category === 'SET UP') return '#B07030';
+  if (category === 'HEALTH CHECK') return GREEN;
+  return '#7A5C8A';
 }
 
-function dueDateWeight(dateStr: string | null | undefined): number {
-  if (!dateStr) return 400;
-  const diff = daysFromToday(dateStr);
-  return diff <= 0 ? 500 : 400;
+interface DueSection {
+  key: string;
+  label: string;
+  color: string;
+  items: ActionPoint[];
 }
 
-// ---------------------------------------------------------------------------
-// Apple × Moleskine design tokens
-// ---------------------------------------------------------------------------
-const RED = 'oklch(42% 0.16 25)';
-const CARD_BG = 'oklch(98% 0.006 75)';
-const PAPER_BG = 'oklch(96% 0.009 75)';
-const INK = '#1C1917';
-const GRAPHITE = '#5C5450';
-const MUTED = '#8A8578';
-const FAINT = '#B5B0A5';
-const BORDER = 'oklch(89% 0.011 75)';
-const BORDER_SOFT = 'oklch(92% 0.009 75)';
-const WEEKEND = 'oklch(86% 0.011 75)';
+function buildDueSections(items: ActionPoint[]): DueSection[] {
+  const sortByDue = (a: ActionPoint, b: ActionPoint) => {
+    const da = daysUntilDue(a.due_date);
+    const db = daysUntilDue(b.due_date);
+    if (da === null && db === null) return 0;
+    if (da === null) return 1;
+    if (db === null) return -1;
+    return da - db;
+  };
+  const defs: { key: string; label: string; color: string; test: (d: number | null) => boolean }[] = [
+    { key: 'overdue', label: 'Overdue', color: RED, test: d => d !== null && d < 0 },
+    { key: 'today', label: 'Today', color: '#B07030', test: d => d === 0 },
+    { key: 'week', label: 'Next 7 days', color: '#4A6580', test: d => d !== null && d > 0 && d <= 7 },
+    { key: 'later', label: 'Later', color: '#C7C2B7', test: d => d !== null && d > 7 },
+    { key: 'none', label: 'No date', color: '#C7C2B7', test: d => d === null },
+  ];
+  return defs
+    .map(d => ({ key: d.key, label: d.label, color: d.color, items: items.filter(it => d.test(daysUntilDue(it.due_date))).sort(sortByDue) }))
+    .filter(s => s.items.length > 0);
+}
 
-const serifFont = "'Source Serif 4', Georgia, serif";
-const sansFont = "-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif";
-const monoFont = "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace";
-
-const dotGrid: React.CSSProperties = {
-  backgroundImage: 'radial-gradient(circle, oklch(55% 0.02 75 / 0.14) 1px, transparent 1px)',
-  backgroundSize: '22px 22px',
-};
-
-function Tag({ children, accent }: { children: React.ReactNode; accent?: boolean }) {
+function Tag({ children }: { children: React.ReactNode }) {
   return (
     <span style={{
       fontSize: 10.5,
       padding: '1px 6px',
       borderRadius: 99,
-      border: `1px solid ${accent ? RED : BORDER}`,
-      color: accent ? RED : GRAPHITE,
-      background: 'transparent',
-      fontFamily: monoFont,
+      border: `1px solid ${BORDER}`,
+      color: MUTED,
+      fontFamily: sansFont,
       textTransform: 'uppercase',
       letterSpacing: '0.04em',
       whiteSpace: 'nowrap',
+      flexShrink: 0,
     }}>
       {children}
     </span>
   );
 }
 
-function CountBadge({ n, accent }: { n: number; accent?: boolean }) {
-  return (
-    <span style={{
-      marginLeft: 5,
-      background: accent ? RED : BORDER_SOFT,
-      color: accent ? CARD_BG : GRAPHITE,
-      borderRadius: 99,
-      padding: '1px 6px',
-      fontSize: 10.5,
-      fontFamily: monoFont,
-    }}>
-      {n}
-    </span>
-  );
-}
-
 export default function ClientActionPointsList({ actionPoints, onToggle }: Props) {
-  const [viewMode, setViewMode] = useState<'list' | 'gantt'>('list');
-  const [listCompletedOpen, setListCompletedOpen] = useState(false);
+  const [view, setView] = useState<'list' | 'timeline'>('list');
+  const [completedOpen, setCompletedOpen] = useState(false);
 
   const incomplete = useMemo(() => actionPoints.filter(ap => !ap.completed), [actionPoints]);
+  const completed = useMemo(() => actionPoints.filter(ap => ap.completed), [actionPoints]);
+
+  const overdueCount = useMemo(() => incomplete.filter(ap => {
+    const d = daysUntilDue(ap.due_date);
+    return d !== null && d < 0;
+  }).length, [incomplete]);
+  const todayCount = useMemo(() => incomplete.filter(ap => daysUntilDue(ap.due_date) === 0).length, [incomplete]);
+
+  const viewTab = (v: 'list' | 'timeline', label: string) => (
+    <button
+      key={v}
+      type="button"
+      onClick={() => setView(v)}
+      style={{
+        border: 'none', background: 'transparent', cursor: 'pointer',
+        padding: '6px 12px', fontSize: 13, fontFamily: sansFont,
+        color: view === v ? INK : MUTED,
+        borderBottom: `2px solid ${view === v ? INK : 'transparent'}`,
+        marginBottom: -1,
+      }}
+    >{label}</button>
+  );
 
   return (
     <>
-    <style>{`.av2-ap-row:hover { background: ${PAPER_BG}; }`}</style>
+    <style>{`
+      @keyframes cap-strike { from { width: 0%; } to { width: 100%; } }
+      .cap-row:hover { background: ${HOVER_BG}; }
+    `}</style>
     <div style={{
       display: 'flex',
       flexDirection: 'column',
       background: CARD_BG,
-      ...dotGrid,
       borderRadius: '0 22px 22px 0',
-      border: `1px solid ${BORDER}`,
-      boxShadow: '0 10px 26px -14px oklch(45% 0.03 75 / 0.4)',
+      border: '0.5px solid #D8D4CE',
+      boxShadow: '0 2px 6px rgba(0,0,0,0.07)',
       overflow: 'hidden',
       fontFamily: sansFont,
       height: '100%',
       position: 'relative',
     }}>
-      {/* Margin rule — thin red notebook-page margin, inset from the left edge */}
-      <div style={{ position: 'absolute', left: 27, top: 0, bottom: 0, width: 1.5, background: RED, opacity: 0.5, zIndex: 1, pointerEvents: 'none' }} />
+      {/* Margin rule — thin red notebook-page margin, inset from the left edge; the flip-card
+          wrapper (dashboard page.tsx) shows this through its 32px "peek" gap, so it stays. */}
+      <div style={{ position: 'absolute', left: 27, top: 0, bottom: 0, width: 1.5, background: RED, opacity: 0.45, zIndex: 1, pointerEvents: 'none' }} />
 
       {/* Header */}
-      <div style={{ padding: '13px 16px 10px 40px', borderBottom: `1px solid ${BORDER_SOFT}`, flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
-          <div style={{ fontSize: 15, fontWeight: 600, color: INK, fontFamily: serifFont, minWidth: 0, display: 'flex', alignItems: 'baseline' }}>
-            Action Points
-            {incomplete.length > 0 && <CountBadge n={incomplete.length} accent />}
+      <div style={{ padding: '13px 16px 8px 40px', borderBottom: `1px solid ${BORDER}`, flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, minWidth: 0 }}>
+            <div style={{ fontFamily: headingFont, fontWeight: 700, fontSize: 16, color: INK }}>To Do</div>
+            <div style={{ fontSize: 11, color: MUTED, whiteSpace: 'nowrap' }}>{overdueCount} overdue · {todayCount} today</div>
           </div>
-          <div style={{ display: 'flex', gap: 3, alignItems: 'center', flexWrap: 'wrap', minWidth: 0, flex: 1, justifyContent: 'flex-end', overflowX: 'auto' }}>
-            <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', minWidth: 0, flexShrink: 0 }}>
-              {(['list', 'gantt'] as const).map(mode => (
-                <button
-                  key={mode}
-                  onClick={() => setViewMode(mode)}
-                  style={{
-                    fontSize: 12,
-                    padding: '2px 7px',
-                    borderRadius: 99,
-                    border: '1px solid',
-                    borderColor: viewMode === mode ? INK : BORDER,
-                    background: viewMode === mode ? INK : 'transparent',
-                    color: viewMode === mode ? CARD_BG : MUTED,
-                    cursor: 'pointer',
-                    fontFamily: sansFont,
-                    lineHeight: 1.5,
-                    whiteSpace: 'nowrap',
-                    flexShrink: 0,
-                  }}
-                >
-                  {mode === 'list' ? 'List' : 'Gantt'}
-                </button>
-              ))}
-            </div>
+          <div style={{ display: 'flex', gap: 4 }}>
+            {viewTab('list', 'List')}
+            {viewTab('timeline', 'Timeline')}
           </div>
         </div>
       </div>
 
-      {viewMode === 'list' ? (
-        /* List View */
-        <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '4px 16px 8px 40px', display: 'flex', flexDirection: 'column' }}>
+      {view === 'list' ? (
+        <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '4px 16px 10px 40px', display: 'flex', flexDirection: 'column' }}>
           {actionPoints.length === 0 ? (
-            <div style={{ padding: '12px 10px', fontSize: 13, color: FAINT, fontFamily: serifFont, fontStyle: 'italic', textAlign: 'center' }}>
+            <div style={{ padding: '14px 10px', fontSize: 13, color: MUTED, fontFamily: sansFont, textAlign: 'center' }}>
               No action points
             </div>
-          ) : (() => {
-            const sortByDue = (a: ActionPoint, b: ActionPoint) => daysFromToday(a.due_date) - daysFromToday(b.due_date);
-            const listIncomplete = [...actionPoints.filter(ap => !ap.completed)].sort(sortByDue);
-            const listCompleted = [...actionPoints.filter(ap => ap.completed)].sort(sortByDue);
-            return (
-              <>
-                {listIncomplete.length === 0 && (
-                  <div style={{ padding: '12px 10px', fontSize: 13, color: FAINT, fontFamily: serifFont, fontStyle: 'italic', textAlign: 'center' }}>
-                    All done!
+          ) : (
+            <>
+              {incomplete.length === 0 ? (
+                <div style={{ padding: '14px 10px', fontSize: 13, color: MUTED, fontFamily: sansFont, textAlign: 'center' }}>
+                  All done!
+                </div>
+              ) : buildDueSections(incomplete).map(section => (
+                <div key={section.key} style={{ paddingTop: 14 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 9, paddingBottom: 5 }}>
+                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: section.color, flexShrink: 0 }} />
+                    <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase', color: INK, fontFamily: sansFont }}>{section.label}</div>
+                    <div style={{ fontSize: 11, color: FAINT, fontFamily: sansFont }}>{section.items.length}</div>
+                    <div style={{ flex: 1, height: 1, background: BORDER }} />
                   </div>
-                )}
-                {listIncomplete.map((item, idx) => (
-                  <ListActionPointRow key={item.id} item={item} onToggle={onToggle} isLast={idx === listIncomplete.length - 1 && listCompleted.length === 0} />
-                ))}
-                {listCompleted.length > 0 && (
-                  <div style={{ marginTop: 6, flexShrink: 0 }}>
-                    <button
-                      onClick={() => setListCompletedOpen(v => !v)}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 5,
-                        fontSize: 12, color: FAINT, background: 'none', border: 'none',
-                        cursor: 'pointer', padding: '4px 2px', width: '100%', textAlign: 'left',
-                        textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: sansFont,
-                      }}
-                    >
-                      <svg width="8" height="8" viewBox="0 0 8 8" style={{ transform: listCompletedOpen ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s', flexShrink: 0 }}>
-                        <path d="M2 1.5L5.5 4 2 6.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
-                      </svg>
-                      Completed ({listCompleted.length})
-                    </button>
-                    {listCompletedOpen && listCompleted.map((item, idx) => (
-                      <ListActionPointRow key={item.id} item={item} onToggle={onToggle} isLast={idx === listCompleted.length - 1} />
-                    ))}
-                  </div>
-                )}
-              </>
-            );
-          })()}
+                  {section.items.map(item => (
+                    <ActionPointRow key={item.id} item={item} onToggle={onToggle} />
+                  ))}
+                </div>
+              ))}
+
+              {completed.length > 0 && (
+                <div style={{ marginTop: 10, flexShrink: 0 }}>
+                  <button
+                    onClick={() => setCompletedOpen(v => !v)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 5,
+                      fontSize: 11, color: FAINT, background: 'none', border: 'none',
+                      cursor: 'pointer', padding: '4px 2px', width: '100%', textAlign: 'left',
+                      textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: sansFont, fontWeight: 700,
+                    }}
+                  >
+                    <svg width="8" height="8" viewBox="0 0 8 8" style={{ transform: completedOpen ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s', flexShrink: 0 }}>
+                      <path d="M2 1.5L5.5 4 2 6.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+                    </svg>
+                    Completed ({completed.length})
+                  </button>
+                  {completedOpen && completed.map(item => (
+                    <ActionPointRow key={item.id} item={item} onToggle={onToggle} />
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      ) : incomplete.length === 0 ? (
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, color: MUTED, fontFamily: sansFont, textAlign: 'center', padding: '0 24px' }}>
+          {actionPoints.length === 0 ? 'No action points' : 'All done!'}
         </div>
       ) : (
-        /* Gantt View */
-        <GanttViewActionPoints actionPoints={actionPoints} onToggle={onToggle} />
+        <TimelineViewActionPoints actionPoints={incomplete} onToggle={onToggle} />
       )}
     </div>
     </>
   );
 }
 
-function ListActionPointRow({ item, onToggle, isLast }: { item: ActionPoint; onToggle: (id: string, c: boolean) => void; isLast?: boolean }) {
+function ActionPointRow({ item, onToggle }: { item: ActionPoint; onToggle: (id: string, c: boolean) => void }) {
   const [isCompleting, setIsCompleting] = useState(false);
-  const [localCompleted, setLocalCompleted] = useState(false);
-  const effectiveCompleted = item.completed || localCompleted;
+  const effectiveCompleted = item.completed || isCompleting;
+  const due = dueMeta(daysUntilDue(item.due_date));
 
   const handleClick = (e: React.MouseEvent) => {
-    if (!effectiveCompleted && !isCompleting) {
-      fireConfetti(e.clientX, e.clientY);
-      setIsCompleting(true);
-      setTimeout(() => {
-        setIsCompleting(false);
-        setLocalCompleted(true);
-        onToggle(item.id, true);
-      }, 400);
-    } else if (effectiveCompleted) {
-      setLocalCompleted(false);
+    e.stopPropagation();
+    if (item.completed) {
       onToggle(item.id, false);
+      return;
     }
+    if (isCompleting) return;
+    fireConfetti(e.clientX, e.clientY);
+    setIsCompleting(true);
+    setTimeout(() => onToggle(item.id, true), 900);
   };
 
   return (
-    <div className="av2-ap-row" style={{
-      display: 'flex',
-      alignItems: 'center',
-      gap: 9,
-      height: 38,
-      borderBottom: isLast ? 'none' : `1px solid ${BORDER_SOFT}`,
-      opacity: effectiveCompleted || isCompleting ? 0.5 : 1,
-      transition: 'opacity 0.4s',
-      flexShrink: 0,
-      borderRadius: 4,
+    <div style={{ display: 'grid', gridTemplateRows: isCompleting ? '0fr' : '1fr', transition: 'grid-template-rows 0.45s ease 0.35s', overflow: 'hidden' }}>
+    <div style={{ overflow: 'hidden' }}>
+    <div className="cap-row" style={{
+      display: 'flex', alignItems: 'center', gap: 9, height: 38, borderRadius: 4,
+      opacity: isCompleting ? 0.4 : 1, transition: 'opacity 0.3s ease',
     }}>
-      {/* Ring checkbox — fills red with white check when complete */}
-      <div
+      <button
+        type="button"
         onClick={handleClick}
+        title={effectiveCompleted ? 'Mark incomplete' : 'Mark complete'}
         style={{
-          width: 18,
-          height: 18,
-          borderRadius: '50%',
-          flexShrink: 0,
-          border: `1.5px solid ${effectiveCompleted || isCompleting ? RED : BORDER}`,
-          background: effectiveCompleted || isCompleting ? RED : 'transparent',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          cursor: 'pointer',
+          width: 18, height: 18, borderRadius: '50%', flexShrink: 0, padding: 0,
+          border: effectiveCompleted ? `1.5px solid ${GREEN}` : '1.5px solid #C7C2B7',
+          background: effectiveCompleted ? GREEN : 'transparent',
+          cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
           transition: 'background 0.15s, border-color 0.15s',
         }}
       >
-        {(effectiveCompleted || isCompleting) && (
-          <svg width="9" height="9" viewBox="0 0 8 8" fill="none">
-            <path d="M1.5 4L3 5.5L6.5 2" stroke={CARD_BG} strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        )}
-      </div>
+        {effectiveCompleted && <span style={{ color: '#fff', fontSize: 10, lineHeight: 1, fontWeight: 700 }}>✓</span>}
+      </button>
 
-      {/* Title, single line, ellipsis — stage/channel no longer print on every row */}
       <div style={{
-        flex: 1,
-        minWidth: 0,
-        fontSize: 14,
-        lineHeight: 1.4,
-        color: effectiveCompleted || isCompleting ? FAINT : INK,
-        textDecoration: effectiveCompleted ? 'line-through' : 'none',
-        whiteSpace: 'nowrap',
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
+        flex: 1, minWidth: 0, position: 'relative',
+        fontSize: 14, lineHeight: 1.4, color: effectiveCompleted ? FAINT : INK,
+        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
         fontFamily: sansFont,
       }}>
         {item.text}
+        {isCompleting && <span style={{ position: 'absolute', left: 0, top: '50%', height: '1.5px', background: '#6B7280', width: 0, animation: 'cap-strike 0.35s ease forwards' }} />}
       </div>
 
-      {/* Due, right-aligned fixed column */}
+      {item.channel_type && <Tag>{item.channel_type}</Tag>}
+
       <div style={{
         width: 86, flexShrink: 0, textAlign: 'right',
-        fontSize: 12, fontFamily: sansFont,
-        color: item.due_date ? dueDateColor(item.due_date) : FAINT,
-        fontWeight: item.due_date ? dueDateWeight(item.due_date) : 400,
-      }}>
-        {item.due_date ? formatDueDate(item.due_date) : ''}
-      </div>
+        fontSize: 12, color: effectiveCompleted ? FAINT : due.color, fontWeight: effectiveCompleted ? 400 : due.weight,
+        fontFamily: sansFont,
+      }}>{due.label}</div>
+    </div>
+    </div>
     </div>
   );
 }
 
-function GanttViewActionPoints({ actionPoints, onToggle }: { actionPoints: ActionPoint[]; onToggle: (id: string, c: boolean) => void }) {
+function TimelineCheckbox({ item, onToggle }: { item: ActionPoint; onToggle: (id: string, c: boolean) => void }) {
+  const [isCompleting, setIsCompleting] = useState(false);
+  const effectiveCompleted = item.completed || isCompleting;
+
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (item.completed) {
+      onToggle(item.id, false);
+      return;
+    }
+    if (isCompleting) return;
+    fireConfetti(e.clientX, e.clientY);
+    setIsCompleting(true);
+    setTimeout(() => onToggle(item.id, true), 900);
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      style={{
+        width: 14, height: 14, borderRadius: '50%', flexShrink: 0, padding: 0,
+        border: effectiveCompleted ? `1.5px solid ${GREEN}` : '1.5px solid #C7C2B7',
+        background: effectiveCompleted ? GREEN : 'transparent',
+        cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        transition: 'background 0.15s, border-color 0.15s',
+      }}
+    >
+      {effectiveCompleted && <span style={{ color: '#fff', fontSize: 8, lineHeight: 1, fontWeight: 700 }}>✓</span>}
+    </button>
+  );
+}
+
+function TimelineRow({ item, days, color, overdue, onToggle, rowWidth }: {
+  item: ActionPoint & { days: number };
+  days: { offset: number; isToday: boolean }[];
+  color: string;
+  overdue: boolean;
+  onToggle: (id: string, c: boolean) => void;
+  rowWidth: number;
+}) {
+  const [isCompleting, setIsCompleting] = useState(false);
+  const effectiveCompleted = item.completed || isCompleting;
+
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (item.completed) {
+      onToggle(item.id, false);
+      return;
+    }
+    if (isCompleting) return;
+    fireConfetti(e.clientX, e.clientY);
+    setIsCompleting(true);
+    setTimeout(() => onToggle(item.id, true), 900);
+  };
+
+  return (
+    <div style={{ display: 'grid', gridTemplateRows: isCompleting ? '0fr' : '1fr', transition: 'grid-template-rows 0.45s ease 0.35s', overflow: 'hidden' }}>
+    <div style={{ overflow: 'hidden' }}>
+    <div style={{ display: 'flex', alignItems: 'center', height: 40, borderBottom: `1px solid ${BORDER_SOFT}`, minWidth: rowWidth, opacity: isCompleting ? 0.4 : 1, transition: 'opacity 0.3s ease' }}>
+      <div style={{ width: 230, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, paddingRight: 12 }}>
+        <button
+          type="button"
+          onClick={handleClick}
+          style={{
+            width: 14, height: 14, borderRadius: '50%', flexShrink: 0, padding: 0,
+            border: effectiveCompleted ? `1.5px solid ${GREEN}` : '1.5px solid #C7C2B7',
+            background: effectiveCompleted ? GREEN : 'transparent',
+            cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          {effectiveCompleted && <span style={{ color: '#fff', fontSize: 8, lineHeight: 1, fontWeight: 700 }}>✓</span>}
+        </button>
+        <div style={{ fontSize: 12, color: effectiveCompleted ? FAINT : INK, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textDecoration: effectiveCompleted ? 'line-through' : 'none' }}>{item.text}</div>
+      </div>
+      <div style={{
+        width: 64, flexShrink: 0, marginRight: 4,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', height: 26,
+        borderRadius: 3,
+        background: overdue ? color : 'transparent',
+        color: CARD_BG, fontSize: 11, fontWeight: 500,
+      }}>{overdue ? `${-item.days}d` : ''}</div>
+      <div style={{ flex: 1, display: 'flex' }}>
+        {days.map(d => {
+          const hit = !overdue && item.days === d.offset;
+          return (
+            <div key={d.offset} style={{ flex: 1, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center', borderLeft: `1px solid ${d.isToday ? '#D5D0C5' : BORDER_SOFT}` }}>
+              {hit && (
+                <div style={{ margin: '0 2px', width: '100%', height: '100%', borderRadius: 3, background: color, color: CARD_BG, fontSize: 10, fontWeight: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                  {item.channel_type || item.category}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+    </div>
+    </div>
+  );
+}
+
+function TimelineViewActionPoints({ actionPoints, onToggle }: { actionPoints: ActionPoint[]; onToggle: (id: string, c: boolean) => void }) {
+  const WINDOW = 8; // today + next 7 days
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const todayMs = today.getTime();
 
-  // Calculate day range
-  const dueDays = actionPoints
+  const days = useMemo(() => Array.from({ length: WINDOW }, (_, i) => {
+    const d = new Date(todayMs + i * 86400000);
+    return {
+      offset: i,
+      dow: d.toLocaleDateString('en-NZ', { weekday: 'short' }).toUpperCase(),
+      num: d.getDate(),
+      isToday: i === 0,
+      isWeekend: d.getDay() === 0 || d.getDay() === 6,
+    };
+  }), [todayMs]);
+
+  const withDue = useMemo(() => actionPoints
     .filter(ap => ap.due_date)
-    .map(ap => {
-      const [y, m, d] = (ap.due_date || '').split('-').map(Number);
-      const date = new Date(y, m - 1, d);
-      date.setHours(0, 0, 0, 0);
-      return Math.round((date.getTime() - todayMs) / 86400000);
-    });
+    .map(ap => ({ ...ap, days: daysUntilDue(ap.due_date) as number }))
+    .sort((a, b) => a.days - b.days), [actionPoints]);
 
-  const startDay = dueDays.length ? Math.min(-2, Math.min(...dueDays)) : -2;
-  const endDay = dueDays.length ? Math.max(14, Math.max(...dueDays) + 3) : 14;
-  const dayCount = endDay - startDay + 1;
-  const DAY_W = 28;
-  const ROW_H = 48;
-  const totalW = dayCount * DAY_W;
-
-  // Group items by due date
-  const withDue = useMemo(() => {
-    return actionPoints
-      .filter(ap => ap.due_date)
-      .sort((a, b) => daysFromToday(a.due_date) - daysFromToday(b.due_date))
-      .map(ap => {
-        const [y, m, d] = (ap.due_date || '').split('-').map(Number);
-        const date = new Date(y, m - 1, d);
-        date.setHours(0, 0, 0, 0);
-        const daysUntil = Math.round((date.getTime() - todayMs) / 86400000);
-        return { ...ap, daysUntil };
-      });
-  }, [actionPoints]);
-
-  const noDue = useMemo(() => actionPoints.filter(ap => !ap.due_date), [actionPoints]);
-
-  // Compute month spans
-  const monthSpans = useMemo(() => {
-    const spans: Array<{ label: string; count: number }> = [];
-    for (let i = 0; i < dayCount; i++) {
-      const d = new Date(todayMs + (startDay + i) * 86400000);
-      const label = d.toLocaleDateString('en-NZ', { month: 'short', year: '2-digit' });
-      if (!spans.length || spans[spans.length - 1].label !== label) {
-        spans.push({ label, count: 1 });
-      } else {
-        spans[spans.length - 1].count++;
-      }
-    }
-    return spans;
-  }, [dayCount, startDay]);
+  const inWindow = withDue.filter(ap => ap.days < WINDOW);
+  const noDue = actionPoints.filter(ap => !ap.due_date);
+  const rowWidth = 230 + 64 + WINDOW * 60;
 
   return (
-    <div style={{ flex: 1, overflow: 'hidden', fontFamily: sansFont, display: 'flex', flexDirection: 'column', paddingLeft: 32 }}>
-      <div style={{ overflowX: 'auto', overflowY: 'auto', flex: 1 }}>
-        <div style={{ minWidth: totalW }}>
-          {/* Month row */}
-          <div style={{ display: 'flex', position: 'sticky', top: 0, zIndex: 3, background: CARD_BG }}>
-            {monthSpans.map((span, i) => (
-              <div key={i} style={{
-                width: span.count * DAY_W, flexShrink: 0,
-                padding: '4px 6px', fontSize: 11, fontWeight: 600,
-                color: MUTED, textTransform: 'uppercase', letterSpacing: '0.08em',
-                borderLeft: i === 0 ? 'none' : `1px solid ${BORDER_SOFT}`,
-                borderBottom: `1px solid ${BORDER_SOFT}`,
-                whiteSpace: 'nowrap', overflow: 'hidden',
-              }}>
-                {span.label}
+    <div style={{ flex: 1, overflow: 'hidden', fontFamily: sansFont, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ overflowX: 'auto', overflowY: 'auto', flex: 1, padding: '4px 16px 10px 40px' }}>
+        {/* Day header */}
+        <div style={{ display: 'flex', alignItems: 'stretch', borderBottom: `1px solid ${BORDER}`, paddingBottom: 7, minWidth: rowWidth }}>
+          <div style={{ width: 230, flexShrink: 0 }} />
+          <div style={{ width: 64, flexShrink: 0, marginRight: 4, textAlign: 'center', fontSize: 10, letterSpacing: '0.06em', color: RED, paddingTop: 3 }}>OVERDUE</div>
+          <div style={{ flex: 1, display: 'flex' }}>
+            {days.map(d => (
+              <div key={d.offset} style={{ flex: 1, textAlign: 'center', fontSize: 10, color: d.isToday ? INK : d.isWeekend ? '#C7C2B7' : MUTED, fontWeight: d.isToday ? 700 : 400 }}>
+                <div style={{ letterSpacing: '0.06em' }}>{d.dow}</div>
+                <div style={{ fontSize: 12, marginTop: 2 }}>{d.num}</div>
               </div>
             ))}
           </div>
-
-          {/* Day labels row */}
-          <div style={{ display: 'flex', position: 'sticky', top: 20, zIndex: 2, background: CARD_BG, borderBottom: `1px solid ${BORDER_SOFT}` }}>
-            {Array.from({ length: dayCount }, (_, i) => {
-              const offset = startDay + i;
-              const d = new Date(todayMs + offset * 86400000);
-              const isToday = offset === 0;
-              const isWeekend = d.getDay() === 0 || d.getDay() === 6;
-              return (
-                <div key={i} style={{
-                  width: DAY_W, flexShrink: 0, textAlign: 'center', padding: '3px 0',
-                  fontSize: 11, fontWeight: isToday ? 600 : 400,
-                  color: isToday ? RED : isWeekend ? WEEKEND : MUTED,
-                  background: isToday ? 'oklch(42% 0.16 25 / 0.06)' : 'transparent',
-                  borderLeft: isToday ? '1px solid oklch(42% 0.16 25 / 0.3)' : `1px solid ${BORDER_SOFT}`,
-                  fontFamily: monoFont,
-                }}>
-                  {isToday ? '▼' : `${d.getDate()}`}
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Items with due dates */}
-          {withDue.map(card => {
-            const dotX = (card.daysUntil - startDay) * DAY_W;
-            const dotColor = card.due_date ? dueDateColor(card.due_date) : FAINT;
-
-            return (
-              <div key={card.id} style={{ position: 'relative', height: ROW_H, borderBottom: `1px solid ${BORDER_SOFT}` }}>
-                {/* Grid columns */}
-                <div style={{ position: 'absolute', inset: 0, display: 'flex', pointerEvents: 'none' }}>
-                  {Array.from({ length: dayCount }, (_, i) => {
-                    const offset = startDay + i;
-                    const d = new Date(todayMs + offset * 86400000);
-                    const isToday = offset === 0;
-                    const isWeekend = d.getDay() === 0 || d.getDay() === 6;
-                    return (
-                      <div key={i} style={{
-                        width: DAY_W, height: '100%', flexShrink: 0,
-                        background: isToday ? 'oklch(42% 0.16 25 / 0.05)' : isWeekend ? 'oklch(50% 0.01 75 / 0.03)' : 'transparent',
-                        borderLeft: isToday ? '1px solid oklch(42% 0.16 25 / 0.2)' : `1px solid ${BORDER_SOFT}`,
-                      }} />
-                    );
-                  })}
-                </div>
-
-                {/* Item */}
-                <div style={{
-                  position: 'absolute', left: dotX, top: '50%', transform: 'translateY(-50%)',
-                  display: 'flex', alignItems: 'center', gap: 3, zIndex: 1, pointerEvents: 'auto',
-                }}>
-                  {/* Checkbox */}
-                  <GanttItemCheckbox item={card} onToggle={onToggle} />
-                  {/* Dot + text */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', maxWidth: 220, paddingRight: 4 }}>
-                    <div style={{
-                      width: 10, height: 10, borderRadius: '50%', flexShrink: 0,
-                      background: dotColor, boxShadow: `0 0 0 3px ${dotColor}22`,
-                    }} />
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 14, lineHeight: 1.3, color: INK, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: 500 }}>
-                        {card.text}
-                      </div>
-                      {card.channel_type && (
-                        <div style={{ fontSize: 12, color: FAINT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 2 }}>
-                          {card.channel_type}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
         </div>
+
+        {/* Rows */}
+        {inWindow.map(item => (
+          <TimelineRow
+            key={item.id}
+            item={item}
+            days={days}
+            color={categoryColor(item.category)}
+            overdue={item.days < 0}
+            onToggle={onToggle}
+            rowWidth={rowWidth}
+          />
+        ))}
+
+        {inWindow.length === 0 && noDue.length === 0 && (
+          <div style={{ padding: '16px 8px', fontSize: 11, color: FAINT, textAlign: 'center' }}>No action points</div>
+        )}
       </div>
 
-      {/* No-due-date items — rendered outside the horizontally-scrolling day-grid so
-          text isn't clamped to the (often much narrower) date-range width. */}
+      {/* No-due-date items — kept outside the horizontally-scrolling day-grid so text isn't clamped */}
       {noDue.length > 0 && (
-        <div style={{ flexShrink: 0, maxHeight: '40%', overflowY: 'auto' }}>
-          <div style={{ padding: '6px 8px', borderTop: `1px solid ${BORDER_SOFT}`, background: PAPER_BG }}>
-            <div style={{ fontSize: 11, color: FAINT, textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600 }}>
-              No due date
-            </div>
+        <div style={{ flexShrink: 0, maxHeight: '35%', overflowY: 'auto', padding: '0 16px 8px 40px' }}>
+          <div style={{ padding: '8px 0 4px', borderTop: `1px solid ${BORDER}` }}>
+            <div style={{ fontSize: 11, color: FAINT, textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700 }}>No due date</div>
           </div>
-          {noDue.map(card => (
-            <div key={card.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 6, padding: '6px 8px', borderBottom: `1px solid ${BORDER_SOFT}`, background: PAPER_BG }}>
-              <GanttItemCheckbox item={card} onToggle={onToggle} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 12, lineHeight: 1.3, color: INK, fontWeight: 500, wordBreak: 'break-word' }}>
-                  {card.text}
-                </div>
-                {card.channel_type && (
-                  <span style={{ marginTop: 2, display: 'inline-block' }}><Tag>{card.channel_type}</Tag></span>
-                )}
-              </div>
+          {noDue.map(item => (
+            <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: `1px solid ${BORDER_SOFT}` }}>
+              <TimelineCheckbox item={item} onToggle={onToggle} />
+              <div style={{ flex: 1, minWidth: 0, fontSize: 13, color: INK, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.text}</div>
+              {item.channel_type && <Tag>{item.channel_type}</Tag>}
             </div>
           ))}
         </div>
-      )}
-
-      {actionPoints.length === 0 && (
-        <div style={{ padding: '12px', fontSize: 13, color: FAINT, fontFamily: serifFont, fontStyle: 'italic', textAlign: 'center' }}>
-          No action points
-        </div>
-      )}
-    </div>
-  );
-}
-
-function GanttItemCheckbox({ item, onToggle }: { item: ActionPoint; onToggle: (id: string, c: boolean) => void }) {
-  const [isCompleting, setIsCompleting] = useState(false);
-  const [localCompleted, setLocalCompleted] = useState(false);
-  const effectiveCompleted = item.completed || localCompleted;
-
-  const handleClick = (e: React.MouseEvent) => {
-    if (!effectiveCompleted && !isCompleting) {
-      fireConfetti(e.clientX, e.clientY);
-      setIsCompleting(true);
-      setTimeout(() => {
-        setIsCompleting(false);
-        setLocalCompleted(true);
-        onToggle(item.id, true);
-      }, 400);
-    } else if (effectiveCompleted) {
-      setLocalCompleted(false);
-      onToggle(item.id, false);
-    }
-  };
-
-  return (
-    <div
-      onClick={handleClick}
-      style={{
-        marginTop: 1,
-        width: 13,
-        height: 13,
-        borderRadius: '50%',
-        flexShrink: 0,
-        border: `1.5px solid ${effectiveCompleted || isCompleting ? RED : BORDER}`,
-        background: effectiveCompleted || isCompleting ? RED : 'transparent',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        cursor: 'pointer',
-        transition: 'background 0.15s, border-color 0.15s',
-      }}
-    >
-      {(effectiveCompleted || isCompleting) && (
-        <svg width="7" height="7" viewBox="0 0 8 8" fill="none">
-          <path d="M1.5 4L3 5.5L6.5 2" stroke={CARD_BG} strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
       )}
     </div>
   );

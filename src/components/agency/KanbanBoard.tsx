@@ -303,11 +303,10 @@ function BoardCardContent({ card }: { card: KanbanCard }) {
 interface BoardCardProps {
   card: KanbanCard;
   isCompleting: boolean;
-  isFlashing: boolean;
   onOpenPopup: (card: KanbanCard, x: number, y: number) => void;
 }
 
-function BoardCard({ card, isCompleting, isFlashing, onOpenPopup }: BoardCardProps) {
+function BoardCard({ card, isCompleting, onOpenPopup }: BoardCardProps) {
   const isPending = card.id.startsWith('temp-');
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: cardKey(card), disabled: isPending });
   return (
@@ -323,7 +322,7 @@ function BoardCard({ card, isCompleting, isFlashing, onOpenPopup }: BoardCardPro
         borderRadius: 4, padding: '10px 11px', cursor: isPending ? 'default' : 'grab',
         display: 'flex', flexDirection: 'column', gap: 8,
         opacity: isDragging ? 0.3 : isCompleting ? 0.4 : isPending ? 0.55 : 1,
-        animation: isFlashing ? 'aiFlash 2s ease-out' : isPending ? 'pendingPulse 1.1s ease-in-out infinite' : undefined,
+        animation: isPending ? 'pendingPulse 1.1s ease-in-out infinite' : undefined,
         touchAction: 'none',
       }}
     >
@@ -338,7 +337,6 @@ interface BoardColumnProps {
   col: { key: BoardStatus; color: string };
   cards: KanbanCard[];
   completingIds: Set<string>;
-  flashingIds: Set<string>;
   ck: (c: KanbanCard) => string;
   onOpenPopup: (card: KanbanCard, x: number, y: number) => void;
   isAdding: boolean;
@@ -349,7 +347,7 @@ interface BoardColumnProps {
   onCancelAdd: () => void;
 }
 
-function BoardColumn({ col, cards, completingIds, flashingIds, ck, onOpenPopup, isAdding, addText, onAddTextChange, onStartAdd, onCommitAdd, onCancelAdd }: BoardColumnProps) {
+function BoardColumn({ col, cards, completingIds, ck, onOpenPopup, isAdding, addText, onAddTextChange, onStartAdd, onCommitAdd, onCancelAdd }: BoardColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id: col.key });
   return (
     <div ref={setNodeRef} style={{ width: 236, flexShrink: 0, background: isOver ? '#E8E4DC' : '#F0EDE6', borderRadius: 5, padding: 9, display: 'flex', flexDirection: 'column', gap: 7, transition: 'background 0.12s' }}>
@@ -364,7 +362,6 @@ function BoardColumn({ col, cards, completingIds, flashingIds, ck, onOpenPopup, 
           key={cardKey(card)}
           card={card}
           isCompleting={completingIds.has(ck(card))}
-          isFlashing={flashingIds.has(card.id)}
           onOpenPopup={onOpenPopup}
         />
       ))}
@@ -988,9 +985,6 @@ export function KanbanBoard(
   // reappear between animation end and the next actionPointClients refresh.
   const locallyCompletedIdsRef = useRef<Set<string>>(new Set());
 
-  // Flash/highlight newly AI-created items
-  const [flashingIds, setFlashingIds] = useState<Set<string>>(new Set());
-
   // Listen for AI write actions and trigger animations
   useEffect(() => {
     const handler = (e: Event) => {
@@ -1010,16 +1004,8 @@ export function KanbanBoard(
       }
 
       if (tool === 'create_action_point') {
-        const newId = data.action_point?.id;
-        // Refresh data first, then highlight the new card
         setTimeout(() => {
           onActionPointCompleted?.();
-          if (newId) {
-            setTimeout(() => {
-              setFlashingIds(prev => new Set(prev).add(newId));
-              setTimeout(() => setFlashingIds(prev => { const n = new Set(prev); n.delete(newId); return n; }), 2000);
-            }, 400); // slight delay so card is rendered before highlight
-          }
         }, 200);
       }
     };
@@ -1433,11 +1419,6 @@ export function KanbanBoard(
         from { width: 0%; }
         to   { width: 100%; }
       }
-      @keyframes aiFlash {
-        0%   { box-shadow: inset 0 0 0 2px rgba(74,124,89,0.7), 0 0 12px rgba(74,124,89,0.35); }
-        60%  { box-shadow: inset 0 0 0 2px rgba(74,124,89,0.3), 0 0 6px rgba(74,124,89,0.15); }
-        100% { box-shadow: none; }
-      }
       @keyframes pendingPulse {
         0%, 100% { opacity: 0.5; }
         50%      { opacity: 0.85; }
@@ -1676,7 +1657,6 @@ export function KanbanBoard(
             {section.cards.map(card => {
               const isCompleting = completingIds.has(ck(card));
               const isPending = card.id.startsWith('temp-');
-              const isFlashing = flashingIds.has(card.id);
               const due = dueMeta(card.daysUntilDue);
               const initials = card.assignedTo ? assigneeInitials(card.assignedTo) : null;
 
@@ -1689,7 +1669,7 @@ export function KanbanBoard(
                     display: 'flex', alignItems: 'center', gap: 9,
                     height: 38, borderRadius: 4, opacity: isCompleting ? 0.4 : isPending ? 0.55 : 1,
                     transition: 'opacity 0.3s ease',
-                    animation: isFlashing ? 'aiFlash 2s ease-out' : isPending ? 'pendingPulse 1.1s ease-in-out infinite' : undefined,
+                    animation: isPending ? 'pendingPulse 1.1s ease-in-out infinite' : undefined,
                   }}
                 >
                   {/* 3px client colour bar */}
@@ -1791,7 +1771,6 @@ export function KanbanBoard(
           col={col}
           cards={allCardsSorted.filter(c => (boardStatusOverrides.get(cardKey(c)) ?? 'To do') === col.key)}
           completingIds={completingIds}
-          flashingIds={flashingIds}
           ck={ck}
           onOpenPopup={(card, x, y) => setCardPopup({ card, x, y })}
           isAdding={boardAddingCol === col.key}

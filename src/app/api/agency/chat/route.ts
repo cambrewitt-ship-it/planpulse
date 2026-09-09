@@ -5,6 +5,7 @@ import { TOOL_DEFINITIONS, withCacheControl } from '@/lib/agent-tools';
 import { buildAuditSummary, buildOutputLinks, TOOL_LABELS, WRITE_TOOLS } from '@/lib/agent-audit';
 import type { AgentAuditStep, AgentOutputLink } from '@/lib/agent-audit';
 import { channelsToSandboxPlan, patchSandboxPlanFlightBudget, upsertSandboxPlanFlight, snapToWeekCommencing } from '@/lib/media-plan/sandbox-sync';
+import { buildActualByClientPlatform, computeChannelPacing } from '@/lib/media-plan/pacing';
 import { nzToday, nzDateKeyOffset, nzStartOfMonth, formatNZ } from '@/lib/timezone';
 import { withAnthropicOverloadRetry, friendlyAnthropicErrorMessage } from '@/lib/anthropic-retry';
 
@@ -264,72 +265,6 @@ async function toolGetDailyBriefing(request: NextRequest) {
   };
 }
 
-function channelNameToPlatform(channelName: string): string | null {
-  const lower = channelName.toLowerCase();
-  if (lower.includes('meta') || lower.includes('facebook') || lower.includes('instagram')) return 'meta-ads';
-  if (lower.includes('google')) return 'google-ads';
-  if (lower.includes('linkedin')) return 'linkedin-ads';
-  if (lower.includes('tiktok')) return 'tiktok-ads';
-  return null;
-}
-
-function getMonthsInRange(startDate: string, endDate: string): Array<{ padded: string; unpadded: string }> {
-  const months: Array<{ padded: string; unpadded: string }> = [];
-  const start = new Date(startDate);
-  const end = new Date(endDate);
-  let cur = new Date(start.getFullYear(), start.getMonth(), 1);
-  while (cur.getFullYear() < end.getFullYear() ||
-    (cur.getFullYear() === end.getFullYear() && cur.getMonth() <= end.getMonth())) {
-    const y = cur.getFullYear();
-    const m = cur.getMonth() + 1;
-    months.push({ padded: `${y}-${String(m).padStart(2, '0')}`, unpadded: `${y}-${m}` });
-    cur = new Date(y, m, 1);
-  }
-  return months;
-}
-
-// Inclusive day count between two 'YYYY-MM-DD' strings.
-function daysBetweenInclusive(startDateStr: string, endDateStr: string): number {
-  const start = new Date(`${startDateStr}T00:00:00Z`);
-  const end = new Date(`${endDateStr}T00:00:00Z`);
-  return Math.round((end.getTime() - start.getTime()) / 86400000) + 1;
-}
-
-function lastDayOfMonth(padded: string): string {
-  const [y, m] = padded.split('-').map(Number);
-  return `${padded}-${String(new Date(y, m, 0).getDate()).padStart(2, '0')}`;
-}
-
-// How much of a month's planned budget should have been spent by now, given
-// the flight's own start/end dates and how far into the requested date range
-// `today` actually is. Without this, a channel a week into a month reads as
-// wildly "underpacing" against the FULL month's plan even when it's exactly
-// on schedule — pacing has to compare like-for-like (spend to date vs plan
-// to date), not partial actuals against a whole-period target.
-function proratePlannedForMonth(
-  amount: number, padded: string, flightStart: string | null, flightEnd: string | null,
-  rangeStart: string, rangeEnd: string, today: string,
-): number {
-  if (amount <= 0) return 0;
-  const monthFirst = `${padded}-01`;
-  const monthLast = lastDayOfMonth(padded);
-
-  let coverageStart = flightStart && flightStart > monthFirst ? flightStart : monthFirst;
-  let coverageEnd = flightEnd && flightEnd < monthLast ? flightEnd : monthLast;
-  if (coverageEnd < coverageStart) { coverageStart = monthFirst; coverageEnd = monthLast; } // malformed dates — fall back to whole month
-
-  const totalCoverageDays = daysBetweenInclusive(coverageStart, coverageEnd);
-  if (totalCoverageDays <= 0) return 0;
-
-  const elapsedCap = rangeEnd < today ? rangeEnd : today;
-  const elapsedStart = coverageStart > rangeStart ? coverageStart : rangeStart;
-  const elapsedEnd = coverageEnd < elapsedCap ? coverageEnd : elapsedCap;
-  if (elapsedEnd < elapsedStart) return 0;
-
-  const elapsedDays = daysBetweenInclusive(elapsedStart, elapsedEnd);
-  return amount * (elapsedDays / totalCoverageDays);
-}
-
 async function toolGetChannelPerformance(
   request: NextRequest,
   input: { client_name?: string; channel_name?: string; start_date?: string; end_date?: string }
@@ -389,148 +324,19 @@ async function toolGetChannelPerformance(
     (conversionConfigRows ?? []).map((r: any) => [`${r.client_id}::${r.channel_key}`, { actionType: r.conversion_action_type, label: r.conversion_label }])
   );
 
-  const actualByClientPlatform = new Map<string, {
-    spend: number; impressions: number; clicks: number; conversions: number;
-    reach: number; cpm_sum: number; cpm_count: number; cpc_sum: number; cpc_count: number; days: number;
-    actionTotals: Map<string, number>;
-  }>();
+  const actualByClientPlatform = buildActualByClientPlatform(metricsRows);
 
-  for (const row of metricsRows || []) {
-    if (!row.client_id) continue;
-    const key = `${row.client_id}::${row.platform}`;
-    const existing = actualByClientPlatform.get(key) || {
-      spend: 0, impressions: 0, clicks: 0, conversions: 0,
-      reach: 0, cpm_sum: 0, cpm_count: 0, cpc_sum: 0, cpc_count: 0, days: 0,
-      actionTotals: new Map<string, number>(),
-    };
-    existing.spend += Number(row.spend || 0);
-    existing.impressions += Number(row.impressions || 0);
-    existing.clicks += Number(row.clicks || 0);
-    existing.conversions += Number(row.conversions || 0);
-    existing.reach += Number(row.reach || 0);
-    if (row.cpm) { existing.cpm_sum += Number(row.cpm); existing.cpm_count++; }
-    if (row.cpc) { existing.cpc_sum += Number(row.cpc); existing.cpc_count++; }
-    existing.days++;
-    const rawActions = row.meta_actions as Array<{ action_type: string; value: string }> | null;
-    if (Array.isArray(rawActions)) {
-      for (const a of rawActions) {
-        if (!a?.action_type) continue;
-        existing.actionTotals.set(a.action_type, (existing.actionTotals.get(a.action_type) ?? 0) + (parseFloat(a.value) || 0));
-      }
-    }
-    actualByClientPlatform.set(key, existing);
-  }
+  const pacingGroups = computeChannelPacing(
+    mediaPlans || [],
+    actualByClientPlatform,
+    clientMap,
+    { startDate, endDate, today },
+    input.channel_name,
+  );
 
-  const monthsInRange = getMonthsInRange(startDate, endDate);
-
-  // First pass: collect per-channel data with per-channel planned budgets
-  // Key: client::platform — used to aggregate multiple plan lines on the same platform
-  const platformGroups = new Map<string, {
-    client: string;
-    line_items: string[];
-    platform: string;
-    status: string;
-    planned_budget: number;
-    planned_budget_to_date: number;
-    actual: typeof actualByClientPlatform extends Map<string, infer V> ? V : never;
-    start_date: string | null;
-    end_date: string | null;
-    conversion_override: number | null;
-    conversion_label: string | null;
-  }>();
-
-  for (const plan of mediaPlans || []) {
-    const clientName = clientMap.get(plan.client_id) || 'Unknown';
-    const rawChannels: any[] = (plan.channels as any[]) || [];
-
-    for (const ch of rawChannels) {
-      if (!ch.channelName) continue;
-      if (input.channel_name && !ch.channelName.toLowerCase().includes(input.channel_name.toLowerCase())) continue;
-
-      const platform = channelNameToPlatform(ch.channelName);
-
-      // Sum planned budget across every month in the requested date range, and
-      // separately the portion of it "due" by today given each flight's own
-      // dates — that second figure is what pacing is actually measured against.
-      let plannedBudget = 0;
-      let plannedBudgetToDate = 0;
-      const flights: any[] = ch.flights || [];
-      for (const f of flights) {
-        const flightStart = f.startWeek ? String(f.startWeek).split('T')[0] : null;
-        const flightEnd = f.endWeek ? String(f.endWeek).split('T')[0] : null;
-        if (f.monthlySpend && typeof f.monthlySpend === 'object') {
-          for (const { padded, unpadded } of monthsInRange) {
-            const amt = Number(f.monthlySpend[padded] || f.monthlySpend[unpadded] || 0);
-            plannedBudget += amt;
-            plannedBudgetToDate += proratePlannedForMonth(amt, padded, flightStart, flightEnd, startDate, endDate, today);
-          }
-        }
-      }
-
-      const startDates = flights.map((f: any) => f.startWeek).filter(Boolean).map((s: string) => s.split('T')[0]).sort();
-      const endDates = flights.map((f: any) => f.endWeek).filter(Boolean).map((s: string) => s.split('T')[0]).sort();
-      const earliestStart = startDates[0] || null;
-      const latestEnd = endDates[endDates.length - 1] || null;
-      let channelStatus: 'live' | 'upcoming' | 'ended' | 'no dates' = 'no dates';
-      if (earliestStart) {
-        if (latestEnd && latestEnd < today) channelStatus = 'ended';
-        else if (earliestStart <= today) channelStatus = 'live';
-        else channelStatus = 'upcoming';
-      }
-
-      const actualKey = platform ? `${plan.client_id}::${platform}` : null;
-      const actual = (actualKey ? actualByClientPlatform.get(actualKey) : null) as any;
-
-      // If this channel has a configured Meta conversion event, resolve its
-      // total from the shared actionTotals for the client+platform (Meta
-      // actuals are only ever tracked at that granularity, same as spend).
-      // When multiple line items on the same platform merge into one group
-      // below, the first one with a mapping wins for the whole group.
-      const channelKey = ch.id ?? ch.channelName;
-      const mapping = platform === 'meta-ads' ? conversionConfigMap.get(`${plan.client_id}::${channelKey}`) : undefined;
-      const conversionOverride = mapping ? (actual?.actionTotals?.get(mapping.actionType) ?? 0) : null;
-      const conversionLabel = mapping?.label ?? null;
-
-      // Aggregate channels that share a platform (actual spend is always platform-level)
-      const groupKey = `${clientName}::${platform ?? ch.channelName}`;
-      if (!platformGroups.has(groupKey)) {
-        platformGroups.set(groupKey, {
-          client: clientName,
-          line_items: [ch.channelName],
-          platform: platform ?? 'unknown',
-          status: channelStatus,
-          planned_budget: plannedBudget,
-          planned_budget_to_date: plannedBudgetToDate,
-          actual,
-          start_date: earliestStart,
-          end_date: latestEnd,
-          conversion_override: conversionOverride,
-          conversion_label: conversionLabel,
-        });
-      } else {
-        const group = platformGroups.get(groupKey)!;
-        group.line_items.push(ch.channelName);
-        group.planned_budget += plannedBudget;
-        group.planned_budget_to_date += plannedBudgetToDate;
-        if (channelStatus === 'live') group.status = 'live';
-        if (earliestStart && (!group.start_date || earliestStart < group.start_date)) group.start_date = earliestStart;
-        if (latestEnd && (!group.end_date || latestEnd > group.end_date)) group.end_date = latestEnd;
-        if (group.conversion_override === null && conversionOverride !== null) {
-          group.conversion_override = conversionOverride;
-          group.conversion_label = conversionLabel;
-        }
-      }
-    }
-  }
-
-  const channels: any[] = Array.from(platformGroups.values()).map(group => {
-    const actualSpend = group.actual?.spend ?? 0;
-    // Pacing compares actual spend to what SHOULD have been spent by today
-    // (planned_budget_to_date), not the full-period plan — a channel a week
-    // into a month should be judged against a week's worth of budget, not
-    // the whole month's, or it always reads as "underpacing" early on.
-    const plannedToDate = group.planned_budget_to_date;
-    const variancePct = plannedToDate > 0 ? ((actualSpend - plannedToDate) / plannedToDate) * 100 : null;
+  const channels: any[] = pacingGroups.map(group => {
+    const actualSpend = group.actual_spend;
+    const variancePct = group.spend_variance_pct;
     const pacingStatus = variancePct === null ? 'no plan'
       : variancePct > 15 ? 'overpacing'
       : variancePct < -15 ? 'underpacing'
@@ -538,27 +344,46 @@ async function toolGetChannelPerformance(
 
     const impressions = group.actual?.impressions ?? null;
     const clicks = group.actual?.clicks ?? null;
+
+    // If this channel has a configured Meta conversion event, resolve its
+    // total from the shared actionTotals for the client+platform (Meta
+    // actuals are only ever tracked at that granularity, same as spend).
+    // When multiple line items share this group, the first one with a
+    // mapping wins for the whole group.
+    let conversionOverride: number | null = null;
+    let conversionLabel: string | null = null;
+    if (group.platform === 'meta-ads') {
+      for (const li of group.line_items) {
+        const mapping = conversionConfigMap.get(`${group.client_id}::${li.id ?? li.name}`);
+        if (mapping) {
+          conversionOverride = group.actual?.actionTotals?.get(mapping.actionType) ?? 0;
+          conversionLabel = mapping.label;
+          break;
+        }
+      }
+    }
     // For Meta, ad_performance_metrics.conversions is always NULL — there's no
-    // single canonical "conversion" the way Google Ads has. group.conversion_override
+    // single canonical "conversion" the way Google Ads has. conversionOverride
     // is the sum of whichever action_type the agency configured as this channel's
-    // conversion event (see client_channel_conversion_config); use it whenever set,
-    // even if it's 0, since 0 is a real answer once an event IS configured.
-    const conversions = group.conversion_override !== null ? group.conversion_override : (group.actual?.conversions ?? null);
+    // conversion event; use it whenever set, even if it's 0, since 0 is a real
+    // answer once an event IS configured.
+    const conversions = conversionOverride !== null ? conversionOverride : (group.actual?.conversions ?? null);
     const reach = group.actual?.reach ?? null;
     const ctr = impressions && impressions > 0 ? (clicks! / impressions) * 100 : null;
     const cpc = clicks && clicks > 0 ? actualSpend / clicks : null;
     const cpm = impressions && impressions > 0 ? (actualSpend / impressions) * 1000 : null;
+    const lineItemNames = group.line_items.map(li => li.name);
 
     return {
       client: group.client,
-      channel: group.line_items.length > 1 ? group.line_items.join(' + ') : group.line_items[0],
+      channel: lineItemNames.length > 1 ? lineItemNames.join(' + ') : lineItemNames[0],
       platform: group.platform,
       status: group.status,
       date_range: { start: startDate, end: endDate },
-      planned_budget_full_period: group.planned_budget > 0 ? Number(group.planned_budget.toFixed(2)) : null,
-      planned_budget_to_date: plannedToDate > 0 ? Number(plannedToDate.toFixed(2)) : null,
-      actual_spend: Number(actualSpend.toFixed(2)),
-      spend_variance_pct: variancePct !== null ? Number(variancePct.toFixed(1)) : null,
+      planned_budget_full_period: group.planned_budget_full_period,
+      planned_budget_to_date: group.planned_budget_to_date,
+      actual_spend: actualSpend,
+      spend_variance_pct: variancePct,
       pacing_status: pacingStatus,
       pacing_note: 'spend_variance_pct and pacing_status compare actual_spend against planned_budget_to_date (the prorated plan for the days elapsed so far), not planned_budget_full_period — never describe pacing using the full-period figure.',
       impressions,
@@ -567,16 +392,16 @@ async function toolGetChannelPerformance(
       cpc: cpc !== null ? Number(cpc.toFixed(2)) : null,
       cpm: cpm !== null ? Number(cpm.toFixed(2)) : null,
       conversions,
-      conversion_event_label: group.conversion_label,
-      ...(group.platform === 'meta-ads' && !group.conversion_label && {
+      conversion_event_label: conversionLabel,
+      ...(group.platform === 'meta-ads' && !conversionLabel && {
         conversion_note: 'No conversion event is configured for this Meta channel yet, so "conversions" is not meaningful — Meta has no single canonical conversion number. Tell the user to pick one in the channel card\'s "Conv. Events" selector, then re-ask; don\'t report this 0 as a real conversion count.',
       }),
       reach,
       start_date: group.start_date,
       end_date: group.end_date,
-      ...(group.line_items.length > 1 && {
-        plan_lines: group.line_items,
-        note: `Planned budget is the combined total of ${group.line_items.length} plan lines. Actual spend is at the platform level.`,
+      ...(lineItemNames.length > 1 && {
+        plan_lines: lineItemNames,
+        note: `Planned budget is the combined total of ${lineItemNames.length} plan lines. Actual spend is at the platform level.`,
       }),
     };
   });

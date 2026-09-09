@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { ALL_TOOL_NAMES } from '@/lib/agent-templates';
 
+// Custom agent creation is untested — flip this on when we're ready to
+// let users build their own agents instead of just toggling/editing templates.
+const AGENT_CREATION_ENABLED = false;
+
 export async function GET() {
   const supabase = await createClient();
   const { data: { session } } = await supabase.auth.getSession();
@@ -20,6 +24,10 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  if (!AGENT_CREATION_ENABLED) {
+    return NextResponse.json({ error: 'Creating new agents is currently disabled' }, { status: 403 });
+  }
+
   const supabase = await createClient();
   const { data: { session } } = await supabase.auth.getSession();
   if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

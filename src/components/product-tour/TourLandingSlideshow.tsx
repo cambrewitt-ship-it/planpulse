@@ -34,6 +34,7 @@ export default function TourLandingSlideshow() {
                 type="button"
                 variant={active ? 'default' : 'outline'}
                 size="sm"
+                className="rounded-full"
                 style={
                   active
                     ? { background: section.accentColor, borderColor: section.accentColor }
@@ -61,6 +62,7 @@ export default function TourLandingSlideshow() {
             type="button"
             variant="outline"
             size="icon-sm"
+            className="rounded-full"
             aria-label="Previous slide"
             disabled={isFirst}
             onClick={() => setActiveIndex((i) => Math.max(0, i - 1))}
@@ -90,6 +92,7 @@ export default function TourLandingSlideshow() {
             type="button"
             variant="outline"
             size="icon-sm"
+            className="rounded-full"
             aria-label="Next slide"
             disabled={isLast}
             onClick={() => setActiveIndex((i) => Math.min(totalSlides - 1, i + 1))}
@@ -101,7 +104,7 @@ export default function TourLandingSlideshow() {
 
       <div className="text-center mt-6">
         <Link href="/auth/signup">
-          <Button variant="outline" size="lg" className="text-base px-8 py-5 h-auto">
+          <Button variant="outline" size="lg" className="text-base px-8 py-4 h-auto rounded-full">
             Get started free
           </Button>
         </Link>

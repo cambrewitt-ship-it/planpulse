@@ -47,7 +47,9 @@ export const VALID_METRICS = [
   'eventCount',
   'bounceRate',
   'pageViews',
+  'screenPageViews',
   'engagementRate',
+  'averageSessionDuration',
 ] as const;
 
 export type ValidMetric = typeof VALID_METRICS[number];

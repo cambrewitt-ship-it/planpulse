@@ -22,6 +22,11 @@ import type { LucideIcon } from 'lucide-react';
 
 const AGENT_ICON_COLOR = '#7B1F2C';
 
+// Custom agent creation is untested — flip this on when we're ready to let
+// users build their own agents instead of just toggling/editing templates.
+// Keep in sync with AGENT_CREATION_ENABLED in src/app/api/agents/route.ts.
+const AGENT_CREATION_ENABLED = false;
+
 const AGENT_ICONS: Record<string, LucideIcon> = {
   ReceiptText,
   BarChart2,
@@ -698,17 +703,19 @@ export default function AgentsPage() {
             <div style={{ fontSize: 16, fontWeight: 700, color: '#1C1917' }}>Agents</div>
             <div style={{ fontSize: 12, color: '#8A8578', marginTop: 1 }}>{agents.length} agent{agents.length !== 1 ? 's' : ''}</div>
           </div>
-          <NewAgentDialog onCreated={agent => {
-            setAgents(prev => [...prev, agent]);
-            selectAgent(agent);
-          }} />
+          {AGENT_CREATION_ENABLED && (
+            <NewAgentDialog onCreated={agent => {
+              setAgents(prev => [...prev, agent]);
+              selectAgent(agent);
+            }} />
+          )}
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', padding: '8px 8px' }}>
           {loading ? (
             <div style={{ padding: '20px 8px', fontSize: 12.5, color: '#8A8578', textAlign: 'center' }}>Loading agents…</div>
           ) : agents.length === 0 ? (
-            <div style={{ padding: '20px 8px', fontSize: 12.5, color: '#8A8578', textAlign: 'center' }}>No agents yet. Create one to get started.</div>
+            <div style={{ padding: '20px 8px', fontSize: 12.5, color: '#8A8578', textAlign: 'center' }}>No agents yet.{AGENT_CREATION_ENABLED ? ' Create one to get started.' : ''}</div>
           ) : (
             agents.map(agent => (
               <div
@@ -745,7 +752,9 @@ export default function AgentsPage() {
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 10, color: '#A0998F' }}>
             <Bot size={40} style={{ color: '#D5D0C5' }} />
             <div style={{ fontSize: 14, fontWeight: 500, color: '#5C564F' }}>Select an agent to edit</div>
-            <div style={{ fontSize: 12.5, color: '#8A8578' }}>Or create a new one from the panel on the left</div>
+            {AGENT_CREATION_ENABLED && (
+              <div style={{ fontSize: 12.5, color: '#8A8578' }}>Or create a new one from the panel on the left</div>
+            )}
           </div>
         ) : (
           <div style={{ flex: 1, overflowY: 'auto', padding: '24px 28px' }}>
