@@ -19,6 +19,7 @@ import type { ClientChannelHealth } from '@/app/api/agency/channel-health/route'
 import { AgencyTimeline, ZOOM_LEVELS as TIMELINE_ZOOM_LEVELS, DEFAULT_ZOOM as DEFAULT_TIMELINE_ZOOM } from '@/components/agency/AgencyTimeline';
 import type { AgencyAlert } from '@/app/api/agency/alerts/route';
 import { AlertsPanel } from '@/components/agency/AlertsPanel';
+import { OnboardingChecklist } from '@/components/agency/OnboardingChecklist';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -495,6 +496,8 @@ export default function AgencyDashboard() {
           Timeline
         </button>
       </div>
+
+      <OnboardingChecklist clients={clients} />
 
       {/* ── Team member tabs ──────────────────────────────── */}
       <div data-tour-id="agency-filters" style={{

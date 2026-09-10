@@ -5,7 +5,7 @@ import { TOOL_DEFINITIONS, withCacheControl } from '@/lib/agent-tools';
 import { buildAuditSummary, buildOutputLinks, TOOL_LABELS, WRITE_TOOLS } from '@/lib/agent-audit';
 import type { AgentAuditStep, AgentOutputLink } from '@/lib/agent-audit';
 import { channelsToSandboxPlan, patchSandboxPlanFlightBudget, upsertSandboxPlanFlight, snapToWeekCommencing } from '@/lib/media-plan/sandbox-sync';
-import { buildActualByClientPlatform, computeChannelPacing } from '@/lib/media-plan/pacing';
+import { buildActualByClientPlatform, computeChannelPacing, channelNameToPlatform, getConversionConfigKeyCandidates } from '@/lib/media-plan/pacing';
 import { nzToday, nzDateKeyOffset, nzStartOfMonth, formatNZ } from '@/lib/timezone';
 import { withAnthropicOverloadRetry, friendlyAnthropicErrorMessage } from '@/lib/anthropic-retry';
 
@@ -326,6 +326,26 @@ async function toolGetChannelPerformance(
 
   const actualByClientPlatform = buildActualByClientPlatform(metricsRows);
 
+  // Resolve, per client+platform, whichever Meta conversion-event mapping (if
+  // any) the agency configured on ANY of that platform's channel cards —
+  // checked against every key-candidate a card could have persisted,
+  // including compound per-campaign-line keys (see getConversionConfigKeyCandidates)
+  // that computeChannelPacing's bare-id line_items can't represent.
+  const conversionMappingByClientPlatform = new Map<string, { actionType: string; label: string }>();
+  for (const plan of mediaPlans || []) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rawChannels: any[] = (plan.channels as any[]) || [];
+    for (const ch of rawChannels) {
+      if (!ch.channelName || channelNameToPlatform(ch.channelName) !== 'meta-ads') continue;
+      const mapKey = `${plan.client_id}::meta-ads`;
+      if (conversionMappingByClientPlatform.has(mapKey)) continue;
+      for (const key of getConversionConfigKeyCandidates(ch)) {
+        const mapping = conversionConfigMap.get(`${plan.client_id}::${key}`);
+        if (mapping) { conversionMappingByClientPlatform.set(mapKey, mapping); break; }
+      }
+    }
+  }
+
   const pacingGroups = computeChannelPacing(
     mediaPlans || [],
     actualByClientPlatform,
@@ -348,18 +368,13 @@ async function toolGetChannelPerformance(
     // If this channel has a configured Meta conversion event, resolve its
     // total from the shared actionTotals for the client+platform (Meta
     // actuals are only ever tracked at that granularity, same as spend).
-    // When multiple line items share this group, the first one with a
-    // mapping wins for the whole group.
     let conversionOverride: number | null = null;
     let conversionLabel: string | null = null;
     if (group.platform === 'meta-ads') {
-      for (const li of group.line_items) {
-        const mapping = conversionConfigMap.get(`${group.client_id}::${li.id ?? li.name}`);
-        if (mapping) {
-          conversionOverride = group.actual?.actionTotals?.get(mapping.actionType) ?? 0;
-          conversionLabel = mapping.label;
-          break;
-        }
+      const mapping = conversionMappingByClientPlatform.get(`${group.client_id}::${group.platform}`);
+      if (mapping) {
+        conversionOverride = group.actual?.actionTotals?.get(mapping.actionType) ?? 0;
+        conversionLabel = mapping.label;
       }
     }
     // For Meta, ad_performance_metrics.conversions is always NULL — there's no

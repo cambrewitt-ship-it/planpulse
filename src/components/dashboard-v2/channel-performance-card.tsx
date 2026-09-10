@@ -46,7 +46,10 @@ export interface ChannelCardProps {
     status: 'healthy' | 'attention' | 'excellent';
     currentSpend: number;
     plannedSpend: number;
+    /** Planned spend prorated to "as of today" — the actual pacing target (never the full-period total). */
+    plannedSpendToDate: number;
     grossPlannedSpend?: number;
+    grossPlannedSpendToDate?: number;
     pacingPercentage: number;
     metrics: {
       impressions: number;
@@ -347,16 +350,20 @@ function PacingBar({
   status: ChannelCardProps['channel']['status'];
   runRate?: { actual: number; required: number } | null;
 }) {
+  // `plannedSpend` here is the pacing target prorated to "as of today", not
+  // the full-period budget — otherwise a channel a week into the month always
+  // reads as wildly "behind" against the whole month's plan. ±10% is treated
+  // as on-track.
   const spendRatio = plannedSpend > 0 ? (currentSpend / plannedSpend) * 100 : 0;
   const fillPct    = Math.min(100, spendRatio);
-  const barColor   = spendRatio > 100 ? '#ef4444' : STATUS_CONFIG[status].bar;
+  const barColor   = spendRatio > 110 ? '#ef4444' : STATUS_CONFIG[status].bar;
   const displayPct = Math.round(spendRatio);
 
   return (
     <div className="space-y-1">
       <div className="flex justify-between text-base text-gray-500">
         <span>Pacing</span>
-        <span className={displayPct > 100 ? 'text-red-600 font-medium' : displayPct < 85 ? 'text-amber-600 font-medium' : 'text-emerald-600 font-medium'}>
+        <span className={displayPct > 110 ? 'text-red-600 font-medium' : displayPct < 90 ? 'text-amber-600 font-medium' : 'text-emerald-600 font-medium'}>
           {fmt(displayPct, 'percent', 0)} of target
         </span>
       </div>
@@ -368,12 +375,12 @@ function PacingBar({
         <div
           className="absolute top-1/2 -translate-y-1/2 w-0.5 h-4 rounded-full bg-gray-400"
           style={{ left: 'calc(100% - 1px)' }}
-          title="Planned target"
+          title="Planned spend to date"
         />
       </div>
       <div className="flex justify-between text-base text-gray-400">
         <span>{fmt(currentSpend, 'currency', 0)} spent</span>
-        <span>{fmt(plannedSpend, 'currency', 0)}{plannedLabel ? ` ${plannedLabel}` : ' planned'}</span>
+        <span>{fmt(plannedSpend, 'currency', 0)}{plannedLabel ? ` ${plannedLabel}` : ' planned to date'}</span>
       </div>
       {runRate && (
         <div className="flex justify-between text-base pt-0.5">
@@ -1566,12 +1573,14 @@ export default function ChannelPerformanceCard({ channel, selectedMonth, dateRan
               <div className="row-start-2 col-start-1 col-end-4">
                 {(() => {
                   const hasCommission = channel.grossPlannedSpend !== undefined && channel.grossPlannedSpend !== channel.plannedSpend;
-                  const displayPlanned = hasCommission && planView === 'gross' ? channel.grossPlannedSpend! : channel.plannedSpend;
-                  const plannedLabel = hasCommission ? (planView === 'gross' ? 'gross' : 'net') : undefined;
+                  const displayPlannedToDate = hasCommission && planView === 'gross'
+                    ? (channel.grossPlannedSpendToDate ?? channel.plannedSpendToDate)
+                    : channel.plannedSpendToDate;
+                  const plannedLabel = hasCommission ? (planView === 'gross' ? 'gross · to date' : 'net · to date') : undefined;
                   return (
                     <PacingBar
                       currentSpend={filteredMetrics.spend ?? channel.currentSpend}
-                      plannedSpend={displayPlanned}
+                      plannedSpend={displayPlannedToDate}
                       plannedLabel={plannedLabel}
                       status={channel.status}
                       runRate={overspendForecast ? { actual: overspendForecast.last24hSpend, required: overspendForecast.requiredDailyRate } : null}

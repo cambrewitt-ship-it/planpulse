@@ -46,6 +46,7 @@ export interface Database {
             logo_url: string | null;
             user_id: string | null;
             billing_address: string | null;
+            is_demo: boolean;
             created_at: string;
             updated_at: string;
           };
@@ -55,6 +56,7 @@ export interface Database {
             logo_url?: string | null;
             user_id?: string | null;
             billing_address?: string | null;
+            is_demo?: boolean;
           };
           Update: {
             id?: string;
@@ -62,6 +64,7 @@ export interface Database {
             logo_url?: string | null;
             user_id?: string | null;
             billing_address?: string | null;
+            is_demo?: boolean;
           };
           Relationships: [];
         };
@@ -1494,6 +1497,13 @@ export interface Database {
             bank_account_number: string;
             invoice_notes: string;
             invoice_due_days: number;
+            demo_data_seeded_at: string | null;
+            onboarding_checklist: {
+              viewed_agency_dashboard: boolean;
+              visited_demo_dashboard: boolean;
+              visited_demo_portal: boolean;
+              created_first_client: boolean;
+            };
             created_at: string;
             updated_at: string;
           };
@@ -1510,6 +1520,8 @@ export interface Database {
             bank_account_number?: string;
             invoice_notes?: string;
             invoice_due_days?: number;
+            demo_data_seeded_at?: string | null;
+            onboarding_checklist?: Record<string, boolean>;
             created_at?: string;
             updated_at?: string;
           };
@@ -1524,6 +1536,8 @@ export interface Database {
             bank_account_number?: string;
             invoice_notes?: string;
             invoice_due_days?: number;
+            demo_data_seeded_at?: string | null;
+            onboarding_checklist?: Record<string, boolean>;
             updated_at?: string;
           };
           Relationships: [];

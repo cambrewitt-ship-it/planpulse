@@ -38,6 +38,18 @@ export default function ClientHubAgencyPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Visiting the Demo Client's own Performance Portal satisfies the
+  // "Getting Started" checklist's "Visit your Demo Client's Performance
+  // Portal" item.
+  useEffect(() => {
+    if (!response?.client.is_demo) return;
+    fetch('/api/agency/onboarding-checklist', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ item: 'visited_demo_portal' }),
+    }).catch(() => {});
+  }, [response?.client.is_demo]);
+
   const handleConversionChange = useCallback(async (platform: ConversionPlatform, actionType: string | null, label: string) => {
     try {
       const res = await fetch(`/api/clients/${clientId}/hub/conversion`, {

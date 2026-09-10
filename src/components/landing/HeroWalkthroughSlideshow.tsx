@@ -21,7 +21,7 @@ const SLIDES: Slide[] = [
     id: 'todo',
     title: "Streamline your team's to do list",
     kind: 'single',
-    image: { src: '/to-do-list.png', alt: 'Action points and to-do list', width: 1518, height: 1220 },
+    image: { src: '/to-do-list.png', alt: 'Action points and to-do list', width: 1500, height: 838 },
   },
   {
     id: 'analytics',

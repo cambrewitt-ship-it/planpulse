@@ -5,14 +5,16 @@ import { AnimatePresence, motion } from 'framer-motion';
 
 export function RotatingWord({
   words,
-  intervalMs = 2400,
+  intervalMs = 3000,
   className,
   color = '#4A7C59',
+  gradient,
 }: {
   words: string[];
   intervalMs?: number;
   className?: string;
   color?: string;
+  gradient?: string;
 }) {
   const [index, setIndex] = useState(0);
 
@@ -24,10 +26,19 @@ export function RotatingWord({
     return () => clearInterval(timer);
   }, [words.length, intervalMs]);
 
+  const textStyle: React.CSSProperties = gradient
+    ? {
+        backgroundImage: gradient,
+        WebkitBackgroundClip: 'text',
+        backgroundClip: 'text',
+        color: 'transparent',
+      }
+    : { color };
+
   return (
     <span
       className={className}
-      style={{ display: 'inline-grid', verticalAlign: 'bottom', color }}
+      style={{ display: 'inline-grid', verticalAlign: 'bottom', lineHeight: 1.2, paddingBottom: '0.1em' }}
     >
       <AnimatePresence mode="wait">
         <motion.span
@@ -36,7 +47,7 @@ export function RotatingWord({
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -14 }}
           transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-          style={{ gridArea: '1 / 1' }}
+          style={{ gridArea: '1 / 1', ...textStyle }}
         >
           {words[index]}
         </motion.span>

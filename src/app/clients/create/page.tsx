@@ -450,6 +450,14 @@ export default function CreateClientPage() {
         } catch {}
       }
       setClientId(newId);
+      // First real client created — satisfies the "Getting Started"
+      // checklist's "Import a media plan & create your first client
+      // profile" item.
+      fetch('/api/agency/onboarding-checklist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item: 'created_first_client' }),
+      }).catch(() => {});
     } catch {
       alert('Error creating client. Please try again.');
     } finally {

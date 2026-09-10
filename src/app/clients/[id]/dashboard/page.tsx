@@ -83,6 +83,7 @@ interface Client {
   notes?: string | null;
   logo_url?: string | null;
   account_manager?: string | null;
+  is_demo?: boolean;
 }
 
 interface MediaPlan {
@@ -991,6 +992,17 @@ export default function DashboardV2() {
     }
   };
 
+  // Visiting the Demo Client's own dashboard satisfies the "Getting Started"
+  // checklist's "Check out your Demo Client's Dashboard" item.
+  useEffect(() => {
+    if (!client?.is_demo) return;
+    fetch('/api/agency/onboarding-checklist', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ item: 'visited_demo_dashboard' }),
+    }).catch(() => {});
+  }, [client?.is_demo]);
+
   useEffect(() => {
     if (clientId) {
       Promise.all([
@@ -1621,11 +1633,14 @@ export default function DashboardV2() {
       rangeStart.getMonth() !== rangeEnd.getMonth() ||
       rangeStart.getFullYear() !== rangeEnd.getFullYear();
 
+    // `planned` here must already be prorated to "as of today" (plannedSpendToDate),
+    // never a full-period/full-month total — comparing today's actual spend against
+    // a whole month's budget always reads as "behind" until the month is over.
     const determineStatus = (current: number, planned: number): 'excellent' | 'healthy' | 'attention' => {
       if (planned === 0) return 'attention';
       const ratio = current / planned;
-      if (ratio >= 0.95 && ratio <= 1.05) return 'healthy';
-      if (ratio > 1.05) return 'excellent';
+      if (ratio >= 0.9 && ratio <= 1.1) return 'healthy';
+      if (ratio > 1.1) return 'excellent';
       return 'attention';
     };
 
@@ -1636,8 +1651,11 @@ export default function DashboardV2() {
       const dayOfMonth   = now.getDate();
       const daysInMonth  = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
       const expectedSoFar = planned * (dayOfMonth / daysInMonth);
-      if (current < expectedSoFar * 0.5)  issues.push('Spend significantly below target — campaign may not be active');
-      else if (current < expectedSoFar * 0.8) issues.push('Spending behind pace — review campaign settings');
+      if (expectedSoFar <= 0) return issues;
+      const variancePct = ((current - expectedSoFar) / expectedSoFar) * 100;
+      if (variancePct < -50) issues.push('Spend significantly below target — campaign may not be active');
+      else if (variancePct < -10) issues.push('Spending behind pace — review campaign settings');
+      else if (variancePct > 10) issues.push('Spending ahead of pace — review campaign settings');
       return issues;
     };
 
@@ -1666,8 +1684,14 @@ export default function DashboardV2() {
       // Single-month: compute as before, scoped to selectedMonth only.
       let currentSpend: number;
       let plannedSpend: number;
+      // Planned spend prorated to "as of today" — the actual pacing target.
+      // Comparing today's spend to a whole month's/period's budget always
+      // reads as "underpacing" until the period is over; pacing has to
+      // compare like-for-like (spend to date vs plan to date).
+      let plannedSpendToDate: number;
 
       let grossPlannedSpend: number;
+      let grossPlannedSpendToDate: number;
 
       if (isMultiMonth && chartData.length > 0) {
         // Header/pacing-bar totals must reflect the real commission regardless
@@ -1681,6 +1705,10 @@ export default function DashboardV2() {
         currentSpend = lastActualPoint?.actualSpend ?? 0;
         plannedSpend = lastPoint.plannedSpend;
         grossPlannedSpend = commission > 0 ? plannedSpend * 100 / (100 - commission) : plannedSpend;
+        // The chart's cumulative planned line is already anchored to the
+        // range end (today, in the common case), so it's already "to date".
+        plannedSpendToDate = plannedSpend;
+        grossPlannedSpendToDate = grossPlannedSpend;
       } else {
         const paddedKey   = format(selectedMonth, 'yyyy-MM');
         const unpaddedKey = `${selectedMonth.getFullYear()}-${selectedMonth.getMonth() + 1}`;
@@ -1700,9 +1728,26 @@ export default function DashboardV2() {
           return false;
         });
         currentSpend = chSpendPoints.reduce((s: number, p: any) => s + (p.spend ?? 0), 0);
+
+        // Prorate by calendar days elapsed in the selected month: a month
+        // already fully in the past counts as 100% elapsed (compare full
+        // totals), a future month as 0% elapsed, the current month by its
+        // actual day-of-month.
+        const daysInSelectedMonth = new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() + 1, 0).getDate();
+        const isPastMonth =
+          selectedMonth.getFullYear() < now.getFullYear() ||
+          (selectedMonth.getFullYear() === now.getFullYear() && selectedMonth.getMonth() < now.getMonth());
+        const isFutureMonth =
+          selectedMonth.getFullYear() > now.getFullYear() ||
+          (selectedMonth.getFullYear() === now.getFullYear() && selectedMonth.getMonth() > now.getMonth());
+        const daysElapsedInMonth = isPastMonth ? daysInSelectedMonth : isFutureMonth ? 0 : now.getDate();
+        const elapsedFraction = daysElapsedInMonth / daysInSelectedMonth;
+
+        grossPlannedSpendToDate = grossPlannedSpend * elapsedFraction;
+        plannedSpendToDate = plannedSpend * elapsedFraction;
       }
 
-      const pacingPct = plannedSpend > 0 ? (currentSpend / plannedSpend) * 100 : 0;
+      const pacingPct = plannedSpendToDate > 0 ? (currentSpend / plannedSpendToDate) * 100 : 0;
 
       // ── Aggregate performance metrics from spend data ─────────────────────
       const rangeStartStr = analyticsDateRange.startDate;
@@ -1786,10 +1831,12 @@ export default function DashboardV2() {
         name:             cardName,
         format:           ch.format || undefined,
         platform,
-        status:           determineStatus(currentSpend, plannedSpend),
+        status:           determineStatus(currentSpend, plannedSpendToDate),
         currentSpend,
         plannedSpend,
+        plannedSpendToDate,
         grossPlannedSpend: commission > 0 ? grossPlannedSpend : undefined,
+        grossPlannedSpendToDate: commission > 0 ? grossPlannedSpendToDate : undefined,
         pacingPercentage: pacingPct,
         metrics: {
           impressions: totalImpressions,
@@ -3250,6 +3297,13 @@ export default function DashboardV2() {
                       ) : (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                           <span style={{ fontSize: 17, fontWeight: 600, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}>{client?.name ?? '—'}</span>
+                          {client?.is_demo && (
+                            <span style={{
+                              fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 8,
+                              background: 'rgba(176,112,48,0.15)', color: '#B07030', letterSpacing: '0.04em',
+                              fontFamily: "'DM Sans', system-ui, sans-serif",
+                            }}>DEMO</span>
+                          )}
                           <button
                             onClick={handleStartEditClientName}
                             style={{

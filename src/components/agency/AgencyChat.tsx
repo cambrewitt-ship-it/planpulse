@@ -235,7 +235,7 @@ function getFlowForAgent(agent: UserAgent) {
   if (n.includes('performance') || n.includes('analyst'))      return AGENT_FLOWS.performance_analyst;
   if (n.includes('media') || n.includes('editor'))             return AGENT_FLOWS.media_plan_editor;
   if (n.includes('action') || n.includes('points') || n.includes('task')) return AGENT_FLOWS.action_points_manager;
-  if (n.includes('setup') && n.includes('audit'))               return AGENT_FLOWS.setup_auditor;
+  if ((n.includes('setup') && n.includes('audit')) || (n.includes('health') && n.includes('check'))) return AGENT_FLOWS.setup_auditor;
   return null;
 }
 

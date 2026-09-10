@@ -8,7 +8,6 @@ import Footer from '@/components/Footer';
 import { supabase } from '@/lib/supabase/client';
 import {
   CheckCircle2,
-  Zap,
   ArrowRight,
 } from 'lucide-react';
 import {
@@ -21,7 +20,7 @@ import HeroWalkthroughSlideshow from '@/components/landing/HeroWalkthroughSlides
 import { CONNECT_PLATFORMS } from '@/components/landing/PlatformLogos';
 
 const pageFont: React.CSSProperties = { fontFamily: "'DM Sans', system-ui, sans-serif" };
-const HERO_ROTATING_WORDS = ['Health checking', 'Media planning', 'Performance tracking', 'AI automation'];
+const HERO_ROTATING_WORDS = ['Health checking', 'Media planning', 'Ad performance', 'AI automation'];
 const PLATFORM_ICON_SIZE = 70;
 const PLATFORM_CENTER_ICON_SIZE = 86;
 const PLATFORM_RING_RADIUS = 80;
@@ -74,8 +73,8 @@ export default function Home() {
             style={{ background: 'radial-gradient(circle, rgba(74,101,128,0.14) 0%, rgba(74,101,128,0) 70%)', filter: 'blur(20px)' }}
           />
           <div className="container relative mx-auto px-4">
-            <div className="max-w-7xl mx-auto grid lg:grid-cols-2 gap-12 items-center">
-              <Reveal delay={0} className="lg:pl-10">
+            <div className="max-w-7xl mx-auto xl:pl-10 grid grid-cols-1 xl:grid-cols-[max-content_1fr] gap-10 xl:gap-12 items-start">
+              <Reveal delay={0}>
                 <h1
                   className="leading-[0.95]"
                   style={{
@@ -83,28 +82,44 @@ export default function Home() {
                     ...pageFont,
                     fontWeight: 900,
                     letterSpacing: '-0.03em',
-                    fontSize: 'clamp(2.25rem, 4.2vw, 3.75rem)',
+                    fontSize: 'clamp(2.75rem, 5vw, 4.5rem)',
                   }}
                 >
-                  <span className="block"><RotatingWord words={HERO_ROTATING_WORDS} /></span>
+                  <span className="block"><RotatingWord words={HERO_ROTATING_WORDS} gradient="linear-gradient(135deg, #3E6A4E 0%, #4A7C59 100%)" /></span>
                   <span className="block">software for</span>
                   <span className="block">marketing agencies</span>
                 </h1>
               </Reveal>
               <div className="space-y-5">
-                <Reveal delay={0.1}>
-                  <span
-                    className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full border"
-                    style={{ background: '#FDFCF8', borderColor: '#E8E4DC', color: '#4A7C59' }}
+                <Reveal delay={0.08}>
+                  <p
+                    className="leading-tight"
+                    style={{
+                      color: '#1C1917',
+                      ...pageFont,
+                      fontWeight: 900,
+                      letterSpacing: '-0.03em',
+                      fontSize: 'clamp(1.5rem, 2.6vw, 29px)',
+                    }}
                   >
-                    <Zap className="w-3.5 h-3.5" />
-                    Powered by Agentic AI
-                  </span>
+                    Catch problems before they{' '}
+                    <span
+                      style={{
+                        background: 'linear-gradient(135deg, #B91C1C 0%, #EF4444 100%)',
+                        WebkitBackgroundClip: 'text',
+                        backgroundClip: 'text',
+                        color: 'transparent',
+                      }}
+                    >
+                      cost you.
+                    </span>
+                  </p>
                 </Reveal>
                 <Reveal delay={0.18}>
-                  <p className="text-lg" style={{ color: '#8A8578' }}>
-                    One platform to plan campaigns, track performance, manage action points, and brief your team — across every client and every channel.
-                  </p>
+                  <div className="space-y-3 text-lg" style={{ color: '#8A8578' }}>
+                    <p>Track live pacing and performance across every ad platform.</p>
+                    <p>AI agents handle health checks and busywork - cutting the errors that cost you clients.</p>
+                  </div>
                 </Reveal>
                 <Reveal delay={0.26}>
                   <div className="flex flex-col sm:flex-row gap-3 pt-2">

@@ -531,7 +531,16 @@ export function ClientCardCompact({
         <span style={{
           flex: 1, fontWeight: 500, fontSize: 15, color: '#1C1917',
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>{client.name}</span>
+          display: 'flex', alignItems: 'center', gap: 6, minWidth: 0,
+        }}>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{client.name}</span>
+          {client.is_demo && (
+            <span style={{
+              flexShrink: 0, fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 8,
+              background: 'rgba(176,112,48,0.15)', color: '#B07030', letterSpacing: '0.04em',
+            }}>DEMO</span>
+          )}
+        </span>
         <div style={{ position: 'relative', flexShrink: 0 }} ref={menuRef}>
           <button
             onClick={(e) => { e.stopPropagation(); setShowAmMenu(v => !v); }}

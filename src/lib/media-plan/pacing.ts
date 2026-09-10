@@ -47,6 +47,30 @@ export function channelNameToPlatform(channelName: string): string | null {
   return null;
 }
 
+// Every `channel_key` the dashboard's channel-performance-card could have
+// persisted to client_channel_conversion_config for a given raw media-plan
+// channel. Mirrors dashboard/page.tsx's `cardId` exactly: a bare
+// `id ?? channelName` when the channel renders as a single card, plus one
+// `${id}::${line.id}` per line when it fans out into per-campaign-line cards
+// (channel.campaignLines.length > 1) — a compound key a bare id/name lookup
+// can never match, which is why conversion-event lookups have to check all
+// of these candidates rather than just the channel-level one.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function getConversionConfigKeyCandidates(ch: any): string[] {
+  const keys = new Set<string>();
+  const bareId = ch.id ?? ch.channelName;
+  if (bareId != null) keys.add(String(bareId));
+  if (ch.channelName) keys.add(ch.channelName);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const lines: any[] = ch.campaignLines ?? [];
+  if (lines.length > 1) {
+    for (const line of lines) {
+      if (line?.id) keys.add(`${ch.id ?? ch.channelName}::${line.id}`);
+    }
+  }
+  return Array.from(keys);
+}
+
 export function getMonthsInRange(startDate: string, endDate: string): Array<{ padded: string; unpadded: string }> {
   const months: Array<{ padded: string; unpadded: string }> = [];
   const start = new Date(startDate);

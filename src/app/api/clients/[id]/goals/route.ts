@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { startOfMonth, subDays, format, parseISO } from 'date-fns';
 import { sendTeamsAlert } from '@/lib/teams';
 import { nzToday } from '@/lib/timezone';
+import { getConversionConfigKeyCandidates } from '@/lib/media-plan/pacing';
 
 type Params = { params: Promise<{ id: string }> | { id: string } };
 
@@ -118,6 +119,31 @@ export async function GET(_req: NextRequest, { params }: Params) {
   // Determined in step 4b, applied to the series build so the sparkline reflects the same event.
   let autoMetaActionType: string | null = null;
 
+  // The channel card's saved conversion event (client_channel_conversion_config, set via
+  // ChannelPerformanceCard's "Conv. Events" selector) — used whenever the widget itself
+  // hasn't sent its own metaActionType override, so CPA-goal actuals and the sparkline stay
+  // in sync with what the channel card shows for the same channel instead of falling straight
+  // to the auto-detect heuristic below.
+  let configuredMetaActionType: string | null = null;
+  if (!metaActionType) {
+    const metaRawChannels = rawChannels.filter(ch => channelToPlatform(ch.channelName) === 'meta-ads');
+    if (metaRawChannels.length > 0) {
+      // Includes compound "${channelId}::${lineId}" keys for channels fanned
+      // into per-campaign-line cards — a bare id/name lookup can't match those.
+      const keys = metaRawChannels.flatMap(ch => getConversionConfigKeyCandidates(ch));
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: configRows } = await (supabase as any)
+        .from('client_channel_conversion_config')
+        .select('channel_key, conversion_action_type')
+        .eq('client_id', clientId)
+        .in('channel_key', keys);
+      if (configRows && configRows.length > 0) {
+        configuredMetaActionType = configRows[0].conversion_action_type;
+      }
+    }
+  }
+  const effectiveMetaActionType = metaActionType ?? configuredMetaActionType;
+
   let actuals: Record<string, {
     spend: number; impressions: number; clicks: number; conversions: number;
     cpc_sum: number; cpc_count: number; cpm_sum: number; cpm_count: number;
@@ -159,7 +185,8 @@ export async function GET(_req: NextRequest, { params }: Params) {
     }
 
     // 4a. Override Meta conversions using specific meta_actions action_type if requested
-    if (metaActionType && actuals['meta-ads']) {
+    // (either an explicit widget override, or the channel card's saved conversion event)
+    if (effectiveMetaActionType && actuals['meta-ads']) {
       let metaActQuery = supabase
         .from('ad_performance_metrics')
         .select('meta_actions')
@@ -173,7 +200,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
       let metaConvs = 0;
       for (const row of metaActRows ?? []) {
         for (const act of ((row.meta_actions as any[]) ?? [])) {
-          if (act.action_type === metaActionType) metaConvs += parseInt(act.value, 10) || 0;
+          if (act.action_type === effectiveMetaActionType) metaConvs += parseInt(act.value, 10) || 0;
         }
       }
       actuals['meta-ads'].conversions = metaConvs;
@@ -201,10 +228,11 @@ export async function GET(_req: NextRequest, { params }: Params) {
       actuals['google-ads'].conversions = googleConvs;
     }
 
-    // 4b. Auto-detect Meta conversion event when none is configured.
-    // Meta stores conversions: null — all event data lives in meta_actions JSONB.
-    // Without this, CPA is always null for Meta even when campaigns are running.
-    if (!metaActionType && actuals['meta-ads'] && actuals['meta-ads'].conversions === 0) {
+    // 4b. Auto-detect Meta conversion event when none is configured anywhere (no widget
+    // override, no channel-card setting either). Meta stores conversions: null — all event
+    // data lives in meta_actions JSONB. Without this, CPA is always null for Meta even when
+    // campaigns are running.
+    if (!effectiveMetaActionType && actuals['meta-ads'] && actuals['meta-ads'].conversions === 0) {
       let autoActQuery = supabase
         .from('ad_performance_metrics')
         .select('meta_actions')
@@ -344,7 +372,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
     // Fallback: if step 4b didn't detect an action type (e.g. no MTD rows on the
     // first day of a new month), detect from the 30-day series window instead.
     // The series rows already include meta_actions so no extra query is needed.
-    if (!metaActionType && !autoMetaActionType && activePlatforms.includes('meta-ads')) {
+    if (!effectiveMetaActionType && !autoMetaActionType && activePlatforms.includes('meta-ads')) {
       const evtTotals = new Map<string, number>();
       for (const row of seriesRows ?? []) {
         for (const act of ((row.meta_actions as any[]) ?? [])) {
@@ -377,7 +405,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
       cur.spend += Number(row.spend || 0);
       cur.impressions += Number(row.impressions || 0);
       cur.clicks += Number(row.clicks || 0);
-      const effectiveActionType = metaActionType || autoMetaActionType;
+      const effectiveActionType = effectiveMetaActionType || autoMetaActionType;
       if (effectiveActionType && row.meta_actions) {
         for (const act of (row.meta_actions as any[]) ?? []) {
           if (act.action_type === effectiveActionType) cur.conversions += parseInt(act.value, 10) || 0;

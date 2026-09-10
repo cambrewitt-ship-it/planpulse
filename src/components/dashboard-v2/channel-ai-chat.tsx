@@ -239,19 +239,48 @@ export default function ChannelAIChat({ clientId, clientName, channelDisplayName
     await streamRequest({ messages: history, agentId: activeAgent?.id });
   }, [messages, isLoading, activeAgent, channelDisplayName, channelKeyword, clientName, platformLabel, streamRequest]);
 
-  // Looks up the Setup Auditor agent config (cached after first lookup) —
-  // shared by the campaign-picker activation and the actual audit kickoff.
+  // Looks up the Setup Auditor / Health Check agent config — shared by the
+  // campaign-picker activation and the actual audit kickoff.
   const resolveSetupAuditorAgent = useCallback(async (): Promise<UserAgent | null> => {
+    const findMatch = (list: UserAgent[]) =>
+      list.find(a => a.template_slug === 'setup_auditor')
+        // Fallback for a manually-renamed custom agent — matches both the old
+        // "Setup Auditor" name and the current "Health Check Agent" one.
+        ?? list.find(a => {
+          const n = a.name.toLowerCase();
+          return (n.includes('setup') && n.includes('audit')) || (n.includes('health') && n.includes('check'));
+        })
+        ?? null;
+
     let list = agents;
-    if (!list) {
+    let match = list ? findMatch(list) : null;
+
+    // Don't trust a cached miss or disabled result forever — the user may have
+    // just flipped the toggle on /agents in another tab, so always refetch
+    // until an enabled agent turns up (same fix as the Agents page/Agency
+    // chat effectively get from re-fetching after every seed).
+    if (!match || match.is_enabled === false) {
       const res = await fetch('/api/agents');
       const data = res.ok ? await res.json() : null;
       list = data?.agents ?? [];
+      match = findMatch(list ?? []);
+
+      // No row at all yet — this channel chat is one of the few surfaces that
+      // never triggers template seeding itself (unlike the Agents page and
+      // Agency chat), so an account that's only ever used this panel would
+      // otherwise never get a setup_auditor row created. Seed, then re-check.
+      if (!match) {
+        await fetch('/api/agents/seed-templates', { method: 'POST' }).catch(() => {});
+        const res2 = await fetch('/api/agents');
+        const data2 = res2.ok ? await res2.json() : null;
+        list = data2?.agents ?? [];
+        match = findMatch(list ?? []);
+      }
+
       setAgents(list);
     }
-    return (list ?? []).find(a => a.template_slug === 'setup_auditor')
-      ?? (list ?? []).find(a => a.name.toLowerCase().includes('setup') && a.name.toLowerCase().includes('audit'))
-      ?? null;
+
+    return match && match.is_enabled !== false ? match : null;
   }, [agents]);
 
   // Step 1: fetch this channel's LIVE campaigns directly (no LLM round-trip)

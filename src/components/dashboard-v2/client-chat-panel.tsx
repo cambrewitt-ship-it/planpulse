@@ -2,17 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Sparkles, ArrowUp, Bot, ReceiptText, BarChart2, Loader2,
-  CalendarRange, ListChecks, ClipboardList, ExternalLink, ChevronDown, Users,
-  RefreshCw,
+  ArrowUp, ExternalLink, RefreshCw,
 } from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
 import type { UserAgent, AgentAuditStep, AgentOutputLink } from '@/types/database';
 import { MarkdownText, TOOL_LABELS, splitOverview, sanitizeChatErrorMessage } from './ai-shared';
 
 // Apple × Moleskine design tokens
 const RED = 'oklch(42% 0.16 25)';
-const CARD_BG = 'oklch(98% 0.006 75)';
+const CARD_BG = '#FFFFFF';
 const PAPER_BG = 'oklch(96% 0.009 75)';
 const INK = '#1C1917';
 const GRAPHITE = '#5C5450';
@@ -27,17 +24,7 @@ const dotGrid: React.CSSProperties = {
   backgroundSize: '22px 22px',
 };
 
-const AGENT_ICON_COLOR = RED;
 const font: React.CSSProperties = { fontFamily: sansFont };
-
-const AGENT_ICONS: Record<string, LucideIcon> = {
-  ReceiptText, BarChart2, CalendarRange, ListChecks, ClipboardList, Bot,
-};
-
-function AgentIcon({ name, size = 14 }: { name?: string | null; size?: number }) {
-  const Icon = (name && AGENT_ICONS[name]) ? AGENT_ICONS[name] : Bot;
-  return <Icon size={size} style={{ color: AGENT_ICON_COLOR, flexShrink: 0 }} />;
-}
 
 function BouncingDots({ color = '#C4BDB5' }: { color?: string }) {
   return (
@@ -79,9 +66,7 @@ export default function ClientChatPanel({
   onActionComplete,
   height,
 }: ClientChatPanelProps) {
-  const [agents, setAgents] = useState<UserAgent[]>([]);
-  const [selectedAgent, setSelectedAgent] = useState<UserAgent | null>(null);
-  const [showAgentMenu, setShowAgentMenu] = useState(false);
+  const selectedAgent: UserAgent | null = null;
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [apiMessages, setApiMessages] = useState<ApiMessage[]>([]);
@@ -95,23 +80,7 @@ export default function ClientChatPanel({
   const bottomRef = useRef<HTMLDivElement>(null);
   const messageThreadRef = useRef<HTMLDivElement>(null);
   const autoOverviewClientIdRef = useRef<string | null>(null);
-  const agentMenuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!showAgentMenu) return;
-    function handleClickOutside(e: MouseEvent) {
-      if (agentMenuRef.current && !agentMenuRef.current.contains(e.target as Node)) setShowAgentMenu(false);
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showAgentMenu]);
-
-  useEffect(() => {
-    fetch('/api/agents')
-      .then(res => res.ok ? res.json() : { agents: [] })
-      .then(data => setAgents((data.agents ?? []).filter((a: UserAgent) => a.is_enabled !== false)))
-      .catch(() => {});
-  }, []);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Scroll the newest message into view within the message thread only — avoid
   // scrollIntoView here, since it walks up through ALL scrollable ancestors
@@ -126,14 +95,6 @@ export default function ClientChatPanel({
     const t = setTimeout(() => setActionEvents(prev => prev.slice(1)), 4000);
     return () => clearTimeout(t);
   }, [actionEvents]);
-
-  function selectAgent(agent: UserAgent | null) {
-    setSelectedAgent(agent);
-    setMessages([]);
-    setApiMessages([]);
-    setAuditSteps([]);
-    setOutputLinks([]);
-  }
 
   const sendMessage = useCallback(async (userText: string, opts?: { silent?: boolean; overviewRequest?: boolean; forceRefresh?: boolean }) => {
     if (isStreaming) return;
@@ -279,11 +240,21 @@ export default function ClientChatPanel({
     const text = input.trim();
     if (!text || isStreaming) return;
     setInput('');
+    if (textareaRef.current) textareaRef.current.style.height = 'auto';
     sendMessage(text);
   }
 
-  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key === 'Enter') {
+  function handleInputChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    setInput(e.target.value);
+    const ta = textareaRef.current;
+    if (ta) {
+      ta.style.height = 'auto';
+      ta.style.height = `${Math.min(ta.scrollHeight, 120)}px`;
+    }
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();
     }
@@ -293,27 +264,17 @@ export default function ClientChatPanel({
 
   return (
     <div style={{ position: 'relative', ...font, borderRadius: 22, ...(height != null ? { height } : {}) }}>
-      {/* Glow ring — same orbiting-conic-gradient technique as the /agency chat textbox, wrapped around the whole card instead of just the input */}
       <div
         style={{
           position: 'relative',
+          background: CARD_BG, ...dotGrid,
           borderRadius: 22,
-          padding: 1.5,
-          overflow: 'hidden',
-          background: BORDER,
+          border: `1px solid ${BORDER}`,
           boxShadow: '0 10px 26px -14px oklch(45% 0.03 75 / 0.4)',
+          overflow: 'hidden',
           ...(height != null ? { height: '100%', display: 'flex', flexDirection: 'column' } : {}),
         }}
       >
-        {!input.trim() && !isStreaming && <div className="askAiGlowSpin" />}
-        <div
-          style={{
-            position: 'relative', zIndex: 1,
-            background: CARD_BG, ...dotGrid,
-            borderRadius: 20.5,
-            ...(height != null ? { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' } : {}),
-          }}
-        >
       {/* Action chips */}
       {actionEvents.length > 0 && (
         <div style={{ position: 'absolute', top: -8, right: 12, transform: 'translateY(-100%)', display: 'flex', flexDirection: 'column', gap: 5, alignItems: 'flex-end', zIndex: 50 }}>
@@ -327,7 +288,6 @@ export default function ClientChatPanel({
               whiteSpace: 'nowrap',
               ...font,
             }}>
-              <Sparkles size={12} />
               {ev.message}
             </div>
           ))}
@@ -336,77 +296,9 @@ export default function ClientChatPanel({
 
       {/* Header + agent picker */}
       <div style={{ padding: '13px 16px 10px', borderBottom: `1px solid ${BORDER_SOFT}`, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', flexShrink: 0 }}>
-        <Sparkles size={14} style={{ color: RED, flexShrink: 0 }} />
         <span style={{ fontSize: 15, fontWeight: 600, color: INK, fontFamily: serifFont, flexShrink: 0 }}>
           Ask AI
         </span>
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginLeft: 8 }}>
-          <button
-            onClick={() => selectAgent(null)}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 5,
-              padding: '3px 10px', borderRadius: 99,
-              border: `1px solid ${selectedAgent === null ? INK : BORDER}`,
-              background: selectedAgent === null ? INK : CARD_BG,
-              color: selectedAgent === null ? CARD_BG : GRAPHITE,
-              fontSize: 11.5, fontWeight: 500, cursor: 'pointer', fontFamily: sansFont,
-            }}
-          >
-            <Bot size={12} />
-            Default Assistant
-          </button>
-
-          {/* Use an Agent — dropdown housing all configured agents */}
-          <div ref={agentMenuRef} style={{ position: 'relative' }}>
-            <button
-              onClick={() => setShowAgentMenu(v => !v)}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 5,
-                padding: '3px 10px', borderRadius: 99,
-                border: `1px solid ${selectedAgent ? INK : BORDER}`,
-                background: selectedAgent ? INK : CARD_BG,
-                color: selectedAgent ? CARD_BG : GRAPHITE,
-                fontSize: 11.5, fontWeight: 500, cursor: 'pointer', fontFamily: sansFont,
-              }}
-            >
-              {selectedAgent ? <AgentIcon name={selectedAgent.icon} size={12} /> : <Users size={12} />}
-              {selectedAgent ? selectedAgent.name : 'Use an Agent'}
-              <ChevronDown size={12} style={{ transform: showAgentMenu ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
-            </button>
-
-            {showAgentMenu && (
-              <div style={{
-                position: 'absolute', top: '100%', left: 0, marginTop: 4,
-                background: CARD_BG, border: `1px solid ${BORDER}`, borderRadius: 10,
-                boxShadow: '0 4px 16px rgba(0,0,0,0.12)', minWidth: 190, zIndex: 20,
-                padding: 4, display: 'flex', flexDirection: 'column', gap: 2,
-                maxHeight: 260, overflowY: 'auto',
-              }}>
-                {agents.length === 0 ? (
-                  <div style={{ padding: '8px 10px', fontSize: 12, color: MUTED }}>
-                    No agents configured yet.
-                  </div>
-                ) : agents.map(agent => (
-                  <button
-                    key={agent.id}
-                    onClick={() => { selectAgent(agent); setShowAgentMenu(false); }}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 7,
-                      padding: '6px 10px', borderRadius: 6, border: 'none',
-                      background: selectedAgent?.id === agent.id ? PAPER_BG : 'transparent',
-                      color: '#3C3732', fontSize: 12.5, fontWeight: 500, cursor: 'pointer',
-                      textAlign: 'left', width: '100%', fontFamily: sansFont,
-                    }}
-                    title={agent.description ?? undefined}
-                  >
-                    <AgentIcon name={agent.icon} size={13} />
-                    {agent.name}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
 
         {selectedAgent === null && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
@@ -448,122 +340,139 @@ export default function ClientChatPanel({
         )}
       </div>
 
-      {/* Scrollable message thread — mirrors AgencyChat's active-chat scroll area */}
-      <div ref={messageThreadRef} style={{ ...(height != null ? { flex: 1, minHeight: 0 } : { height: 420 }), overflowY: 'auto', padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {messages.length === 0 && (
-          <div style={{ fontSize: 12.5, color: '#B5B0A5', fontFamily: serifFont, fontStyle: 'italic' }}>
-            {selectedAgent
-              ? `Ask "${selectedAgent.name}" a question about ${clientName || 'this client'}.`
-              : `Ask a question about ${clientName || 'this client'}, or pick a saved agent above to run it against this client.`}
-          </div>
-        )}
-        {messages.map((msg, idx) => {
-          const overview = msg.role === 'assistant' && msg.content ? splitOverview(msg.content) : null;
+      {/* Messages + floating input wrapper — the input overlays the scrollable
+          thread instead of sitting in its own footer section, matching AgencyChat. */}
+      <div style={{ position: 'relative', ...(height != null ? { flex: 1, minHeight: 0 } : { height: 440 }) }}>
+        {/* Scrollable message thread — mirrors AgencyChat's active-chat scroll area */}
+        <div ref={messageThreadRef} style={{ position: 'absolute', inset: 0, overflowY: 'auto', padding: '12px 16px 84px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {messages.length === 0 && (
+            <div style={{ fontSize: 12.5, color: '#B5B0A5', fontFamily: serifFont, fontStyle: 'italic' }}>
+              {selectedAgent
+                ? `Ask "${selectedAgent.name}" a question about ${clientName || 'this client'}.`
+                : `Ask a question about ${clientName || 'this client'}, or pick a saved agent above to run it against this client.`}
+            </div>
+          )}
+          {messages.map((msg, idx) => {
+            const overview = msg.role === 'assistant' && msg.content ? splitOverview(msg.content) : null;
 
-          return (
-            <div key={idx} style={{ display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
-              <div style={{
-                maxWidth: overview ? '100%' : '92%',
-                padding: msg.role === 'user' ? '7px 12px' : overview ? '11px 14px' : '9px 12px',
-                borderRadius: 14,
-                background: msg.role === 'user' ? INK : CARD_BG,
-                color: msg.role === 'user' ? CARD_BG : GRAPHITE,
-              }}>
-                {msg.role === 'user' ? (
-                  <span style={{ fontSize: 12.5, lineHeight: 1.5, fontFamily: sansFont }}>{msg.content}</span>
-                ) : overview ? (
-                  <MarkdownText text={overviewTab === 'internal' ? overview.internal : overview.client} variant="overview" />
-                ) : msg.content ? (
-                  <MarkdownText text={msg.content} />
-                ) : (
-                  <BouncingDots />
-                )}
+            return (
+              <div key={idx} style={{ display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
+                <div style={{
+                  maxWidth: overview ? '100%' : '92%',
+                  padding: msg.role === 'user' ? '7px 12px' : overview ? '11px 14px' : '9px 12px',
+                  borderRadius: 14,
+                  background: msg.role === 'user' ? INK : CARD_BG,
+                  color: msg.role === 'user' ? CARD_BG : GRAPHITE,
+                }}>
+                  {msg.role === 'user' ? (
+                    <span style={{ fontSize: 12.5, lineHeight: 1.5, fontFamily: sansFont }}>{msg.content}</span>
+                  ) : overview ? (
+                    <MarkdownText text={overviewTab === 'internal' ? overview.internal : overview.client} variant="overview" />
+                  ) : msg.content ? (
+                    <MarkdownText text={msg.content} />
+                  ) : (
+                    <BouncingDots />
+                  )}
+                </div>
+              </div>
+            );
+          })}
+
+          {streamingAssistantEmpty && (
+            <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 2px' }}>
+                <span style={{ fontSize: 11, color: MUTED, fontFamily: sansFont }}>
+                  {activeToolCall ? (TOOL_LABELS[activeToolCall] ?? 'Working on it…') : 'Thinking…'}
+                </span>
+                <BouncingDots color={RED} />
               </div>
             </div>
-          );
-        })}
+          )}
 
-        {streamingAssistantEmpty && (
-          <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 2px' }}>
-              <span style={{ fontSize: 11, color: MUTED, fontFamily: sansFont }}>
-                {activeToolCall ? (TOOL_LABELS[activeToolCall] ?? 'Working on it…') : 'Thinking…'}
-              </span>
-              <BouncingDots color={RED} />
+          {selectedAgent && auditSteps.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11, color: MUTED, fontFamily: sansFont }}>
+              {auditSteps.map((step, i) => (
+                <div key={i}>· {step.summary || step.label}</div>
+              ))}
+            </div>
+          )}
+
+          {outputLinks.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {outputLinks.map((link, i) => (
+                <a
+                  key={i}
+                  href={link.href}
+                  target={link.target ?? '_blank'}
+                  rel="noreferrer"
+                  style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: RED, fontFamily: sansFont }}
+                >
+                  <ExternalLink size={11} />
+                  {link.label}
+                </a>
+              ))}
+            </div>
+          )}
+          <div ref={bottomRef} />
+        </div>
+
+        {/* Gradient fade behind floating input — same technique as AgencyChat */}
+        <div style={{
+          position: 'absolute', bottom: 0, left: 0, right: 0, height: 72,
+          background: `linear-gradient(to bottom, transparent, ${CARD_BG} 55%)`,
+          pointerEvents: 'none',
+        }} />
+
+        {/* Floating input */}
+        <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '0 14px 14px' }}>
+          <div style={{ borderRadius: 20, boxShadow: '0 2px 16px rgba(0,0,0,0.09)' }}>
+            <div style={{
+              position: 'relative', borderRadius: 20, padding: 1.5,
+              overflow: 'hidden', background: 'rgba(224,220,212,0.7)',
+            }}>
+              {!input.trim() && !isStreaming && <div className="askAiGlowSpin" />}
+              <div style={{
+                background: '#FFFFFF', borderRadius: 18.5,
+                padding: '7px 7px 7px 14px',
+                position: 'relative', zIndex: 1,
+                display: 'flex', alignItems: 'flex-end', gap: 8,
+              }}>
+                <textarea
+                  ref={textareaRef}
+                  value={input}
+                  onChange={handleInputChange}
+                  onKeyDown={handleKeyDown}
+                  disabled={isStreaming}
+                  placeholder={
+                    isStreaming
+                      ? (activeToolCall ? TOOL_LABELS[activeToolCall] ?? 'Thinking…' : 'Thinking…')
+                      : selectedAgent ? `Ask ${selectedAgent.name}…` : `Ask about ${clientName || 'this client'}…`
+                  }
+                  rows={1}
+                  style={{
+                    flex: 1, resize: 'none', border: 'none', background: 'transparent',
+                    fontSize: 13, lineHeight: 1.5, color: INK, outline: 'none',
+                    ...font, minHeight: 20, maxHeight: 120, overflow: 'auto',
+                    padding: '6px 0', display: 'block', boxSizing: 'border-box',
+                  }}
+                />
+                <button
+                  onClick={handleSubmit}
+                  disabled={!input.trim() || isStreaming}
+                  style={{
+                    width: 30, height: 30, flexShrink: 0,
+                    background: input.trim() && !isStreaming ? RED : PAPER_BG,
+                    border: 'none', borderRadius: '50%',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    cursor: input.trim() && !isStreaming ? 'pointer' : 'default',
+                    transition: 'background 0.15s',
+                  }}
+                >
+                  <ArrowUp size={13} style={{ color: input.trim() && !isStreaming ? '#FFFFFF' : MUTED }} />
+                </button>
+              </div>
             </div>
           </div>
-        )}
-
-        {selectedAgent && auditSteps.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11, color: MUTED, fontFamily: sansFont }}>
-            {auditSteps.map((step, i) => (
-              <div key={i}>· {step.summary || step.label}</div>
-            ))}
-          </div>
-        )}
-
-        {outputLinks.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {outputLinks.map((link, i) => (
-              <a
-                key={i}
-                href={link.href}
-                target={link.target ?? '_blank'}
-                rel="noreferrer"
-                style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: RED, fontFamily: sansFont }}
-              >
-                <ExternalLink size={11} />
-                {link.label}
-              </a>
-            ))}
-          </div>
-        )}
-        <div ref={bottomRef} />
-      </div>
-
-      {/* Input — pill bar */}
-      <div style={{ padding: '10px 16px 14px', borderTop: `1px solid ${BORDER_SOFT}`, flexShrink: 0 }}>
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 8,
-          background: CARD_BG,
-          border: `1.5px solid ${BORDER}`,
-          borderRadius: 24,
-          padding: '8px 10px 8px 16px',
-        }}>
-          {isStreaming ? (
-            <Loader2 size={14} style={{ color: MUTED, animation: 'clientChatSpin 1s linear infinite', flexShrink: 0 }} />
-          ) : (
-            <Sparkles size={14} style={{ color: RED, flexShrink: 0 }} />
-          )}
-          <input
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={
-              isStreaming
-                ? (activeToolCall ? TOOL_LABELS[activeToolCall] ?? 'Thinking…' : 'Thinking…')
-                : selectedAgent ? `Ask ${selectedAgent.name}…` : `Ask about ${clientName || 'this client'}…`
-            }
-            style={{
-              flex: 1, border: 'none', outline: 'none', background: 'transparent',
-              fontSize: 14, color: INK, minWidth: 0, ...font,
-            }}
-          />
-          <button
-            onClick={handleSubmit}
-            disabled={!input.trim() || isStreaming}
-            style={{
-              width: 30, height: 30, flexShrink: 0,
-              background: input.trim() && !isStreaming ? RED : PAPER_BG,
-              border: input.trim() && !isStreaming ? 'none' : `1px solid ${BORDER}`,
-              borderRadius: '50%',
-              cursor: input.trim() && !isStreaming ? 'pointer' : 'default',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              transition: 'background 0.15s',
-            }}
-          >
-            <ArrowUp size={13} style={{ color: input.trim() && !isStreaming ? CARD_BG : MUTED }} />
-          </button>
         </div>
       </div>
 
@@ -575,7 +484,11 @@ export default function ClientChatPanel({
         @keyframes clientChatSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         .askAiGlowSpin {
           position: absolute;
-          inset: -100%;
+          top: 50%;
+          left: 50%;
+          width: 300%;
+          aspect-ratio: 1;
+          transform: translate(-50%, -50%) rotate(0deg);
           background: conic-gradient(
             from 0deg,
             transparent 270deg,
@@ -586,14 +499,13 @@ export default function ClientChatPanel({
           );
           animation: askAiGlowOrbit 4s linear infinite, askAiGlowPulse 9s ease-in-out 1s infinite;
         }
-        @keyframes askAiGlowOrbit { to { transform: rotate(360deg); } }
+        @keyframes askAiGlowOrbit { to { transform: translate(-50%, -50%) rotate(360deg); } }
         @keyframes askAiGlowPulse {
           0%, 100% { opacity: 0; }
           8%, 50% { opacity: 1; }
           58%, 95% { opacity: 0; }
         }
       `}</style>
-        </div>
       </div>
     </div>
   );

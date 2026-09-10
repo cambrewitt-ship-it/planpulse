@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/server';
 import type { Database, ClientWithSpendCache } from '@/types/database';
 import { refreshClientSpendCache, getActionPointStatsForClient } from '@/lib/health/calculations';
 import { nzToday, nzDateKeyOffset, nzStartOfYear } from '@/lib/timezone';
+import { ensureDemoDataSeeded } from '@/lib/demo-seed/seed-demo-data';
 
 export interface ClientChannelFlight {
   startDate: string;
@@ -31,6 +32,7 @@ export interface ClientCardData extends ClientWithSpendCache {
   completedActionPoints: number;       // completed action points for this client
   account_manager: string | null;      // assigned account manager name
   logo_url: string | null;             // client logo URL
+  is_demo: boolean;                    // true for the auto-seeded Demo Client
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -65,6 +67,15 @@ export async function GET(request: NextRequest) {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // Lazily seed a Demo Client the first time a brand-new (empty) account
+    // loads the dashboard. Idempotent and best-effort — never blocks a real
+    // dashboard load if seeding fails.
+    try {
+      await ensureDemoDataSeeded(supabase, session.user.id);
+    } catch (seedError) {
+      console.error('Error ensuring demo data seeded:', seedError);
     }
 
     // Fetch only clients belonging to the current user
@@ -311,6 +322,7 @@ export async function GET(request: NextRequest) {
           completedActionPoints: apStats.completed,
           account_manager: client.account_manager || null,
           logo_url: client.logo_url || null,
+          is_demo: client.is_demo || false,
         };
       })
     );

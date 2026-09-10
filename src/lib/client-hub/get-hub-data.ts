@@ -103,7 +103,7 @@ export interface HubConversionConfig {
 }
 
 export interface ClientHubData {
-  client: { id: string; name: string; logo_url: string | null };
+  client: { id: string; name: string; logo_url: string | null; is_demo: boolean };
   agency: { name: string | null; logo_url: string | null } | null;
   period: { start: string; end: string };
   metrics: HubMetric[];
@@ -241,7 +241,7 @@ export async function getClientHubData(
 ): Promise<ClientHubData | null> {
   const { data: client } = await supabase
     .from('clients')
-    .select('id, name, logo_url, user_id')
+    .select('id, name, logo_url, user_id, is_demo')
     .eq('id', clientId)
     .maybeSingle();
 
@@ -569,7 +569,7 @@ export async function getClientHubData(
   const documents: HubDocument[] = (docRows ?? []) as HubDocument[];
 
   return {
-    client: { id: client.id, name: client.name, logo_url: client.logo_url ?? null },
+    client: { id: client.id, name: client.name, logo_url: client.logo_url ?? null, is_demo: client.is_demo ?? false },
     agency,
     period,
     metrics,

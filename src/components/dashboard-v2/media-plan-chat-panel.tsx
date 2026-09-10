@@ -119,12 +119,27 @@ export default function MediaPlanChatPanel({
   // This chat is always the Media Planner Agent — find it once and use it
   // for every turn, with no user-facing option to switch assistants.
   useEffect(() => {
+    const findAgent = (agents: UserAgent[]) => {
+      const list = agents.filter(a => a.is_enabled !== false);
+      return list.find(a => a.template_slug === 'media_plan_editor')
+        ?? list.find(a => /media|editor/i.test(a.name))
+        ?? null;
+    };
+
     fetch('/api/agents')
       .then(res => res.ok ? res.json() : { agents: [] })
-      .then(data => {
-        const list: UserAgent[] = (data.agents ?? []).filter((a: UserAgent) => a.is_enabled !== false);
-        const agent = list.find(a => a.template_slug === 'media_plan_editor')
-          ?? list.find(a => /media|editor/i.test(a.name));
+      .then(async data => {
+        let agent = findAgent(data.agents ?? []);
+        // No row at all yet — this panel (unlike the Agents page and Agency
+        // chat) never triggers template seeding itself, so an account that's
+        // only ever used the media plan chat never gets a media_plan_editor
+        // row created. Seed, then look again.
+        if (!agent) {
+          await fetch('/api/agents/seed-templates', { method: 'POST' }).catch(() => {});
+          const res2 = await fetch('/api/agents');
+          const data2 = res2.ok ? await res2.json() : { agents: [] };
+          agent = findAgent(data2.agents ?? []);
+        }
         if (agent) setMediaPlanAgent(agent);
       })
       .catch(() => {});

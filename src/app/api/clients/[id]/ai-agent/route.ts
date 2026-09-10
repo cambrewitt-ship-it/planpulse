@@ -3,6 +3,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/server';
 import { patchSandboxPlanFlightBudget, upsertSandboxPlanFlight, snapToWeekCommencing } from '@/lib/media-plan/sandbox-sync';
+import { channelNameToPlatform, getConversionConfigKeyCandidates } from '@/lib/media-plan/pacing';
 import { nzToday, nzDateKeyOffset, nzStartOfMonth, formatNZ } from '@/lib/timezone';
 import { withCacheControl } from '@/lib/agent-tools';
 import { withAnthropicOverloadRetry, friendlyAnthropicErrorMessage } from '@/lib/anthropic-retry';
@@ -21,7 +22,7 @@ const CLIENT_AGENT_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'get_channel_performance',
-    description: 'Get channel-level performance and spend pacing for this client. Returns, per channel: planned vs actual spend, variance %, pacing status, impressions, clicks, CTR, CPC, CPA, conversions, reach, and frequency. Always call this for an overview — it is the source of the real numbers to cite.',
+    description: 'Get channel-level performance and spend pacing for this client. Returns, per channel: planned vs actual spend, variance %, pacing status, impressions, clicks, CTR, CPC, CPA, conversions, reach, and frequency. For Meta, "conversions" reflects whichever event the agency configured in the channel card\'s "Conv. Events" selector (see conversion_event_label); if none is configured, conversion_note explains that the 0 is not a real count. Always call this for an overview — it is the source of the real numbers to cite.',
     input_schema: {
       type: 'object',
       properties: {
@@ -222,9 +223,9 @@ async function toolGetChannelPerformance(clientId: string, input: { start_date?:
   const start_date = input.start_date ?? nzStartOfMonth();
   const end_date = input.end_date ?? nzToday();
 
-  const [metricsRes, mediaPlanRes] = await Promise.all([
+  const [metricsRes, mediaPlanRes, conversionConfigRes] = await Promise.all([
     supabase.from('ad_performance_metrics')
-      .select('platform, spend, impressions, clicks, conversions, reach, frequency')
+      .select('platform, spend, impressions, clicks, conversions, reach, frequency, meta_actions')
       .eq('client_id', clientId)
       .gte('date', start_date)
       .lte('date', end_date)
@@ -233,21 +234,59 @@ async function toolGetChannelPerformance(clientId: string, input: { start_date?:
       .select('channels')
       .eq('client_id', clientId)
       .maybeSingle(),
+    // client_channel_conversion_config isn't in the generated Supabase types yet —
+    // cast to `any`, same workaround as agency/chat/route.ts's identical query.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase as any).from('client_channel_conversion_config')
+      .select('channel_key, conversion_action_type, conversion_label')
+      .eq('client_id', clientId),
   ]);
 
   const metrics = metricsRes.data ?? [];
   const rawChannels: any[] = ((mediaPlanRes.data as any)?.channels as any[]) ?? [];
+  const conversionConfigByKey = new Map<string, { actionType: string; label: string }>(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (conversionConfigRes.data ?? []).map((r: any) => [r.channel_key, { actionType: r.conversion_action_type, label: r.conversion_label }])
+  );
 
-  const actualByPlatform = new Map<string, { spend: number; impressions: number; clicks: number; conversions: number; reach: number; freqSum: number; freqCount: number }>();
+  const actualByPlatform = new Map<string, { spend: number; impressions: number; clicks: number; conversions: number; reach: number; freqSum: number; freqCount: number; actionTotals: Map<string, number> }>();
   for (const m of metrics as any[]) {
-    const existing = actualByPlatform.get(m.platform) ?? { spend: 0, impressions: 0, clicks: 0, conversions: 0, reach: 0, freqSum: 0, freqCount: 0 };
+    const existing = actualByPlatform.get(m.platform) ?? { spend: 0, impressions: 0, clicks: 0, conversions: 0, reach: 0, freqSum: 0, freqCount: 0, actionTotals: new Map<string, number>() };
     existing.spend += Number(m.spend || 0);
     existing.impressions += Number(m.impressions || 0);
     existing.clicks += Number(m.clicks || 0);
     existing.conversions += Number(m.conversions || 0);
     existing.reach += Number(m.reach || 0);
     if (m.frequency != null) { existing.freqSum += Number(m.frequency); existing.freqCount += 1; }
+    // Meta has no single canonical "conversions" number — ad_performance_metrics.conversions
+    // is always NULL for meta-ads rows, with the raw per-action breakdown in meta_actions.
+    // Tally it here so the configured conversion event (client_channel_conversion_config,
+    // set via the channel card's "Conv. Events" selector) can be summed below instead of
+    // always reporting 0.
+    const rawActions = m.meta_actions as Array<{ action_type: string; value: string }> | null;
+    if (Array.isArray(rawActions)) {
+      for (const a of rawActions) {
+        if (!a?.action_type) continue;
+        existing.actionTotals.set(a.action_type, (existing.actionTotals.get(a.action_type) ?? 0) + (parseFloat(a.value) || 0));
+      }
+    }
     actualByPlatform.set(m.platform, existing);
+  }
+
+  // Resolve the Meta conversion-event mapping (if any) from ANY raw channel
+  // whose name resolves to meta-ads — checked against every key-candidate the
+  // channel card could have persisted, including the compound
+  // "${channelId}::${lineId}" key written for per-campaign-line fanned-out
+  // cards (see getConversionConfigKeyCandidates), which an exact channelName
+  // or bare-id match can never resolve.
+  let metaConversionMapping: { actionType: string; label: string } | null = null;
+  for (const ch of rawChannels) {
+    if (!ch.channelName || channelNameToPlatform(ch.channelName) !== 'meta-ads') continue;
+    for (const key of getConversionConfigKeyCandidates(ch)) {
+      const mapping = conversionConfigByKey.get(key);
+      if (mapping) { metaConversionMapping = mapping; break; }
+    }
+    if (metaConversionMapping) break;
   }
 
   const monthsInRange = getMonthsInRange(start_date, end_date);
@@ -276,7 +315,17 @@ async function toolGetChannelPerformance(clientId: string, input: { start_date?:
       ? Math.round(((actual_spend - planned_budget) / planned_budget) * 1000) / 10 : null;
     const impressions = perf?.impressions || null;
     const clicks = perf?.clicks || null;
-    const conversions = perf?.conversions || null;
+
+    // Meta: use whichever action_type the agency configured as this channel's
+    // conversion event (client_channel_conversion_config), summed from meta_actions,
+    // instead of the always-NULL ad_performance_metrics.conversions column.
+    let conversionOverride: number | null = null;
+    let conversionLabel: string | null = null;
+    if (platformKey === 'meta-ads' && metaConversionMapping) {
+      conversionOverride = perf?.actionTotals?.get(metaConversionMapping.actionType) ?? 0;
+      conversionLabel = metaConversionMapping.label;
+    }
+    const conversions = conversionOverride !== null ? conversionOverride : (perf?.conversions || null);
     const reach = perf?.reach || null;
     const frequency = perf && perf.freqCount > 0 ? Math.round((perf.freqSum / perf.freqCount) * 100) / 100 : null;
     const ctr = impressions && clicks ? Math.round((clicks / impressions) * 10000) / 100 : null;
@@ -286,7 +335,13 @@ async function toolGetChannelPerformance(clientId: string, input: { start_date?:
       : variance_pct > 15 ? 'overpacing'
       : variance_pct < -15 ? 'underpacing'
       : 'on track';
-    return { name, planned_budget, actual_spend, variance_pct, pacing_status, impressions, clicks, ctr, cpc, cpa, conversions, reach, frequency };
+    return {
+      name, planned_budget, actual_spend, variance_pct, pacing_status, impressions, clicks, ctr, cpc, cpa, conversions, reach, frequency,
+      conversion_event_label: conversionLabel,
+      ...(platformKey === 'meta-ads' && !conversionLabel && {
+        conversion_note: 'No conversion event is configured for this Meta channel yet, so "conversions"/"cpa" are not meaningful — Meta has no single canonical conversion number. Tell the user to pick one in the channel card\'s "Conv. Events" selector, then re-ask; don\'t report this 0 as a real conversion count.',
+      }),
+    };
   });
 
   const total_planned_budget = channels.reduce((s, c) => s + (c.planned_budget ?? 0), 0) || null;
