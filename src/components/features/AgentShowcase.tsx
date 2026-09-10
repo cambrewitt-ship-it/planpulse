@@ -10,18 +10,8 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { MediaPlanMockup } from '@/components/features/FeatureMockups';
-
-function ChannelPerformanceScreenshot() {
-  return (
-    <Image
-      src="/channel-performance.png"
-      alt="Real-time performance dashboard showing pacing, spend variance, and platform metrics"
-      width={2002}
-      height={1502}
-      className="w-full h-auto"
-    />
-  );
-}
+import HealthCheckAgentDemo from '@/components/features/HealthCheckAgentDemo';
+import InvoiceAgentDemo from '@/components/features/InvoiceAgentDemo';
 
 function PerformanceAnalystScreenshot() {
   return (
@@ -30,18 +20,6 @@ function PerformanceAnalystScreenshot() {
       alt="Performance analyst dashboard showing cross-channel pacing and variance insights"
       width={1858}
       height={798}
-      className="w-full h-auto"
-    />
-  );
-}
-
-function InvoiceScreenshot() {
-  return (
-    <Image
-      src="/invoice.png"
-      alt="Generated client invoice with commission breakdown"
-      width={1466}
-      height={1396}
       className="w-full h-auto"
     />
   );
@@ -66,7 +44,7 @@ const SHOWCASE_AGENTS: ShowcaseAgent[] = [
     name: 'Invoice Generator',
     icon: ReceiptText,
     tagline: 'Builds accurate client invoices from planned or actual spend, with commission breakdowns, in seconds.',
-    Mockup: InvoiceScreenshot,
+    Mockup: InvoiceAgentDemo,
   },
   {
     slug: 'media_plan_editor',
@@ -87,12 +65,16 @@ const SHOWCASE_AGENTS: ShowcaseAgent[] = [
     name: 'Health Check Agent',
     icon: ShieldAlert,
     tagline: 'Audits live Google and Meta campaigns against their intended setup and flags every discrepancy.',
-    Mockup: ChannelPerformanceScreenshot,
+    Mockup: HealthCheckAgentDemo,
   },
 ];
 
+const DEFAULT_ACTIVE_SLUG = 'setup_auditor';
+
 export default function AgentShowcase() {
-  const [active, setActive] = useState(0);
+  const [active, setActive] = useState(
+    Math.max(0, SHOWCASE_AGENTS.findIndex((a) => a.slug === DEFAULT_ACTIVE_SLUG))
+  );
 
   const activeAgent = SHOWCASE_AGENTS[active];
   const MockupComp = activeAgent.Mockup;
