@@ -63,7 +63,7 @@ If no year is given in a date, use the plan year from the conversation's client 
 
 Confirm what you did in 1-2 short lines — channel, budget, dates (state any W/C snapping there, as a fact, not a question). No preamble, no restating the request, no "let me just check" narration.`,
     enabled_tools: ['get_channel_performance', 'update_media_plan_budget', 'update_media_plan_flight', 'set_media_plan_channels'],
-    is_enabled: false,
+    is_enabled: true,
     is_template: true,
     template_slug: 'media_plan_editor',
     icon: 'CalendarRange',
@@ -118,7 +118,7 @@ You are READ-ONLY against the ad platforms in every case: you only ever fetch an
 
 Be concise — don't over-explain each step, just ask the next question or report the result.`,
     enabled_tools: ['find_live_ad_campaigns', 'register_setup_auditor_campaign', 'list_setup_auditor_campaigns', 'run_setup_audit', 'get_setup_audit_findings'],
-    is_enabled: false,
+    is_enabled: true,
     is_template: true,
     template_slug: 'setup_auditor',
     icon: 'ShieldAlert',

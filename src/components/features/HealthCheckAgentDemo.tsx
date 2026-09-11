@@ -1,10 +1,13 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import Image from 'next/image';
 import { Bot, ArrowUp, Globe, Link2Off, Wallet } from 'lucide-react';
 
-// Mirrors the real chat surface in ChannelAIChat (src/components/dashboard-v2/channel-ai-chat.tsx)
-// so this looping demo reads as an authentic recording rather than a mockup.
+// Same side-by-side layout as MediaPlanEditorDemo / PerformanceAnalystDemo
+// (src/components/features/MediaPlanEditorDemo.tsx), mirrored — chat on the
+// left, the real pacing dashboard screenshot on the right — so this looping
+// demo reads as an authentic recording rather than a mockup.
 const AGENT_RUST = '#A0442A';
 
 interface CampaignOption {
@@ -48,7 +51,6 @@ function Dots({ color = '#C4BDB5' }: { color?: string }) {
 }
 
 export default function HealthCheckAgentDemo() {
-  const [pressed, setPressed] = useState(false);
   const [messages, setMessages] = useState<DemoMessage[]>([]);
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
   const [fading, setFading] = useState(false);
@@ -97,43 +99,38 @@ export default function HealthCheckAgentDemo() {
         setFading(false);
         setMessages([]);
         setSelectedCampaignId(null);
-        setPressed(false);
-        await sleep(2400);
+        await sleep(1500);
         if (!active) return;
 
-        setPressed(true);
-        await sleep(200);
-        if (!active) return;
-        setPressed(false);
         setMessages([{ id: 'm1', role: 'user', content: 'Activate Health Check Agent' }]);
 
-        await sleep(500);
+        await sleep(375);
         if (!active) return;
         setMessages((prev) => [...prev, { id: 'm2', role: 'assistant', loadingLabel: 'Thinking…' }]);
 
-        await sleep(750);
+        await sleep(560);
         if (!active) return;
         setMessages((prev) => prev.map((m) => (m.id === 'm2'
           ? { ...m, loadingLabel: undefined, content: 'Which live campaign should Setup Auditor check?', campaignOptions: CAMPAIGNS }
           : m)));
 
-        await sleep(2200);
+        await sleep(1650);
         if (!active) return;
         setSelectedCampaignId(SELECTED_CAMPAIGN.id);
 
-        await sleep(550);
+        await sleep(410);
         if (!active) return;
         setMessages((prev) => [...prev, { id: 'm3', role: 'user', content: SELECTED_CAMPAIGN.name }]);
 
-        await sleep(500);
+        await sleep(375);
         if (!active) return;
         setMessages((prev) => [...prev, { id: 'm4', role: 'assistant', loadingLabel: 'Pulling performance data…' }]);
 
-        await sleep(1100);
+        await sleep(825);
         if (!active) return;
         setMessages((prev) => prev.map((m) => (m.id === 'm4' ? { ...m, loadingLabel: 'Pulling account data…' } : m)));
 
-        await sleep(1100);
+        await sleep(825);
         if (!active) return;
         setMessages((prev) => prev.map((m) => (m.id === 'm4'
           ? {
@@ -151,7 +148,7 @@ export default function HealthCheckAgentDemo() {
             }
           : m)));
 
-        await sleep(5400);
+        await sleep(4050);
         if (!active) return;
         setFading(true);
         await sleep(400);
@@ -171,96 +168,109 @@ export default function HealthCheckAgentDemo() {
       style={{ height: 480 }}
     >
       <div
-        className="h-full flex flex-col p-4 transition-opacity duration-400 ease-out"
+        className="h-full flex p-4 gap-3 transition-opacity duration-400 ease-out"
         style={{ opacity: fading ? 0 : 1 }}
       >
-        {isEmpty ? (
-          <div className="flex-1 flex flex-col items-center justify-center gap-6 text-center px-3">
-            <div
-              className="flex items-center justify-center gap-2.5 rounded-full bg-white px-6 py-3.5 text-sm font-semibold shadow-lg border border-black/[0.04] transition-transform duration-150"
-              style={{ color: AGENT_RUST, transform: pressed ? 'scale(0.96)' : 'scale(1)' }}
-            >
-              <Bot size={24} />
-              Activate Health Check Agent
-            </div>
-            <p className="text-xs text-gray-600 leading-relaxed max-w-[210px]">
-              Or ask anything about this channel — pacing, performance, set up, health etc.
-            </p>
+        {/* Pacing dashboard screenshot */}
+        <div className="flex-1 min-w-0 flex items-center justify-center">
+          <div
+            className="w-full rounded-xl overflow-hidden"
+            style={{ border: '1px solid #E8E4DC', boxShadow: '0 8px 24px rgba(28,25,23,0.08)' }}
+          >
+            <Image
+              src="/channel-performance.png"
+              alt="Channel performance dashboard showing pacing and actual vs planned spend"
+              width={2002}
+              height={1502}
+              className="w-full h-auto"
+            />
           </div>
-        ) : (
+        </div>
+
+        {/* Chat column */}
+        <div className="flex-shrink-0 flex flex-col" style={{ width: 205 }}>
           <div ref={threadRef} className="flex-1 min-h-0 overflow-y-auto -mx-1 px-1">
-            <div className="flex flex-col gap-2">
-              {messages.map((msg) => (
-                <div
-                  key={msg.id}
-                  className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-1 duration-300`}
-                >
+            {isEmpty ? (
+              <div className="h-full flex flex-col items-center justify-center gap-2 text-center px-1">
+                <Bot size={18} style={{ color: AGENT_RUST }} />
+                <p className="text-[10.5px] leading-snug" style={{ color: '#8A8578' }}>
+                  Ask me to check a live campaign&apos;s setup and health.
+                </p>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {messages.map((msg) => (
                   <div
-                    className={`max-w-[92%] rounded-xl text-xs leading-relaxed whitespace-pre-wrap ${
-                      msg.role === 'user' ? 'bg-gray-900 text-white px-2.5 py-1.5' : 'bg-gray-100 text-gray-800 px-2.5 py-2'
-                    }`}
+                    key={msg.id}
+                    className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-1 duration-300`}
                   >
-                    {msg.result ? (
-                      <div className="flex flex-col gap-1.5">
-                        <span>{msg.result.intro}</span>
-                        {msg.result.issues.map((issue, i) => (
-                          <div key={i} className="flex items-start gap-1.5">
-                            {issue.icon === 'geo' ? (
-                              <Globe size={13} className="shrink-0 mt-0.5" style={{ color: AGENT_RUST }} />
-                            ) : issue.icon === 'link' ? (
-                              <Link2Off size={13} className="shrink-0 mt-0.5" style={{ color: AGENT_RUST }} />
-                            ) : (
-                              <Wallet size={13} className="shrink-0 mt-0.5" style={{ color: AGENT_RUST }} />
-                            )}
-                            <span>{issue.text}</span>
-                          </div>
-                        ))}
-                        <span className="mt-0.5">{msg.result.outro}</span>
-                      </div>
-                    ) : msg.content ? (
-                      msg.content
-                    ) : msg.loadingLabel ? (
-                      <span className="flex items-center gap-1.5">
-                        <span className="text-[11px] text-gray-400">{msg.loadingLabel}</span>
-                        <Dots color="#CC785C" />
-                      </span>
-                    ) : null}
+                    <div
+                      className={`max-w-[95%] rounded-xl text-[10.5px] leading-relaxed whitespace-pre-wrap ${
+                        msg.role === 'user' ? 'bg-gray-900 text-white px-2 py-1.5' : 'bg-gray-100 text-gray-800 px-2 py-1.5'
+                      }`}
+                    >
+                      {msg.result ? (
+                        <div className="flex flex-col gap-1.5">
+                          <span>{msg.result.intro}</span>
+                          {msg.result.issues.map((issue, i) => (
+                            <div key={i} className="flex items-start gap-1.5">
+                              {issue.icon === 'geo' ? (
+                                <Globe size={12} className="shrink-0 mt-0.5" style={{ color: AGENT_RUST }} />
+                              ) : issue.icon === 'link' ? (
+                                <Link2Off size={12} className="shrink-0 mt-0.5" style={{ color: AGENT_RUST }} />
+                              ) : (
+                                <Wallet size={12} className="shrink-0 mt-0.5" style={{ color: AGENT_RUST }} />
+                              )}
+                              <span>{issue.text}</span>
+                            </div>
+                          ))}
+                          <span className="mt-0.5">{msg.result.outro}</span>
+                        </div>
+                      ) : msg.content ? (
+                        msg.content
+                      ) : msg.loadingLabel ? (
+                        <span className="flex items-center gap-1.5">
+                          <span className="text-[10px] text-gray-400">{msg.loadingLabel}</span>
+                          <Dots color="#CC785C" />
+                        </span>
+                      ) : null}
 
-                    {msg.campaignOptions && (
-                      <div className="flex flex-wrap gap-1.5 mt-2">
-                        {msg.campaignOptions.map((c) => (
-                          <span
-                            key={c.id}
-                            className="px-2.5 py-1 rounded-full border text-gray-800 text-[11.5px] font-medium transition-colors duration-300"
-                            style={{
-                              background: selectedCampaignId === c.id ? '#EFF6FF' : '#FFFFFF',
-                              borderColor: selectedCampaignId === c.id ? '#93C5FD' : '#E5E7EB',
-                            }}
-                          >
-                            {c.name}
-                            {c.account && <span className="text-gray-400 font-normal"> · {c.account}</span>}
-                            {c.isRegistered && <span className="text-emerald-600 font-normal"> · Registered</span>}
-                          </span>
-                        ))}
-                      </div>
-                    )}
+                      {msg.campaignOptions && (
+                        <div className="flex flex-wrap gap-1.5 mt-2">
+                          {msg.campaignOptions.map((c) => (
+                            <span
+                              key={c.id}
+                              className="px-2 py-1 rounded-full border text-gray-800 text-[10px] font-medium transition-colors duration-300"
+                              style={{
+                                background: selectedCampaignId === c.id ? '#EFF6FF' : '#FFFFFF',
+                                borderColor: selectedCampaignId === c.id ? '#93C5FD' : '#E5E7EB',
+                              }}
+                            >
+                              {c.name}
+                              {c.account && <span className="text-gray-400 font-normal"> · {c.account}</span>}
+                              {c.isRegistered && <span className="text-emerald-600 font-normal"> · Registered</span>}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
-        )}
 
-        {/* Input bar — decorative only, mirrors the real floating input chrome */}
-        <div className="flex-shrink-0 mt-2 pt-2 border-t border-gray-100">
-          <div style={{ borderRadius: 20, boxShadow: '0 2px 16px rgba(0,0,0,0.09)' }}>
-            <div style={{ position: 'relative', borderRadius: 20, padding: 1.5, overflow: 'hidden', background: 'rgba(224,220,212,0.7)' }}>
-              {isEmpty && <div className="hcaDemoGlowSpin" />}
-              <div style={{ background: '#FFFFFF', borderRadius: 18.5, padding: '13px 13px 10px', position: 'relative', zIndex: 1 }}>
-                <div style={{ fontSize: 13, color: '#9CA3AF', minHeight: 20 }}>Ask about this channel…</div>
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
-                  <div style={{ width: 36, height: 36, borderRadius: '50%', background: '#D1D5DB', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <ArrowUp size={16} style={{ color: '#FFFFFF' }} />
+          {/* Input bar — decorative only, mirrors the real floating input chrome */}
+          <div className="flex-shrink-0 mt-2 pt-2 border-t border-gray-100">
+            <div style={{ borderRadius: 18, boxShadow: '0 2px 16px rgba(0,0,0,0.09)' }}>
+              <div style={{ position: 'relative', borderRadius: 18, padding: 1.5, overflow: 'hidden', background: 'rgba(224,220,212,0.7)' }}>
+                {isEmpty && <div className="hcaDemoGlowSpin" />}
+                <div style={{ background: '#FFFFFF', borderRadius: 16.5, padding: '10px 10px 8px', position: 'relative', zIndex: 1 }}>
+                  <div style={{ fontSize: 11, color: '#9CA3AF', minHeight: 16 }}>Ask about this channel…</div>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
+                    <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#D1D5DB', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <ArrowUp size={13} style={{ color: '#FFFFFF' }} />
+                    </div>
                   </div>
                 </div>
               </div>

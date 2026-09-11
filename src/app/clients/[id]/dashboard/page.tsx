@@ -62,7 +62,6 @@ import ChannelPerformanceCard from '@/components/dashboard-v2/channel-performanc
 import { ChannelManageMenu } from '@/components/dashboard-v2/channel-manage-menu';
 import dynamic from 'next/dynamic';
 const InvoiceModal = dynamic(() => import('@/components/dashboard-v2/invoice-modal').then(m => m.InvoiceModal), { ssr: false });
-const ReportBuilderModal = dynamic(() => import('@/components/dashboard-v2/report-builder-modal').then(m => m.ReportBuilderModal), { ssr: false });
 import { type GanttClient, type GanttChannel } from '@/components/agency/GanttCalendar';
 import { FullscreenGanttView, type GanttAPMarker } from '@/components/agency/FullscreenGanttView';
 import { ClientIntelTab } from '@/components/dashboard-v2/client-intel-tab';
@@ -323,7 +322,6 @@ export default function DashboardV2() {
   const [organicSocialActuals, setOrganicSocialActuals] = useState<OrganicSocialActual[]>([]);
   const [edmActuals, setEdmActuals] = useState<EdmActual[]>([]);
   const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
-  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   // Sandbox-style media plan (per-client). Persisted to Supabase so it syncs
   // across every logged-in device; localStorage is kept only as an instant-paint
   // cache for the initial render and an offline fallback.
@@ -3184,28 +3182,6 @@ export default function DashboardV2() {
                   )}
                 </div>
 
-                {/* Reports section */}
-                <div style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', padding: '20px 24px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                    <span style={{ fontSize: 16, fontWeight: 500, color: '#1C1917', fontFamily: "'DM Sans', system-ui, sans-serif" }}>Performance Reports</span>
-                    <button
-                      onClick={() => setIsReportModalOpen(true)}
-                      style={{
-                        height: 30, padding: '0 12px', borderRadius: 12,
-                        border: '0.5px solid #D5D0C5', background: '#FDFCF8',
-                        color: '#1C1917', fontSize: 15, fontWeight: 500,
-                        cursor: 'pointer', fontFamily: "'DM Sans', system-ui, sans-serif",
-                        display: 'flex', alignItems: 'center', gap: 5,
-                      }}
-                    >
-                      + Generate Report
-                    </button>
-                  </div>
-                  <p style={{ fontSize: 15, color: '#B5B0A5', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
-                    Generate a branded PDF with spend, channel performance, and action points.
-                  </p>
-                </div>
-
                 {/* Client Logo & Name */}
                 <div style={{ background: '#FDFCF8', border: '1px solid rgba(232,228,220,0.7)', borderRadius: 18, boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 6px rgba(0,0,0,0.04)', padding: '20px 24px' }}>
                   <div style={{ marginBottom: 16 }}>
@@ -3430,16 +3406,6 @@ export default function DashboardV2() {
             setInvoiceHistory(updated);
             try { localStorage.setItem(`invoice-history-${clientId}`, JSON.stringify(updated)); } catch {}
           }}
-        />
-      )}
-
-      {/* Report Builder Modal */}
-      {client && (
-        <ReportBuilderModal
-          isOpen={isReportModalOpen}
-          onClose={() => setIsReportModalOpen(false)}
-          clientId={clientId}
-          clientName={client.name}
         />
       )}
 

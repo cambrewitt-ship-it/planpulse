@@ -290,7 +290,7 @@ export default function Home() {
         {/* ── CPA gauge showcase ── */}
         <section className="py-20" style={{ background: '#F5F3EF' }}>
           <div className="container mx-auto px-4">
-            <div className="max-w-6xl mx-auto grid lg:grid-cols-2 gap-12 items-center">
+            <div className="max-w-6xl mx-auto grid lg:grid-cols-[0.8fr_1.2fr] gap-12 items-center">
               <Reveal className="space-y-6">
                 <span
                   className="inline-block text-xs font-semibold uppercase tracking-widest px-3 py-1 rounded-full"
@@ -336,7 +336,15 @@ export default function Home() {
         <section className="py-20" style={{ background: '#FDFCF8' }}>
           <div className="container mx-auto px-4">
             <div className="max-w-6xl mx-auto grid lg:grid-cols-2 gap-12 items-center">
-              <Reveal className="space-y-6">
+              <Reveal delay={0.1} className="order-2 lg:order-1">
+                <div
+                  className="transition-transform duration-500 hover:-translate-y-1"
+                  style={{ boxShadow: '0 8px 40px rgba(0,0,0,0.10), 0 2px 8px rgba(0,0,0,0.06)', borderRadius: 20, overflow: 'hidden' }}
+                >
+                  <MediaPlanMockup />
+                </div>
+              </Reveal>
+              <Reveal className="order-1 lg:order-2 space-y-6">
                 <span
                   className="inline-block text-xs font-semibold uppercase tracking-widest px-3 py-1 rounded-full"
                   style={{ background: '#E8EDF2', color: '#4A6580' }}
@@ -359,14 +367,6 @@ export default function Home() {
                   <FeatureChip icon={<CheckCircle2 className="w-4 h-4" />} label="Upload a new plan version any time" />
                 </div>
               </Reveal>
-              <Reveal delay={0.1}>
-                <div
-                  className="transition-transform duration-500 hover:-translate-y-1"
-                  style={{ boxShadow: '0 8px 40px rgba(0,0,0,0.10), 0 2px 8px rgba(0,0,0,0.06)', borderRadius: 20, overflow: 'hidden' }}
-                >
-                  <MediaPlanMockup />
-                </div>
-              </Reveal>
             </div>
           </div>
         </section>
@@ -379,7 +379,7 @@ export default function Home() {
                 className="relative max-w-6xl mx-auto overflow-hidden text-center space-y-6 px-8 py-20 md:py-24"
                 style={{
                   borderRadius: 32,
-                  background: 'radial-gradient(120% 160% at 15% 15%, #3E6A4E 0%, #1C1917 45%, #1C1917 55%, #2D4A61 100%)',
+                  background: 'radial-gradient(120% 160% at 15% 15%, #2D4A61 0%, #1C1917 45%, #1C1917 55%, #3B5F7D 100%)',
                   boxShadow: '0 24px 64px rgba(28,25,23,0.28)',
                 }}
               >
@@ -391,7 +391,7 @@ export default function Home() {
                 <div
                   aria-hidden
                   className="pointer-events-none absolute -top-20 -left-10 w-[300px] h-[300px] rounded-full"
-                  style={{ background: 'radial-gradient(circle, rgba(74,124,89,0.35) 0%, rgba(74,124,89,0) 70%)', filter: 'blur(10px)' }}
+                  style={{ background: 'radial-gradient(circle, rgba(59,95,125,0.35) 0%, rgba(59,95,125,0) 70%)', filter: 'blur(10px)' }}
                 />
                 <div className="relative max-w-2xl mx-auto space-y-6">
                   <h2

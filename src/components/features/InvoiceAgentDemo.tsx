@@ -100,75 +100,75 @@ export default function InvoiceAgentDemo() {
         setLinkPressed(false);
         setShowPdf(false);
         setPressed(false);
-        await sleep(2400);
+        await sleep(1800);
         if (!active) return;
 
         setPressed(true);
-        await sleep(200);
+        await sleep(150);
         if (!active) return;
         setPressed(false);
         setMessages([{ id: 'm1', role: 'user', content: 'Generate an invoice' }]);
 
-        await sleep(500);
+        await sleep(375);
         if (!active) return;
         setMessages((prev) => [...prev, { id: 'm2', role: 'assistant', loadingLabel: 'Thinking…' }]);
 
-        await sleep(750);
+        await sleep(560);
         if (!active) return;
         setMessages((prev) => prev.map((m) => (m.id === 'm2'
           ? { ...m, loadingLabel: undefined, content: 'Which client is this for?', options: CLIENTS }
           : m)));
 
-        await sleep(1800);
+        await sleep(1350);
         if (!active) return;
         setSelectedClientId(SELECTED_CLIENT.id);
 
-        await sleep(550);
+        await sleep(410);
         if (!active) return;
         setMessages((prev) => [...prev, { id: 'm3', role: 'user', content: SELECTED_CLIENT.label }]);
 
-        await sleep(500);
+        await sleep(375);
         if (!active) return;
         setMessages((prev) => [...prev, { id: 'm4', role: 'assistant', loadingLabel: 'Thinking…' }]);
 
-        await sleep(650);
+        await sleep(490);
         if (!active) return;
         setMessages((prev) => prev.map((m) => (m.id === 'm4'
           ? { ...m, loadingLabel: undefined, content: 'Which month should this invoice cover?', options: MONTHS }
           : m)));
 
-        await sleep(1600);
+        await sleep(1200);
         if (!active) return;
         setSelectedMonthId(SELECTED_MONTH.id);
 
-        await sleep(550);
+        await sleep(410);
         if (!active) return;
         setMessages((prev) => [...prev, { id: 'm5', role: 'user', content: SELECTED_MONTH.label }]);
 
-        await sleep(500);
+        await sleep(375);
         if (!active) return;
         setMessages((prev) => [...prev, { id: 'm6', role: 'assistant', loadingLabel: 'Pulling spend data…' }]);
 
-        await sleep(1100);
+        await sleep(825);
         if (!active) return;
         setMessages((prev) => prev.map((m) => (m.id === 'm6' ? { ...m, loadingLabel: 'Calculating commission…' } : m)));
 
-        await sleep(1100);
+        await sleep(825);
         if (!active) return;
         setMessages((prev) => prev.map((m) => (m.id === 'm6'
           ? { ...m, loadingLabel: undefined, invoice: { intro: `Here's the invoice for ${SELECTED_CLIENT.label} — ${SELECTED_MONTH.label}:` } }
           : m)));
 
-        await sleep(1800);
+        await sleep(1350);
         if (!active) return;
         setLinkPressed(true);
 
-        await sleep(220);
+        await sleep(165);
         if (!active) return;
         setLinkPressed(false);
         setShowPdf(true);
 
-        await sleep(3400);
+        await sleep(2550);
         if (!active) return;
         setFading(true);
         await sleep(400);

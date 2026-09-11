@@ -98,7 +98,7 @@ export const TOUR_SECTIONS: TourSection[] = [
         description:
           'The Client Portal shortcut gives each client their own shareable hub link, with sections you control — including funnels and cost-per-metric charts.',
         icon: Share2,
-        media: { type: 'video', src: '/client-portal.mp4' },
+        media: { type: 'video', src: '/client-portal-use.mp4' },
       },
     ],
   },

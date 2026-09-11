@@ -1,29 +1,17 @@
 'use client';
 
 import { useState, type ComponentType } from 'react';
-import Image from 'next/image';
 import {
   ReceiptText,
   CalendarRange,
   BarChart2,
-  ShieldAlert,
+  Bot,
   type LucideIcon,
 } from 'lucide-react';
-import { MediaPlanMockup } from '@/components/features/FeatureMockups';
 import HealthCheckAgentDemo from '@/components/features/HealthCheckAgentDemo';
 import InvoiceAgentDemo from '@/components/features/InvoiceAgentDemo';
-
-function PerformanceAnalystScreenshot() {
-  return (
-    <Image
-      src="/performance.png"
-      alt="Performance analyst dashboard showing cross-channel pacing and variance insights"
-      width={1858}
-      height={798}
-      className="w-full h-auto"
-    />
-  );
-}
+import MediaPlanEditorDemo from '@/components/features/MediaPlanEditorDemo';
+import PerformanceAnalystDemo from '@/components/features/PerformanceAnalystDemo';
 
 const pageFont: React.CSSProperties = { fontFamily: "'DM Sans', system-ui, sans-serif" };
 
@@ -40,6 +28,13 @@ type ShowcaseAgent = {
 
 const SHOWCASE_AGENTS: ShowcaseAgent[] = [
   {
+    slug: 'setup_auditor',
+    name: 'Health Check Agent',
+    icon: Bot,
+    tagline: 'Audits live Google and Meta campaigns against their intended setup and flags every discrepancy.',
+    Mockup: HealthCheckAgentDemo,
+  },
+  {
     slug: 'invoice_generator',
     name: 'Invoice Generator',
     icon: ReceiptText,
@@ -48,24 +43,17 @@ const SHOWCASE_AGENTS: ShowcaseAgent[] = [
   },
   {
     slug: 'media_plan_editor',
-    name: 'Media Plan Editor',
+    name: 'Media Planning Agent',
     icon: CalendarRange,
     tagline: 'Builds and adjusts media plans conversationally — just describe the flight, budget, or dates.',
-    Mockup: MediaPlanMockup,
+    Mockup: MediaPlanEditorDemo,
   },
   {
     slug: 'performance_analyst',
     name: 'Performance Analyst',
     icon: BarChart2,
     tagline: 'Surfaces pacing, variance, and cross-channel performance insights the moment you ask.',
-    Mockup: PerformanceAnalystScreenshot,
-  },
-  {
-    slug: 'setup_auditor',
-    name: 'Health Check Agent',
-    icon: ShieldAlert,
-    tagline: 'Audits live Google and Meta campaigns against their intended setup and flags every discrepancy.',
-    Mockup: HealthCheckAgentDemo,
+    Mockup: PerformanceAnalystDemo,
   },
 ];
 
@@ -129,8 +117,9 @@ export default function AgentShowcase() {
             })}
           </div>
 
-          {/* Corresponding visual */}
-          <div className="mx-auto lg:mx-0" style={{ maxWidth: 460 }}>
+          {/* Corresponding visual — these three agents need extra width since their chat
+              thread sits alongside a live chart/grid/screenshot rather than replacing it */}
+          <div className="mx-auto lg:mx-0" style={{ maxWidth: ['setup_auditor', 'media_plan_editor', 'performance_analyst'].includes(activeAgent.slug) ? 640 : 460 }}>
             <p
               key={`${activeAgent.slug}-tag`}
               className="mb-4 text-sm text-center lg:text-left animate-in fade-in-0 duration-500"

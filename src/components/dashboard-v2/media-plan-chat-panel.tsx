@@ -486,7 +486,7 @@ export default function MediaPlanChatPanel({
           <div style={{ padding: '13px 16px 10px', borderBottom: `1px solid ${BORDER_SOFT}`, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', flexShrink: 0 }}>
             <img src="/favicon.ico" alt="" width={20} height={20} style={{ borderRadius: 5, flexShrink: 0 }} />
             <span style={{ fontSize: 15, fontWeight: 600, color: INK, fontFamily: serifFont, flexShrink: 0 }}>
-              Media Plan Editor
+              Media Planning Agent
             </span>
 
             {confirmedAt && (

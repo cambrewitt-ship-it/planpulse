@@ -1350,6 +1350,7 @@ export default function CreateClientPage() {
                         onPlanChange={handleSandboxPlanChange}
                         onUpload={handleSandboxPlanUpload}
                         showDownloadPdf={false}
+                        outerStyle={{ minHeight: 820 }}
                       />
                     </div>
                   </div>

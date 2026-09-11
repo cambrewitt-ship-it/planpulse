@@ -15,6 +15,7 @@ interface OnboardingChecklistProps {
 export function OnboardingChecklist({ clients }: OnboardingChecklistProps) {
   const [checklist, setChecklist] = useState<Checklist | null>(null);
   const markedViewed = useRef(false);
+  const markedCreated = useRef(false);
 
   useEffect(() => {
     fetch('/api/agency/onboarding-checklist')
@@ -37,6 +38,23 @@ export function OnboardingChecklist({ clients }: OnboardingChecklistProps) {
       .then(data => setChecklist(data.checklist))
       .catch(() => {});
   }, [checklist]);
+
+  // A real (non-demo) client already exists — this covers agencies whose
+  // clients predate this checklist, or were created outside the /clients/create
+  // flow, and would otherwise never satisfy "created_first_client".
+  const hasRealClient = clients.some(c => !c.is_demo);
+  useEffect(() => {
+    if (!checklist || checklist.created_first_client || markedCreated.current || !hasRealClient) return;
+    markedCreated.current = true;
+    fetch('/api/agency/onboarding-checklist', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ item: 'created_first_client' }),
+    })
+      .then(r => r.json())
+      .then(data => setChecklist(data.checklist))
+      .catch(() => {});
+  }, [checklist, hasRealClient]);
 
   if (!checklist) return null;
 
