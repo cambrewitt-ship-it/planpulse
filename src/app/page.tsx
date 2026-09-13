@@ -76,13 +76,12 @@ export default function Home() {
             <div className="max-w-7xl mx-auto xl:pl-10 grid grid-cols-1 xl:grid-cols-[max-content_1fr] gap-10 xl:gap-12 items-start">
               <Reveal delay={0}>
                 <h1
-                  className="leading-[0.95]"
+                  className="leading-[0.95] text-[clamp(2rem,8vw,2.75rem)] md:text-[clamp(2.75rem,5vw,4.5rem)]"
                   style={{
                     color: '#1C1917',
                     ...pageFont,
                     fontWeight: 900,
                     letterSpacing: '-0.03em',
-                    fontSize: 'clamp(2.75rem, 5vw, 4.5rem)',
                   }}
                 >
                   <span className="block"><RotatingWord words={HERO_ROTATING_WORDS} gradient="linear-gradient(135deg, #3E6A4E 0%, #4A7C59 100%)" /></span>
