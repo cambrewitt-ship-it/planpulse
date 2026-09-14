@@ -46,6 +46,49 @@ export interface GoogleAdsSyncResult {
 }
 
 /**
+ * Runs a GAQL search against the REST `googleAds:search` endpoint, following
+ * `nextPageToken` until exhausted. The endpoint caps a single page at 10,000
+ * rows — without this loop, any query whose result set exceeds that (e.g. a
+ * year-to-date campaign/date query for an account with enough campaigns)
+ * gets silently truncated. Since these queries are `ORDER BY segments.date
+ * DESC`, a truncated response drops the *oldest* rows in the range, which
+ * reads as "no spend before some cutoff date" rather than an obvious error.
+ */
+interface SearchAllPagesFailure {
+  status: number;
+  errorText: string;
+}
+
+async function searchAllPages(
+  cleanCustomerId: string,
+  headers: Record<string, string>,
+  query: string,
+): Promise<{ results: any[]; failure: SearchAllPagesFailure | null }> {
+  const results: any[] = [];
+  let pageToken: string | undefined;
+
+  do {
+    const response = await fetch(
+      `https://googleads.googleapis.com/v25/customers/${cleanCustomerId}/googleAds:search`,
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ query, pageSize: 10000, ...(pageToken ? { pageToken } : {}) }),
+      }
+    );
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => 'Could not read error response');
+      return { results, failure: { status: response.status, errorText } };
+    }
+    const data = await response.json();
+    if (Array.isArray(data.results)) results.push(...data.results);
+    pageToken = data.nextPageToken;
+  } while (pageToken);
+
+  return { results, failure: null };
+}
+
+/**
  * Fetches per-day, per-campaign conversion counts broken down by named
  * conversion action (e.g. "Purchase", "Phone Call Lead"), so the Client Hub
  * trend builder can filter a conversions trend to one specific event —
@@ -84,16 +127,12 @@ async function fetchGoogleConversionActionBreakdown(
   };
 
   try {
-    const response = await fetch(
-      `https://googleads.googleapis.com/v25/customers/${cleanCustomerId}/googleAds:search`,
-      { method: 'POST', headers, body: JSON.stringify({ query }) }
-    );
-    if (!response.ok) {
-      console.log(`[conversion-action-breakdown] API error ${response.status} for ${cleanCustomerId}`);
+    const page = await searchAllPages(cleanCustomerId, headers, query);
+    if (page.failure) {
+      console.log(`[conversion-action-breakdown] API error ${page.failure.status} for ${cleanCustomerId}`);
       return breakdown;
     }
-    const data = await response.json();
-    for (const result of (data.results ?? [])) {
+    for (const result of page.results) {
       const campaignId = result.campaign?.id?.toString();
       const date = result.segments?.date;
       const name = result.segments?.conversionActionName;
@@ -250,20 +289,12 @@ export async function syncGoogleAdsSpend(params: {
         cleanCustomerId, loginCustomerId, accessToken, startDate, endDate,
       );
 
-      const response = await fetch(
-        `https://googleads.googleapis.com/v25/customers/${cleanCustomerId}/googleAds:search`,
-        { method: 'POST', headers: requestHeaders, body: JSON.stringify({ query }) }
-      );
+      const page = await searchAllPages(cleanCustomerId, requestHeaders, query);
 
-      if (!response.ok) {
-        let errorText = '';
+      if (page.failure) {
+        const { status, errorText } = page.failure;
         let errorJson: any = null;
-        try {
-          errorText = await response.text();
-          try { errorJson = JSON.parse(errorText); } catch { /* not JSON */ }
-        } catch {
-          errorText = 'Could not read error response';
-        }
+        try { errorJson = JSON.parse(errorText); } catch { /* not JSON */ }
 
         const isNotEnabled = errorJson?.error?.details?.[0]?.errors?.[0]?.errorCode?.authorizationError === 'CUSTOMER_NOT_ENABLED';
         if (isNotEnabled) {
@@ -275,41 +306,37 @@ export async function syncGoogleAdsSpend(params: {
         errors.push({
           customerId,
           accountName: account.account_name || '',
-          error: `Google Ads API error ${response.status}: ${errorJson?.error?.message || errorJson?.error || errorText.substring(0, 200)}`,
+          error: `Google Ads API error ${status}: ${errorJson?.error?.message || errorJson?.error || errorText.substring(0, 200)}`,
         });
         return;
       }
 
-      const data = await response.json();
+      const conversionBreakdown = await conversionBreakdownPromise;
+      for (const result of page.results) {
+        const spend = (result.metrics?.costMicros || 0) / 1000000;
+        const averageCpc = (result.metrics?.averageCpc || 0) / 1000000;
+        const impressions = parseInt(result.metrics?.impressions || '0', 10);
+        const clicks = parseInt(result.metrics?.clicks || '0', 10);
+        const ctr = parseFloat(result.metrics?.ctr || '0');
+        const conversions = parseFloat(result.metrics?.conversions || '0');
+        const date = result.segments?.date || '';
+        const campaignId = result.campaign?.id?.toString() || '';
 
-      if (data.results && Array.isArray(data.results)) {
-        const conversionBreakdown = await conversionBreakdownPromise;
-        for (const result of data.results) {
-          const spend = (result.metrics?.costMicros || 0) / 1000000;
-          const averageCpc = (result.metrics?.averageCpc || 0) / 1000000;
-          const impressions = parseInt(result.metrics?.impressions || '0', 10);
-          const clicks = parseInt(result.metrics?.clicks || '0', 10);
-          const ctr = parseFloat(result.metrics?.ctr || '0');
-          const conversions = parseFloat(result.metrics?.conversions || '0');
-          const date = result.segments?.date || '';
-          const campaignId = result.campaign?.id?.toString() || '';
-
-          allSpendData.push({
-            customerId,
-            accountName: account.account_name || '',
-            campaignId,
-            campaignName: result.campaign?.name || '',
-            date,
-            spend,
-            impressions,
-            clicks,
-            ctr,
-            averageCpc,
-            conversions,
-            currency: 'USD',
-            conversionActions: conversionBreakdown.get(`${campaignId}|${date}`),
-          });
-        }
+        allSpendData.push({
+          customerId,
+          accountName: account.account_name || '',
+          campaignId,
+          campaignName: result.campaign?.name || '',
+          date,
+          spend,
+          impressions,
+          clicks,
+          ctr,
+          averageCpc,
+          conversions,
+          currency: 'USD',
+          conversionActions: conversionBreakdown.get(`${campaignId}|${date}`),
+        });
       }
     } catch (error: any) {
       errors.push({ customerId, accountName: account.account_name || '', error: error.message });
