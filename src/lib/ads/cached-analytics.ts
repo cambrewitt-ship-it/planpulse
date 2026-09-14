@@ -7,6 +7,7 @@
  */
 
 import type { SpendDataPoint, GA4DataPoint } from '@/lib/api/analytics-data-integration';
+import { selectAllRows } from '@/lib/supabase/select-all-rows';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnySupabase = any;
@@ -19,7 +20,9 @@ export async function readCachedSpendData(
   startDate: string,
   endDate: string,
 ): Promise<SpendDataPoint[]> {
-  const { data } = await supabase
+  // Paginated: a year of daily rows across several campaigns/platforms can
+  // exceed Supabase's default 1000-row response cap — see selectAllRows.
+  const data = await selectAllRows(() => supabase
     .from('ad_performance_metrics')
     .select('date, platform, account_name, campaign_id, campaign_name, spend, impressions, clicks, ctr, cpc, conversions, reach, frequency, meta_actions, google_conversion_actions')
     .eq('client_id', clientId)
@@ -29,10 +32,11 @@ export async function readCachedSpendData(
     // Manual per-channel spend overrides (src/app/api/channels/actual-spend) live in
     // this same table under a synthetic campaign_id — exclude them here, matching
     // every other reader of this table (get-hub-data.ts, perf-series.ts, invoice, etc).
-    .not('campaign_id', 'like', 'manual-override-%');
+    .not('campaign_id', 'like', 'manual-override-%')
+    .order('date', { ascending: true }));
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (data ?? []).map((row: any) => ({
+  return data.map((row: any) => ({
     date: row.date,
     spend: Number(row.spend) || 0,
     platform: row.platform,
@@ -60,15 +64,18 @@ export async function readCachedGA4Data(
   startDate: string,
   endDate: string,
 ): Promise<GA4DataPoint[]> {
-  const { data } = await supabase
+  // Paginated for the same reason as readCachedSpendData above — a year of
+  // daily rows across several metric names can exceed the default row cap.
+  const data = await selectAllRows(() => supabase
     .from('google_analytics_metrics')
     .select('date, metric_name, metric_value')
     .eq('client_id', clientId)
     .gte('date', startDate)
-    .lte('date', endDate);
+    .lte('date', endDate)
+    .order('date', { ascending: true }));
 
   const byDate = new Map<string, GA4DataPoint>();
-  for (const row of data ?? []) {
+  for (const row of data) {
     const point = byDate.get(row.date) ?? { date: row.date };
     (point as Record<string, string | number>)[row.metric_name] = Number(row.metric_value) || 0;
     byDate.set(row.date, point);

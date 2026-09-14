@@ -13,6 +13,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { HubMetric } from './get-hub-data';
+import { selectAllRows } from '@/lib/supabase/select-all-rows';
 
 export interface GoogleAdsDailyPoint {
   date: string;
@@ -45,17 +46,20 @@ interface DateRange {
 
 /** Raw daily series from ad_performance_metrics (platform='google-ads'), summed across campaigns per day — no rolling window. */
 export async function getGoogleAdsDailySeries(supabase: SupabaseClient, clientId: string, { start, end }: DateRange): Promise<GoogleAdsDailyPoint[]> {
-  const { data } = await supabase
+  // Paginated: a wide date range across several campaigns can exceed
+  // Supabase's default 1000-row response cap — see selectAllRows.
+  const data = await selectAllRows(() => supabase
     .from('ad_performance_metrics')
     .select('date, impressions, clicks, spend')
     .eq('client_id', clientId)
     .eq('platform', 'google-ads')
     .gte('date', start)
     .lte('date', end)
-    .not('campaign_id', 'like', 'manual-override-%');
+    .not('campaign_id', 'like', 'manual-override-%')
+    .order('date', { ascending: true }));
 
   const byDate = new Map<string, { impressions: number; clicks: number; spend: number }>();
-  for (const r of data ?? []) {
+  for (const r of data) {
     const cur = byDate.get(r.date) ?? { impressions: 0, clicks: 0, spend: 0 };
     cur.impressions += Number(r.impressions || 0);
     cur.clicks += Number(r.clicks || 0);
@@ -81,13 +85,14 @@ export async function getGoogleAdsKpiTiles(supabase: SupabaseClient, clientId: s
     clicks: acc.clicks + p.clicks,
   }), { impressions: 0, clicks: 0 });
 
-  const { data: spendRows } = await supabase
+  const spendRows = await selectAllRows(() => supabase
     .from('ad_performance_metrics')
     .select('spend')
     .eq('client_id', clientId).eq('platform', 'google-ads')
     .gte('date', start).lte('date', end)
-    .not('campaign_id', 'like', 'manual-override-%');
-  const totalSpend = (spendRows ?? []).reduce((s, r) => s + Number(r.spend || 0), 0);
+    .not('campaign_id', 'like', 'manual-override-%')
+    .order('date', { ascending: true }));
+  const totalSpend = spendRows.reduce((s, r) => s + Number(r.spend || 0), 0);
 
   const { data: shareRows } = await supabase
     .from('google_ads_search_impression_share')
@@ -255,15 +260,16 @@ const DAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Fri
 
 /** Derives a day-of-week donut from ad_performance_metrics — no new table or fetch, just date math on data already synced by the 6h cron. */
 export async function getGoogleAdsDayOfWeekDonut(supabase: SupabaseClient, clientId: string, { start, end }: DateRange): Promise<DonutBucket[]> {
-  const { data } = await supabase
+  const data = await selectAllRows(() => supabase
     .from('ad_performance_metrics')
     .select('date, impressions')
     .eq('client_id', clientId).eq('platform', 'google-ads')
     .gte('date', start).lte('date', end)
-    .not('campaign_id', 'like', 'manual-override-%');
+    .not('campaign_id', 'like', 'manual-override-%')
+    .order('date', { ascending: true }));
 
   const byDay = new Array(7).fill(0);
-  for (const r of data ?? []) {
+  for (const r of data) {
     const day = new Date(`${r.date}T00:00:00Z`).getUTCDay();
     byDay[day] += Number(r.impressions || 0);
   }

@@ -10,6 +10,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { format, startOfMonth, subDays, differenceInCalendarDays, parseISO } from 'date-fns';
 import { getPlatformForChannel, getChannelCategory } from '@/lib/utils/channel-pacing';
 import { toBenchmarkChannelName } from '@/lib/calculate-performance-health';
+import { selectAllRows } from '@/lib/supabase/select-all-rows';
 
 const AD_PLATFORMS = ['meta-ads', 'google-ads'] as const;
 type AdPlatform = typeof AD_PLATFORMS[number];
@@ -299,16 +300,19 @@ export async function getClientHubData(
   const channels = rawChannels.filter(ch => ch.channelName);
 
   // ── Ad performance metrics over the period ─────────────────────────────
-  const { data: adRowsRaw } = await supabase
+  // Paginated: a wide period across several campaigns/platforms can exceed
+  // Supabase's default 1000-row response cap — see selectAllRows.
+  const adRowsRaw = await selectAllRows(() => supabase
     .from('ad_performance_metrics')
     .select('date, platform, spend, impressions, clicks, ctr, conversions, meta_actions, google_conversion_actions')
     .eq('client_id', clientId)
     .in('platform', AD_PLATFORMS as unknown as string[])
     .gte('date', period.start)
     .lte('date', period.end)
-    .not('campaign_id', 'like', 'manual-override-%');
+    .not('campaign_id', 'like', 'manual-override-%')
+    .order('date', { ascending: true }));
 
-  const adRows: AdRow[] = (adRowsRaw ?? []).map((r: any) => ({
+  const adRows: AdRow[] = adRowsRaw.map((r: any) => ({
     date: r.date,
     platform: r.platform,
     spend: Number(r.spend || 0),
@@ -332,15 +336,16 @@ export async function getClientHubData(
   const periodDays = differenceInCalendarDays(periodEndClamped, periodStartClamped) + 1;
   const priorStart = format(subDays(periodStartClamped, periodDays), 'yyyy-MM-dd');
   const priorEnd = format(subDays(periodStartClamped, 1), 'yyyy-MM-dd');
-  const { data: priorRowsRaw } = await supabase
+  const priorRowsRaw = await selectAllRows(() => supabase
     .from('ad_performance_metrics')
     .select('date, platform, spend, impressions, clicks, ctr, conversions, meta_actions, google_conversion_actions')
     .eq('client_id', clientId)
     .in('platform', AD_PLATFORMS as unknown as string[])
     .gte('date', priorStart)
     .lte('date', priorEnd)
-    .not('campaign_id', 'like', 'manual-override-%');
-  const priorAdRows: AdRow[] = (priorRowsRaw ?? []).map((r: any) => ({
+    .not('campaign_id', 'like', 'manual-override-%')
+    .order('date', { ascending: true }));
+  const priorAdRows: AdRow[] = priorRowsRaw.map((r: any) => ({
     date: r.date, platform: r.platform, spend: Number(r.spend || 0),
     impressions: Number(r.impressions || 0), clicks: Number(r.clicks || 0),
     ctr: r.ctr != null ? Number(r.ctr) : null,
