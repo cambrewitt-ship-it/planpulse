@@ -35,6 +35,25 @@ interface GoogleAdsAccountRow {
   account_name: string | null;
   manager_customer_id: string | null;
   is_active: boolean;
+  created_at: string;
+}
+
+/**
+ * Google Ads commonly returns CUSTOMER_NOT_ENABLED for up to ~24-48h after an
+ * account is newly linked (or newly granted API access), while the grant
+ * propagates through Google's systems — it is not necessarily a real,
+ * permanent "not enabled" state. Permanently flipping is_active=false the
+ * first time a brand-new account hits this would lock it out of every future
+ * sync with no automatic recovery (nothing else ever sets is_active back to
+ * true), silently dropping that account's spend forever. So within this
+ * grace window after linking, a NOT_ENABLED response is treated as transient
+ * and the account stays eligible for retry on the next sync instead.
+ */
+const RECENTLY_LINKED_GRACE_MS = 48 * 60 * 60 * 1000;
+
+function isWithinLinkGracePeriod(createdAt: string): boolean {
+  const created = new Date(createdAt).getTime();
+  return !Number.isNaN(created) && Date.now() - created < RECENTLY_LINKED_GRACE_MS;
 }
 
 export interface GoogleAdsSyncResult {
@@ -156,19 +175,26 @@ async function fetchGoogleAdsAccounts(
   clientId: string | null,
   connectionId: string,
 ): Promise<GoogleAdsAccountRow[]> {
+  // Accounts stay eligible for a sync attempt if they're active, OR if
+  // they're within the "recently linked" grace window even though a prior
+  // attempt already flipped is_active=false — see RECENTLY_LINKED_GRACE_MS.
+  const graceCutoff = new Date(Date.now() - RECENTLY_LINKED_GRACE_MS).toISOString();
+  const activeOrRecent = `is_active.eq.true,created_at.gt.${graceCutoff}`;
+  const columns = 'customer_id, account_name, manager_customer_id, is_active, created_at';
+
   let { data } = clientId
     ? await supabase
         .from('google_ads_accounts')
-        .select('customer_id, account_name, manager_customer_id, is_active')
+        .select(columns)
         .eq('user_id', userId)
         .eq('client_id', clientId)
-        .eq('is_active', true)
+        .or(activeOrRecent)
     : await supabase
         .from('google_ads_accounts')
-        .select('customer_id, account_name, manager_customer_id, is_active')
+        .select(columns)
         .eq('user_id', userId)
         .eq('connection_id', connectionId)
-        .eq('is_active', true);
+        .or(activeOrRecent);
 
   // Fall back to connection-scoped accounts only when they've never been
   // assigned to any client (client_id IS NULL — pre-migration legacy rows).
@@ -179,11 +205,11 @@ async function fetchGoogleAdsAccounts(
   if (clientId && (!data || data.length === 0)) {
     ({ data } = await supabase
       .from('google_ads_accounts')
-      .select('customer_id, account_name, manager_customer_id, is_active')
+      .select(columns)
       .eq('user_id', userId)
       .eq('connection_id', connectionId)
       .is('client_id', null)
-      .eq('is_active', true));
+      .or(activeOrRecent));
   }
 
   return (data || []) as GoogleAdsAccountRow[];
@@ -298,8 +324,24 @@ export async function syncGoogleAdsSpend(params: {
 
         const isNotEnabled = errorJson?.error?.details?.[0]?.errors?.[0]?.errorCode?.authorizationError === 'CUSTOMER_NOT_ENABLED';
         if (isNotEnabled) {
-          void supabase.from('google_ads_accounts').update({ is_active: false })
-            .eq('user_id', userId).eq('customer_id', account.customer_id).then(() => {});
+          // Only persist the disable once the account is past the
+          // just-linked grace window — see RECENTLY_LINKED_GRACE_MS. Within
+          // the window, leave is_active untouched so the account (which
+          // fetchGoogleAdsAccounts still surfaces during the grace period
+          // regardless of is_active) gets retried on the next sync instead
+          // of being locked out permanently by what may be a propagation
+          // delay rather than a real permission problem.
+          if (!isWithinLinkGracePeriod(account.created_at)) {
+            void supabase.from('google_ads_accounts').update({ is_active: false })
+              .eq('user_id', userId).eq('customer_id', account.customer_id).then(() => {});
+          }
+          errors.push({
+            customerId,
+            accountName: account.account_name || '',
+            error: isWithinLinkGracePeriod(account.created_at)
+              ? 'Google Ads account not yet enabled — this is normal for up to 48h after linking; will retry automatically.'
+              : 'Google Ads account not enabled (CUSTOMER_NOT_ENABLED); disabled and excluded from future syncs.',
+          });
           return;
         }
 

@@ -3,6 +3,17 @@ import { createClient } from '@/lib/supabase/server';
 import { Nango } from '@nangohq/node';
 import { toNangoPlatform } from '@/lib/platform-mapping';
 
+// Google Ads commonly returns CUSTOMER_NOT_ENABLED for up to ~24-48h after an
+// account is newly linked, while the API grant propagates — not necessarily a
+// real, permanent "not enabled" state. See the matching constant/comment in
+// src/lib/ads/google-ads-live.ts for the full rationale.
+const RECENTLY_LINKED_GRACE_MS = 48 * 60 * 60 * 1000;
+
+function isWithinLinkGracePeriod(createdAt: string): boolean {
+  const created = new Date(createdAt).getTime();
+  return !Number.isNaN(created) && Date.now() - created < RECENTLY_LINKED_GRACE_MS;
+}
+
 export async function GET(request: NextRequest) {
   try {
     const secretKey = process.env.NANGO_SECRET_KEY_DEV_PLAN_CHECK;
@@ -51,33 +62,41 @@ export async function GET(request: NextRequest) {
     }
 
     // Prefer client-scoped accounts; fall back to connection-scoped for legacy setups.
+    // Also surface accounts within the "just linked" grace window even if a
+    // prior attempt already flipped is_active=false — see
+    // RECENTLY_LINKED_GRACE_MS above for why.
+    const graceCutoff = new Date(Date.now() - RECENTLY_LINKED_GRACE_MS).toISOString();
+    const activeOrRecent = `is_active.eq.true,created_at.gt.${graceCutoff}`;
+    const accountColumns = 'customer_id, account_name, manager_customer_id, created_at';
+
     let { data: accountsData } = clientId
       ? await supabase
           .from('google_ads_accounts')
-          .select('customer_id, account_name, manager_customer_id')
+          .select(accountColumns)
           .eq('user_id', user.id)
           .eq('client_id', clientId)
-          .eq('is_active', true)
+          .or(activeOrRecent)
       : await supabase
           .from('google_ads_accounts')
-          .select('customer_id, account_name, manager_customer_id')
+          .select(accountColumns)
           .eq('user_id', user.id)
           .eq('connection_id', connection.connection_id)
-          .eq('is_active', true);
+          .or(activeOrRecent);
 
     if (clientId && (!accountsData || accountsData.length === 0)) {
       ({ data: accountsData } = await supabase
         .from('google_ads_accounts')
-        .select('customer_id, account_name, manager_customer_id')
+        .select(accountColumns)
         .eq('user_id', user.id)
         .eq('connection_id', connection.connection_id)
-        .eq('is_active', true));
+        .or(activeOrRecent));
     }
 
     const googleAdsAccounts = (accountsData ?? []) as Array<{
       customer_id: string;
       account_name: string | null;
       manager_customer_id: string | null;
+      created_at: string;
     }>;
 
     if (googleAdsAccounts.length === 0) {
@@ -136,8 +155,10 @@ export async function GET(request: NextRequest) {
           try { errJson = JSON.parse(errText); } catch {}
           const isNotEnabled = errJson?.error?.details?.[0]?.errors?.[0]?.errorCode?.authorizationError === 'CUSTOMER_NOT_ENABLED';
           if (isNotEnabled) {
-            supabase.from('google_ads_accounts').update({ is_active: false })
-              .eq('user_id', user.id).eq('customer_id', account.customer_id).then(() => {});
+            if (!isWithinLinkGracePeriod(account.created_at)) {
+              supabase.from('google_ads_accounts').update({ is_active: false })
+                .eq('user_id', user.id).eq('customer_id', account.customer_id).then(() => {});
+            }
             continue;
           }
           console.log(`[google-ads/conversion-actions] API error ${response.status} for ${cleanCustomerId}: ${errText.substring(0, 300)}`);
