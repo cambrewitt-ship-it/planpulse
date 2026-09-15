@@ -87,12 +87,17 @@ async function searchAllPages(
   let pageToken: string | undefined;
 
   do {
+    // Body is identical to the pre-pagination request (just `{ query }`) apart
+    // from adding pageToken once paging — deliberately not also sending an
+    // explicit pageSize: Google's own default is already the max (10,000),
+    // and adding it turned out to make the API reject the request outright
+    // ("Request contains an invalid argument") even on the very first page.
     const response = await fetch(
       `https://googleads.googleapis.com/v25/customers/${cleanCustomerId}/googleAds:search`,
       {
         method: 'POST',
         headers,
-        body: JSON.stringify({ query, pageSize: 10000, ...(pageToken ? { pageToken } : {}) }),
+        body: JSON.stringify({ query, ...(pageToken ? { pageToken } : {}) }),
       }
     );
     if (!response.ok) {
