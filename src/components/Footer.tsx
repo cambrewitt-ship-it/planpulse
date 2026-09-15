@@ -76,6 +76,13 @@ export default function Footer() {
               ]}
             />
             <FooterColumn
+              title="Resources"
+              links={[
+                { label: 'Blog', href: '/blog' },
+                { label: 'Glossary', href: '/glossary' },
+              ]}
+            />
+            <FooterColumn
               title="Company"
               links={[{ label: 'About', href: '/about' }]}
             />

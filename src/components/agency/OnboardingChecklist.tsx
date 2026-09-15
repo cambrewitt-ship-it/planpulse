@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { Check } from 'lucide-react';
+import { Check, ArrowRight } from 'lucide-react';
 import type { ClientCardData } from '@/app/api/agency/clients/route';
 
 type ChecklistItemKey = 'viewed_agency_dashboard' | 'visited_demo_dashboard' | 'visited_demo_portal' | 'created_first_client';
@@ -14,6 +14,7 @@ interface OnboardingChecklistProps {
 
 export function OnboardingChecklist({ clients }: OnboardingChecklistProps) {
   const [checklist, setChecklist] = useState<Checklist | null>(null);
+  const [hoveredKey, setHoveredKey] = useState<ChecklistItemKey | null>(null);
   const markedViewed = useRef(false);
   const markedCreated = useRef(false);
 
@@ -81,18 +82,21 @@ export function OnboardingChecklist({ clients }: OnboardingChecklistProps) {
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           {items.map(item => {
             const done = checklist[item.key];
+            const hovered = hoveredKey === item.key;
             return (
               <Link
                 key={item.key}
                 href={item.href}
+                onMouseEnter={() => setHoveredKey(item.key)}
+                onMouseLeave={() => setHoveredKey(null)}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 7,
                   padding: '7px 12px', borderRadius: 12,
-                  border: `0.5px solid ${done ? 'rgba(74,124,89,0.3)' : '#E0DCD4'}`,
-                  background: done ? 'rgba(74,124,89,0.08)' : '#F5F3EF',
+                  border: `0.5px solid ${done ? 'rgba(74,124,89,0.3)' : hovered ? '#C9C3B6' : '#E0DCD4'}`,
+                  background: done ? 'rgba(74,124,89,0.08)' : hovered ? '#EFEBE2' : '#F5F3EF',
                   color: done ? '#4A7C59' : '#1C1917',
                   fontSize: 12.5, fontWeight: 500, textDecoration: 'none',
-                  cursor: 'pointer',
+                  cursor: 'pointer', transition: 'background 0.12s ease, border-color 0.12s ease',
                 }}
               >
                 <span style={{
@@ -104,6 +108,17 @@ export function OnboardingChecklist({ clients }: OnboardingChecklistProps) {
                   {done && <Check size={10} color="#FDFCF8" strokeWidth={3} />}
                 </span>
                 <span style={{ textDecoration: done ? 'line-through' : 'none' }}>{item.label}</span>
+                {!done && (
+                  <ArrowRight
+                    size={13}
+                    strokeWidth={2.25}
+                    style={{
+                      flexShrink: 0, marginLeft: 1, color: '#8A8578',
+                      transform: hovered ? 'translateX(2px)' : 'translateX(0)',
+                      transition: 'transform 0.12s ease',
+                    }}
+                  />
+                )}
               </Link>
             );
           })}

@@ -600,6 +600,6 @@ export function FloatingAIChat() {
   }, []);
 
   if (!isSignedIn) return null;
-  if (pathname === '/agency' || pathname?.startsWith('/hub/') || pathname?.startsWith('/media-plan-builder')) return null;
+  if (pathname === '/agency' || pathname?.startsWith('/hub/') || pathname?.startsWith('/media-plan-builder') || pathname?.startsWith('/marketing/video/')) return null;
   return <FloatingAIChatInner />;
 }

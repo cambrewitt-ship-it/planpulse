@@ -290,25 +290,113 @@ export async function POST(request: NextRequest) {
   // We collect month/day first (in column order), then assign years sequentially so
   // a plan that starts in Dec of the previous year gets the right year on every column.
   const dateColMap = new Map<number, Date>(); // col → Monday Date
+  const dateWarnings: string[] = [];
   {
-    const rawColDates: Array<{ col: number; month: number; day: number }> = [];
+    const rawColDates: Array<{ col: number; month: number; day: number; confident: boolean; wrapped: boolean }> = [];
     const dateRow = ws.getRow(colMap.dateHeaderRow);
+
+    // Some spreadsheets split the date header across two rows: a merged
+    // month-label row ("JUL", "AUG", ... each spanning several columns, with
+    // the value only present in the first cell of each merged range) sitting
+    // above a row of bare day-of-month numbers ("6", "13", "20", "27") that
+    // carries no month text of its own. Build a column→month lookup from the
+    // row immediately above dateHeaderRow, used only to seed the very first
+    // bare-day cell's month — a merged label's column position is not a
+    // reliable *per-column* boundary once a month spans 5 weeks instead of 4
+    // (the label can visually start one column early or late relative to the
+    // true 1st-of-month), so every column after the seed is driven by day-of
+    // -month continuity instead (see below), which stays calendar-accurate
+    // regardless of how many weeks a given month has.
+    const MONTH_ABBR: Record<string, number> = {
+      jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+      jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
+    };
+    const monthLabelCols: Array<{ col: number; month: number }> = [];
+    if (colMap.dateHeaderRow > 1) {
+      const labelRow = ws.getRow(colMap.dateHeaderRow - 1);
+      labelRow.eachCell({ includeEmpty: false }, (cell, colNum) => {
+        let v = cell.value;
+        if (v !== null && typeof v === 'object' && 'result' in (v as any)) v = (v as any).result;
+        if (typeof v !== 'string') return;
+        const m = v.trim().match(/^([a-z]{3,9})\.?(?:[\s\-/]*\d{2,4})?$/i);
+        if (!m) return;
+        const month = MONTH_ABBR[m[1].slice(0, 3).toLowerCase()];
+        if (month !== undefined) monthLabelCols.push({ col: colNum, month });
+      });
+      monthLabelCols.sort((a, b) => a.col - b.col);
+    }
+    function monthForCol(col: number): number | null {
+      let found: number | null = null;
+      for (const entry of monthLabelCols) {
+        if (entry.col <= col) found = entry.month;
+        else break;
+      }
+      return found;
+    }
+
+    // Tracks the running month/day so that a bare day-of-month number (a
+    // "continuation week" cell with no month text, e.g. "13", "20", "27"
+    // following "6-Jul", or every column in a two-row header once seeded)
+    // can inherit a month instead of being misread as a tiny Excel serial,
+    // which resolves to January 1900.
+    let anchorMonth: number | null = null;
+    let anchorDay: number | null = null;
     dateRow.eachCell({ includeEmpty: false }, (cell, colNum) => {
       let v = cell.value;
       if (v !== null && typeof v === 'object' && 'result' in (v as any)) v = (v as any).result;
       let d: Date | null = null;
+      let bareDay: number | null = null;
       if (v instanceof Date && !isNaN(v.getTime())) {
         d = v;
       } else if (typeof v === 'number' && v > 1 && v < 100000) {
         const candidate = new Date(new Date(1899, 11, 30).getTime() + v * 86400000);
-        if (!isNaN(candidate.getTime())) d = candidate;
+        if (!isNaN(candidate.getTime()) && candidate.getFullYear() > 1990) {
+          d = candidate;
+        } else if (Number.isInteger(v) && v >= 1 && v <= 31) {
+          // Too small to be a plausible Excel serial — treat as a bare day number.
+          bareDay = v;
+        }
       } else if (typeof v === 'string') {
         d = parseFlexDate(v, colMap.year);
       }
+      const prevMonth = anchorMonth;
       if (d && !isNaN(d.getTime())) {
-        rawColDates.push({ col: colNum, month: d.getMonth(), day: d.getDate() });
+        anchorMonth = d.getMonth();
+        anchorDay = d.getDate();
+        rawColDates.push({ col: colNum, month: anchorMonth, day: anchorDay, confident: true, wrapped: prevMonth === 11 && anchorMonth === 0 });
+        return;
       }
+      if (bareDay === null) return;
+      if (anchorMonth === null) {
+        // Cold start (no confident cell seen yet): seed from an explicit month
+        // label covering this column, if one exists. If none does, this column
+        // can't be placed yet — skip it and try again on the next cell.
+        const labelMonth = monthForCol(colNum);
+        if (labelMonth === null) return;
+        anchorMonth = labelMonth;
+        anchorDay = bareDay;
+        rawColDates.push({ col: colNum, month: anchorMonth, day: anchorDay, confident: true, wrapped: false });
+        return;
+      }
+      // A day that didn't advance since the last cell means an unlabeled month
+      // boundary was crossed.
+      if (anchorDay !== null && bareDay <= anchorDay) {
+        anchorMonth = (anchorMonth + 1) % 12;
+      }
+      anchorDay = bareDay;
+      rawColDates.push({ col: colNum, month: anchorMonth, day: bareDay, confident: false, wrapped: prevMonth === 11 && anchorMonth === 0 });
     });
+
+    const confidentCount = rawColDates.filter(c => c.confident).length;
+    if (rawColDates.length > 0 && confidentCount === 0) {
+      return NextResponse.json(
+        {
+          error:
+            "Could not find month information for the date columns. Make sure each week's header shows a full date (e.g. \"6-Jul\") or that a month row (e.g. \"JUL\", \"AUG\") sits directly above the week numbers, then re-upload.",
+        },
+        { status: 400 }
+      );
+    }
 
     if (rawColDates.length > 0) {
       // If the plan starts in December before rolling into the new year (e.g. 28-Dec → 5-Jan),
@@ -317,15 +405,28 @@ export async function POST(request: NextRequest) {
       if (rawColDates.length >= 2 && rawColDates[0].month === 11 && rawColDates[1].month < 6) {
         currentYear = colMap.year - 1;
       }
-      let prevMonth = rawColDates[0].month;
-      for (const { col, month, day } of rawColDates) {
-        // Month dropped significantly → year rolled over (e.g. Dec→Jan)
-        if (month < prevMonth - 3) currentYear++;
-        prevMonth = month;
-        const d = new Date(currentYear, month, day);
-        if (!isNaN(d.getTime())) {
-          dateColMap.set(col, toMonday(d));
+      // The year rolls over exactly once, at the column where the month wrapped
+      // from December to January — detected in the loop above regardless of
+      // whether that column was confidently parsed or day-count-inferred, since
+      // a Dec→Jan wrap is unambiguous evidence of a year boundary either way.
+      let rolledOver = false;
+      for (const { col, month, day, wrapped } of rawColDates) {
+        if (wrapped && !rolledOver) {
+          currentYear++;
+          rolledOver = true;
         }
+        const d = new Date(currentYear, month, day);
+        if (isNaN(d.getTime())) continue;
+        // Backstop: a column landing well outside the user-selected plan year is
+        // almost certainly a parsing error, not real data — drop and warn instead
+        // of silently importing a wrong date.
+        if (d.getFullYear() < colMap.year - 1 || d.getFullYear() > colMap.year + 2) {
+          dateWarnings.push(
+            `Skipped a date column that resolved to ${d.toDateString()}, well outside the ${colMap.year} plan year — please check that week's header cell in the source spreadsheet.`
+          );
+          continue;
+        }
+        dateColMap.set(col, toMonday(d));
       }
     }
   }
@@ -554,6 +655,7 @@ export async function POST(request: NextRequest) {
   // (e.g. BIRTHDAYS / MONDAY & TUESDAYS below RETARGETING when MONEY MOMENTS is merged
   // across all three rows) get tagged with a flightGroupId so the grid can render a single
   // cell with rowspan across all group rows instead of stacked individual cells.
+  const groupLastIdx = new Map<string, number>();
   for (let i = 0; i < rows.length; i++) {
     if (rows[i].flights.length > 0) continue;
     if (rows[i].flightGroupId) continue; // already assigned
@@ -566,9 +668,18 @@ export async function POST(request: NextRequest) {
         if (!rows[masterIdx].flightGroupId) {
           const gid = id();
           rows[masterIdx] = { ...rows[masterIdx], flightGroupId: gid, isMasterRow: true };
+          groupLastIdx.set(gid, masterIdx);
         }
         const groupId = rows[masterIdx].flightGroupId!;
+        // The grid renders this group with a single rowspan-ed cell across
+        // its rows, so a slave must be physically adjacent to the group's
+        // last member — an intervening row with its own flights (skipped
+        // above) would otherwise let the rowspan reach past it and shove
+        // that row's own cells sideways.
+        const lastIdx = groupLastIdx.get(groupId) ?? masterIdx;
+        if (i !== lastIdx + 1) break;
         rows[i] = { ...rows[i], flightGroupId: groupId, isMasterRow: false };
+        groupLastIdx.set(groupId, i);
         break;
       }
     }
@@ -592,6 +703,7 @@ export async function POST(request: NextRequest) {
         }))
       : undefined,
     updatedAt: new Date().toISOString(),
+    warnings: dateWarnings.length > 0 ? dateWarnings : undefined,
   };
 
   return NextResponse.json({ plan });

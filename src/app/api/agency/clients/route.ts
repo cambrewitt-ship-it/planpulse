@@ -4,7 +4,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import type { Database, ClientWithSpendCache } from '@/types/database';
-import { refreshClientSpendCache, getActionPointStatsForClient } from '@/lib/health/calculations';
+import {
+  refreshClientSpendCache,
+  computeActionPointStatsFromBulk,
+  computeNextCriticalFromBulk,
+} from '@/lib/health/calculations';
 import { nzToday, nzDateKeyOffset, nzStartOfYear } from '@/lib/timezone';
 import { ensureDemoDataSeeded } from '@/lib/demo-seed/seed-demo-data';
 
@@ -78,23 +82,40 @@ export async function GET(request: NextRequest) {
       console.error('Error ensuring demo data seeded:', seedError);
     }
 
-    // Fetch only clients belonging to the current user
+    // Fetch clients (filtered by account manager at the source when provided,
+    // rather than after fully enriching every client) plus the two other
+    // agency-wide bulk lookups in parallel — none of these three depend on
+    // each other.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: clientsData, error: clientsError } = await (supabase as any)
+    let clientsQuery = (supabase as any)
       .from('clients')
       .select(`*, client_spend_cache (*)`)
       .eq('user_id', session.user.id)
       .order('name', { ascending: true });
+    if (accountManagerFilter) {
+      clientsQuery = clientsQuery.eq('account_manager', accountManagerFilter);
+    }
+
+    const today = nzToday();
+    const in3Days = nzDateKeyOffset(3);
+
+    const [
+      { data: clientsData, error: clientsError },
+      { data: allMediaPlans },
+      { data: allActionPoints },
+    ] = await Promise.all([
+      clientsQuery,
+      supabase.from('client_media_plan_builder').select('client_id, channels'),
+      // Unfiltered: used both for tasksDueSoon (filtered client-side to the
+      // 3-day window below) and for the bulk action-point stats / next-critical-task
+      // computations, which need the full set (including undated/later APs).
+      supabase.from('action_points').select('id, channel_type, due_date, text'),
+    ]);
 
     if (clientsError) {
       console.error('Error fetching clients:', clientsError);
       return NextResponse.json({ error: 'Failed to fetch clients' }, { status: 500 });
     }
-
-    // ── Fetch all media plans (channels + flights) in one query ───────────────
-    const { data: allMediaPlans } = await supabase
-      .from('client_media_plan_builder')
-      .select('client_id, channels');
 
     const mediaPlanMap = new Map<string, any[]>();
     for (const plan of allMediaPlans || []) {
@@ -102,16 +123,6 @@ export async function GET(request: NextRequest) {
         mediaPlanMap.set(plan.client_id, plan.channels as any[]);
       }
     }
-
-    // ── Fetch all action points with due dates ────────────────────────────────
-    const today = nzToday();
-    const in3Days = nzDateKeyOffset(3);
-
-    const { data: allActionPoints } = await supabase
-      .from('action_points')
-      .select('id, channel_type, due_date')
-      .not('due_date', 'is', null)
-      .lte('due_date', in3Days); // only fetch those due within the next 3 days (+ overdue)
 
     // ── Fetch all per-client completions for those APs ────────────────────────
     const apIds = (allActionPoints || []).map((ap: any) => ap.id);
@@ -196,11 +207,15 @@ export async function GET(request: NextRequest) {
 
     // ── Fetch actual spend across the widest window any client's plan needs ──
     // actualSpend is always plan-to-date per client (see planBoundsByClient),
-    // never a shared/selectable date range.
+    // never a shared/selectable date range. Also widened to cover the last 30
+    // days so the same fetch can supply the cache's 30-day actualSpend30d figure
+    // (see refreshClientSpendCache's precomputed path below) without a second query.
+    const thirtyDaysAgo = nzDateKeyOffset(-30);
     const allPlanStarts = Array.from(planBoundsByClient.values())
       .map(b => b.start)
       .filter(Boolean) as string[];
-    const spendQueryStart = allPlanStarts.length ? [...allPlanStarts].sort()[0] : nzStartOfYear();
+    const earliestPlanStart = allPlanStarts.length ? [...allPlanStarts].sort()[0] : nzStartOfYear();
+    const spendQueryStart = earliestPlanStart < thirtyDaysAgo ? earliestPlanStart : thirtyDaysAgo;
     const { data: spendRows } = await supabase
       .from('ad_performance_metrics')
       .select('client_id, spend, campaign_id, date, platform, account_id')
@@ -209,22 +224,29 @@ export async function GET(request: NextRequest) {
       .lte('date', today)
       .not('client_id', 'is', null); // Only include rows with client_id (matching new-client-dashboard which filters by client)
 
+    // Group once instead of each client scanning the full array.
+    const spendRowsByClient = new Map<string, any[]>();
+    for (const row of spendRows || []) {
+      if (!spendRowsByClient.has(row.client_id)) spendRowsByClient.set(row.client_id, []);
+      spendRowsByClient.get(row.client_id)!.push(row);
+    }
+
     // ── Build enriched client list ────────────────────────────────────────────
     const enrichedClients: ClientCardData[] = await Promise.all(
       (clientsData || []).map(async (client: any) => {
         const spendCacheArray = client.client_spend_cache as any[];
         let spendCache = spendCacheArray && spendCacheArray.length > 0 ? spendCacheArray[0] : null;
 
-        if (!spendCache) {
-          spendCache = await refreshClientSpendCache(supabase, client.id);
-        }
-
         const rawChannels: any[] = mediaPlanMap.get(client.id) || [];
         const channels = channelsByClient.get(client.id) || [];
         const { start: planStart, end: planEnd } = planBoundsByClient.get(client.id) || { start: null, end: today };
+        const clientCompletions = completionsByClient.get(client.id) || new Map<string, boolean>();
+        const clientSpendRows = spendRowsByClient.get(client.id) || [];
+
+        // ── Action point completion stats (from already-fetched bulk data) ──
+        const apStats = computeActionPointStatsFromBulk(rawChannels, allActionPoints || [], clientCompletions, today);
 
         // ── Tasks due soon (within 3 days, not completed) ──
-        const clientCompletions = completionsByClient.get(client.id) || new Map<string, boolean>();
         const clientChannelNames = new Set(
           rawChannels.filter((ch: any) => ch.channelName).map((ch: any) => normalizeChannel(ch.channelName))
         );
@@ -250,6 +272,26 @@ export async function GET(request: NextRequest) {
               }
             }
           }
+        }
+
+        if (!spendCache) {
+          const activeChannelCount = rawChannels.filter((ch: any) => ch.channelName).length;
+          const nextCritical = computeNextCriticalFromBulk(rawChannels, allActionPoints || [], clientCompletions);
+          // Matches getActualSpendForClient's default (last 30 days, unfiltered by
+          // campaign selection) — intentionally distinct from the plan-to-date,
+          // campaign-filtered `actualSpend` computed below.
+          const actualSpend30d = clientSpendRows.reduce((sum: number, row: any) => {
+            if (!row.date || row.date < thirtyDaysAgo || row.date > today) return sum;
+            return sum + Number(row.spend || 0);
+          }, 0);
+
+          spendCache = await refreshClientSpendCache(supabase, client.id, {
+            activeChannelCount,
+            plannedBudget,
+            actualSpend30d,
+            apStats,
+            nextCritical,
+          });
         }
 
         // ── Actual spend: plan-to-date (this client's own plan start → today) ──
@@ -291,8 +333,7 @@ export async function GET(request: NextRequest) {
             }
           }
           actualSpend = calculateActualSpendForClient(
-            client.id,
-            spendRows || [],
+            clientSpendRows,
             planStart,
             planEnd,
             selectedCampaignIds.size > 0 ? selectedCampaignIds : undefined
@@ -303,9 +344,6 @@ export async function GET(request: NextRequest) {
         const spendVariancePct = plannedBudget > 0
           ? ((actualSpend - plannedBudget) / plannedBudget) * 100
           : null;
-
-        // ── Action point completion stats ──
-        const apStats = await getActionPointStatsForClient(supabase, client.id);
 
         return {
           id: client.id,
@@ -327,18 +365,11 @@ export async function GET(request: NextRequest) {
       })
     );
 
-    // Apply account manager filter if provided
-    let filteredClients = enrichedClients;
-    if (accountManagerFilter) {
-      filteredClients = filteredClients.filter(
-        (client) => client.account_manager === accountManagerFilter
-      );
-    }
+    // Sort by name (account manager filtering is already applied at the
+    // clients query above, so no post-hoc filtering needed here)
+    enrichedClients.sort((a, b) => a.name.localeCompare(b.name));
 
-    // Sort by name
-    filteredClients.sort((a, b) => a.name.localeCompare(b.name));
-
-    return NextResponse.json({ clients: filteredClients });
+    return NextResponse.json({ clients: enrichedClients });
   } catch (error: any) {
     console.error('Error in GET /api/agency/clients:', error);
     return NextResponse.json(
@@ -359,12 +390,12 @@ function normalizeChannel(name: string): string {
 
 /**
  * Calculate actual spend for a client by summing live API rows only, bounded
- * to [dateStart, dateEnd] (the client's own plan-to-date window). When
- * selectedCampaignIds is provided, only rows with a matching campaign_id are
- * counted — this mirrors the client dashboard's per-channel campaign filter.
+ * to [dateStart, dateEnd] (the client's own plan-to-date window). `spendRows`
+ * must already be pre-filtered to this client (see spendRowsByClient above).
+ * When selectedCampaignIds is provided, only rows with a matching campaign_id
+ * are counted — this mirrors the client dashboard's per-channel campaign filter.
  */
 function calculateActualSpendForClient(
-  clientId: string,
   spendRows: any[],
   dateStart: string,
   dateEnd: string,
@@ -373,7 +404,6 @@ function calculateActualSpendForClient(
   let totalSpend = 0;
 
   for (const row of spendRows) {
-    if (row.client_id !== clientId) continue;
     if (!row.date || row.date < dateStart || row.date > dateEnd) continue;
     if (row.campaign_id && row.campaign_id.startsWith('manual-override-')) continue;
     if (selectedCampaignIds && selectedCampaignIds.size > 0) {

@@ -266,7 +266,15 @@ export default function CreateClientPage() {
   const [mediaPlanChatOpen, setMediaPlanChatOpen] = useState(true);
   // Purely visual — shown dimmed behind a lock overlay before the client exists,
   // so the grid + chat panel are visible (not interactive) instead of hidden.
-  const previewPlan = useMemo(() => createBlankSandboxPlan(), []);
+  // A truly blank row's channel is empty, which makes PlanGrid auto-open its
+  // channel picker — and since that dropdown renders via a portal straight to
+  // document.body, it escapes this preview's opacity/pointer-events wrapper and
+  // shows up fully interactive-looking before the client is even created. Give
+  // the row a channel so that auto-open never triggers here.
+  const previewPlan = useMemo(() => {
+    const blank = createBlankSandboxPlan();
+    return { ...blank, rows: blank.rows.map((row) => ({ ...row, channel: 'Meta Ads' })) };
+  }, []);
 
   // ── Step 6: Performance Goal ──
   const [goalMetric, setGoalMetric] = useState('');
@@ -1186,7 +1194,7 @@ export default function CreateClientPage() {
 
   return (
     <div className="min-h-screen" style={{ background: '#F5F3EF', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
-      <div className="container mx-auto px-4 py-8 max-w-5xl">
+      <div className="w-full px-6 py-8">
 
         {/* Back */}
         <div className="mb-8">

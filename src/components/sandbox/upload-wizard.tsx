@@ -3,6 +3,12 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { FileSpreadsheet, CheckCircle, AlertCircle, Loader2, ArrowRight, Sparkles } from "lucide-react";
 import type { SandboxPlan, PlanRow } from "./types";
+import { compareExtractions, type CrossCheckResult } from "./cross-check";
+import type { VisionExtraction } from "@/app/api/media-plan-agent/vision-extract/route";
+import { readFileAsDownscaledImage } from "@/lib/media-plan/image-downscale";
+import { TurnstileWidget } from "@/components/auth/turnstile-widget";
+
+const CAPTCHA_REQUIRED = !!process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
 
 type Step = "drop" | "year" | "sheet" | "parsing" | "review" | "error";
 
@@ -223,6 +229,42 @@ export function UploadWizard({ onPlanLoaded, onScreenshotSelected, title, descri
   // user answers: true = organic, false = paid; undefined = not yet answered
   const [organicOverrides, setOrganicOverrides] = useState<Record<string, boolean>>({});
 
+  // Optional screenshot cross-check on the review step — diffs vision-read totals
+  // and dates against what the Excel parser produced.
+  const crossCheckInputRef = useRef<HTMLInputElement>(null);
+  const [crossCheck, setCrossCheck] = useState<CrossCheckResult | null>(null);
+  const [crossCheckLoading, setCrossCheckLoading] = useState(false);
+  const [crossCheckError, setCrossCheckError] = useState<string | null>(null);
+  const [crossCheckCaptchaToken, setCrossCheckCaptchaToken] = useState<string | null>(null);
+  const [crossCheckCaptchaKey, setCrossCheckCaptchaKey] = useState(0);
+
+  const handleCrossCheckFile = useCallback(async (file: File, plan: SandboxPlan) => {
+    setCrossCheckLoading(true);
+    setCrossCheckError(null);
+    setCrossCheck(null);
+    try {
+      const { base64, mimeType } = await readFileAsDownscaledImage(file);
+      const res = await fetch("/api/media-plan-agent/vision-extract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: base64, mimeType, year: plan.weeks[0]?.year, turnstileToken: crossCheckCaptchaToken }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Could not read the screenshot.");
+      const extraction: VisionExtraction = {
+        channels: data.channels, fees: data.fees, customColumns: data.customColumns, notes: data.notes,
+      };
+      setCrossCheck(compareExtractions(plan, extraction));
+    } catch (err: any) {
+      setCrossCheckError(err.message ?? "Could not read the screenshot.");
+    } finally {
+      setCrossCheckLoading(false);
+      // Single-use token — clear it and remount the widget for next time.
+      setCrossCheckCaptchaToken(null);
+      setCrossCheckCaptchaKey(k => k + 1);
+    }
+  }, [crossCheckCaptchaToken]);
+
   const parseFile = useCallback(async (file: File, year: number, sheetName: string) => {
     if (!file.name.match(/\.(xlsx?|xls)$/i)) {
       setErrorMsg("Please upload an Excel file (.xlsx or .xls)");
@@ -267,6 +309,8 @@ export function UploadWizard({ onPlanLoaded, onScreenshotSelected, title, descri
       const suspects = uniqueChannels.filter(isPotentiallyOrganic);
       setSuspectChannels(suspects);
       setOrganicOverrides({});
+      setCrossCheck(null);
+      setCrossCheckError(null);
       setStep("review");
     } catch {
       setErrorMsg("Network error. Please try again.");
@@ -644,6 +688,18 @@ export function UploadWizard({ onPlanLoaded, onScreenshotSelected, title, descri
             </div>
           )}
 
+          {/* Date columns dropped during import — surfaced instead of silently importing bad dates */}
+          {parsedPlan.warnings && parsedPlan.warnings.length > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4 flex items-start gap-2">
+              <svg className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <div className="text-xs text-amber-800 space-y-1">
+                {parsedPlan.warnings.map((w, i) => <p key={i}>{w}</p>)}
+              </div>
+            </div>
+          )}
+
           {/* Custom columns detected */}
           {parsedPlan.customColumns && parsedPlan.customColumns.length > 0 && (
             <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 mb-4 flex items-center gap-2 flex-wrap">
@@ -667,6 +723,73 @@ export function UploadWizard({ onPlanLoaded, onScreenshotSelected, title, descri
               ))}
             </div>
           )}
+
+          {/* Optional secondary check: attach a screenshot of the same plan and diff
+              its totals/date range against what the Excel parser produced. */}
+          <div className="bg-white border border-gray-200 rounded-xl px-4 py-3 mb-4">
+            <input
+              ref={crossCheckInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/gif,image/webp"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (file) handleCrossCheckFile(file, parsedPlan);
+              }}
+            />
+            {!crossCheck && !crossCheckLoading && !crossCheckError && (
+              <div className="flex flex-col items-start gap-2">
+                <button
+                  onClick={() => crossCheckInputRef.current?.click()}
+                  disabled={CAPTCHA_REQUIRED && !crossCheckCaptchaToken}
+                  className="text-xs font-medium text-blue-600 hover:text-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {CAPTCHA_REQUIRED && !crossCheckCaptchaToken
+                    ? "Verifying…"
+                    : "Attach a screenshot to double-check totals & dates (optional)"}
+                </button>
+                <TurnstileWidget key={crossCheckCaptchaKey} onVerify={setCrossCheckCaptchaToken} />
+              </div>
+            )}
+            {crossCheckLoading && (
+              <div className="flex items-center gap-2 text-xs text-gray-500">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                Reading screenshot and comparing…
+              </div>
+            )}
+            {crossCheckError && (
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs text-red-600">{crossCheckError}</span>
+                <button
+                  onClick={() => { setCrossCheckError(null); crossCheckInputRef.current?.click(); }}
+                  className="text-xs font-medium text-blue-600 hover:text-blue-700 flex-shrink-0"
+                >
+                  Try again
+                </button>
+              </div>
+            )}
+            {crossCheck && crossCheck.totalMatch && crossCheck.dateRangeMatch && (
+              <div className="flex items-center gap-2 text-xs text-green-700">
+                <CheckCircle className="w-3.5 h-3.5" />
+                Screenshot cross-check matched — totals and dates agree.
+              </div>
+            )}
+            {crossCheck && (!crossCheck.totalMatch || !crossCheck.dateRangeMatch) && (
+              <div className="flex items-start gap-2">
+                <AlertCircle className="w-3.5 h-3.5 text-amber-500 flex-shrink-0 mt-0.5" />
+                <div className="text-xs text-amber-800 space-y-1">
+                  <p className="font-medium">Screenshot cross-check found a mismatch — please double-check before continuing:</p>
+                  {!crossCheck.totalMatch && (
+                    <p>Excel total {formatBudget(crossCheck.sandboxTotal)} vs. screenshot-read total {formatBudget(crossCheck.visionTotal)}.</p>
+                  )}
+                  {!crossCheck.dateRangeMatch && crossCheck.sandboxRange && crossCheck.visionRange && (
+                    <p>Excel dates run {crossCheck.sandboxRange[0]} to {crossCheck.sandboxRange[1]}, screenshot reads {crossCheck.visionRange[0]} to {crossCheck.visionRange[1]}.</p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Row preview */}
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-6">
@@ -743,7 +866,7 @@ export function UploadWizard({ onPlanLoaded, onScreenshotSelected, title, descri
 
           <div className="flex gap-3">
             <button
-              onClick={() => { setParsedPlan(null); setSuspectChannels([]); setOrganicOverrides({}); setStep("drop"); }}
+              onClick={() => { setParsedPlan(null); setSuspectChannels([]); setOrganicOverrides({}); setCrossCheck(null); setCrossCheckError(null); setStep("drop"); }}
               className="flex-1 py-3 border border-gray-300 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
             >
               Upload different file

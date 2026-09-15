@@ -7,8 +7,14 @@ import { Reveal } from '@/components/landing/Reveal';
 import { ArrowRight, Mail, Clock, CalendarClock } from 'lucide-react';
 
 export const metadata: Metadata = {
-  title: 'About Us — PlanPulse',
+  title: 'About Us',
   description: 'PlanPulse is built by OneOneThree Digital, a New Zealand marketing agency.',
+  alternates: { canonical: '/about' },
+  openGraph: {
+    title: 'About Us — PlanPulse',
+    description: 'PlanPulse is built by OneOneThree Digital, a New Zealand marketing agency.',
+    url: '/about',
+  },
 };
 
 const pageFont: React.CSSProperties = { fontFamily: "'DM Sans', system-ui, sans-serif" };

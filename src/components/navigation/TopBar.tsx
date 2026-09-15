@@ -77,6 +77,7 @@ export default function TopBar() {
 
   if (pathname?.startsWith('/hub/')) return null;
   if (pathname?.match(/^\/clients\/[^/]+\/hub$/)) return null;
+  if (pathname?.startsWith('/marketing/video/')) return null;
 
   // Only the signed-out marketing nav condenses into a floating pill on scroll —
   // the authenticated app nav carries too many items for that treatment, so it
@@ -131,6 +132,11 @@ export default function TopBar() {
                 <Link href="/pricing">
                   <Button variant={pathname === '/pricing' ? 'default' : 'ghost'} size="sm">
                     Pricing
+                  </Button>
+                </Link>
+                <Link href="/blog">
+                  <Button variant={pathname?.startsWith('/blog') ? 'default' : 'ghost'} size="sm">
+                    Blog
                   </Button>
                 </Link>
                 <Link href="/about">

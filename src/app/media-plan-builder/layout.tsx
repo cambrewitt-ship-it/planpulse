@@ -1,8 +1,12 @@
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Media Plan Builder — PlanPulse',
+  title: 'Media Plan Builder',
   description: 'Plan and edit media budgets on a visual weekly timeline — upload an existing plan or start from scratch. Free, no account needed.',
+  // Password-gated (src/middleware.ts) — excluded from the sitemap and not
+  // eligible for indexing until the gate comes off, but noindex explicitly
+  // in case the gate is ever lifted without revisiting this file.
+  robots: { index: false, follow: false },
 };
 
 const jsonLd = {

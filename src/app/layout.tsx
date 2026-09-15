@@ -10,13 +10,58 @@ const inter = Inter({
   display: "swap",
 });
 
+const SITE_URL = "https://www.planpulse.nz";
+const SITE_NAME = "PlanPulse";
+const SITE_DESCRIPTION =
+  "Agentic AI software for marketing agencies — media planning, campaign health scoring, and AI agents that catch setup errors and pacing issues before they cost you a client.";
+const DEFAULT_OG_IMAGE = "/pacing.png";
+
 export const metadata: Metadata = {
-  title: "PlanPulse",
-  description: "Manage your client campaigns efficiently",
+  metadataBase: new URL(SITE_URL),
+  title: {
+    default: SITE_NAME,
+    template: `%s — ${SITE_NAME}`,
+  },
+  description: SITE_DESCRIPTION,
   icons: {
     icon: '/favicon.ico',
     shortcut: '/favicon.ico',
   },
+  robots: {
+    index: true,
+    follow: true,
+  },
+  openGraph: {
+    type: 'website',
+    siteName: SITE_NAME,
+    title: SITE_NAME,
+    description: SITE_DESCRIPTION,
+    url: SITE_URL,
+    images: [{ url: DEFAULT_OG_IMAGE, width: 1200, height: 630, alt: SITE_NAME }],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: SITE_NAME,
+    description: SITE_DESCRIPTION,
+    images: [DEFAULT_OG_IMAGE],
+  },
+};
+
+const organizationJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'Organization',
+  name: SITE_NAME,
+  url: SITE_URL,
+  logo: `${SITE_URL}/oot-product-silver.png`,
+  description: SITE_DESCRIPTION,
+  sameAs: ['https://www.oneonethree.co.nz', 'https://nz.linkedin.com/company/oneonethreedigital'],
+};
+
+const websiteJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'WebSite',
+  name: SITE_NAME,
+  url: SITE_URL,
 };
 
 export default function RootLayout({
@@ -36,6 +81,14 @@ export default function RootLayout({
         style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}
         suppressHydrationWarning
       >
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(organizationJsonLd) }}
+        />
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteJsonLd) }}
+        />
         <TopBar />
         {children}
         <FloatingAIChat />

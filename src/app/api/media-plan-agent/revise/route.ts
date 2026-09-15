@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { createClient } from '@/lib/supabase/server';
-import { rateLimit } from '@/lib/rate-limit';
+import { rateLimit, clientIp } from '@/lib/rate-limit';
+import { verifyTurnstileToken } from '@/lib/turnstile';
 import type { VisionExtraction } from '../vision-extract/route';
 
 function buildRevisePrompt(current: VisionExtraction, correction: string): string {
@@ -33,11 +34,21 @@ export async function POST(request: NextRequest) {
     if (limited) return limited;
   }
 
-  let body: { current: VisionExtraction; correction: string };
+  let body: { current: VisionExtraction; correction: string; turnstileToken?: string };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+  }
+
+  if (!session?.user) {
+    const verified = await verifyTurnstileToken(body.turnstileToken, clientIp(request));
+    if (!verified) {
+      return NextResponse.json(
+        { error: 'Verification check failed — please refresh the page and try again.' },
+        { status: 403 }
+      );
+    }
   }
 
   const { current, correction } = body;

@@ -1,0 +1,15 @@
+# PlanPulse
+
+> PlanPulse is agentic AI software for marketing agencies. It combines multi-channel media planning, live campaign pacing and performance tracking across Google Ads, Meta, and GA4, and AI agents that audit account setup, catch spend anomalies, and generate client invoices — built by OneOneThree Digital, a New Zealand marketing agency, for agencies like their own.
+
+## Product
+
+- [Homepage](https://www.planpulse.nz/): overview of PlanPulse and its AI agents
+- [Features](https://www.planpulse.nz/features): campaign health scoring, media planning, pacing analytics, task management, AI reporting
+- [Pricing](https://www.planpulse.nz/pricing): Free, Starter, Growth, and Agency plans
+- [About](https://www.planpulse.nz/about): who builds PlanPulse and why
+
+## Resources
+
+- [Blog](https://www.planpulse.nz/blog): agency media-buying guides drawn from real campaign audits
+- [Glossary](https://www.planpulse.nz/glossary): definitions of media-buying and campaign-pacing terms

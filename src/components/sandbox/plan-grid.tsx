@@ -1,9 +1,10 @@
 "use client";
 
 import React, { useState, useCallback, useEffect, useRef, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { Plus, Trash2, Upload, Download, X, Check, Edit2, ChevronDown, Loader2, Calendar } from "lucide-react";
-import type { SandboxPlan, PlanRow, Flight, Week, FeeRow, CustomColumn } from "./types";
-import { FLIGHT_COLORS } from "./types";
+import type { SandboxPlan, PlanRow, Flight, Week, FeeRow, CustomColumn, FlightStatus } from "./types";
+import { FLIGHT_COLORS, FLIGHT_STATUS_COLORS } from "./types";
 import { getChannelLogo, PRESET_CHANNELS } from "@/lib/utils/channel-icons";
 import { nzToday } from "@/lib/timezone";
 
@@ -25,6 +26,20 @@ function uid() { return Math.random().toString(36).slice(2, 10); }
 
 function totalForRow(row: PlanRow): number {
   return row.flights.reduce((s, f) => s + f.budget, 0);
+}
+
+// A flightGroupId's member rows must be physically adjacent in `rows` for a
+// master's rowSpan to be valid — an import or delete bug can otherwise tag a
+// non-adjacent row, which makes the master's <td> rowSpan reserve columns in
+// an unrelated row and shove that row's own cells sideways. Clamp to the
+// actual contiguous run so a bad group can never corrupt an unrelated row.
+function contiguousGroupSpan(rows: PlanRow[], masterIdx: number, groupId: string): number {
+  let count = 1;
+  for (let j = masterIdx + 1; j < rows.length; j++) {
+    if (rows[j].flightGroupId !== groupId) break;
+    count++;
+  }
+  return count;
 }
 
 function fmt(n: number): string {
@@ -124,10 +139,11 @@ interface FlightPopoverProps {
   onSave: (budget: number, color: string) => void;
   onDelete: () => void;
   onClose: () => void;
+  onSetStatus: (status: FlightStatus | undefined) => void;
   anchorRef: React.RefObject<HTMLElement | null>;
 }
 
-function FlightPopover({ flight, onSave, onDelete, onClose, anchorRef }: FlightPopoverProps) {
+function FlightPopover({ flight, onSave, onDelete, onClose, onSetStatus, anchorRef }: FlightPopoverProps) {
   const [budget, setBudget] = useState(String(flight.budget));
   const [color, setColor] = useState(flight.color);
   const popRef = useRef<HTMLDivElement>(null);
@@ -175,6 +191,27 @@ function FlightPopover({ flight, onSave, onDelete, onClose, anchorRef }: FlightP
             style={{ background: c, borderColor: color === c ? "#1d4ed8" : "transparent" }}
           />
         ))}
+      </div>
+      <label className="text-xs text-gray-500 block mb-2">Booking status</label>
+      <div className="flex gap-1.5 mb-3">
+        <button
+          onClick={() => onSetStatus(flight.status === 'booked' ? undefined : 'booked')}
+          className="flex-1 py-1.5 rounded-lg text-xs font-medium border transition-colors"
+          style={flight.status === 'booked'
+            ? { background: FLIGHT_STATUS_COLORS.booked, borderColor: FLIGHT_STATUS_COLORS.booked, color: '#fff' }
+            : { background: '#fff', borderColor: '#e5e7eb', color: '#374151' }}
+        >
+          Booked
+        </button>
+        <button
+          onClick={() => onSetStatus(flight.status === 'in_progress' ? undefined : 'in_progress')}
+          className="flex-1 py-1.5 rounded-lg text-xs font-medium border transition-colors"
+          style={flight.status === 'in_progress'
+            ? { background: FLIGHT_STATUS_COLORS.in_progress, borderColor: FLIGHT_STATUS_COLORS.in_progress, color: '#fff' }
+            : { background: '#fff', borderColor: '#e5e7eb', color: '#374151' }}
+        >
+          Booking in progress
+        </button>
       </div>
       <div className="flex gap-2">
         <button
@@ -382,9 +419,26 @@ function ChannelSelectCell({ value, onChange, libraryChannels, className = "", s
   const [open, setOpen] = useState(!!autoOpen);
   const [custom, setCustom] = useState(false);
   const [draft, setDraft] = useState(value);
+  const [menuPos, setMenuPos] = useState<{ left: number; top: number; maxHeight: number } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const cellRef = useRef<HTMLTableCellElement>(null);
+
+  // Position the dropdown in document (not viewport) coordinates, always
+  // below the cell, so it scrolls in lockstep with the row it belongs to.
+  // Rendered via a portal (below) so it can still never be clipped by an
+  // ancestor card's `overflow: hidden`, with an internal scroll as a
+  // fallback — capped to a sane height rather than filling the viewport.
+  const MENU_MAX_HEIGHT = 320;
+  useEffect(() => {
+    if (!open || !cellRef.current) return;
+    const rect = cellRef.current.getBoundingClientRect();
+    setMenuPos({
+      left: rect.left + window.scrollX,
+      top: rect.bottom + 4 + window.scrollY,
+      maxHeight: MENU_MAX_HEIGHT,
+    });
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -412,78 +466,81 @@ function ChannelSelectCell({ value, onChange, libraryChannels, className = "", s
   const icon = getChannelLogo(value, "w-3.5 h-3.5 flex-shrink-0");
 
   return (
-    <td
-      ref={cellRef}
-      className={`group cursor-pointer ${className}`}
-      style={{ ...style, position: style?.position as React.CSSProperties["position"], overflow: open ? "visible" : "hidden", zIndex: open ? 40 : (style?.zIndex ?? 10) }}
-      rowSpan={rowSpan}
-      onClick={() => setOpen(o => !o)}
-    >
-      <div className="relative flex items-center gap-1.5 justify-center w-full min-w-0">
-        {value ? (
-          <>
-            {icon}
-            <span className="font-semibold text-xs truncate min-w-0" title={value}>{value}</span>
-          </>
-        ) : (
-          <span className="text-black text-xs">Select a Channel</span>
-        )}
-        <ChevronDown className="w-3 h-3 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none" />
+    <>
+      <td
+        ref={cellRef}
+        className={`group cursor-pointer ${className}`}
+        style={{ ...style, position: style?.position as React.CSSProperties["position"], zIndex: open ? 40 : (style?.zIndex ?? 10) }}
+        rowSpan={rowSpan}
+        onClick={() => setOpen(o => !o)}
+      >
+        <div className="relative flex items-center gap-1.5 justify-center w-full min-w-0">
+          {value ? (
+            <>
+              {icon}
+              <span className="font-semibold text-xs truncate min-w-0" title={value}>{value}</span>
+            </>
+          ) : (
+            <span className="text-black text-xs">Select a Channel</span>
+          )}
+          <ChevronDown className="w-3 h-3 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none" />
+        </div>
+      </td>
 
-        {open && (
-          <div
-            ref={dropdownRef}
-            className="absolute z-50 bg-white border border-gray-200 rounded-xl shadow-xl py-1 w-52"
-            style={{ top: "calc(100% + 4px)", left: 0 }}
-            onMouseDown={e => e.stopPropagation()}
-            onClick={e => e.stopPropagation()}
-          >
-            {(() => {
-              const presetSet = new Set(PRESET_CHANNELS.map(c => c.toLowerCase()));
-              const extraLibrary = libraryChannels.filter(ch => !presetSet.has(ch.channel_type.toLowerCase()));
-              const allChannels = [
-                ...extraLibrary.map(ch => ch.channel_type),
-                ...PRESET_CHANNELS,
-              ];
-              return allChannels.map(name => (
-                <button
-                  key={name}
-                  onClick={() => selectChannel(name)}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-blue-50 hover:text-blue-800 transition-colors text-left"
-                >
-                  {getChannelLogo(name, "w-4 h-4 flex-shrink-0")}
-                  <span className="truncate">{name}</span>
-                </button>
-              ));
-            })()}
-            <div className="border-t border-gray-100 mt-1 pt-1">
-              {custom ? (
-                <div className="px-2 pb-1">
-                  <input
-                    ref={inputRef}
-                    value={draft}
-                    onChange={e => setDraft(e.target.value)}
-                    onKeyDown={e => {
-                      if (e.key === "Enter" && draft.trim()) selectChannel(draft.trim());
-                      if (e.key === "Escape") { setCustom(false); setOpen(false); }
-                    }}
-                    placeholder="Type channel name…"
-                    className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-400"
-                  />
-                </div>
-              ) : (
-                <button
-                  onClick={() => { setDraft(value); setCustom(true); }}
-                  className="w-full text-left px-3 py-2 text-xs text-gray-400 hover:bg-gray-50 transition-colors"
-                >
-                  Write custom channel…
-                </button>
-              )}
-            </div>
+      {open && menuPos && typeof document !== "undefined" && createPortal(
+        <div
+          ref={dropdownRef}
+          className="absolute z-50 bg-white border border-gray-200 rounded-xl shadow-xl py-1 w-52 overflow-y-auto"
+          style={{ left: menuPos.left, top: menuPos.top, maxHeight: menuPos.maxHeight }}
+          onMouseDown={e => e.stopPropagation()}
+          onClick={e => e.stopPropagation()}
+        >
+          {(() => {
+            const presetSet = new Set(PRESET_CHANNELS.map(c => c.toLowerCase()));
+            const extraLibrary = libraryChannels.filter(ch => !presetSet.has(ch.channel_type.toLowerCase()));
+            const allChannels = [
+              ...extraLibrary.map(ch => ch.channel_type),
+              ...PRESET_CHANNELS,
+            ];
+            return allChannels.map(name => (
+              <button
+                key={name}
+                onClick={() => selectChannel(name)}
+                className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-blue-50 hover:text-blue-800 transition-colors text-left"
+              >
+                {getChannelLogo(name, "w-4 h-4 flex-shrink-0")}
+                <span className="truncate">{name}</span>
+              </button>
+            ));
+          })()}
+          <div className="border-t border-gray-100 mt-1 pt-1">
+            {custom ? (
+              <div className="px-2 pb-1">
+                <input
+                  ref={inputRef}
+                  value={draft}
+                  onChange={e => setDraft(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === "Enter" && draft.trim()) selectChannel(draft.trim());
+                    if (e.key === "Escape") { setCustom(false); setOpen(false); }
+                  }}
+                  placeholder="Type channel name…"
+                  className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-400"
+                />
+              </div>
+            ) : (
+              <button
+                onClick={() => { setDraft(value); setCustom(true); }}
+                className="w-full text-left px-3 py-2 text-xs text-gray-400 hover:bg-gray-50 transition-colors"
+              >
+                Write custom channel…
+              </button>
+            )}
           </div>
-        )}
-      </div>
-    </td>
+        </div>,
+        document.body
+      )}
+    </>
   );
 }
 
@@ -851,7 +908,19 @@ export function PlanGrid({ plan, onPlanChange, onUpload, outerStyle, showDownloa
   const totalLeftColsWidth = dynamicTotalLeft + COL_WIDTHS.total; // pixel offset where weeks begin
   const leftColSpan = 2 + customColumns.length; // DEL + CHANNEL + custom cols
 
-  const todayStr = nzToday();
+  // Re-read on an interval (and when the tab regains focus) so the "today"
+  // line keeps moving in a dashboard tab left open for days, instead of
+  // freezing at whatever date the page happened to load on.
+  const [todayStr, setTodayStr] = useState(() => nzToday());
+  useEffect(() => {
+    const refresh = () => setTodayStr(nzToday());
+    const id = setInterval(refresh, 60 * 1000);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, []);
   const planYear = weeks[0]?.year ?? Number(todayStr.slice(0, 4));
   const yearOptions = Array.from({ length: 7 }, (_, i) => new Date().getFullYear() - 2 + i);
 
@@ -981,7 +1050,20 @@ export function PlanGrid({ plan, onPlanChange, onUpload, outerStyle, showDownloa
   }, []);
 
   const deleteRow = useCallback((rowId: string) => {
-    setRows(prev => prev.filter(r => r.id !== rowId));
+    setRows(prev => {
+      const deleted = prev.find(r => r.id === rowId);
+      const next = prev.filter(r => r.id !== rowId);
+      // Deleting a merged flight's master row would otherwise leave its slave
+      // rows pointing at a flightGroupId with no master left to render the
+      // rowspan-ed cell — strip their group membership so they revert to
+      // plain independent rows instead of vanishing/misrendering.
+      if (deleted?.isMasterRow && deleted.flightGroupId) {
+        return next.map(r => r.flightGroupId === deleted.flightGroupId
+          ? { ...r, flightGroupId: undefined, isMasterRow: undefined }
+          : r);
+      }
+      return next;
+    });
   }, []);
 
   const addBlankRow = useCallback(() => {
@@ -1011,6 +1093,13 @@ export function PlanGrid({ plan, onPlanChange, onUpload, outerStyle, showDownloa
   const deleteFlight = useCallback((rowId: string, flightId: string) => {
     updateRow(rowId, r => ({ ...r, flights: r.flights.filter(f => f.id !== flightId) }));
     setEditingFlight(null);
+  }, [updateRow]);
+
+  const setFlightStatus = useCallback((rowId: string, flightId: string, status: FlightStatus | undefined) => {
+    updateRow(rowId, r => ({
+      ...r,
+      flights: r.flights.map(f => f.id === flightId ? { ...f, status } : f),
+    }));
   }, [updateRow]);
 
   // ── Fee helpers ───────────────────────────────────────────────────────────
@@ -1223,7 +1312,7 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
     const dragLo = activeHighlight ? Math.min(activeHighlight.startIdx, activeHighlight.endIdx) : -1;
     const dragHi = activeHighlight ? Math.max(activeHighlight.startIdx, activeHighlight.endIdx) : -1;
     const flightRowSpan = (row.flightGroupId && row.isMasterRow)
-      ? (flightGroups.get(row.flightGroupId)?.length ?? 1)
+      ? contiguousGroupSpan(rows, rowIdx, row.flightGroupId)
       : 1;
 
     while (i < weeks.length) {
@@ -1248,9 +1337,10 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
         const isEditing = editingFlight?.rowId === row.id && editingFlight?.flightId === flight.id;
         const isBeingResized = resizeState?.rowId === row.id && resizeState?.flightId === flight.id;
 
+        const displayColor = flight.status ? FLIGHT_STATUS_COLORS[flight.status] : flight.color;
         const flightBg = row.isOrganic
-          ? `repeating-linear-gradient(-45deg, ${flight.color}, ${flight.color} 5px, rgba(255,255,255,0.45) 5px, rgba(255,255,255,0.45) 10px)`
-          : flight.color;
+          ? `repeating-linear-gradient(-45deg, ${displayColor}, ${displayColor} 5px, rgba(255,255,255,0.45) 5px, rgba(255,255,255,0.45) 10px)`
+          : displayColor;
 
         cells.push(
           <td
@@ -1287,7 +1377,7 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
             {flight.budget > 0 && (
               row.isOrganic ? (
                 <span style={{
-                  background: flight.color,
+                  background: displayColor,
                   borderRadius: 4,
                   padding: '1px 5px',
                   display: 'inline-block',
@@ -1322,6 +1412,7 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
                   anchorRef={flightAnchorRef}
                   onSave={(budget, color) => editFlight(row.id, flight.id, budget, color)}
                   onDelete={() => deleteFlight(row.id, flight.id)}
+                  onSetStatus={status => setFlightStatus(row.id, flight.id, status)}
                   onClose={() => setEditingFlight(null)}
                 />
               </div>
@@ -1632,7 +1723,7 @@ const endDrag = useCallback((clientX: number, clientY: number) => {
                   {(!row.flightGroupId || row.isMasterRow) && (
                     <td
                       className={`${stickyBase} text-right align-middle font-medium`}
-                      rowSpan={row.isMasterRow ? (flightGroups.get(row.flightGroupId!)?.length ?? 1) : 1}
+                      rowSpan={row.isMasterRow ? contiguousGroupSpan(rows, rowIdx, row.flightGroupId!) : 1}
                     >
                       {rowTotal > 0 ? fmt(rowTotal) : ""}
                     </td>

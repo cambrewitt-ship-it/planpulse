@@ -10,6 +10,9 @@ import type { SandboxPlan } from '@/components/sandbox/types';
 import { mergeExtractionIntoPlan, type PlanExtraction } from '@/lib/media-plan/sandbox-sync';
 import type { VisionExtraction } from '@/app/api/media-plan-agent/vision-extract/route';
 import { ExtractionCard } from '@/components/sandbox/extraction-card';
+import { readFileAsDownscaledImage } from '@/lib/media-plan/image-downscale';
+
+const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 
 // Same Apple × Moleskine tokens as client-chat-panel.tsx, for visual consistency
 const RED = 'oklch(42% 0.16 25)';
@@ -395,16 +398,19 @@ export default function MediaPlanChatPanel({
       onExcelFileSelected?.(file);
       return;
     }
-    if (file.size > 20 * 1024 * 1024) return;
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setMessages(prev => [
+        ...prev,
+        { role: 'assistant', content: `That image is ${(file.size / (1024 * 1024)).toFixed(1)}MB, which is too large to attach — please upload a file under 20MB.`, isStreaming: false },
+      ]);
+      return;
+    }
     const caption = input.trim();
     setInput('');
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const dataUrl = ev.target?.result as string;
-      runVisionExtract({ base64: dataUrl.split(',')[1], mimeType: file.type, preview: dataUrl, name: file.name }, caption);
-    };
-    reader.readAsDataURL(file);
+    readFileAsDownscaledImage(file).then(({ base64, mimeType, preview }) => {
+      runVisionExtract({ base64, mimeType, preview, name: file.name }, caption);
+    });
   };
 
   function handleSubmit() {

@@ -64,6 +64,10 @@ const nextConfig: NextConfig = {
   // Strict mode for better error catching
   reactStrictMode: true,
 
+  // The floating dev-mode badge otherwise gets baked into anything captured
+  // from `next dev` (e.g. scripts/record-agent-video.mjs's marketing clips).
+  devIndicators: false,
+
   // Optimize production builds
   poweredByHeader: false,
   compress: true,

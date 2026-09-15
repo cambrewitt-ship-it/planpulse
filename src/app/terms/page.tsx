@@ -2,8 +2,10 @@ import Link from 'next/link';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Terms and Conditions — PlanPulse',
+  title: 'Terms and Conditions',
   description: 'Terms and Conditions for PlanPulse by OneOneThree Digital Limited',
+  alternates: { canonical: '/terms' },
+  robots: { index: false, follow: true },
 };
 
 export default function TermsPage() {

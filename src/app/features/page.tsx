@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import Image from 'next/image';
 import { Button } from '@/components/ui/button';
@@ -24,6 +25,18 @@ import {
   Workflow,
   Gauge,
 } from 'lucide-react';
+
+export const metadata: Metadata = {
+  title: 'Features',
+  description:
+    'Campaign health scoring, multi-channel media planning, real-time pacing analytics, and AI agents for setup audits, anomaly detection, and reporting — everything a marketing agency needs in one place.',
+  alternates: { canonical: '/features' },
+  openGraph: {
+    title: 'Features — PlanPulse',
+    description: 'Campaign health scoring, media planning, pacing analytics, and AI agents for marketing agencies.',
+    url: '/features',
+  },
+};
 
 const pageFont: React.CSSProperties = { fontFamily: "'DM Sans', system-ui, sans-serif" };
 const serifFont: React.CSSProperties = { fontFamily: "'DM Sans', system-ui, sans-serif" };
@@ -55,6 +68,7 @@ function FeatureCard({ icon, iconBg, title, description }: FeatureCardProps) {
 }
 
 interface SectionProps {
+  id?: string;
   label: string;
   headline: string;
   description: string;
@@ -62,9 +76,9 @@ interface SectionProps {
   alt?: boolean;
 }
 
-function Section({ label, headline, description, children, alt }: SectionProps) {
+function Section({ id, label, headline, description, children, alt }: SectionProps) {
   return (
-    <section className="py-20" style={{ background: alt ? '#F5F3EF' : '#FDFCF8' }}>
+    <section id={id} className="py-20" style={{ background: alt ? '#F5F3EF' : '#FDFCF8' }}>
       <div className="container mx-auto px-4">
         <div className="text-center mb-12 max-w-2xl mx-auto">
           <span
@@ -126,6 +140,7 @@ export default function FeaturesPage() {
 
         {/* Agency & Client Management */}
         <Section
+          id="agency-operations"
           label="Agency Operations"
           headline="Full visibility across every client"
           description="Manage your entire book of business from a single dashboard. Know the health of every account at a glance without opening a single spreadsheet."
@@ -152,6 +167,7 @@ export default function FeaturesPage() {
 
         {/* Media Planning */}
         <Section
+          id="media-planning"
           label="Media Planning"
           headline="Plan campaigns across every channel"
           description="Build, visualise, and manage media plans with channel-level budgets, flight dates, and Gantt timeline views — all in one place."
@@ -193,6 +209,7 @@ export default function FeaturesPage() {
 
         {/* Analytics & Performance */}
         <Section
+          id="analytics-performance"
           label="Analytics & Performance"
           headline="Real-time spend and performance tracking"
           description="Monitor actual vs. planned spend, pacing variance, and platform-native metrics — with automatic syncing from your connected ad accounts."
@@ -265,6 +282,7 @@ export default function FeaturesPage() {
 
         {/* Task Management */}
         <Section
+          id="task-management"
           label="Task Management"
           headline="Never miss a setup step or health check"
           description="Action points auto-generate from your media plan so every channel launch and recurring review is tracked without manual effort."
@@ -292,6 +310,7 @@ export default function FeaturesPage() {
 
         {/* AI & Reporting */}
         <Section
+          id="ai-reporting"
           label="AI & Reporting"
           headline="Intelligent insights, automated briefings"
           description="From daily AI briefings delivered to your inbox or Teams channel, to an on-demand chat agent that can take action — PlanPulse keeps your team informed."

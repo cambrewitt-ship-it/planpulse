@@ -188,6 +188,76 @@ export async function getActualSpendForClient(
 }
 
 // ============================================================================
+// BULK COMPUTATION HELPERS
+// ============================================================================
+// Pure (no DB access) equivalents of the per-client query logic above, for
+// callers that already have the relevant data fetched in bulk (e.g. the
+// agency clients list, which fetches media plans / action points / completions
+// once for all clients instead of re-querying per client).
+
+function titleCaseChannelTypes(rawChannels: any[]): string[] {
+  return [
+    ...new Set(
+      (rawChannels || [])
+        .filter((ch: any) => ch.channelName)
+        .map((ch: any) =>
+          ch.channelName
+            .toLowerCase()
+            .split(' ')
+            .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
+            .join(' ')
+        )
+    ),
+  ];
+}
+
+/** Bulk equivalent of {@link getActionPointStatsForClient}. */
+export function computeActionPointStatsFromBulk(
+  rawChannels: any[],
+  allActionPoints: Array<{ id: string; channel_type: string; due_date: string | null }>,
+  completionsForClient: Map<string, boolean>,
+  today: string
+): { total: number; completed: number; overdueIncomplete: number } {
+  const channelTypes = new Set(titleCaseChannelTypes(rawChannels));
+  if (channelTypes.size === 0) return { total: 0, completed: 0, overdueIncomplete: 0 };
+
+  const actionPoints = allActionPoints.filter(ap => channelTypes.has(ap.channel_type));
+  if (actionPoints.length === 0) return { total: 0, completed: 0, overdueIncomplete: 0 };
+
+  const total = actionPoints.length;
+  const completed = actionPoints.filter(ap => completionsForClient.get(ap.id) === true).length;
+  const overdueIncomplete = actionPoints.filter(ap => {
+    if (completionsForClient.get(ap.id) === true) return false;
+    if (!ap.due_date) return false;
+    return String(ap.due_date).slice(0, 10) < today;
+  }).length;
+
+  return { total, completed, overdueIncomplete };
+}
+
+/** Bulk equivalent of the "next critical task" lookup inside {@link refreshClientSpendCache}. */
+export function computeNextCriticalFromBulk(
+  rawChannels: any[],
+  allActionPoints: Array<{ id: string; channel_type: string; due_date: string | null; text: string }>,
+  completionsForClient: Map<string, boolean>
+): { date: string | null; task: string | null } {
+  const channelTypes = new Set(titleCaseChannelTypes(rawChannels));
+  if (channelTypes.size === 0) return { date: null, task: null };
+
+  const apWithDates = allActionPoints
+    .filter(ap => channelTypes.has(ap.channel_type) && ap.due_date != null)
+    .sort((a, b) => String(a.due_date).localeCompare(String(b.due_date)))
+    .slice(0, 10);
+
+  if (apWithDates.length === 0) return { date: null, task: null };
+
+  const nextIncomplete = apWithDates.find(ap => completionsForClient.get(ap.id) !== true);
+  if (!nextIncomplete) return { date: null, task: null };
+
+  return { date: nextIncomplete.due_date, task: nextIncomplete.text };
+}
+
+// ============================================================================
 // MAIN CALCULATION
 // ============================================================================
 
@@ -196,88 +266,114 @@ export async function getActualSpendForClient(
  * No grading — just plain numbers (overdue task count, budget pacing %,
  * next critical task) cached in client_spend_cache for reuse across the
  * agency list, reports, Teams bot, and crons.
+ *
+ * When `precomputed` is supplied (the agency clients list already has all of
+ * this in bulk), it's used directly and no per-client queries are made. When
+ * omitted, falls back to the original per-client query path below.
  */
 export async function refreshClientSpendCache(
   supabase: SupabaseClient,
-  clientId: string
+  clientId: string,
+  precomputed?: {
+    activeChannelCount: number;
+    plannedBudget: number;
+    actualSpend30d: number;
+    apStats: { total: number; completed: number; overdueIncomplete: number };
+    nextCritical: { date: string | null; task: string | null };
+  }
 ): Promise<ClientSpendCache | null> {
   try {
-    // 1. Action point stats
-    const { total, completed, overdueIncomplete } =
-      await getActionPointStatsForClient(supabase, clientId);
+    let total: number;
+    let completed: number;
+    let overdueIncomplete: number;
+    let activeChannelCount: number;
+    let plannedBudget: number;
+    let actualSpend: number;
+    let nextCriticalDate: string | null = null;
+    let nextCriticalTask: string | null = null;
 
-    // 2. Channel count
-    const activeChannelCount = await getActiveChannelCount(supabase, clientId);
+    if (precomputed) {
+      ({ total, completed, overdueIncomplete } = precomputed.apStats);
+      activeChannelCount = precomputed.activeChannelCount;
+      plannedBudget = precomputed.plannedBudget;
+      actualSpend = precomputed.actualSpend30d;
+      nextCriticalDate = precomputed.nextCritical.date;
+      nextCriticalTask = precomputed.nextCritical.task;
+    } else {
+      // 1. Action point stats
+      ({ total, completed, overdueIncomplete } =
+        await getActionPointStatsForClient(supabase, clientId));
 
-    // 3. Budget
-    const plannedBudget = await getPlannedBudgetForClient(supabase, clientId);
-    const actualSpend = await getActualSpendForClient(supabase, clientId);
+      // 2. Channel count
+      activeChannelCount = await getActiveChannelCount(supabase, clientId);
+
+      // 3. Budget
+      plannedBudget = await getPlannedBudgetForClient(supabase, clientId);
+      actualSpend = await getActualSpendForClient(supabase, clientId);
+
+      // 4. Find next due incomplete action point
+      try {
+        const { data: planData } = await supabase
+          .from('client_media_plan_builder')
+          .select('channels')
+          .eq('client_id', clientId)
+          .single();
+
+        if (planData?.channels && Array.isArray(planData.channels)) {
+          const channelTypes = [
+            ...new Set(
+              (planData.channels as any[])
+                .filter((ch: any) => ch.channelName)
+                .map((ch: any) =>
+                  ch.channelName
+                    .toLowerCase()
+                    .split(' ')
+                    .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
+                    .join(' ')
+                )
+            ),
+          ];
+
+          if (channelTypes.length > 0) {
+            const { data: apWithDates } = await supabase
+              .from('action_points')
+              .select('id, text, due_date')
+              .in('channel_type', channelTypes)
+              .not('due_date', 'is', null)
+              .order('due_date', { ascending: true })
+              .limit(10);
+
+            if (apWithDates && apWithDates.length > 0) {
+              const { data: clientCompletions } = await supabase
+                .from('client_action_point_completions')
+                .select('action_point_id, completed')
+                .eq('client_id', clientId)
+                .in('action_point_id', apWithDates.map((ap: any) => ap.id));
+
+              const doneSet = new Set(
+                (clientCompletions || [])
+                  .filter((c: any) => c.completed)
+                  .map((c: any) => c.action_point_id)
+              );
+
+              const nextIncomplete = apWithDates.find(
+                (ap: any) => !doneSet.has(ap.id)
+              );
+              if (nextIncomplete) {
+                nextCriticalDate = nextIncomplete.due_date;
+                nextCriticalTask = nextIncomplete.text;
+              }
+            }
+          }
+        }
+      } catch {
+        // non-fatal
+      }
+    }
 
     // Budget pacing as percentage (actual / planned * 100)
     const budgetPacing =
       plannedBudget > 0 ? (actualSpend / plannedBudget) * 100 : null;
-
-    // 4. Find next due incomplete action point
-    let nextCriticalDate: string | null = null;
-    let nextCriticalTask: string | null = null;
-
-    try {
-      const { data: planData } = await supabase
-        .from('client_media_plan_builder')
-        .select('channels')
-        .eq('client_id', clientId)
-        .single();
-
-      if (planData?.channels && Array.isArray(planData.channels)) {
-        const channelTypes = [
-          ...new Set(
-            (planData.channels as any[])
-              .filter((ch: any) => ch.channelName)
-              .map((ch: any) =>
-                ch.channelName
-                  .toLowerCase()
-                  .split(' ')
-                  .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
-                  .join(' ')
-              )
-          ),
-        ];
-
-        if (channelTypes.length > 0) {
-          const { data: apWithDates } = await supabase
-            .from('action_points')
-            .select('id, text, due_date')
-            .in('channel_type', channelTypes)
-            .not('due_date', 'is', null)
-            .order('due_date', { ascending: true })
-            .limit(10);
-
-          if (apWithDates && apWithDates.length > 0) {
-            const { data: clientCompletions } = await supabase
-              .from('client_action_point_completions')
-              .select('action_point_id, completed')
-              .eq('client_id', clientId)
-              .in('action_point_id', apWithDates.map((ap: any) => ap.id));
-
-            const doneSet = new Set(
-              (clientCompletions || [])
-                .filter((c: any) => c.completed)
-                .map((c: any) => c.action_point_id)
-            );
-
-            const nextIncomplete = apWithDates.find(
-              (ap: any) => !doneSet.has(ap.id)
-            );
-            if (nextIncomplete) {
-              nextCriticalDate = nextIncomplete.due_date;
-              nextCriticalTask = nextIncomplete.text;
-            }
-          }
-        }
-      }
-    } catch {
-      // non-fatal
-    }
 
     // 5. Upsert to client_spend_cache
     // mtd_actual_spend, mtd_actual_spend_updated_at, spend_date_start, and

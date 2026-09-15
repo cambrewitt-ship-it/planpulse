@@ -1,11 +1,8 @@
-'use client';
-
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import Image from 'next/image';
-import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import Footer from '@/components/Footer';
-import { supabase } from '@/lib/supabase/client';
 import {
   CheckCircle2,
   ArrowRight,
@@ -18,6 +15,36 @@ import { Reveal, RevealStagger, RevealStaggerItem } from '@/components/landing/R
 import { RotatingWord } from '@/components/landing/RotatingWord';
 import HeroWalkthroughSlideshow from '@/components/landing/HeroWalkthroughSlideshow';
 import { CONNECT_PLATFORMS } from '@/components/landing/PlatformLogos';
+import { AuthAwareCTA } from '@/components/landing/AuthAwareCTA';
+import FAQSection, { FAQJsonLd } from '@/components/landing/FAQSection';
+
+export const metadata: Metadata = {
+  title: 'Agentic AI Software for Marketing Agencies',
+  description:
+    'PlanPulse gives marketing agencies real-time campaign pacing, AI-powered health checks, and multi-channel media planning — so setup errors and budget overspend get caught before they cost you a client.',
+  alternates: { canonical: '/' },
+  openGraph: {
+    title: 'PlanPulse — Agentic AI Software for Marketing Agencies',
+    description:
+      'Real-time campaign pacing, AI-powered health checks, and multi-channel media planning for marketing agencies.',
+    url: '/',
+  },
+};
+
+const softwareApplicationJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: 'PlanPulse',
+  applicationCategory: 'BusinessApplication',
+  operatingSystem: 'Web',
+  description:
+    'Agentic AI software for marketing agencies — media planning, campaign health scoring, and AI agents that catch setup errors and pacing issues before they cost you a client.',
+  offers: {
+    '@type': 'Offer',
+    price: '0',
+    priceCurrency: 'USD',
+  },
+};
 
 const pageFont: React.CSSProperties = { fontFamily: "'DM Sans', system-ui, sans-serif" };
 const HERO_ROTATING_WORDS = ['Health checking', 'Media planning', 'Ad performance', 'AI automation'];
@@ -38,22 +65,13 @@ function FeatureChip({ icon, label }: { icon: React.ReactNode; label: string }) 
 }
 
 export default function Home() {
-  const [isSignedIn, setIsSignedIn] = useState(false);
-
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setIsSignedIn(!!session?.user);
-    });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setIsSignedIn(!!session?.user);
-    });
-    return () => subscription.unsubscribe();
-  }, []);
-
-  const ctaHref = isSignedIn ? '/agency' : '/auth/signup';
-
   return (
     <div className="flex flex-col min-h-screen" style={{ background: '#F5F3EF', ...pageFont }}>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(softwareApplicationJsonLd) }}
+      />
+      <FAQJsonLd />
       <main className="flex-1">
 
         {/* ── Hero ── */}
@@ -122,18 +140,15 @@ export default function Home() {
                 </Reveal>
                 <Reveal delay={0.26}>
                   <div className="flex flex-col sm:flex-row gap-3 pt-2">
-                    <Link href={ctaHref}>
-                      <Button
-                        size="lg"
-                        className="text-base px-6 py-2.5 h-auto rounded-full group text-white border-0"
-                        style={{ background: 'linear-gradient(135deg, #1E3A8A 0%, #1D4ED8 100%)' }}
-                        onMouseEnter={(e) => { e.currentTarget.style.background = 'linear-gradient(135deg, #172554 0%, #1E40AF 100%)'; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.background = 'linear-gradient(135deg, #1E3A8A 0%, #1D4ED8 100%)'; }}
-                      >
-                        Get started free
-                        <ArrowRight className="ml-2 w-4 h-4 transition-transform group-hover:translate-x-1" />
-                      </Button>
-                    </Link>
+                    <AuthAwareCTA
+                      size="lg"
+                      className="text-base px-6 py-2.5 h-auto rounded-full group text-white border-0"
+                      style={{ background: 'linear-gradient(135deg, #1E3A8A 0%, #1D4ED8 100%)' }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = 'linear-gradient(135deg, #172554 0%, #1E40AF 100%)'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = 'linear-gradient(135deg, #1E3A8A 0%, #1D4ED8 100%)'; }}
+                    >
+                      Get started free
+                    </AuthAwareCTA>
                     <Link href="/features">
                       <Button
                         size="lg"
@@ -370,6 +385,9 @@ export default function Home() {
           </div>
         </section>
 
+        {/* ── FAQ ── */}
+        <FAQSection />
+
         {/* ── CTA ── */}
         <section className="pb-24 pt-4" style={{ background: '#F5F3EF' }}>
           <div className="container mx-auto px-4">
@@ -403,12 +421,12 @@ export default function Home() {
                     Start free. Upgrade as your client roster grows. No credit card required.
                   </p>
                   <div className="flex flex-col sm:flex-row gap-3 justify-center pt-2">
-                    <Link href={ctaHref}>
-                      <Button size="lg" className="text-base px-8 py-4 h-auto rounded-full bg-white text-stone-900 hover:bg-stone-100 group shadow-lg">
-                        Get started free
-                        <ArrowRight className="ml-2 w-4 h-4 transition-transform group-hover:translate-x-1" />
-                      </Button>
-                    </Link>
+                    <AuthAwareCTA
+                      size="lg"
+                      className="text-base px-8 py-4 h-auto rounded-full bg-white text-stone-900 hover:bg-stone-100 group shadow-lg"
+                    >
+                      Get started free
+                    </AuthAwareCTA>
                     <Link href="/pricing">
                       <Button size="lg" variant="outline" className="text-base px-8 py-4 h-auto rounded-full border-stone-500 text-stone-100 bg-transparent hover:bg-white/10 hover:text-white">
                         View pricing

@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { createClient } from '@/lib/supabase/server';
-import { rateLimit } from '@/lib/rate-limit';
+import { rateLimit, clientIp } from '@/lib/rate-limit';
+import { verifyTurnstileToken } from '@/lib/turnstile';
 import { PRESET_CHANNELS } from '@/lib/utils/channel-icons';
+
+// Three sequential Anthropic calls in this route — higher than the 60s used by
+// single-call sibling routes (agency/chat, clients/[id]/ai-agent).
+export const maxDuration = 120;
 
 function getFirstMondayOfYear(year: number): string {
   const d = new Date(year, 0, 1);
@@ -219,11 +224,21 @@ export async function POST(request: NextRequest) {
     if (limited) return limited;
   }
 
-  let body: { image: string; mimeType: string; year?: number };
+  let body: { image: string; mimeType: string; year?: number; turnstileToken?: string };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+  }
+
+  if (!session?.user) {
+    const verified = await verifyTurnstileToken(body.turnstileToken, clientIp(request));
+    if (!verified) {
+      return NextResponse.json(
+        { error: 'Verification check failed — please refresh the page and try again.' },
+        { status: 403 }
+      );
+    }
   }
 
   const { image, mimeType, year: clientYear } = body;
@@ -246,19 +261,32 @@ export async function POST(request: NextRequest) {
       },
     };
 
-    // Pass 1: Vision — plain-English description, shown to the user as-is before anything is applied
-    const visionResponse = await anthropic.messages.create({
-      model: 'claude-opus-5',
-      max_tokens: 6500,
-      messages: [
-        {
-          role: 'user',
-          content: [imageBlock, { type: 'text', text: buildVisionPrompt() }],
-        },
-      ],
-    });
+    // Pass 1: Vision — plain-English description, shown to the user as-is before anything is applied.
+    // claude-opus-5 runs adaptive thinking on by default, drawing from the same
+    // max_tokens budget as the output text — capped via effort (not disabled, which
+    // has its own failure modes on this model), with enough headroom for a dense
+    // screenshot to still leave room for the actual description.
+    const visionResponse = await anthropic.messages
+      .stream({
+        model: 'claude-opus-5',
+        max_tokens: 16000,
+        output_config: { effort: 'medium' },
+        messages: [
+          {
+            role: 'user',
+            content: [imageBlock, { type: 'text', text: buildVisionPrompt() }],
+          },
+        ],
+      })
+      .finalMessage();
 
     let description = visionResponse.content.find(b => b.type === 'text')?.text ?? '';
+    if (visionResponse.stop_reason === 'max_tokens' && !description.trim()) {
+      return NextResponse.json(
+        { error: 'This screenshot is too dense to read in one pass — try cropping to one section or uploading a clearer image.' },
+        { status: 500 }
+      );
+    }
     if (!description.trim()) {
       return NextResponse.json({ error: 'Could not read the screenshot. Please try a clearer image.' }, { status: 500 });
     }
@@ -269,11 +297,14 @@ export async function POST(request: NextRequest) {
     // this only catches it by re-deriving the anchor date from the image a second time.
     let correctionNote: string | null = null;
     try {
-      const anchorResponse = await anthropic.messages.create({
-        model: 'claude-opus-5',
-        max_tokens: 100,
-        messages: [{ role: 'user', content: [imageBlock, { type: 'text', text: buildAnchorPrompt() }] }],
-      });
+      const anchorResponse = await anthropic.messages
+        .stream({
+          model: 'claude-opus-5',
+          max_tokens: 500,
+          output_config: { effort: 'low' },
+          messages: [{ role: 'user', content: [imageBlock, { type: 'text', text: buildAnchorPrompt() }] }],
+        })
+        .finalMessage();
       const anchorText = anchorResponse.content.find(b => b.type === 'text')?.text ?? '';
       const anchorMatch = anchorText.match(/FIRST_COLUMN:\s*(\S.*)/i);
       const claimedMatch = description.match(/COL1:\s*(\S.*?)(?:[,\n]|$)/i);
@@ -298,14 +329,23 @@ export async function POST(request: NextRequest) {
     const detectedYear = yearMatch ? parseInt(yearMatch[1]) : new Date().getFullYear();
     const year = (clientYear && clientYear >= 2020 && clientYear <= 2040) ? clientYear : detectedYear;
 
-    // Pass 2: Text-only — convert description to structured JSON
-    const structureResponse = await anthropic.messages.create({
-      model: 'claude-opus-5',
-      max_tokens: 8192,
-      messages: [{ role: 'user', content: buildStructurePrompt(description, year) }],
-    });
+    // Pass 2: Text-only — convert description to structured JSON. Left at the
+    // default effort since this pass does real arithmetic (summing weekly spend).
+    const structureResponse = await anthropic.messages
+      .stream({
+        model: 'claude-opus-5',
+        max_tokens: 16000,
+        messages: [{ role: 'user', content: buildStructurePrompt(description, year) }],
+      })
+      .finalMessage();
 
     const structureText = structureResponse.content.find(b => b.type === 'text')?.text ?? '';
+    if (structureResponse.stop_reason === 'max_tokens' && !structureText.trim()) {
+      return NextResponse.json(
+        { error: 'The extracted plan was too large to convert in one pass. Try a screenshot with fewer channels or weeks.' },
+        { status: 500 }
+      );
+    }
 
     let parsed: VisionExtraction | null = null;
     try { parsed = JSON.parse(structureText.trim()); } catch { /* fall through */ }

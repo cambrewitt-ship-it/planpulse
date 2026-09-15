@@ -598,14 +598,8 @@ export function ClientCardCompact({
           </div>
           {!perfReady ? (
             <GraphSpinner />
-          ) : variant === 'agency' ? (
-            <SparkLine clientId={client.id} perf={perf} />
           ) : (
-            <div style={{ minWidth: 0 }}>
-              {/* Visible widget (shows metric label) — only mounted after data is ready */}
-              <PerformanceWidget clientId={client.id} onNeedle={handleNeedle} hideControls />
-              <SparkLine clientId={client.id} perf={perf} />
-            </div>
+            <SparkLine clientId={client.id} perf={perf} />
           )}
         </div>
         <div style={{ width: 0.5, height: 40, background: '#E8E4DC', flexShrink: 0 }} />

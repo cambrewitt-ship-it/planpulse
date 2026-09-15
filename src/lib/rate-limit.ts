@@ -27,7 +27,7 @@ function getLimiter(prefix: string, limit: number, windowSeconds: number): Ratel
   return limiter;
 }
 
-function clientIp(req: NextRequest): string {
+export function clientIp(req: NextRequest): string {
   return req.headers.get('x-forwarded-for')?.split(',')[0].trim() ?? 'unknown';
 }
 

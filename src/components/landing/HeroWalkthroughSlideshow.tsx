@@ -18,6 +18,18 @@ type Slide =
 
 const SLIDES: Slide[] = [
   {
+    id: 'pacing',
+    title: 'Stay ahead of budget pacing, automatically',
+    kind: 'single',
+    image: { src: '/pacing.png', alt: 'Ad spend pacing chart', width: 1959, height: 1015 },
+  },
+  {
+    id: 'media-plan',
+    title: 'Connect your media plan & track activity',
+    kind: 'single',
+    image: { src: '/media-plan.png', alt: 'Media plan grid', width: 2622, height: 956, scale: 1 },
+  },
+  {
     id: 'todo',
     title: "Streamline your team's to do list",
     kind: 'single',
@@ -35,12 +47,6 @@ const SLIDES: Slide[] = [
     title: 'See every campaign on one shared timeline',
     kind: 'single',
     image: { src: '/timeline.png', alt: 'Campaign timeline', width: 1450, height: 1030 },
-  },
-  {
-    id: 'media-plan',
-    title: 'Connect your media plan & track activity',
-    kind: 'single',
-    image: { src: '/media-plan.png', alt: 'Media plan grid', width: 2622, height: 956, scale: 1 },
   },
   {
     id: 'performance',

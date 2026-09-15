@@ -21,6 +21,7 @@ const PUBLIC_ROUTES = [
   '/api/media-plan-builder/',
   '/hub/',
   '/api/hub/',
+  '/marketing/video/',
 ];
 
 // Temporary password gate for the public media plan builder (unauthenticated
@@ -49,8 +50,11 @@ function hasValidGatePassword(req: NextRequest) {
     return false;
   }
 
+  const gatePassword = process.env.MEDIA_PLAN_BUILDER_PASSWORD;
+  if (!gatePassword) return false; // fail closed if the env var isn't set, rather than a guessable default
+
   const password = decoded.slice(decoded.indexOf(':') + 1);
-  return password === (process.env.MEDIA_PLAN_BUILDER_PASSWORD || 'planpulse');
+  return password === gatePassword;
 }
 
 function gateResponse() {

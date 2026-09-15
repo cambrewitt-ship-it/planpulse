@@ -7,6 +7,9 @@ import { mergeExtractionIntoPlan } from "@/lib/media-plan/sandbox-sync";
 import type { VisionExtraction } from "@/app/api/media-plan-agent/vision-extract/route";
 import { ExtractionCard } from "./extraction-card";
 import { BetaSignupForm } from "./beta-signup-form";
+import { TurnstileWidget } from "@/components/auth/turnstile-widget";
+
+const CAPTCHA_REQUIRED = !!process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
 
 const INK = '#1C1917';
 const GRAPHITE = '#5C5450';
@@ -66,21 +69,31 @@ export function PublicAiPanel({ currentPlan, onPlanApplied, autoAttachImage, onA
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [rateLimited, setRateLimited] = useState(false);
   const [usesToday, setUsesToday] = useState(0);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [captchaKey, setCaptchaKey] = useState(0);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const autoRanRef = useRef(false);
 
   useEffect(() => { setUsesToday(getUsesToday()); }, []);
 
+  // Tokens are single-use on Cloudflare's end — clear ours and remount the
+  // widget (via key) after every call so the next action gets a fresh one.
+  const consumeCaptcha = () => {
+    setCaptchaToken(null);
+    setCaptchaKey(k => k + 1);
+  };
+
   const runExtraction = useCallback(async (image: AttachedImage) => {
     setExtracting(true);
     setErrorMsg(null);
     setRateLimited(false);
+    const usedToken = captchaToken;
     try {
       const year = currentPlan?.weeks?.[0]?.year;
       const res = await fetch('/api/media-plan-agent/vision-extract', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: image.base64, mimeType: image.mimeType, year }),
+        body: JSON.stringify({ image: image.base64, mimeType: image.mimeType, year, turnstileToken: usedToken }),
       });
       const json = await res.json().catch(() => ({}));
       if (res.status === 429) {
@@ -101,18 +114,21 @@ export function PublicAiPanel({ currentPlan, onPlanApplied, autoAttachImage, onA
       setErrorMsg(err instanceof Error ? err.message : 'Could not read that screenshot');
     } finally {
       setExtracting(false);
+      consumeCaptcha();
     }
-  }, [currentPlan]);
+  }, [currentPlan, captchaToken]);
 
   // Auto-run once if a screenshot was handed off from the upload wizard's
-  // "Upload a screenshot of your Media Plan" entry point.
+  // "Upload a screenshot of your Media Plan" entry point — held until a
+  // Turnstile token is ready (or none is required) so this path can't skip
+  // verification just because it never touches the upload button below.
   useEffect(() => {
-    if (autoAttachImage && !autoRanRef.current) {
+    if (autoAttachImage && !autoRanRef.current && (!CAPTCHA_REQUIRED || captchaToken)) {
       autoRanRef.current = true;
       runExtraction(autoAttachImage);
       onAutoAttachConsumed?.();
     }
-  }, [autoAttachImage, runExtraction, onAutoAttachConsumed]);
+  }, [autoAttachImage, captchaToken, runExtraction, onAutoAttachConsumed]);
 
   const handleFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -128,6 +144,7 @@ export function PublicAiPanel({ currentPlan, onPlanApplied, autoAttachImage, onA
 
   const handleRevise = async () => {
     if (!pendingExtraction || !correction.trim() || revising) return;
+    if (CAPTCHA_REQUIRED && !captchaToken) return;
     setRevising(true);
     setErrorMsg(null);
     setRateLimited(false);
@@ -135,7 +152,7 @@ export function PublicAiPanel({ currentPlan, onPlanApplied, autoAttachImage, onA
       const res = await fetch('/api/media-plan-agent/revise', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ current: pendingExtraction, correction }),
+        body: JSON.stringify({ current: pendingExtraction, correction, turnstileToken: captchaToken }),
       });
       const json = await res.json().catch(() => ({}));
       if (res.status === 429) {
@@ -156,6 +173,7 @@ export function PublicAiPanel({ currentPlan, onPlanApplied, autoAttachImage, onA
       setErrorMsg(err instanceof Error ? err.message : 'Could not apply that correction');
     } finally {
       setRevising(false);
+      consumeCaptcha();
     }
   };
 
@@ -193,17 +211,19 @@ export function PublicAiPanel({ currentPlan, onPlanApplied, autoAttachImage, onA
         <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/gif,image/webp" className="hidden" onChange={handleFileSelected} />
         <button
           onClick={() => imageInputRef.current?.click()}
-          disabled={extracting || rateLimited}
+          disabled={extracting || rateLimited || (CAPTCHA_REQUIRED && !captchaToken)}
           style={{
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
             padding: '8px 12px', borderRadius: 10, border: `1px dashed ${BORDER}`,
             background: PAPER_BG, color: GRAPHITE, fontSize: 12.5, fontWeight: 500,
-            cursor: extracting || rateLimited ? 'not-allowed' : 'pointer', opacity: extracting || rateLimited ? 0.6 : 1,
+            cursor: extracting || rateLimited || (CAPTCHA_REQUIRED && !captchaToken) ? 'not-allowed' : 'pointer',
+            opacity: extracting || rateLimited || (CAPTCHA_REQUIRED && !captchaToken) ? 0.6 : 1,
           }}
         >
           {extracting ? <Loader2 size={13} className="animate-spin" /> : <Paperclip size={13} />}
-          {extracting ? 'Reading screenshot…' : 'Upload a screenshot'}
+          {extracting ? 'Reading screenshot…' : CAPTCHA_REQUIRED && !captchaToken ? 'Verifying…' : 'Upload a screenshot'}
         </button>
+        {!rateLimited && <TurnstileWidget key={captchaKey} onVerify={setCaptchaToken} />}
 
         {errorMsg && (
           <div style={{ fontSize: 12, color: RED, background: 'oklch(96% 0.03 25)', border: `1px solid oklch(88% 0.06 25)`, borderRadius: 8, padding: '8px 10px' }}>
@@ -249,12 +269,13 @@ export function PublicAiPanel({ currentPlan, onPlanApplied, autoAttachImage, onA
           />
           <button
             onClick={handleRevise}
-            disabled={revising || !correction.trim()}
+            disabled={revising || !correction.trim() || (CAPTCHA_REQUIRED && !captchaToken)}
             style={{
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               width: 32, height: 32, borderRadius: 8, border: 'none',
-              background: INK, color: CARD_BG, cursor: revising || !correction.trim() ? 'not-allowed' : 'pointer',
-              opacity: revising || !correction.trim() ? 0.5 : 1, flexShrink: 0,
+              background: INK, color: CARD_BG,
+              cursor: revising || !correction.trim() || (CAPTCHA_REQUIRED && !captchaToken) ? 'not-allowed' : 'pointer',
+              opacity: revising || !correction.trim() || (CAPTCHA_REQUIRED && !captchaToken) ? 0.5 : 1, flexShrink: 0,
             }}
           >
             {revising ? <Loader2 size={14} className="animate-spin" /> : <ArrowUp size={14} />}

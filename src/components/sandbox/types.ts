@@ -5,13 +5,22 @@ export interface Week {
   year: number;
 }
 
+export type FlightStatus = 'booked' | 'in_progress';
+
 export interface Flight {
   id: string;
   startWeek: string; // ISO Monday
   endWeek: string;   // ISO Monday (last week of flight)
   budget: number;
   color: string;     // hex
+  status?: FlightStatus;
 }
+
+// Overrides the flight's chosen colour when a booking status is set.
+export const FLIGHT_STATUS_COLORS: Record<FlightStatus, string> = {
+  booked: '#111827',
+  in_progress: '#9CA3AF',
+};
 
 export interface PlanRow {
   id: string;
@@ -46,6 +55,7 @@ export interface SandboxPlan {
   fees?: FeeRow[];
   customColumns?: CustomColumn[];
   updatedAt: string;
+  warnings?: string[]; // non-fatal issues surfaced during import, e.g. dropped date columns
   objective?: string;      // shown in the PDF export's stats row, blank if unset
   agencyName?: string;     // PDF footer / logo placeholder caption
   clientName?: string;     // PDF footer / logo placeholder caption

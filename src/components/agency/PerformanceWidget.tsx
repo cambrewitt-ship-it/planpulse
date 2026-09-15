@@ -665,15 +665,17 @@ export function PerformanceWidget({
 
   useEffect(() => { setMounted(true); }, []);
 
-  // Fetch real Google Ads conversion actions for the modal picker
+  // Fetch real Google Ads conversion actions for the modal picker — only
+  // needed once the config modal is actually open, since that's its only consumer.
   useEffect(() => {
+    if (!showModal) return;
     fetch(`/api/ads/google-ads/conversion-actions?clientId=${clientId}`)
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (data?.conversionActions?.length > 0) setGoogleAdsConversionActions(data.conversionActions);
       })
       .catch(() => {});
-  }, [clientId]);
+  }, [clientId, showModal]);
 
   // Fetch data whenever config changes
   useEffect(() => {
