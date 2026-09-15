@@ -467,8 +467,14 @@ export async function GET(_req: NextRequest, { params }: Params) {
     .filter(r => { if (seenCampaigns.has(r.campaign_id)) return false; seenCampaigns.add(r.campaign_id); return true; })
     .map(r => ({ id: r.campaign_id, name: r.campaign_name ?? r.campaign_id, platform: r.platform }));
 
-  // 8. Available GA4 event names for the modal event picker
-  const ga4Events = Object.keys(ga4Totals).sort();
+  // 8. Available GA4 event names for the modal event picker. This only covers the
+  // handful of standard metrics synced into google_analytics_metrics (sessions,
+  // conversions, etc) — real custom GA4 events are discovered live from the GA4
+  // Data API by the client (see PerformanceWidget's list-events fetch) since
+  // sync-metrics never persists per-event rows.
+  const ga4Events = Object.entries(ga4Totals)
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count);
 
   // 9. Available Meta conversion action types from meta_actions JSONB
   // Look back 90 days so early-month or sparse accounts still surface their events
@@ -491,6 +497,28 @@ export async function GET(_req: NextRequest, { params }: Params) {
     .map(([name, count]) => ({ name, count }))
     .sort((a, b) => b.count - a.count);
 
+  // 10. Available Google Ads conversion action names from google_conversion_actions JSONB
+  // Mirrors the Meta aggregation above — pulled from already-synced data rather than a
+  // live Google Ads API call, so it stays available even when live auth/API calls fail.
+  const { data: googleAdsEvtRows } = await supabase
+    .from('ad_performance_metrics')
+    .select('google_conversion_actions')
+    .eq('client_id', clientId)
+    .eq('platform', 'google-ads')
+    .gte('date', ninetyDaysAgo)
+    .not('google_conversion_actions', 'is', null)
+    .limit(500);
+
+  const googleAdsEvtMap = new Map<string, number>();
+  for (const row of googleAdsEvtRows ?? []) {
+    for (const act of ((row.google_conversion_actions as any[]) ?? [])) {
+      googleAdsEvtMap.set(act.action_type, (googleAdsEvtMap.get(act.action_type) ?? 0) + (parseInt(act.value, 10) || 0));
+    }
+  }
+  const googleAdsConversionActions = Array.from(googleAdsEvtMap.entries())
+    .map(([name, count]) => ({ id: name, name, count }))
+    .sort((a, b) => b.count - a.count);
+
   return NextResponse.json({
     channels,
     goals: goals ?? [],
@@ -506,6 +534,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
     campaigns,
     ga4Events,
     metaEvents,
+    googleAdsConversionActions,
     period: { start: monthStart, end: today },
   });
 }

@@ -90,11 +90,21 @@ const META_DEFAULT_EVENTS: Array<{ name: string; count: number }> = [
 ];
 
 // Default GA4 event names — shown even before data is synced
-const GA4_DEFAULT_EVENTS: string[] = [
+const GA4_DEFAULT_EVENTS: Array<{ name: string; count: number }> = [
   'purchase', 'generate_lead', 'begin_checkout', 'add_to_cart',
   'view_item', 'sign_up', 'form_submit', 'page_view',
   'app_install', 'first_open',
-];
+].map(name => ({ name, count: 0 }));
+
+// Merges a live/fresh list of counted events on top of a previously-known one —
+// the fresh entry (name + count) wins whenever the same name appears in both,
+// so a successful live fetch always supersedes stale or default data.
+function mergeCountedEvents<T extends { name: string }>(base: T[], fresh: T[]): T[] {
+  const map = new Map<string, T>();
+  for (const item of base) map.set(item.name, item);
+  for (const item of fresh) map.set(item.name, item);
+  return Array.from(map.values());
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -251,7 +261,7 @@ interface ModalProps {
   initialConfig: WidgetConfig;
   goals: Goal[];
   campaigns: Campaign[];
-  ga4Events: string[];
+  ga4Events: Array<{ name: string; count: number }>;
   metaEvents: Array<{ name: string; count: number }>;
   googleAdsConversionActions: Array<{ id: string; name: string; count: number }>;
   hasData: boolean;
@@ -276,9 +286,9 @@ function ConfigModal({ clientId, initialConfig, goals, campaigns, ga4Events, met
     ...metaEvents,
     ...META_DEFAULT_EVENTS.filter(d => !metaEvents.some(e => e.name === d.name)),
   ];
-  const mergedGa4Events: string[] = [
+  const mergedGa4Events: Array<{ name: string; count: number }> = [
     ...ga4Events,
-    ...GA4_DEFAULT_EVENTS.filter(d => !ga4Events.includes(d)),
+    ...GA4_DEFAULT_EVENTS.filter(d => !ga4Events.some(e => e.name === d.name)),
   ];
 
   const effectivePlatform =
@@ -472,7 +482,11 @@ function ConfigModal({ clientId, initialConfig, goals, campaigns, ga4Events, met
               style={selectStyle}
             >
               <option value="">— select event —</option>
-              {mergedGa4Events.map(ev => <option key={ev} value={ev}>{ev}</option>)}
+              {mergedGa4Events.map(ev => (
+                <option key={ev.name} value={ev.name}>
+                  {ev.name}{ev.count > 0 ? ` (${ev.count.toLocaleString()})` : ''}
+                </option>
+              ))}
             </select>
             <p style={{ fontSize: 10, color: '#B5B0A5', marginTop: 4 }}>
               This event count becomes the denominator for CPA / CPL calculation
@@ -644,7 +658,7 @@ export function PerformanceWidget({
   const [dayBeforeActuals, setDayBeforeActuals] = useState<Record<string, number>>({});
   const [last30DaysSeries, setLast30DaysSeries] = useState<Array<{ date: string; spend: number; impressions: number; clicks: number; conversions: number }>>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [ga4Events, setGa4Events] = useState<string[]>([]);
+  const [ga4Events, setGa4Events] = useState<Array<{ name: string; count: number }>>([]);
   const [metaEvents, setMetaEvents] = useState<Array<{ name: string; count: number }>>([]);
   const [googleAdsConversionActions, setGoogleAdsConversionActions] = useState<Array<{ id: string; name: string; count: number }>>([]);
   const [perfData, setPerfData] = useState<PerfData | null>(null);
@@ -667,12 +681,38 @@ export function PerformanceWidget({
 
   // Fetch real Google Ads conversion actions for the modal picker — only
   // needed once the config modal is actually open, since that's its only consumer.
+  // The goals fetch below already seeds this list from synced ad_performance_metrics
+  // data (reliable, always available); this live Google Ads API call enriches/refreshes
+  // it on top, but a failure here (auth, grace period, etc) no longer wipes out the
+  // synced counts the way a plain overwrite would.
   useEffect(() => {
     if (!showModal) return;
     fetch(`/api/ads/google-ads/conversion-actions?clientId=${clientId}`)
       .then(r => r.ok ? r.json() : null)
       .then(data => {
-        if (data?.conversionActions?.length > 0) setGoogleAdsConversionActions(data.conversionActions);
+        if (data?.conversionActions?.length > 0) {
+          setGoogleAdsConversionActions(prev => mergeCountedEvents(prev, data.conversionActions));
+        }
+      })
+      .catch(() => {});
+  }, [clientId, showModal]);
+
+  // Fetch live GA4 event names for the modal picker — the goals fetch only surfaces
+  // the handful of standard metrics synced into google_analytics_metrics, so custom
+  // GA4 events (and their real counts) need this live discovery call, mirroring the
+  // Google Ads conversion-actions fetch above.
+  useEffect(() => {
+    if (!showModal) return;
+    fetch('/api/ads/google-analytics/list-events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clientId }),
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.success && data?.events?.length > 0) {
+          setGa4Events(prev => mergeCountedEvents(prev, data.events));
+        }
       })
       .catch(() => {});
   }, [clientId, showModal]);
@@ -704,6 +744,7 @@ export function PerformanceWidget({
           setCampaigns(json.campaigns ?? []);
           setGa4Events(json.ga4Events ?? []);
           setMetaEvents(json.metaEvents ?? []);
+          setGoogleAdsConversionActions(json.googleAdsConversionActions ?? []);
         }
         onFetchedRef.current?.();
       })
