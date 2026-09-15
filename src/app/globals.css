@@ -2,6 +2,16 @@
 @import "tw-animate-css";
 @plugin "@tailwindcss/typography";
 
+/* Hero CTA gradient + hover state — CSS instead of JS onMouseEnter/onMouseLeave
+   so the button can be a prop-driven Client Component invoked from a Server
+   Component (function props can't cross that boundary). */
+.hero-cta-gradient {
+  background: linear-gradient(135deg, #1E3A8A 0%, #1D4ED8 100%);
+}
+.hero-cta-gradient:hover {
+  background: linear-gradient(135deg, #172554 0%, #1E40AF 100%);
+}
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {

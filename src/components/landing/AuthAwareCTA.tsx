@@ -14,17 +14,11 @@ export function AuthAwareCTA({
   size = 'lg',
   variant,
   className,
-  style,
-  onMouseEnter,
-  onMouseLeave,
 }: {
   children: React.ReactNode;
   size?: 'default' | 'sm' | 'lg' | 'icon-sm';
   variant?: 'default' | 'outline' | 'ghost';
   className?: string;
-  style?: React.CSSProperties;
-  onMouseEnter?: React.MouseEventHandler<HTMLButtonElement>;
-  onMouseLeave?: React.MouseEventHandler<HTMLButtonElement>;
 }) {
   const [isSignedIn, setIsSignedIn] = useState(false);
 
@@ -42,14 +36,7 @@ export function AuthAwareCTA({
 
   return (
     <Link href={href}>
-      <Button
-        size={size}
-        variant={variant}
-        className={className}
-        style={style}
-        onMouseEnter={onMouseEnter}
-        onMouseLeave={onMouseLeave}
-      >
+      <Button size={size} variant={variant} className={className}>
         {children}
         <ArrowRight className="ml-2 w-4 h-4 transition-transform group-hover:translate-x-1" />
       </Button>

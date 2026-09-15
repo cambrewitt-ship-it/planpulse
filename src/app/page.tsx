@@ -142,10 +142,7 @@ export default function Home() {
                   <div className="flex flex-col sm:flex-row gap-3 pt-2">
                     <AuthAwareCTA
                       size="lg"
-                      className="text-base px-6 py-2.5 h-auto rounded-full group text-white border-0"
-                      style={{ background: 'linear-gradient(135deg, #1E3A8A 0%, #1D4ED8 100%)' }}
-                      onMouseEnter={(e) => { e.currentTarget.style.background = 'linear-gradient(135deg, #172554 0%, #1E40AF 100%)'; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.background = 'linear-gradient(135deg, #1E3A8A 0%, #1D4ED8 100%)'; }}
+                      className="hero-cta-gradient text-base px-6 py-2.5 h-auto rounded-full group text-white border-0"
                     >
                       Get started free
                     </AuthAwareCTA>
